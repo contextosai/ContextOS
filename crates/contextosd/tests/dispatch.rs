@@ -1231,3 +1231,13 @@ async fn admitted_runs_export_replay_cases() {
     .unwrap();
     assert_eq!(report.verdict, "pass");
 }
+
+#[tokio::test]
+async fn the_api_description_is_served() {
+    let w = world(&ALL_CONTROLS).await;
+    let response = reqwest::get(format!("{}/v1/openapi.json", w.base)).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let doc: Value = response.json().await.unwrap();
+    assert_eq!(doc["openapi"], "3.1.0");
+    assert!(doc["paths"]["/v1/runs/{run_id}/tool-calls"]["post"].is_object());
+}

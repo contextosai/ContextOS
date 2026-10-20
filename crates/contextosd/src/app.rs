@@ -5,6 +5,7 @@
 //! | `GET /healthz` | – | liveness |
 //! | `GET /readyz` | – | store reachable and OIDC keys loaded |
 //! | `GET /metrics` | – | Prometheus metrics |
+//! | `GET /v1/openapi.json` | – | this API as OpenAPI 3.1 (`openapi/contextosd.v1.json`) |
 //! | `POST /v1/compile` | `compile` | compile a pinned Context Pack for a request |
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
@@ -214,6 +215,13 @@ fn same_tenant(caller: &Caller, tenant: &Value) -> Result<(), ApiError> {
     } else {
         Err(ApiError::forbidden())
     }
+}
+
+/// The OpenAPI 3.1 description of this API (`openapi/contextosd.v1.json`).
+pub const OPENAPI: &str = include_str!("../../../openapi/contextosd.v1.json");
+
+async fn openapi() -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], OPENAPI).into_response()
 }
 
 async fn healthz() -> &'static str {
@@ -1331,6 +1339,7 @@ where
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz::<S, L>))
         .route("/metrics", get(metrics::<S, L>))
+        .route("/v1/openapi.json", get(openapi))
         .route("/v1/compile", post(compile::<S, L>))
         .route("/v1/contracts/negotiate", post(negotiate::<S, L>))
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))

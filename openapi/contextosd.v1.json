@@ -1,0 +1,1969 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "contextosd",
+    "version": "1.0.0",
+    "description": "The ContextOS runtime's HTTP API. Request and record bodies reference the normative ContextOS JSON Schemas by their `$id`; the server also embeds them (`POST /v1/schemas/{doc}/validate`). Every body is parsed with strict ingress (duplicate keys are rejected) and every request is bound to the caller's tenant."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "Process is serving"
+          }
+        },
+        "security": []
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz",
+        "summary": "Readiness: store reachable and OIDC keys loaded",
+        "responses": {
+          "200": {
+            "description": "Ready"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": []
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "summary": "This document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 description",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/v1/compile": {
+      "post": {
+        "operationId": "compile",
+        "summary": "Compile a pinned Context Pack for a request",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Compiled context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://contextosai.com/schemas/compiled-context.v1.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "compile"
+            ]
+          }
+        ],
+        "x-contextos-scope": "compile"
+      }
+    },
+    "/v1/contracts/negotiate": {
+      "post": {
+        "operationId": "negotiate",
+        "summary": "Negotiate an execution contract against this deployment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "contract",
+                  "features"
+                ],
+                "properties": {
+                  "contract": {
+                    "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json"
+                  },
+                  "features": {
+                    "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/WorkflowFeatureSet"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted negotiation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admit"
+            ]
+          }
+        ],
+        "x-contextos-scope": "admit"
+      }
+    },
+    "/v1/schemas/{doc}/validate": {
+      "post": {
+        "operationId": "validate_schema",
+        "summary": "Validate a payload against a published schema",
+        "parameters": [
+          {
+            "name": "doc",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Schema name, e.g. `context-pack`, `execution-contract`"
+          },
+          {
+            "name": "def",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A `$defs` entry to validate against"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "valid",
+                    "violations"
+                  ],
+                  "properties": {
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "violations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-contextos-scope": "authenticated"
+      }
+    },
+    "/v1/audit/verify": {
+      "get": {
+        "operationId": "audit_verify",
+        "summary": "Verify the caller tenant's signed audit chain",
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/audit/entries": {
+      "get": {
+        "operationId": "audit_entries",
+        "summary": "Page the tenant's signed audit chain out",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of entries; `next` is the following cursor or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "entries",
+                    "next"
+                  ],
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/runs": {
+      "post": {
+        "operationId": "admit",
+        "summary": "Compile, negotiate and admit a run; with `delegation`, admit a child run in a narrowed lane",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ParentExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Admitted run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admission"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admit"
+            ]
+          }
+        ],
+        "x-contextos-scope": "admit"
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "run_status",
+        "summary": "Lifecycle status and current executor generation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/takeover": {
+      "post": {
+        "operationId": "take_over",
+        "summary": "Move the run to a new executor; the previous generation goes stale",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_generation"
+                ],
+                "properties": {
+                  "expected_generation": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New ownership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ownership"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/tool-calls": {
+      "post": {
+        "operationId": "tool_call",
+        "summary": "Govern and dispatch one tool call",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://contextosai.com/schemas/tool-envelope.v1.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The governed outcome; `result.status` is ok, completed, paused, blocked, rejected or failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/operations/{operation_id}/input": {
+      "post": {
+        "operationId": "provide_input",
+        "summary": "Answer a tool's input_required and continue the same operation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tool_call",
+                  "input_responses"
+                ],
+                "properties": {
+                  "tool_call": {
+                    "$ref": "https://contextosai.com/schemas/tool-envelope.v1.schema.json"
+                  },
+                  "input_responses": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The governed outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/operations/{operation_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile",
+        "summary": "Resolve an unknown effect by provider query or evidenced operator assertion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source"
+                    ],
+                    "properties": {
+                      "source": {
+                        "const": "provider"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source",
+                      "outcome",
+                      "evidence_ref"
+                    ],
+                    "properties": {
+                      "source": {
+                        "const": "operator"
+                      },
+                      "outcome": {
+                        "enum": [
+                          "confirmed",
+                          "not_applied",
+                          "partial"
+                        ]
+                      },
+                      "evidence_ref": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "reconcile"
+            ]
+          }
+        ],
+        "x-contextos-scope": "reconcile"
+      }
+    },
+    "/v1/runs/{run_id}/decisions": {
+      "post": {
+        "operationId": "record_decision",
+        "summary": "Record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed record and replay packet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "record",
+                    "replay_packet"
+                  ],
+                  "properties": {
+                    "record": {
+                      "$ref": "https://contextosai.com/schemas/decision-record.v1.schema.json"
+                    },
+                    "replay_packet": {
+                      "$ref": "https://contextosai.com/schemas/replay-packet.v1.schema.json"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/memory": {
+      "post": {
+        "operationId": "govern_memory",
+        "summary": "Govern a memory lifecycle operation against trusted memory policy",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "record"
+                ],
+                "properties": {
+                  "record": {
+                    "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/MemoryLifecycleRecord"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The kernel's decision; only allowed records change the memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/DataFlowDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/memory/{record_id}": {
+      "get": {
+        "operationId": "memory_state",
+        "summary": "A memory's current governed lifecycle state",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/runs/{run_id}/mcp": {
+      "post": {
+        "operationId": "mcp",
+        "summary": "MCP server for the run (JSON-RPC 2.0): tools/list of surfaced capabilities, governed tools/call",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "const": "2.0"
+                  },
+                  "id": {},
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/evidence": {
+      "get": {
+        "operationId": "run_evidence",
+        "summary": "The run's evidence bundle",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evidence bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/runs/{run_id}/replay-case": {
+      "get": {
+        "operationId": "replay_case",
+        "summary": "The run's admission inputs as a release-gate replay case (`ctx gate`)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Replay case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayCase"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/runs/{run_id}/close": {
+      "post": {
+        "operationId": "close_child",
+        "summary": "Close a delegated child and settle its usage into the parent",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ParentExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision"
+                ],
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "accept",
+                      "reject"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Closure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "reason_codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admit"
+            ]
+          }
+        ],
+        "x-contextos-scope": "admit"
+      }
+    },
+    "/v1/runs/{run_id}/complete": {
+      "post": {
+        "operationId": "complete_run",
+        "summary": "Complete the run (no unresolved effect, open child or work in flight)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/fail": {
+      "post": {
+        "operationId": "fail_run",
+        "summary": "Mark the run failed",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run",
+        "summary": "Cancel the run and its children; stops dispatch and settles children",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admit"
+            ]
+          }
+        ],
+        "x-contextos-scope": "admit"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read."
+      }
+    },
+    "parameters": {
+      "RunId": {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "OperationId": {
+        "name": "operation_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ExecutorGeneration": {
+        "name": "ContextOS-Executor-Generation",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description": "The generation returned by admission or takeover. A stale generation is refused with 409."
+      },
+      "ParentExecutorGeneration": {
+        "name": "ContextOS-Executor-Generation",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description": "Required when the request acts on a parent run (delegation, closing a child): the parent's current generation."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Refused. `code` is stable; `message` never carries backend detail. 429 and 503 were not processed and carry Retry-After.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "detail": {}
+            }
+          }
+        }
+      },
+      "CompileRequest": {
+        "type": "object",
+        "required": [
+          "pack_ref",
+          "request",
+          "run_context"
+        ],
+        "properties": {
+          "pack_ref": {
+            "type": "string",
+            "description": "A pinned pack reference from the server configuration"
+          },
+          "request": {
+            "$ref": "https://contextosai.com/schemas/invoke-agent.v1.schema.json"
+          },
+          "run_context": {
+            "$ref": "https://contextosai.com/schemas/run-context.v1.schema.json"
+          },
+          "deps": {
+            "$ref": "#/components/schemas/CompileDeps"
+          }
+        }
+      },
+      "CompileDeps": {
+        "type": "object",
+        "properties": {
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "evidence_conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "promoted_memory": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "AdmissionRequest": {
+        "type": "object",
+        "required": [
+          "pack_ref",
+          "request",
+          "run_context",
+          "contract"
+        ],
+        "properties": {
+          "pack_ref": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "https://contextosai.com/schemas/invoke-agent.v1.schema.json"
+          },
+          "run_context": {
+            "$ref": "https://contextosai.com/schemas/run-context.v1.schema.json"
+          },
+          "contract": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json"
+          },
+          "features": {
+            "type": "object",
+            "description": "Workflow features to declare; the server derives the rest from the compiled context and refuses inconsistent declarations (`features_invalid`)."
+          },
+          "deps": {
+            "$ref": "#/components/schemas/CompileDeps"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "tokens": {
+                "type": "integer"
+              },
+              "tool_calls": {
+                "type": "integer"
+              },
+              "replans": {
+                "type": "integer"
+              },
+              "cost_cents": {
+                "type": "number"
+              }
+            }
+          },
+          "delegation": {
+            "$ref": "https://contextosai.com/schemas/agent-delegation.v1.schema.json"
+          }
+        }
+      },
+      "Admission": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "executor_generation",
+          "compiled_context_hash"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "executor_generation": {
+            "type": "integer"
+          },
+          "compiled_context_hash": {
+            "type": "string"
+          },
+          "required_controls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policy_refs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "policy_outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "RunStatus": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "executor_generation"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "executor_generation": {
+            "type": "integer"
+          }
+        }
+      },
+      "ToolCallOutcome": {
+        "type": "object",
+        "required": [
+          "result",
+          "report"
+        ],
+        "properties": {
+          "result": {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "completed",
+                  "paused",
+                  "blocked",
+                  "rejected",
+                  "failed"
+                ]
+              },
+              "output": {}
+            }
+          },
+          "report": {
+            "$ref": "#/components/schemas/DispatchReport"
+          }
+        }
+      },
+      "DispatchReport": {
+        "type": "object",
+        "required": [
+          "status",
+          "reason_codes",
+          "obligations",
+          "audit_sequences"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "action_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "obligations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "approval_request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audit_sequences": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "DecisionReport": {
+        "type": "object",
+        "required": [
+          "decision_key",
+          "decision_version",
+          "status"
+        ],
+        "properties": {
+          "decision_key": {
+            "type": "string"
+          },
+          "decision_version": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "DECIDED",
+              "DEFERRED",
+              "REJECTED",
+              "ESCALATED",
+              "IN_FLIGHT",
+              "CLOSED"
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "tool_calls": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "required": [
+                "tool_call_id",
+                "operation_id"
+              ],
+              "properties": {
+                "tool_call_id": {
+                  "type": "string"
+                },
+                "operation_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReplayCase": {
+        "type": "object",
+        "required": [
+          "name",
+          "request",
+          "run_context"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "https://contextosai.com/schemas/invoke-agent.v1.schema.json"
+          },
+          "run_context": {
+            "$ref": "https://contextosai.com/schemas/run-context.v1.schema.json"
+          },
+          "deps": {
+            "$ref": "#/components/schemas/CompileDeps"
+          }
+        }
+      },
+      "Ownership": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "executor_generation"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "executor_generation": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}
