@@ -124,6 +124,11 @@ pub struct GuardsConfig {
     /// reserve (and self-settle) a model call for nothing.
     #[serde(default = "default_model_call_tokens")]
     pub model_call_min_tokens: u64,
+    /// Release artifact types every run's execution contract must pin in
+    /// `release_refs` (e.g. `["model_profile", "evaluator_suite"]`), so each decision
+    /// records which model and evaluators produced it; empty by default.
+    #[serde(default)]
+    pub required_release_refs: Vec<String>,
 }
 
 fn default_model_call_tokens() -> u64 {
@@ -139,6 +144,7 @@ impl Default for GuardsConfig {
         Self {
             identical_tool_calls: default_identical_calls(),
             model_call_min_tokens: default_model_call_tokens(),
+            required_release_refs: Vec::new(),
         }
     }
 }

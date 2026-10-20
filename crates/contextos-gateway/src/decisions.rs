@@ -267,8 +267,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 policy_versions: Some(compiled.context_ledger.policy_bundles.clone()),
                 decision_spec: None,
                 kg_snapshot: None,
-                model_profile: None,
-                evaluator_suite: None,
+                model_profile: pinned_release(admission, "model_profile"),
+                evaluator_suite: pinned_release(admission, "evaluator_suite"),
                 routing_decision_id: None,
             },
             scorecard: None,
@@ -384,4 +384,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "decisions": decisions,
         }))
     }
+}
+
+/// The run's pinned release reference of one artifact type, as `id@version` (the
+/// executing model profile and the evaluator suite are pinned at admission through
+/// the execution contract's `release_refs`).
+fn pinned_release(admission: &RunAdmission, artifact_type: &str) -> Option<String> {
+    admission
+        .release_refs
+        .iter()
+        .find(|r| r["artifact_type"] == artifact_type)
+        .and_then(|r| Some(format!("{}@{}", r["artifact_id"].as_str()?, r["version"].as_str()?)))
 }

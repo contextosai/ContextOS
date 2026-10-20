@@ -109,6 +109,8 @@ pub struct AppState<S, L> {
     pub conformance: crate::config::ConformanceConfig,
     /// Concurrent shadow diffs at most; beyond it a diff is skipped, never queued.
     pub shadow_slots: Arc<tokio::sync::Semaphore>,
+    /// `[guards] required_release_refs`.
+    pub required_release_refs: Vec<String>,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -469,6 +471,22 @@ where
             "contract_unbound",
             "The contract is not bound to this run.",
         ));
+    }
+    // The deployment may require the executing model profile (and evaluators) to be
+    // pinned, so every decision records what produced it.
+    let pinned = input["contract"]["release_refs"].as_array();
+    let unpinned: Vec<&String> = state
+        .required_release_refs
+        .iter()
+        .filter(|t| !pinned.is_some_and(|refs| refs.iter().any(|r| r["artifact_type"] == t.as_str())))
+        .collect();
+    if !unpinned.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "release_ref_missing",
+            "The execution contract must pin these release artifacts in release_refs.",
+        )
+        .with_detail(json!({"artifact_types": unpinned})));
     }
     // A delegated child takes its deadline and budget from the envelope.
     let delegation = input.get("delegation").filter(|d| !d.is_null());

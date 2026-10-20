@@ -144,5 +144,6 @@ where
         limits,
         conformance: config.conformance.clone(),
         shadow_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+        required_release_refs: config.guards.required_release_refs.clone(),
     }))
 }

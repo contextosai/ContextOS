@@ -3178,3 +3178,54 @@ async fn erasing_a_run_redacts_its_feedback_text() {
         .unwrap();
     assert_eq!(verified["verified"], true);
 }
+
+#[tokio::test]
+async fn decisions_record_the_pinned_model_and_evaluators() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    config.guards.required_release_refs = vec!["model_profile".into(), "evaluator_suite".into()];
+    let state = replica_state(&config, Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
+    let base = serve(router(state, Duration::from_secs(10))).await;
+    let plain = reqwest::Client::new();
+    let admit = |body: Value| {
+        let (plain, url) = (plain.clone(), format!("{base}/v1/runs"));
+        async move {
+            plain
+                .post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // A contract that does not pin the model is refused, naming what is missing.
+    let unpinned = admit(run_body("run_unpinned", 1200)).await;
+    assert_eq!(unpinned.status(), 422);
+    let unpinned: Value = unpinned.json().await.unwrap();
+    assert_eq!(unpinned["error"]["code"], "release_ref_missing");
+
+    let mut body = run_body("run_pinned", 1200);
+    let refs = body["contract"]["release_refs"].as_array_mut().unwrap();
+    refs.push(artifact("model_profile", "claude-opus-5-5.support"));
+    refs.push(artifact("evaluator_suite", "support.refund.judges"));
+    let admitted = admit(body).await;
+    assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
+    let admitted: Value = admitted.json().await.unwrap();
+    let recorded: Value = executor_client(admitted["executor_generation"].as_u64().unwrap())
+        .post(format!("{base}/v1/runs/run_pinned/decisions"))
+        .bearer_auth("acme-key")
+        .json(
+            &json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
+            "outcome": "refund_denied", "tool_calls": []}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let lineage = &recorded["record"]["lineage"];
+    assert_eq!(lineage["model_profile"], "claude-opus-5-5.support@1", "{recorded}");
+    assert_eq!(lineage["evaluator_suite"], "support.refund.judges@1");
+}

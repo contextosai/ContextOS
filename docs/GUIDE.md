@@ -476,6 +476,24 @@ the revision (`checkpoint_conflict` names the current one), the state is at most
 KiB, each save is audited by digest, and checkpoints are erased with the run (an erased
 checkpoint, or a run past its deadline, takes no new one).
 
+### Pin the model and evaluators
+
+Each decision's lineage names the Context Pack and policies it ran under; to make it
+name the model and evaluators too, the executor pins them in its execution contract's
+`release_refs`, like any release artifact:
+
+```json
+"release_refs": [
+  {"artifact_type": "model_profile", "artifact_id": "claude-opus-5-5.support", "version": "3", "sha256": "sha256:…"},
+  {"artifact_type": "evaluator_suite", "artifact_id": "support.refund.judges", "version": "2", "sha256": "sha256:…"}]
+```
+
+Every DecisionRecord of the run then carries `lineage.model_profile` and
+`lineage.evaluator_suite` (`id@version`), signed with the record, so a decision can be
+replayed against what produced it. `[guards] required_release_refs = ["model_profile",
+"evaluator_suite"]` refuses admission (`release_ref_missing`) for a contract that does
+not pin them.
+
 ### Loop guard
 
 An agent stuck repeating one action is stopped: after `[guards] identical_tool_calls`
