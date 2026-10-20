@@ -1,0 +1,6411 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/execution-contract.v1.schema.json",
+  "title": "ExecutionContractEnvelope v1",
+  "description": "Additive profile selection and closed typed attachment entry points. Shape validation does not establish support, authority, artifact authenticity, arithmetic invariants or active runtime enforcement. Existing eight base schemas are unchanged. Register the contextos-utc format using the reference UTC calendar semantics.",
+  "type": "object",
+  "required": [
+    "envelope_version",
+    "contract_id",
+    "run_id",
+    "trace_id",
+    "tenant_id",
+    "profiles",
+    "required_controls",
+    "optional_controls",
+    "release_refs"
+  ],
+  "properties": {
+    "envelope_version": {
+      "const": "contextos.execution_contract.v1"
+    },
+    "contract_id": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "run_id": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "trace_id": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "tenant_id": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/ProfileSelection"
+      }
+    },
+    "required_controls": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/ControlRef"
+      }
+    },
+    "optional_controls": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/ControlRef"
+      }
+    },
+    "release_refs": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "SHA256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "UTCTimestamp": {
+      "type": "string",
+      "maxLength": 256,
+      "format": "contextos-utc"
+    },
+    "ControlRef": {
+      "type": "object",
+      "properties": {
+        "control_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_version": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "control_id",
+        "control_version"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "properties": {
+        "artifact_type": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sha256": {
+          "$ref": "#/$defs/SHA256"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "artifact_id",
+        "version",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "ProfileSelection": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profile_version": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "profile_id",
+        "profile_version"
+      ],
+      "additionalProperties": false
+    },
+    "WorkflowFeatureSet": {
+      "type": "object",
+      "properties": {
+        "arbitrary_code": {
+          "type": "boolean"
+        },
+        "external_network": {
+          "type": "boolean"
+        },
+        "persistent_memory": {
+          "type": "boolean"
+        },
+        "external_effects": {
+          "type": "boolean"
+        },
+        "delegation": {
+          "type": "boolean"
+        },
+        "checkpoint_resume": {
+          "type": "boolean"
+        },
+        "proactive_triggers": {
+          "type": "boolean"
+        },
+        "sensitive_data": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "arbitrary_code",
+        "external_network",
+        "persistent_memory",
+        "external_effects",
+        "delegation",
+        "checkpoint_resume",
+        "proactive_triggers",
+        "sensitive_data"
+      ],
+      "additionalProperties": false
+    },
+    "ConditionalControlRequirement": {
+      "type": "object",
+      "properties": {
+        "feature": {
+          "enum": [
+            "arbitrary_code",
+            "external_network",
+            "persistent_memory",
+            "external_effects",
+            "delegation",
+            "checkpoint_resume",
+            "proactive_triggers",
+            "sensitive_data"
+          ]
+        },
+        "equals": {
+          "type": "boolean"
+        },
+        "control": {
+          "$ref": "#/$defs/ControlRef"
+        }
+      },
+      "required": [
+        "feature",
+        "equals",
+        "control"
+      ],
+      "additionalProperties": false
+    },
+    "ControlDefinition": {
+      "type": "object",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ControlRef"
+        },
+        "definition_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "evidence_obligations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "positive_cases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "negative_cases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "control",
+        "definition_ref",
+        "evidence_obligations",
+        "positive_cases",
+        "negative_cases"
+      ],
+      "additionalProperties": false
+    },
+    "ProfileDefinition": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/ProfileSelection"
+        },
+        "includes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ProfileSelection"
+          }
+        },
+        "mandatory_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "conditional_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ConditionalControlRequirement"
+          }
+        },
+        "definition_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "profile",
+        "includes",
+        "mandatory_controls",
+        "conditional_controls",
+        "definition_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ProfileRegistrySnapshot": {
+      "type": "object",
+      "properties": {
+        "registry_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ProfileDefinition"
+          }
+        },
+        "controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlDefinition"
+          }
+        }
+      },
+      "required": [
+        "registry_ref",
+        "profiles",
+        "controls"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionContractEnvelope": {
+      "type": "object",
+      "properties": {
+        "envelope_version": {
+          "const": "contextos.execution_contract.v1"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ProfileSelection"
+          }
+        },
+        "required_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "optional_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        }
+      },
+      "required": [
+        "envelope_version",
+        "contract_id",
+        "run_id",
+        "trace_id",
+        "tenant_id",
+        "profiles",
+        "required_controls",
+        "optional_controls",
+        "release_refs"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeSupportDeclaration": {
+      "type": "object",
+      "properties": {
+        "implementation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "implementation_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "supported_profiles": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ProfileSelection"
+          }
+        },
+        "supported_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        }
+      },
+      "required": [
+        "implementation_id",
+        "implementation_version",
+        "supported_profiles",
+        "supported_controls"
+      ],
+      "additionalProperties": false
+    },
+    "ContractNegotiationReasonCode": {
+      "enum": [
+        "invalid_contract",
+        "feature_state_invalid",
+        "profile_unknown",
+        "profile_version_unsupported",
+        "control_unknown",
+        "control_version_unsupported",
+        "required_control_unsupported",
+        "conflicting_reference",
+        "artifact_binding_invalid",
+        "registry_expansion_invalid"
+      ]
+    },
+    "ContractNegotiationReason": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ContractNegotiationReasonCode"
+        },
+        "identifier": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "code",
+        "identifier"
+      ],
+      "additionalProperties": false
+    },
+    "ContractNegotiationResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "contract_id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "registry_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ArtifactRef"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "feature_set_digest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SHA256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "selected_profiles": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ProfileSelection"
+              }
+            },
+            "effective_required_controls": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "supported_controls": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "unsupported_optional": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "reasons": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ContractNegotiationReason"
+              }
+            },
+            "status": {
+              "const": "accepted"
+            }
+          },
+          "required": [
+            "contract_id",
+            "registry_ref",
+            "feature_set_digest",
+            "selected_profiles",
+            "effective_required_controls",
+            "supported_controls",
+            "unsupported_optional",
+            "reasons",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contract_id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "registry_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ArtifactRef"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "feature_set_digest": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SHA256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "selected_profiles": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ProfileSelection"
+              }
+            },
+            "effective_required_controls": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "supported_controls": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "unsupported_optional": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ControlRef"
+              }
+            },
+            "reasons": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ContractNegotiationReason"
+              }
+            },
+            "status": {
+              "const": "rejected"
+            }
+          },
+          "required": [
+            "contract_id",
+            "registry_ref",
+            "feature_set_digest",
+            "selected_profiles",
+            "effective_required_controls",
+            "supported_controls",
+            "unsupported_optional",
+            "reasons",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NegotiationDetail": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "registry_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feature_set_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_profiles": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ProfileSelection"
+          }
+        },
+        "effective_required_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "supported_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "unsupported_optional": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ContractNegotiationReason"
+          }
+        }
+      },
+      "required": [
+        "contract_id",
+        "registry_ref",
+        "feature_set_digest",
+        "selected_profiles",
+        "effective_required_controls",
+        "supported_controls",
+        "unsupported_optional",
+        "reasons"
+      ],
+      "additionalProperties": false
+    },
+    "PrincipalRef": {
+      "type": "object",
+      "properties": {
+        "principal_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "principal_type": {
+          "enum": [
+            "person",
+            "workload",
+            "agent"
+          ]
+        },
+        "trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "principal_id",
+        "principal_type",
+        "trust_domain",
+        "tenant_id"
+      ],
+      "additionalProperties": false
+    },
+    "MonetaryAmount": {
+      "type": "object",
+      "properties": {
+        "minor_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": [
+        "minor_units",
+        "currency"
+      ],
+      "additionalProperties": false
+    },
+    "ActionBinding": {
+      "type": "object",
+      "properties": {
+        "binding_version": {
+          "const": "contextos.action_binding.v1"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "proposal_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "actor": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "authority_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "capability_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "capability_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "resource_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "destination_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "profile_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "action_risk": {
+          "$ref": "#/$defs/ActionRisk"
+        },
+        "amount": {
+          "$ref": "#/$defs/MonetaryAmount"
+        }
+      },
+      "required": [
+        "binding_version",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "proposal_id",
+        "actor",
+        "authority_refs",
+        "purpose_id",
+        "capability_id",
+        "capability_version",
+        "arguments",
+        "resource_ids",
+        "destination_ids",
+        "evidence_refs",
+        "policy_refs",
+        "profile_refs",
+        "release_refs",
+        "action_risk"
+      ],
+      "additionalProperties": false
+    },
+    "ActionRisk": {
+      "type": "object",
+      "properties": {
+        "effect": {
+          "$ref": "#/$defs/ActionEffect"
+        },
+        "authority": {
+          "$ref": "#/$defs/ActionAuthority"
+        },
+        "reversibility": {
+          "$ref": "#/$defs/ActionReversibility"
+        },
+        "interaction": {
+          "$ref": "#/$defs/ActionInteraction"
+        },
+        "data_scope": {
+          "$ref": "#/$defs/DataClassification"
+        },
+        "decision_ttl_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "effect",
+        "authority",
+        "reversibility",
+        "interaction",
+        "data_scope"
+      ],
+      "additionalProperties": false
+    },
+    "ActionEffect": {
+      "enum": [
+        "none",
+        "local_state",
+        "external_state",
+        "physical_world"
+      ]
+    },
+    "ActionAuthority": {
+      "enum": [
+        "agent",
+        "service",
+        "user_delegated",
+        "human_approved"
+      ]
+    },
+    "ActionReversibility": {
+      "enum": [
+        "read_only",
+        "reversible",
+        "compensatable",
+        "irreversible"
+      ]
+    },
+    "ActionInteraction": {
+      "enum": [
+        "api",
+        "browser",
+        "computer",
+        "agent_to_agent",
+        "human_handoff"
+      ]
+    },
+    "DataClassification": {
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "CONFIDENTIAL",
+        "RESTRICTED"
+      ]
+    },
+    "ArgumentConstraint": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "pointer": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+            },
+            "kind": {
+              "const": "equals"
+            },
+            "value": {}
+          },
+          "required": [
+            "pointer",
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pointer": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+            },
+            "kind": {
+              "const": "one_of"
+            },
+            "values": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {}
+            }
+          },
+          "required": [
+            "pointer",
+            "kind",
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pointer": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^(?:/(?:[^~]|~[01])*)*$"
+            },
+            "kind": {
+              "const": "max_integer"
+            },
+            "maximum": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "pointer",
+            "kind",
+            "maximum"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AuthorityScope": {
+      "type": "object",
+      "properties": {
+        "root_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "capability_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "resource_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "destination_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "classification_labels": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/DataClassification"
+          }
+        },
+        "argument_constraints": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArgumentConstraint"
+          }
+        },
+        "amount_ceiling": {
+          "$ref": "#/$defs/MonetaryAmount"
+        }
+      },
+      "required": [
+        "root_run_id",
+        "purpose_ids",
+        "capability_ids",
+        "resource_ids",
+        "destination_ids",
+        "classification_labels",
+        "argument_constraints"
+      ],
+      "additionalProperties": false
+    },
+    "GrantRef": {
+      "type": "object",
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "grant_revision": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "grant_id",
+        "grant_revision"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorityGrant": {
+      "type": "object",
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "grant_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "issuer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "subject": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "audience": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/AuthorityScope"
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "delegation_depth_remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "parent_grant_ref": {
+          "$ref": "#/$defs/GrantRef"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "grant_id",
+        "grant_revision",
+        "issuer",
+        "subject",
+        "audience",
+        "scope",
+        "not_before",
+        "expires_at",
+        "delegation_depth_remaining",
+        "verification_ref"
+      ],
+      "additionalProperties": false
+    },
+    "VerificationStatus": {
+      "enum": [
+        "verified",
+        "invalid",
+        "unavailable"
+      ]
+    },
+    "GrantObservation": {
+      "type": "object",
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "grant_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "grant_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "revocation_status": {
+          "enum": [
+            "active",
+            "revoked",
+            "unknown"
+          ]
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        }
+      },
+      "required": [
+        "grant_id",
+        "grant_revision",
+        "grant_digest",
+        "verification_ref",
+        "verification_status",
+        "observed_at",
+        "valid_until",
+        "revocation_status",
+        "observer"
+      ],
+      "additionalProperties": false
+    },
+    "AuthenticatedPrincipalContext": {
+      "type": "object",
+      "properties": {
+        "principal": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "audience": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "root_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "mandate_kind": {
+          "enum": [
+            "workload",
+            "person_directed"
+          ]
+        },
+        "mandating_person": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "trusted_issuers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "principal",
+        "audience",
+        "root_run_id",
+        "run_id",
+        "mandate_kind",
+        "trusted_issuers",
+        "trusted_observers",
+        "verification_status",
+        "verification_ref",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "VerifiedRunLink": {
+      "type": "object",
+      "properties": {
+        "parent_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "child_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "root_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "subject": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "parent_run_id",
+        "child_run_id",
+        "root_run_id",
+        "tenant_id",
+        "subject",
+        "observer",
+        "verification_status",
+        "verification_ref",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorityValidationInput": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ActionBinding"
+        },
+        "authenticated": {
+          "$ref": "#/$defs/AuthenticatedPrincipalContext"
+        },
+        "leaf_grant_ref": {
+          "$ref": "#/$defs/GrantRef"
+        },
+        "grants": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/AuthorityGrant"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/GrantObservation"
+          }
+        },
+        "run_links": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/VerifiedRunLink"
+          }
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "binding",
+        "authenticated",
+        "leaf_grant_ref",
+        "grants",
+        "observations",
+        "run_links",
+        "evaluation_time"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorityReasonCode": {
+      "enum": [
+        "identity_unverified",
+        "tenant_mismatch",
+        "grant_invalid",
+        "grant_expired",
+        "grant_revoked",
+        "revocation_unknown",
+        "delegation_scope_expanded",
+        "scope_mismatch",
+        "precondition_stale",
+        "verification_unavailable"
+      ]
+    },
+    "AuthorityValidationResult": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "action_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grant_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/AuthorityReasonCode"
+          }
+        }
+      },
+      "required": [
+        "allowed",
+        "action_digest",
+        "grant_refs",
+        "reason_codes"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizationVerdict": {
+      "enum": [
+        "allow",
+        "deny",
+        "require_approval",
+        "escalate",
+        "error"
+      ]
+    },
+    "NormalizedPolicyOutcome": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "enum": [
+            "guardrail",
+            "business"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "verdict": {
+          "$ref": "#/$defs/AuthorizationVerdict"
+        },
+        "rule_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "bundle_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "obligations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "category",
+        "priority",
+        "verdict",
+        "rule_id",
+        "bundle_ref",
+        "obligations"
+      ],
+      "additionalProperties": false
+    },
+    "ComposedPolicyOutcome": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "$ref": "#/$defs/AuthorizationVerdict"
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "obligations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "rule_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "verdict",
+        "reason_codes",
+        "obligations",
+        "policy_refs",
+        "rule_ids"
+      ],
+      "additionalProperties": false
+    },
+    "StoredActionProposal": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "proposal_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "authority_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "request_id",
+        "proposal_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "policy_refs",
+        "authority_refs",
+        "not_before",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRequestRecord": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "proposal_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "authority_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "approval_request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "requester": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "eligible_approvers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "eligible_approver_roles": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "required_approvals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "prohibit_self_approval": {
+          "type": "boolean"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "request_id",
+        "proposal_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "policy_refs",
+        "authority_refs",
+        "not_before",
+        "expires_at",
+        "approval_request_id",
+        "requester",
+        "eligible_approvers",
+        "eligible_approver_roles",
+        "required_approvals",
+        "prohibit_self_approval",
+        "verification_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalBinding": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "proposal_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "authority_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "approval_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "approval_request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "approver": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "decision": {
+          "enum": [
+            "approved",
+            "denied"
+          ]
+        },
+        "decided_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "request_id",
+        "proposal_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "policy_refs",
+        "authority_refs",
+        "not_before",
+        "expires_at",
+        "approval_id",
+        "approval_request_id",
+        "approver",
+        "decision",
+        "decided_at",
+        "verification_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalVerificationObservation": {
+      "type": "object",
+      "properties": {
+        "approval_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "decision_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "approval_id",
+        "decision_digest",
+        "verification_ref",
+        "verification_status",
+        "observer",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "ApproverEntitlementObservation": {
+      "type": "object",
+      "properties": {
+        "approver": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "role_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "approval_request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "approver",
+        "role_id",
+        "approval_request_id",
+        "action_digest",
+        "observer",
+        "verification_status",
+        "verification_ref",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRedemptionState": {
+      "type": "object",
+      "properties": {
+        "approval_request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "approval_request_id",
+        "revision",
+        "operation_id",
+        "action_digest"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalValidationInput": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ActionBinding"
+        },
+        "proposal": {
+          "$ref": "#/$defs/StoredActionProposal"
+        },
+        "request": {
+          "$ref": "#/$defs/ApprovalRequestRecord"
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ApprovalBinding"
+          }
+        },
+        "verification_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ApprovalVerificationObservation"
+          }
+        },
+        "entitlements": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ApproverEntitlementObservation"
+          }
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "redemption_state": {
+          "$ref": "#/$defs/ApprovalRedemptionState"
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "binding",
+        "proposal",
+        "request",
+        "decisions",
+        "verification_observations",
+        "entitlements",
+        "trusted_observers",
+        "redemption_state",
+        "evaluation_time"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalValidationResult": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "action_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approval_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "allowed",
+        "action_digest",
+        "approval_refs",
+        "reason_codes"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRedemptionInput": {
+      "type": "object",
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/ApprovalValidationInput"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "approval",
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRedemptionResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "expected_revision": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "permits_new_effect": {
+              "const": false
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "status": {
+              "enum": [
+                "redeem",
+                "existing"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/ApprovalRedemptionState"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "permits_new_effect",
+            "reason_codes",
+            "status",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expected_revision": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "permits_new_effect": {
+              "const": false
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "status": {
+              "const": "rejected"
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ApprovalRedemptionState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "expected_revision",
+            "permits_new_effect",
+            "reason_codes",
+            "status",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ConstraintObservation": {
+      "type": "object",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ControlRef"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "verdict": {
+          "enum": [
+            "allow",
+            "deny",
+            "unknown"
+          ]
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "verification_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "control",
+        "action_digest",
+        "policy_refs",
+        "verdict",
+        "verification_status",
+        "verification_ref",
+        "observer",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizationInput": {
+      "type": "object",
+      "properties": {
+        "decision_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "authority": {
+          "$ref": "#/$defs/AuthorityValidationInput"
+        },
+        "policy_outcomes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/NormalizedPolicyOutcome"
+          }
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalValidationInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_constraints": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "constraint_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ConstraintObservation"
+          }
+        }
+      },
+      "required": [
+        "decision_id",
+        "authority",
+        "policy_outcomes",
+        "approval",
+        "required_constraints",
+        "constraint_observations"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizationDecision": {
+      "type": "object",
+      "properties": {
+        "decision_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "grant_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "approval_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "obligations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "verdict": {
+          "$ref": "#/$defs/AuthorizationVerdict"
+        }
+      },
+      "required": [
+        "decision_id",
+        "contract_id",
+        "run_id",
+        "operation_id",
+        "action_digest",
+        "evaluation_time",
+        "policy_refs",
+        "grant_refs",
+        "approval_refs",
+        "reason_codes",
+        "obligations",
+        "verdict"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizationOutcome": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "const": "allow"
+            },
+            "decision": {
+              "$ref": "#/$defs/AuthorizationDecision"
+            }
+          },
+          "required": [
+            "verdict",
+            "decision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verdict": {
+              "enum": [
+                "deny",
+                "require_approval",
+                "escalate",
+                "error"
+              ]
+            },
+            "decision": {
+              "$ref": "#/$defs/AuthorizationDecision"
+            }
+          },
+          "required": [
+            "verdict",
+            "decision"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "IsolationMode": {
+      "enum": [
+        "broker_only",
+        "sandboxed_code",
+        "dedicated_environment"
+      ]
+    },
+    "FilesystemGrant": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "path_format": {
+          "enum": [
+            "posix",
+            "windows"
+          ]
+        },
+        "access": {
+          "enum": [
+            "read",
+            "read_write"
+          ]
+        }
+      },
+      "required": [
+        "root",
+        "path_format",
+        "access"
+      ],
+      "additionalProperties": false
+    },
+    "NetworkGrant": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "additionalProperties": false
+    },
+    "ProcessRestrictions": {
+      "type": "object",
+      "properties": {
+        "run_as": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "allow_privileged": {
+          "type": "boolean"
+        },
+        "allow_child_processes": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_as",
+        "allow_privileged",
+        "allow_child_processes"
+      ],
+      "additionalProperties": false
+    },
+    "BoundaryResourceCeilings": {
+      "type": "object",
+      "properties": {
+        "cpu_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pids": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "wall_clock_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "output_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "scratch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "cpu_ms",
+        "memory_bytes",
+        "pids",
+        "wall_clock_ms",
+        "output_bytes",
+        "scratch_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionBoundaryRequirement": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "boundary_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "isolation_mode": {
+          "$ref": "#/$defs/IsolationMode"
+        },
+        "configuration_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "required_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "filesystem_grants": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/FilesystemGrant"
+          }
+        },
+        "process_restrictions": {
+          "$ref": "#/$defs/ProcessRestrictions"
+        },
+        "network_grants": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/NetworkGrant"
+          }
+        },
+        "resource_ceilings": {
+          "$ref": "#/$defs/BoundaryResourceCeilings"
+        },
+        "credential_broker_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "trusted_observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "maximum_observation_age_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "boundary_id",
+        "isolation_mode",
+        "configuration_ref",
+        "trust_domain",
+        "required_controls",
+        "filesystem_grants",
+        "process_restrictions",
+        "network_grants",
+        "resource_ceilings",
+        "credential_broker_ref",
+        "trusted_observer",
+        "maximum_observation_age_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionBoundaryObservation": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "boundary_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "isolation_mode": {
+          "$ref": "#/$defs/IsolationMode"
+        },
+        "actual_configuration_sha256": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "active_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "failed_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "lifecycle_state": {
+          "enum": [
+            "ready",
+            "unavailable",
+            "terminated"
+          ]
+        },
+        "enforcement": {
+          "type": "object",
+          "properties": {
+            "filesystem": {
+              "type": "boolean"
+            },
+            "process": {
+              "type": "boolean"
+            },
+            "network": {
+              "type": "boolean"
+            },
+            "resources": {
+              "type": "boolean"
+            },
+            "credentials": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "filesystem",
+            "process",
+            "network",
+            "resources",
+            "credentials"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "boundary_id",
+        "isolation_mode",
+        "actual_configuration_sha256",
+        "trust_domain",
+        "active_controls",
+        "failed_controls",
+        "observer",
+        "verification_status",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "lifecycle_state",
+        "enforcement"
+      ],
+      "additionalProperties": false
+    },
+    "BoundaryReadinessResult": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "boundary_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "configuration_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unsatisfied_obligations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "allowed",
+        "reason_codes",
+        "boundary_id",
+        "evaluation_time",
+        "configuration_ref",
+        "evidence_ref",
+        "unsatisfied_obligations"
+      ],
+      "additionalProperties": false
+    },
+    "DataFlowStage": {
+      "enum": [
+        "collection",
+        "inference",
+        "tool_input",
+        "tool_output",
+        "telemetry",
+        "cache",
+        "memory",
+        "export",
+        "delegation"
+      ]
+    },
+    "SourceClassificationObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "artifact_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "classification": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "artifact_ref",
+        "classification",
+        "tenant_id",
+        "trust_domain"
+      ],
+      "additionalProperties": false
+    },
+    "ProcessorObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "processor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "residency_region": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "processor_id",
+        "destination_id",
+        "destination_tenant_id",
+        "destination_trust_domain",
+        "residency_region"
+      ],
+      "additionalProperties": false
+    },
+    "DataTransformationObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "transformation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "result_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "result_classification": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "release_status": {
+          "enum": [
+            "approved",
+            "denied",
+            "unknown"
+          ]
+        },
+        "approval_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "destination_tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "processor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "stage": {
+          "$ref": "#/$defs/DataFlowStage"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "transformation_id",
+        "source_refs",
+        "result_ref",
+        "result_classification",
+        "policy_ref",
+        "purpose_id",
+        "destination_id",
+        "release_status",
+        "approval_ref",
+        "destination_tenant_id",
+        "destination_trust_domain",
+        "operation_id",
+        "action_digest",
+        "processor_id",
+        "stage"
+      ],
+      "additionalProperties": false
+    },
+    "DataFlowRequest": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "source_artifacts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifact_ref": {
+                "$ref": "#/$defs/ArtifactRef"
+              },
+              "classification": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "required": [
+              "artifact_ref",
+              "classification"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "source_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "stage": {
+          "$ref": "#/$defs/DataFlowStage"
+        },
+        "requested_classification": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "processor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "processor_observation": {
+          "$ref": "#/$defs/ProcessorObservation"
+        },
+        "transformation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataTransformationObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "policy_ref",
+        "source_artifacts",
+        "source_trust_domain",
+        "destination_tenant_id",
+        "destination_trust_domain",
+        "destination_id",
+        "purpose_id",
+        "stage",
+        "requested_classification",
+        "processor_id",
+        "processor_observation",
+        "transformation"
+      ],
+      "additionalProperties": false
+    },
+    "DataFlowRule": {
+      "type": "object",
+      "properties": {
+        "source_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_trust_domain": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/DataFlowStage"
+          }
+        },
+        "source_classifications": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "destination_classifications": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "processor_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "residency_regions": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "transformation_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "source_trust_domain",
+        "destination_trust_domain",
+        "destination_tenant_id",
+        "destination_id",
+        "purpose_id",
+        "stages",
+        "source_classifications",
+        "destination_classifications",
+        "processor_ids",
+        "residency_regions",
+        "transformation_ids"
+      ],
+      "additionalProperties": false
+    },
+    "DataFlowPolicySnapshot": {
+      "type": "object",
+      "properties": {
+        "policy_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "known_classifications": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "label_combinations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "inputs": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 128,
+                "items": {
+                  "$ref": "#/$defs/Identifier"
+                }
+              },
+              "output": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "required": [
+              "inputs",
+              "output"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "maximum_observation_age_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "source_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/SourceClassificationObservation"
+          }
+        },
+        "allowed_flows": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/DataFlowRule"
+          }
+        }
+      },
+      "required": [
+        "policy_ref",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "not_before",
+        "expires_at",
+        "known_classifications",
+        "label_combinations",
+        "maximum_observation_age_seconds",
+        "trusted_observers",
+        "source_observations",
+        "allowed_flows"
+      ],
+      "additionalProperties": false
+    },
+    "DataFlowDecision": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "policy_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "classification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unsatisfied_obligations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "contract_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SHA256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "propagation_status": {
+          "$ref": "#/$defs/MemoryPropagationState"
+        },
+        "completion_verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "allowed",
+        "reason_codes",
+        "evaluation_time",
+        "policy_ref",
+        "artifact_refs",
+        "classification",
+        "unsatisfied_obligations",
+        "contract_id",
+        "run_id",
+        "operation_id",
+        "action_digest"
+      ],
+      "additionalProperties": false
+    },
+    "MemoryPropagationState": {
+      "enum": [
+        "pending",
+        "confirmed",
+        "failed",
+        "external_unknown"
+      ]
+    },
+    "MemoryLifecycleOperation": {
+      "enum": [
+        "propose",
+        "promote",
+        "correct",
+        "delete"
+      ]
+    },
+    "MemoryReviewObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "record_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "decision": {
+          "enum": [
+            "approved",
+            "denied"
+          ]
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "record_digest",
+        "decision"
+      ],
+      "additionalProperties": false
+    },
+    "MemoryPropagationObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "artifact_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "status": {
+          "$ref": "#/$defs/MemoryPropagationState"
+        },
+        "record_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "record_digest": {
+          "$ref": "#/$defs/SHA256"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "artifact_ref",
+        "status",
+        "record_id",
+        "operation_id",
+        "record_digest"
+      ],
+      "additionalProperties": false
+    },
+    "MemoryAccessObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "namespace": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "tenant_id",
+        "owner_id",
+        "namespace",
+        "purpose_id"
+      ],
+      "additionalProperties": false
+    },
+    "MemoryLifecycleRecord": {
+      "type": "object",
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "memory_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "namespace": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "readers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "operation": {
+          "$ref": "#/$defs/MemoryLifecycleOperation"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "retention_expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryReviewObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "derived_copy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "propagation_entries": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 129,
+          "items": {
+            "$ref": "#/$defs/MemoryPropagationObservation"
+          }
+        },
+        "propagation_status": {
+          "$ref": "#/$defs/MemoryPropagationState"
+        }
+      },
+      "required": [
+        "record_id",
+        "memory_ref",
+        "contract_id",
+        "run_id",
+        "operation_id",
+        "action_digest",
+        "tenant_id",
+        "owner_id",
+        "namespace",
+        "purpose_id",
+        "source_refs",
+        "readers",
+        "operation",
+        "policy_ref",
+        "retention_expires_at",
+        "review",
+        "derived_copy_refs",
+        "propagation_entries",
+        "propagation_status"
+      ],
+      "additionalProperties": false
+    },
+    "MemoryLifecycleContext": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "owner_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "namespace": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "allowed_readers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "allowed_operations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/MemoryLifecycleOperation"
+          }
+        },
+        "requires_review": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/MemoryLifecycleOperation"
+          }
+        },
+        "maximum_retention_expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "retention_exception": {
+          "enum": [
+            "none",
+            "requires_escalation"
+          ]
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "access_observation": {
+          "$ref": "#/$defs/MemoryAccessObservation"
+        },
+        "data_flow_request": {
+          "$ref": "#/$defs/DataFlowRequest"
+        },
+        "data_policy": {
+          "$ref": "#/$defs/DataFlowPolicySnapshot"
+        },
+        "known_derived_copy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "derived_inventory_status": {
+          "enum": [
+            "verified_complete",
+            "incomplete",
+            "external_unknown"
+          ]
+        }
+      },
+      "required": [
+        "tenant_id",
+        "owner_id",
+        "namespace",
+        "purpose_id",
+        "allowed_readers",
+        "allowed_operations",
+        "requires_review",
+        "maximum_retention_expires_at",
+        "retention_exception",
+        "trusted_observers",
+        "access_observation",
+        "data_flow_request",
+        "data_policy",
+        "known_derived_copy_refs",
+        "derived_inventory_status"
+      ],
+      "additionalProperties": false
+    },
+    "RunStatus": {
+      "enum": [
+        "created",
+        "running",
+        "waiting_approval",
+        "waiting_external",
+        "suspended",
+        "cancel_requested",
+        "completed",
+        "failed",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "RunEventKind": {
+      "enum": [
+        "start",
+        "resume",
+        "wait_approval",
+        "wait_external",
+        "suspend",
+        "request_cancel",
+        "acknowledge_cancel",
+        "complete",
+        "fail",
+        "expire"
+      ]
+    },
+    "RunEffectOutcome": {
+      "enum": [
+        "not_dispatched",
+        "confirmed",
+        "not_applied",
+        "partial",
+        "unknown"
+      ]
+    },
+    "RunExecutionState": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "admission_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "trusted_observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "outstanding_effects": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "operation_id": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "outcome": {
+                "$ref": "#/$defs/RunEffectOutcome"
+              }
+            },
+            "required": [
+              "operation_id",
+              "outcome"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "child_run_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "dispatch_stop_acknowledged": {
+          "type": "boolean"
+        },
+        "last_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "status",
+        "revision",
+        "executor_generation",
+        "deadline",
+        "admission_ref",
+        "trusted_observer",
+        "outstanding_effects",
+        "child_run_ids",
+        "dispatch_stop_acknowledged",
+        "last_event_id"
+      ],
+      "additionalProperties": false
+    },
+    "RunPreconditionObservation": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "admission_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "checks": {
+          "type": "object",
+          "properties": {
+            "admission": {
+              "enum": [
+                "ready",
+                "blocked",
+                "unknown"
+              ]
+            },
+            "authority": {
+              "enum": [
+                "ready",
+                "blocked",
+                "unknown"
+              ]
+            },
+            "boundary": {
+              "enum": [
+                "ready",
+                "blocked",
+                "unknown"
+              ]
+            },
+            "budget": {
+              "enum": [
+                "ready",
+                "blocked",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "admission",
+            "authority",
+            "boundary",
+            "budget"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "run_id",
+        "tenant_id",
+        "executor_generation",
+        "observer",
+        "verification_status",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "admission_ref",
+        "checks"
+      ],
+      "additionalProperties": false
+    },
+    "DispatchStopObservation": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "child_run_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "dispatch_stopped": {
+          "type": "boolean"
+        },
+        "children_stop_recorded": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_id",
+        "tenant_id",
+        "executor_generation",
+        "observer",
+        "verification_status",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "child_run_ids",
+        "dispatch_stopped",
+        "children_stop_recorded"
+      ],
+      "additionalProperties": false
+    },
+    "RunEvent": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunEventKind"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "preconditions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunPreconditionObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dispatch_stop_ack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DispatchStopObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "tenant_id",
+        "kind",
+        "expected_revision",
+        "executor_generation",
+        "preconditions",
+        "dispatch_stop_ack"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceCounters": {
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "replans": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cost_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "tokens",
+        "tool_calls",
+        "replans",
+        "cost_units"
+      ],
+      "additionalProperties": false
+    },
+    "CostAccountingUnit": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "units_per_cent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "enum": [
+            1,
+            10,
+            100,
+            1000,
+            10000,
+            100000,
+            1000000,
+            10000000,
+            100000000,
+            1000000000,
+            10000000000,
+            100000000000,
+            1000000000000,
+            10000000000000,
+            100000000000000,
+            1000000000000000
+          ]
+        }
+      },
+      "required": [
+        "currency",
+        "units_per_cent"
+      ],
+      "additionalProperties": false
+    },
+    "CheckpointBudgetSnapshot": {
+      "type": "object",
+      "properties": {
+        "ledger_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cost_unit": {
+          "$ref": "#/$defs/CostAccountingUnit"
+        },
+        "ceiling": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "used": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "reserved": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "ledger_revision",
+        "cost_unit",
+        "ceiling",
+        "used",
+        "reserved",
+        "deadline"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionCheckpoint": {
+      "type": "object",
+      "properties": {
+        "checkpoint_version": {
+          "const": "contextos.execution_checkpoint.v1"
+        },
+        "checkpoint_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "pack_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "tool_registry_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "profile_registry_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "run_state": {
+          "$ref": "#/$defs/RunExecutionState"
+        },
+        "operation_ledger_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "budget_ledger_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "operation_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "budget_snapshot": {
+          "$ref": "#/$defs/CheckpointBudgetSnapshot"
+        },
+        "pending_approval_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "pending_task_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "cancellation_state": {
+          "enum": [
+            "none",
+            "requested",
+            "acknowledged"
+          ]
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "require_target_fencing": {
+          "type": "boolean"
+        },
+        "digest": {
+          "$ref": "#/$defs/SHA256"
+        }
+      },
+      "required": [
+        "checkpoint_version",
+        "checkpoint_id",
+        "revision",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "contract_ref",
+        "pack_ref",
+        "policy_refs",
+        "tool_registry_ref",
+        "profile_registry_ref",
+        "release_refs",
+        "run_state",
+        "operation_ledger_ref",
+        "budget_ledger_ref",
+        "operation_ids",
+        "budget_snapshot",
+        "pending_approval_refs",
+        "pending_task_refs",
+        "cancellation_state",
+        "executor_generation",
+        "require_target_fencing",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "ResumeCheck": {
+      "enum": [
+        "contract_support",
+        "authority",
+        "approval",
+        "boundary",
+        "external_preconditions",
+        "budget"
+      ]
+    },
+    "ResumeControlObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "check": {
+          "$ref": "#/$defs/ResumeCheck"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "blocked",
+            "unknown"
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "checkpoint_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "check",
+        "status",
+        "run_id",
+        "tenant_id",
+        "checkpoint_digest",
+        "executor_generation"
+      ],
+      "additionalProperties": false
+    },
+    "ResumeArtifactObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "artifact_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "actual_sha256": {
+          "$ref": "#/$defs/SHA256"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "artifact_ref",
+        "actual_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "ResumeStoreObservation": {
+      "type": "object",
+      "properties": {
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "checkpoint_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "checkpoint_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "checkpoint_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lease_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "target_fencing": {
+          "enum": [
+            "enforced",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "run_status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "cancellation_state": {
+          "enum": [
+            "none",
+            "requested",
+            "acknowledged"
+          ]
+        },
+        "operation_ledger_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "budget_ledger_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "operation_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "budget_snapshot": {
+          "$ref": "#/$defs/CheckpointBudgetSnapshot"
+        }
+      },
+      "required": [
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "checkpoint_id",
+        "checkpoint_revision",
+        "checkpoint_digest",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "executor_id",
+        "executor_generation",
+        "lease_ref",
+        "target_fencing",
+        "run_status",
+        "cancellation_state",
+        "operation_ledger_ref",
+        "budget_ledger_ref",
+        "operation_ids",
+        "budget_snapshot"
+      ],
+      "additionalProperties": false
+    },
+    "ResumeValidationInput": {
+      "type": "object",
+      "properties": {
+        "checkpoint": {
+          "$ref": "#/$defs/ExecutionCheckpoint"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "required_policy_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "store_observation": {
+          "$ref": "#/$defs/ResumeStoreObservation"
+        },
+        "artifact_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ResumeArtifactObservation"
+          }
+        },
+        "current_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ResumeControlObservation"
+          }
+        }
+      },
+      "required": [
+        "checkpoint",
+        "run_id",
+        "tenant_id",
+        "executor_id",
+        "executor_generation",
+        "expected_revision",
+        "evaluation_time",
+        "trusted_observers",
+        "required_policy_refs",
+        "store_observation",
+        "artifact_observations",
+        "current_observations"
+      ],
+      "additionalProperties": false
+    },
+    "ResumeValidationResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "accepted"
+            },
+            "state": {
+              "$ref": "#/$defs/ExecutionCheckpoint"
+            },
+            "obligations": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "obligations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "rejected"
+            },
+            "state": {
+              "$ref": "#/$defs/ExecutionCheckpoint"
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "obligations": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "reason_codes",
+            "obligations"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RecoveryStrategy": {
+      "enum": [
+        "query",
+        "idempotent_retry",
+        "manual_reconcile",
+        "no_retry"
+      ]
+    },
+    "OperationIntent": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "adapter_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "capability_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "desired_effect": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "recovery_strategy": {
+          "$ref": "#/$defs/RecoveryStrategy"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotency_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_idempotency_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "retry_delays_seconds": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "compensates_operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "adapter_ref",
+        "capability_ref",
+        "desired_effect",
+        "recovery_strategy",
+        "idempotency_key",
+        "idempotency_scope",
+        "provider_idempotency_ref",
+        "max_attempts",
+        "retry_delays_seconds",
+        "deadline",
+        "compensates_operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "OperationAttempt": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "started_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "dispatch_state": {
+          "enum": [
+            "claimed",
+            "dispatched",
+            "settled"
+          ]
+        },
+        "last_observation_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "attempt_id",
+        "operation_id",
+        "executor_generation",
+        "started_at",
+        "dispatch_state",
+        "last_observation_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ProviderIdempotencyObservation": {
+      "type": "object",
+      "properties": {
+        "provider_contract_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "same_payload_enforced": {
+          "type": "boolean"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "not_before": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "retention_expires_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "provider_contract_ref",
+        "key",
+        "scope",
+        "operation_id",
+        "action_digest",
+        "same_payload_enforced",
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "not_before",
+        "retention_expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "OperationClaim": {
+      "type": "object",
+      "properties": {
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "adapter_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "capability_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "desired_effect": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "recovery_strategy": {
+          "$ref": "#/$defs/RecoveryStrategy"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotency_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_idempotency_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "retry_delays_seconds": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "compensates_operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempt": {
+          "$ref": "#/$defs/OperationAttempt"
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "provider_observation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderIdempotencyObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "action_digest",
+        "adapter_ref",
+        "capability_ref",
+        "desired_effect",
+        "recovery_strategy",
+        "idempotency_key",
+        "idempotency_scope",
+        "provider_idempotency_ref",
+        "max_attempts",
+        "retry_delays_seconds",
+        "deadline",
+        "compensates_operation_id",
+        "attempt",
+        "evaluation_time",
+        "provider_observation"
+      ],
+      "additionalProperties": false
+    },
+    "EffectObservation": {
+      "type": "object",
+      "properties": {
+        "observation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "outcome": {
+          "$ref": "#/$defs/RunEffectOutcome"
+        },
+        "finality": {
+          "enum": [
+            "definitive",
+            "provisional"
+          ]
+        },
+        "external_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "observation_id",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "operation_id",
+        "attempt_id",
+        "action_digest",
+        "executor_generation",
+        "outcome",
+        "finality",
+        "external_ref",
+        "evidence_ref",
+        "verification_status",
+        "observer",
+        "observed_at",
+        "valid_until",
+        "evaluation_time"
+      ],
+      "additionalProperties": false
+    },
+    "OperationRecord": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "$ref": "#/$defs/OperationIntent"
+        },
+        "attempts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/OperationAttempt"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/EffectObservation"
+          }
+        },
+        "outcome": {
+          "$ref": "#/$defs/RunEffectOutcome"
+        },
+        "next_eligible_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UTCTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conflict": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "intent",
+        "attempts",
+        "observations",
+        "outcome",
+        "next_eligible_at",
+        "conflict"
+      ],
+      "additionalProperties": false
+    },
+    "OperationLedger": {
+      "type": "object",
+      "properties": {
+        "ledger_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/OperationRecord"
+          }
+        }
+      },
+      "required": [
+        "ledger_id",
+        "contract_id",
+        "run_id",
+        "tenant_id",
+        "revision",
+        "executor_generation",
+        "deadline",
+        "trusted_observers",
+        "operations"
+      ],
+      "additionalProperties": false
+    },
+    "CostUnitConversion": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "converted"
+            },
+            "units": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "status",
+            "units"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "rejected"
+            },
+            "reason_code": {
+              "enum": [
+                "cost_precision_unsupported",
+                "budget_accounting_invalid"
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "reason_code"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "BudgetReservationRecord": {
+      "type": "object",
+      "properties": {
+        "reservation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "child"
+          ]
+        },
+        "allocation": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "used": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "status": {
+          "enum": [
+            "reserved",
+            "usage_unknown",
+            "settled"
+          ]
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "settlement_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reservation_id",
+        "run_id",
+        "scope",
+        "allocation",
+        "used",
+        "status",
+        "deadline",
+        "settlement_ref"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetMutationReceipt": {
+      "type": "object",
+      "properties": {
+        "mutation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kind": {
+          "enum": [
+            "reserve",
+            "settle"
+          ]
+        },
+        "request_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "reservation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "result_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "allocated": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "charged": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "released": {
+          "$ref": "#/$defs/ResourceCounters"
+        }
+      },
+      "required": [
+        "mutation_id",
+        "kind",
+        "request_digest",
+        "reservation_id",
+        "result_revision",
+        "allocated",
+        "charged",
+        "released"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetLedger": {
+      "type": "object",
+      "properties": {
+        "ledger_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "parent_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "cost_unit": {
+          "$ref": "#/$defs/CostAccountingUnit"
+        },
+        "original_limits": {
+          "type": "object",
+          "properties": {
+            "tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool_calls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "replans": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cost_cents": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "tokens",
+            "tool_calls",
+            "replans",
+            "cost_cents"
+          ],
+          "additionalProperties": false
+        },
+        "original_limits_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "opening_usage": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "opening_usage_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "ceiling": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "used": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "reserved": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "unknown_usage_policy": {
+          "const": "retain_reservation"
+        },
+        "mutations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/BudgetMutationReceipt"
+          }
+        },
+        "trusted_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "reservations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/BudgetReservationRecord"
+          }
+        }
+      },
+      "required": [
+        "ledger_id",
+        "contract_id",
+        "parent_run_id",
+        "tenant_id",
+        "revision",
+        "executor_generation",
+        "deadline",
+        "cost_unit",
+        "original_limits",
+        "original_limits_ref",
+        "opening_usage",
+        "opening_usage_ref",
+        "ceiling",
+        "used",
+        "reserved",
+        "unknown_usage_policy",
+        "mutations",
+        "trusted_observers",
+        "reservations"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetReservationRequest": {
+      "type": "object",
+      "properties": {
+        "ledger_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "parent_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "mutation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "reservation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "child"
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "cost_unit": {
+          "$ref": "#/$defs/CostAccountingUnit"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "allocation": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTCTimestamp"
+        }
+      },
+      "required": [
+        "ledger_id",
+        "contract_id",
+        "parent_run_id",
+        "tenant_id",
+        "mutation_id",
+        "reservation_id",
+        "scope",
+        "run_id",
+        "cost_unit",
+        "expected_revision",
+        "executor_generation",
+        "evaluation_time",
+        "allocation",
+        "deadline"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetSettlementRequest": {
+      "type": "object",
+      "properties": {
+        "ledger_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "contract_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "parent_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "mutation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "reservation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "child"
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "cost_unit": {
+          "$ref": "#/$defs/CostAccountingUnit"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executor_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "usage": {
+          "$ref": "#/$defs/ResourceCounters"
+        },
+        "usage_status": {
+          "enum": [
+            "known",
+            "unknown"
+          ]
+        },
+        "execution_status": {
+          "enum": [
+            "running",
+            "completed",
+            "cancelled",
+            "unknown"
+          ]
+        },
+        "usage_observation": {
+          "type": "object",
+          "properties": {
+            "intent_digest": {
+              "$ref": "#/$defs/SHA256"
+            },
+            "verification_status": {
+              "$ref": "#/$defs/VerificationStatus"
+            },
+            "observer": {
+              "$ref": "#/$defs/PrincipalRef"
+            },
+            "evidence_ref": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "observed_at": {
+              "$ref": "#/$defs/UTCTimestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/UTCTimestamp"
+            }
+          },
+          "required": [
+            "intent_digest",
+            "verification_status",
+            "observer",
+            "evidence_ref",
+            "observed_at",
+            "valid_until"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "ledger_id",
+        "contract_id",
+        "parent_run_id",
+        "tenant_id",
+        "mutation_id",
+        "reservation_id",
+        "scope",
+        "run_id",
+        "cost_unit",
+        "expected_revision",
+        "executor_generation",
+        "evaluation_time",
+        "usage",
+        "usage_status",
+        "execution_status",
+        "usage_observation"
+      ],
+      "additionalProperties": false
+    },
+    "ControlEvidenceStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "unsupported",
+        "not_evaluated"
+      ]
+    },
+    "ConformanceOutcome": {
+      "enum": [
+        "passed",
+        "failed",
+        "insufficient_evidence"
+      ]
+    },
+    "ConformanceCaseResult": {
+      "type": "object",
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_evaluated"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        }
+      },
+      "required": [
+        "case_id",
+        "status",
+        "evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "ControlEvidenceResult": {
+      "type": "object",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ControlRef"
+        },
+        "status": {
+          "$ref": "#/$defs/ControlEvidenceStatus"
+        },
+        "case_results": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ConformanceCaseResult"
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "control",
+        "status",
+        "case_results",
+        "evidence_refs",
+        "reason_codes",
+        "limitations"
+      ],
+      "additionalProperties": false
+    },
+    "ConformanceReport": {
+      "type": "object",
+      "properties": {
+        "report_version": {
+          "const": "contextos.conformance_report.v1"
+        },
+        "report_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "implementation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "implementation_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ProfileSelection"
+          }
+        },
+        "effective_required_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "registry_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "suite_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "environment": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "configuration_ref": {
+              "$ref": "#/$defs/ArtifactRef"
+            }
+          },
+          "required": [
+            "description",
+            "configuration_ref"
+          ],
+          "additionalProperties": false
+        },
+        "evaluated_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "evaluator": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "control_results": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlEvidenceResult"
+          }
+        },
+        "utility_results": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ConformanceCaseResult"
+          }
+        },
+        "outcome": {
+          "$ref": "#/$defs/ConformanceOutcome"
+        }
+      },
+      "required": [
+        "report_version",
+        "report_id",
+        "implementation_id",
+        "implementation_version",
+        "workflow_id",
+        "profiles",
+        "effective_required_controls",
+        "registry_ref",
+        "suite_ref",
+        "release_refs",
+        "environment",
+        "evaluated_at",
+        "valid_until",
+        "evaluator",
+        "control_results",
+        "utility_results",
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "ConformanceEvidenceObservation": {
+      "type": "object",
+      "properties": {
+        "report_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "evidence_kind": {
+          "enum": [
+            "runtime",
+            "synthetic"
+          ]
+        },
+        "actual_sha256": {
+          "$ref": "#/$defs/SHA256"
+        }
+      },
+      "required": [
+        "report_digest",
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "evidence_kind",
+        "actual_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "ConformanceAssessmentInput": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/ExecutionContractEnvelope"
+        },
+        "support": {
+          "$ref": "#/$defs/RuntimeSupportDeclaration"
+        },
+        "registry": {
+          "$ref": "#/$defs/ProfileRegistrySnapshot"
+        },
+        "features": {
+          "$ref": "#/$defs/WorkflowFeatureSet"
+        },
+        "report": {
+          "$ref": "#/$defs/ConformanceReport"
+        },
+        "evaluation_time": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "workflow_id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "implementation_id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "implementation_version": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "release_refs": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ArtifactRef"
+              }
+            },
+            "environment_ref": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "required_utility_case_ids": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "workflow_id",
+            "implementation_id",
+            "implementation_version",
+            "release_refs",
+            "environment_ref",
+            "required_utility_case_ids"
+          ],
+          "additionalProperties": false
+        },
+        "trusted_assessors": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "trusted_evidence_observers": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          }
+        },
+        "report_verification": {
+          "$ref": "#/$defs/EvidenceVerification"
+        },
+        "evidence_observations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ConformanceEvidenceObservation"
+          }
+        }
+      },
+      "required": [
+        "contract",
+        "support",
+        "registry",
+        "features",
+        "report",
+        "evaluation_time",
+        "scope",
+        "trusted_assessors",
+        "trusted_evidence_observers",
+        "report_verification",
+        "evidence_observations"
+      ],
+      "additionalProperties": false
+    },
+    "EvidenceVerification": {
+      "type": "object",
+      "properties": {
+        "report_digest": {
+          "$ref": "#/$defs/SHA256"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "observer": {
+          "$ref": "#/$defs/PrincipalRef"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UTCTimestamp"
+        },
+        "evidence_kind": {
+          "enum": [
+            "runtime",
+            "synthetic"
+          ]
+        }
+      },
+      "required": [
+        "report_digest",
+        "verification_status",
+        "observer",
+        "evidence_ref",
+        "observed_at",
+        "valid_until",
+        "evidence_kind"
+      ],
+      "additionalProperties": false
+    },
+    "ConformanceAssessment": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/ConformanceOutcome"
+        },
+        "report_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "implementation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "implementation_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "registry_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing_controls": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "unsupported_optional": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "outcome",
+        "report_id",
+        "workflow_id",
+        "implementation_id",
+        "implementation_version",
+        "release_refs",
+        "registry_ref",
+        "missing_controls",
+        "unsupported_optional",
+        "reasons",
+        "limitations"
+      ],
+      "additionalProperties": false
+    },
+    "ReferenceValidationReport": {
+      "type": "object",
+      "properties": {
+        "report_version": {
+          "const": "contextos.reference_validation.v1"
+        },
+        "report_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "implementation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "implementation_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "suite_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "release_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "fixture_refs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "case_results": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "case_id": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "status": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "case_id",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "runtime_controls": {
+          "const": "not_evaluated"
+        },
+        "outcome": {
+          "enum": [
+            "reference_checks_passed",
+            "reference_checks_failed"
+          ]
+        }
+      },
+      "required": [
+        "report_version",
+        "report_id",
+        "implementation_id",
+        "implementation_version",
+        "workflow_id",
+        "suite_ref",
+        "release_refs",
+        "fixture_refs",
+        "case_results",
+        "runtime_controls",
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "ContextCompileErrorDetail": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "const": "policy_eval_error"
+        },
+        "stage": {
+          "const": "policy_resolution"
+        },
+        "bundle_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "rule_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expression_path": {
+          "const": "if"
+        },
+        "message": {
+          "$ref": "#/$defs/Identifier",
+          "const": "An applicable policy predicate could not be evaluated."
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "bundle_id",
+        "rule_id",
+        "expression_path",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "RunTransitionResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "accepted"
+            },
+            "state": {
+              "$ref": "#/$defs/RunExecutionState"
+            },
+            "obligations": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "obligations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "rejected"
+            },
+            "state": {
+              "$ref": "#/$defs/RunExecutionState"
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "reason_codes"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "OperationTransitionResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "accepted"
+            },
+            "state": {
+              "$ref": "#/$defs/OperationLedger"
+            },
+            "obligations": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "obligations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "rejected"
+            },
+            "state": {
+              "$ref": "#/$defs/OperationLedger"
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "reason_codes"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "BudgetTransitionResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "accepted"
+            },
+            "state": {
+              "$ref": "#/$defs/BudgetLedger"
+            },
+            "obligations": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "obligations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "rejected"
+            },
+            "state": {
+              "$ref": "#/$defs/BudgetLedger"
+            },
+            "reason_codes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          },
+          "required": [
+            "status",
+            "state",
+            "reason_codes"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

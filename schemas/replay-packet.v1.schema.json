@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/replay-packet.v1.schema.json",
+  "title": "ReplayPacket v1",
+  "description": "Portable replay contract for audit replay, regression replay, environment replay, and source-pressure closure.",
+  "type": "object",
+  "required": ["replay_packet_id", "trace_id", "source_kind", "source_ref", "context_pack_ref", "compiled_context_hash", "side_effect_policy", "expected"],
+  "properties": {
+    "replay_packet_id": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "source_kind": {
+      "type": "string",
+      "enum": ["decision_record", "quality_replay_case", "environment_episode", "operator_correction", "golden_case"]
+    },
+    "source_ref": { "type": "string" },
+    "context_pack_ref": { "type": "string" },
+    "run_context_ref": { "type": "string" },
+    "knowledge_snapshot_ref": { "type": "string" },
+    "compiled_context_hash": { "type": "string" },
+    "tool_transcript_chain_hash": { "type": "string" },
+    "side_effect_policy": { "type": "string", "enum": ["transcript_only", "sandbox", "live_disallowed"] },
+    "expected": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string" },
+        "decision_record_hash": { "type": "string" },
+        "scorecard": { "type": "object", "additionalProperties": true },
+        "properties": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "latest_result": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["not_run", "replay_equal", "replay_mismatch", "fixed", "still_failing", "invalid", "superseded"] },
+        "eval_run_id": { "type": "string" },
+        "score": { "type": "number" },
+        "diff_refs": { "type": "array", "items": { "type": "string" } },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "metadata": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

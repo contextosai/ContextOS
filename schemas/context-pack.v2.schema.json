@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/context-pack.v2.schema.json",
+  "title": "ContextPack",
+  "description": "Versioned, immutable Context Pack — the unit of deployment for the Context plane. A deployment may require signatures through a separate supply-chain profile; signatures are not fields in this base schema. Mirrors the TypeScript ContextPack in src/lib/contextos/types.ts.",
+  "type": "object",
+  "required": [
+    "contract_meta",
+    "pack_meta",
+    "intelligence_refs",
+    "business_context",
+    "policy_layer",
+    "tooling_layer",
+    "decision_layer",
+    "memory_layer",
+    "evaluation_layer",
+    "tone_and_comms"
+  ],
+  "$defs": {
+    "ApprovalMode": {
+      "type": "string",
+      "enum": ["read_only", "local_write", "network", "delegated", "destructive"],
+      "description": "Required v1 compatibility projection and safety ceiling; not the complete native risk model. Native risk is represented by ActionRisk and evaluated per dimension."
+    },
+    "ActionRisk": {
+      "type": "object",
+      "required": ["effect", "authority", "reversibility", "interaction", "data_scope"],
+      "properties": {
+        "effect": { "type": "string", "enum": ["none", "local_state", "external_state", "physical_world"] },
+        "authority": { "type": "string", "enum": ["agent", "service", "user_delegated", "human_approved"] },
+        "reversibility": { "type": "string", "enum": ["read_only", "reversible", "compensatable", "irreversible"] },
+        "interaction": { "type": "string", "enum": ["api", "browser", "computer", "agent_to_agent", "human_handoff"] },
+        "data_scope": { "type": "string", "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        "decision_ttl_seconds": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "ActionRiskPolicy": {
+      "type": "object",
+      "required": ["allowed_effects", "allowed_authorities", "allowed_reversibility", "allowed_interactions", "data_scope_ceiling"],
+      "properties": {
+        "allowed_effects": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["none", "local_state", "external_state", "physical_world"] }
+        },
+        "allowed_authorities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["agent", "service", "user_delegated", "human_approved"] }
+        },
+        "allowed_reversibility": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["read_only", "reversible", "compensatable", "irreversible"] }
+        },
+        "allowed_interactions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["api", "browser", "computer", "agent_to_agent", "human_handoff"] }
+        },
+        "data_scope_ceiling": { "$ref": "#/$defs/DataClassification" },
+        "max_decision_ttl_seconds": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "DataClassification": {
+      "type": "string",
+      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]
+    },
+    "WriteClass": {
+      "type": "string",
+      "enum": ["evidence_link", "preference", "decision_outcome", "correction"]
+    },
+    "ContractMeta": {
+      "type": "object",
+      "required": ["contract_name", "contract_version", "issuer", "created_at", "compatibility"],
+      "properties": {
+        "contract_name": { "type": "string" },
+        "contract_version": { "type": "string" },
+        "issuer": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "compatibility": {
+          "type": "object",
+          "required": ["requires"],
+          "properties": {
+            "requires": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "PackMeta": {
+      "type": "object",
+      "required": ["pack_id", "pack_version", "tenant", "environment_defaults", "ttl_seconds", "data_classification"],
+      "properties": {
+        "pack_id": { "type": "string" },
+        "pack_version": { "type": "string" },
+        "tenant": {
+          "type": "object",
+          "required": ["tenant_id", "name"],
+          "properties": {
+            "tenant_id": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        "environment_defaults": {
+          "type": "object",
+          "required": ["language", "timezone", "currency", "region"],
+          "properties": {
+            "language": { "type": "string" },
+            "timezone": { "type": "string" },
+            "currency": { "type": "string" },
+            "region": { "type": "string" }
+          }
+        },
+        "ttl_seconds": { "type": "integer", "minimum": 0 },
+        "data_classification": { "$ref": "#/$defs/DataClassification" }
+      }
+    },
+    "IntelligenceRefs": {
+      "type": "object",
+      "required": ["ontology", "knowledge_graph", "identity_layer"],
+      "properties": {
+        "ontology": {
+          "type": "object",
+          "required": ["namespace", "version", "entity_types", "relationship_types"],
+          "properties": {
+            "namespace": { "type": "string" },
+            "version": { "type": "string" },
+            "entity_types": { "type": "array", "items": { "type": "string" } },
+            "relationship_types": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "knowledge_graph": {
+          "type": "object",
+          "required": ["snapshot_pin_rule"],
+          "properties": {
+            "snapshot_pin_rule": {
+              "type": "string",
+              "description": "Rule for resolving the pinned snapshot version (e.g. 'alias:prod' or a fixed version)."
+            }
+          }
+        },
+        "identity_layer": {
+          "type": "object",
+          "required": ["ceid_namespaces"],
+          "properties": {
+            "ceid_namespaces": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "embedding_keys": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "BusinessContext": {
+      "type": "object",
+      "required": ["summary", "non_negotiables"],
+      "properties": {
+        "summary": {
+          "type": "object",
+          "required": ["what_we_do", "who_we_serve", "differentiators"],
+          "properties": {
+            "what_we_do": { "type": "string" },
+            "who_we_serve": { "type": "array", "items": { "type": "string" } },
+            "differentiators": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "non_negotiables": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PolicyRule": {
+      "type": "object",
+      "required": ["rule_id", "applies_to", "if", "then"],
+      "properties": {
+        "rule_id": { "type": "string" },
+        "applies_to": {
+          "type": "object",
+          "properties": {
+            "intent": { "type": "string" },
+            "task": { "type": "string" }
+          }
+        },
+        "if": {},
+        "then": {
+          "type": "object",
+          "required": ["allow"],
+          "properties": {
+            "allow": { "type": "boolean" },
+            "approval_mode": { "$ref": "#/$defs/ApprovalMode" },
+            "requires": { "type": "array", "items": { "type": "string" } },
+            "prohibits": { "type": "array", "items": { "type": "string" } },
+            "requires_approval_gate": { "type": ["string", "null"] },
+            "arg_constraints": { "type": "object" }
+          }
+        },
+        "else": {
+          "type": "object",
+          "properties": {
+            "allow": { "type": "boolean" },
+            "reason": { "type": "string" }
+          }
+        },
+        "decision_binding": { "type": "string" },
+        "rationale": { "type": "string" },
+        "citations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PolicyBundle": {
+      "type": "object",
+      "required": ["bundle_id", "priority", "policy_dsl"],
+      "properties": {
+        "bundle_id": { "type": "string" },
+        "priority": { "type": "integer", "minimum": 0 },
+        "effective_from": { "type": "string", "format": "date-time" },
+        "policy_dsl": {
+          "type": "object",
+          "required": ["language", "rules"],
+          "properties": {
+            "language": { "const": "jsonlogic" },
+            "rules": { "type": "array", "items": { "$ref": "#/$defs/PolicyRule" } }
+          }
+        },
+        "prohibited_claims": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PolicyLayer": {
+      "type": "object",
+      "required": ["policy_bundles", "guardrails", "approval_gates"],
+      "properties": {
+        "policy_bundles": { "type": "array", "items": { "$ref": "#/$defs/PolicyBundle" } },
+        "guardrails": {
+          "type": "object",
+          "required": ["must_refuse", "must_escalate", "redaction_rules"],
+          "properties": {
+            "must_refuse": { "type": "array", "items": { "type": "string" } },
+            "must_escalate": { "type": "array", "items": { "type": "string" } },
+            "redaction_rules": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "approval_gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["gate_id", "when", "required_approver_role"],
+            "properties": {
+              "gate_id": { "type": "string" },
+              "when": {},
+              "required_approver_role": { "type": "string" },
+              "ttl_seconds": { "type": "integer", "minimum": 60 }
+            }
+          }
+        },
+        "action_risk_policy": { "$ref": "#/$defs/ActionRiskPolicy" }
+      }
+    },
+    "AdapterDefinition": {
+      "type": "object",
+      "required": ["adapter_id", "type", "endpoint_ref", "capabilities", "approval_mode"],
+      "properties": {
+        "adapter_id": { "type": "string" },
+        "type": { "type": "string", "enum": ["MCP", "A2A", "OPENAPI", "INTERNAL", "DB", "CUSTOM"] },
+        "endpoint_ref": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "approval_mode": { "$ref": "#/$defs/ApprovalMode" },
+        "capability_risks": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/ActionRisk" }
+        }
+      }
+    },
+    "ToolPermission": {
+      "type": "object",
+      "required": ["permission_id", "adapter_id", "capability", "allow"],
+      "properties": {
+        "permission_id": { "type": "string" },
+        "adapter_id": { "type": "string" },
+        "capability": { "type": "string" },
+        "allow": { "type": "boolean" },
+        "arg_constraints": { "type": "object" },
+        "requires_approval_gate": { "type": ["string", "null"] }
+      }
+    },
+    "ToolingLayer": {
+      "type": "object",
+      "required": ["adapter_registry", "permissions"],
+      "properties": {
+        "adapter_registry": { "type": "array", "items": { "$ref": "#/$defs/AdapterDefinition" } },
+        "permissions": { "type": "array", "items": { "$ref": "#/$defs/ToolPermission" } }
+      }
+    },
+    "DecisionSpec": {
+      "type": "object",
+      "required": ["decision_key", "version", "required_evidence", "allowed_outcomes", "approval_mode"],
+      "properties": {
+        "decision_key": { "type": "string" },
+        "version": { "type": "string" },
+        "owner_role": { "type": "string" },
+        "required_evidence": { "type": "array", "items": { "type": "string" } },
+        "allowed_outcomes": { "type": "array", "items": { "type": "string" } },
+        "approval_mode": { "$ref": "#/$defs/ApprovalMode" },
+        "inputs_schema_ref": { "type": "string" },
+        "outputs_schema_ref": { "type": "string" },
+        "eligibility_rules": {},
+        "decision_right": { "type": "string", "enum": ["propose", "recommend", "execute", "escalate"] },
+        "challenge_required": { "type": "boolean" }
+      }
+    },
+    "DecisionLayer": {
+      "type": "object",
+      "required": ["decision_specs"],
+      "properties": {
+        "decision_specs": { "type": "array", "items": { "$ref": "#/$defs/DecisionSpec" } }
+      }
+    },
+    "MemoryLayer": {
+      "type": "object",
+      "required": ["memory_policy", "promotion_thresholds"],
+      "properties": {
+        "memory_policy": {
+          "type": "object",
+          "required": ["tier_ttls", "write_classes_allowed", "consent_gating"],
+          "properties": {
+            "tier_ttls": {
+              "type": "object",
+              "required": ["working", "episodic", "semantic", "durable"],
+              "properties": {
+                "working": { "type": "string" },
+                "episodic": { "type": "string" },
+                "semantic": { "type": "string" },
+                "durable": { "type": "string" }
+              }
+            },
+            "write_classes_allowed": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/WriteClass" }
+            },
+            "consent_gating": {
+              "type": "object",
+              "required": ["pii_write_back_allowed"],
+              "properties": {
+                "pii_write_back_allowed": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "promotion_thresholds": {
+          "type": "object",
+          "required": ["auto_promote_confidence"],
+          "properties": {
+            "auto_promote_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "EvalTarget": {
+      "type": "object",
+      "required": ["intent", "policy", "utility", "safety"],
+      "properties": {
+        "intent": { "type": "string" },
+        "policy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "utility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "latency_p99_ms": { "type": "integer", "minimum": 0 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 },
+        "economics_cents_per_decision": { "type": "number", "minimum": 0 }
+      }
+    },
+    "EvaluationLayer": {
+      "type": "object",
+      "required": ["eval_targets"],
+      "properties": {
+        "eval_targets": { "type": "array", "items": { "$ref": "#/$defs/EvalTarget" } },
+        "release_gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["metric", "max_delta"],
+            "properties": {
+              "metric": { "type": "string" },
+              "max_delta": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "ToneAndComms": {
+      "type": "object",
+      "required": ["voice_attributes", "do", "dont"],
+      "properties": {
+        "voice_attributes": { "type": "array", "items": { "type": "string" } },
+        "do": { "type": "array", "items": { "type": "string" } },
+        "dont": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "properties": {
+    "contract_meta": { "$ref": "#/$defs/ContractMeta" },
+    "pack_meta": { "$ref": "#/$defs/PackMeta" },
+    "intelligence_refs": { "$ref": "#/$defs/IntelligenceRefs" },
+    "business_context": { "$ref": "#/$defs/BusinessContext" },
+    "policy_layer": { "$ref": "#/$defs/PolicyLayer" },
+    "tooling_layer": { "$ref": "#/$defs/ToolingLayer" },
+    "decision_layer": { "$ref": "#/$defs/DecisionLayer" },
+    "memory_layer": { "$ref": "#/$defs/MemoryLayer" },
+    "evaluation_layer": { "$ref": "#/$defs/EvaluationLayer" },
+    "tone_and_comms": { "$ref": "#/$defs/ToneAndComms" }
+  }
+}

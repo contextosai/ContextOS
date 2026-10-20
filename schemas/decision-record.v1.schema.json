@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/decision-record.v1.schema.json",
+  "title": "DecisionRecord v1",
+  "type": "object",
+  "required": ["record_id", "decision_key", "decision_version", "timestamp", "status", "actor", "evidence_refs", "policy_decisions", "approvals", "controls_active", "budget_usage", "lineage", "trace_id"],
+  "$defs": {
+    "ApprovalMode": {
+      "type": "string",
+      "enum": ["read_only", "local_write", "network", "delegated", "destructive"],
+      "description": "Required v1 compatibility projection recorded for approval and audit compatibility; not the complete native risk model."
+    },
+    "EvidenceConflictMarker": {
+      "type": "object",
+      "required": ["conflict_id", "evidence_refs", "requirements", "status"],
+      "properties": {
+        "conflict_id": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string", "enum": ["unresolved", "resolved"] },
+        "subject": { "type": "string" },
+        "predicate": { "type": "string" },
+        "values": { "type": "array" },
+        "resolution": {
+          "type": "object",
+          "required": ["resolution_ref", "selected_evidence_refs"],
+          "properties": {
+            "resolution_ref": { "type": "string", "minLength": 1 },
+            "selected_evidence_refs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "resolved" } },
+            "required": ["status"]
+          },
+          "then": { "required": ["resolution"] },
+          "else": { "not": { "required": ["resolution"] } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "EvidenceGate": {
+      "type": "object",
+      "required": [
+        "decision_key",
+        "required",
+        "satisfied",
+        "unresolved",
+        "rejected_evidence",
+        "commit_allowed"
+      ],
+      "properties": {
+        "decision_key": { "type": "string" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "satisfied": { "type": "array", "items": { "type": "string" } },
+        "unresolved": { "type": "array", "items": { "type": "string" } },
+        "rejected_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["evidence_ref", "requirements", "reasons"],
+            "properties": {
+              "evidence_ref": { "type": "string" },
+              "requirements": { "type": "array", "items": { "type": "string" } },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "untrusted",
+                    "stale",
+                    "freshness_unknown",
+                    "budget_omitted",
+                    "unresolved_conflict",
+                    "superseded_by_resolution"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceConflictMarker" }
+        },
+        "sufficiency": {
+          "type": "string",
+          "enum": ["sufficient", "insufficient"]
+        },
+        "commit_allowed": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ContextAdmissionControls": {
+      "type": "object",
+      "required": ["data_only_block_ids", "untrusted_block_ids", "privileged_sink_policy"],
+      "properties": {
+        "data_only_block_ids": { "type": "array", "items": { "type": "string" } },
+        "untrusted_block_ids": { "type": "array", "items": { "type": "string" } },
+        "privileged_sink_policy": {
+          "type": "string",
+          "const": "verified_or_user_intent"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "record_id": { "type": "string" },
+    "decision_key": { "type": "string" },
+    "decision_version": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["DECIDED", "DEFERRED", "REJECTED", "ESCALATED", "IN_FLIGHT", "CLOSED"] },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["USER", "AGENT", "SYSTEM"] },
+        "id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "intent_ref": { "type": "string" },
+    "context_snapshot_hash": { "type": "string" },
+    "subject_ids": { "type": "array", "items": { "type": "string" } },
+    "inputs_refs": { "type": "object", "additionalProperties": { "type": "string" } },
+    "outputs": { "type": "object", "additionalProperties": true },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "policy_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["policy_decision_id", "rule_ids"],
+        "properties": {
+          "policy_decision_id": { "type": "string" },
+          "bundle_id": { "type": "string" },
+          "rule_ids": { "type": "array", "items": { "type": "string" } },
+          "verdict": { "type": "string", "enum": ["allow", "deny", "require_approval", "escalate"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gate_id", "approver", "approval_mode_effective", "evidence_snapshot_hash", "decided_at"],
+        "properties": {
+          "gate_id": { "type": "string" },
+          "approver": { "type": "string" },
+          "approval_mode_effective": { "$ref": "#/$defs/ApprovalMode" },
+          "evidence_snapshot_hash": { "type": "string" },
+          "decided_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "controls_active": {
+      "type": "object",
+      "required": ["must_refuse", "must_escalate", "approval_gates_active", "redaction_rules_active"],
+      "properties": {
+        "must_refuse": { "type": "array", "items": { "type": "string" } },
+        "must_escalate": { "type": "array", "items": { "type": "string" } },
+        "approval_gates_active": { "type": "array", "items": { "type": "string" } },
+        "redaction_rules_active": { "type": "array", "items": { "type": "string" } },
+        "context_admission": { "$ref": "#/$defs/ContextAdmissionControls" },
+        "evidence_gates": { "type": "array", "items": { "$ref": "#/$defs/EvidenceGate" } }
+      },
+      "additionalProperties": false
+    },
+    "tool_lineage": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "scorecard": {
+      "type": "object",
+      "required": ["policy", "utility", "safety"],
+      "properties": {
+        "policy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "utility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "latency": { "type": "number", "minimum": 0 },
+        "safety": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "rationale": { "type": "object", "additionalProperties": true },
+    "budget_usage": {
+      "type": "object",
+      "required": ["tokens", "tool_calls", "cost_usd_cents", "wall_clock_ms"],
+      "properties": {
+        "tokens": { "type": "integer", "minimum": 0 },
+        "tool_calls": { "type": "integer", "minimum": 0 },
+        "cost_usd_cents": { "type": "number", "minimum": 0 },
+        "wall_clock_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "lineage": {
+      "type": "object",
+      "required": ["pack_version"],
+      "properties": {
+        "pack_version": { "type": "string" },
+        "snapshot_version": { "type": "string" },
+        "policy_versions": { "type": "array", "items": { "type": "string" } },
+        "decision_spec": { "type": "string" },
+        "kg_snapshot": { "type": "string" },
+        "model_profile": { "type": "string" },
+        "evaluator_suite": { "type": "string" },
+        "routing_decision_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "replay": { "type": "object", "additionalProperties": true },
+    "audit": { "type": "object", "additionalProperties": true },
+    "trace_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

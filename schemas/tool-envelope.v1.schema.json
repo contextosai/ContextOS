@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/tool-envelope.v1.schema.json",
+  "title": "ToolEnvelope v1",
+  "anyOf": [
+    { "$ref": "#/$defs/ToolCallEnvelope" },
+    { "$ref": "#/$defs/ToolResultEnvelope" }
+  ],
+  "$defs": {
+    "ApprovalMode": {
+      "type": "string",
+      "enum": ["read_only", "local_write", "network", "delegated", "destructive"],
+      "description": "Required v1 compatibility projection; not the complete native risk model. Native risk is carried by ActionRisk when available."
+    },
+    "ActionRisk": {
+      "type": "object",
+      "required": ["effect", "authority", "reversibility", "interaction", "data_scope"],
+      "properties": {
+        "effect": { "type": "string", "enum": ["none", "local_state", "external_state", "physical_world"] },
+        "authority": { "type": "string", "enum": ["agent", "service", "user_delegated", "human_approved"] },
+        "reversibility": { "type": "string", "enum": ["read_only", "reversible", "compensatable", "irreversible"] },
+        "interaction": { "type": "string", "enum": ["api", "browser", "computer", "agent_to_agent", "human_handoff"] },
+        "data_scope": { "type": "string", "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        "decision_ttl_seconds": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "Principal": {
+      "$ref": "https://contextosai.com/schemas/run-context.v1.schema.json#/$defs/Principal"
+    },
+    "ToolCallEnvelope": {
+      "type": "object",
+      "required": ["envelope_version", "tool_call_id", "run_id", "trace_id", "capability_id", "args", "principal_chain", "approval_mode_requested", "approval_mode_effective", "approval_mode_highest", "evidence_refs"],
+      "properties": {
+        "envelope_version": { "const": "contextos.tool_call.v1" },
+        "tool_call_id": { "type": "string" },
+        "run_id": { "type": "string" },
+        "trace_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "capability_id": { "type": "string" },
+        "args": { "type": "object", "additionalProperties": true },
+        "principal_chain": { "type": "array", "items": { "$ref": "#/$defs/Principal" } },
+        "approval_mode_requested": { "$ref": "#/$defs/ApprovalMode" },
+        "approval_mode_effective": { "$ref": "#/$defs/ApprovalMode" },
+        "approval_mode_highest": { "$ref": "#/$defs/ApprovalMode" },
+        "action_risk_requested": { "$ref": "#/$defs/ActionRisk" },
+        "action_risk_effective": { "$ref": "#/$defs/ActionRisk" },
+        "policy_decision_id": { "type": ["string", "null"] },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "idempotency_key": { "type": ["string", "null"] },
+        "auth_ref": { "type": ["string", "null"] },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "ToolResultEnvelope": {
+      "type": "object",
+      "required": ["envelope_version", "tool_call_id", "run_id", "trace_id", "capability_id", "status", "output", "artifacts", "citations", "mutations", "risk_tags", "latency_ms"],
+      "properties": {
+        "envelope_version": { "const": "contextos.tool_result.v1" },
+        "tool_call_id": { "type": "string" },
+        "run_id": { "type": "string" },
+        "trace_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "capability_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["ok", "error", "paused", "completed", "failed", "rejected", "blocked"] },
+        "output": { "type": "object", "additionalProperties": true },
+        "error": { "type": ["string", "null"] },
+        "artifacts": { "type": "array", "items": { "type": "string" } },
+        "citations": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "mutations": { "type": "array", "items": { "type": "string" } },
+        "risk_tags": { "type": "array", "items": { "type": "string" } },
+        "policy_decision_id": { "type": ["string", "null"] },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/run-context.v1.schema.json",
+  "title": "RunContext v1",
+  "type": "object",
+  "required": ["run_id", "trace_id", "tenant_id", "user", "agent", "safety_mode", "run_budget"],
+  "$defs": {
+    "ApprovalMode": {
+      "type": "string",
+      "enum": ["read_only", "local_write", "network", "delegated", "destructive"],
+      "description": "Required v1 compatibility projection used by safety_mode as an execution ceiling; not the complete native risk model."
+    },
+    "Principal": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["user", "service", "agent", "automation"] },
+        "id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "UserDelegation": {
+      "type": "object",
+      "required": ["auth_type", "scopes", "subject"],
+      "properties": {
+        "auth_type": { "type": "string", "enum": ["oauth2", "saml", "oidc", "service"] },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "subject": { "type": "string" },
+        "token_ref": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "UserClaims": {
+      "type": "object",
+      "required": ["user_id"],
+      "properties": {
+        "user_id": { "type": "string" },
+        "delegation": { "$ref": "#/$defs/UserDelegation" },
+        "role": { "type": "string" },
+        "tenure_days": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "IdentityClaim": {
+      "type": "object",
+      "required": ["version", "iss", "sub", "run_id", "tenant_id", "principal_chain", "scopes", "nbf", "exp", "kid", "claim_hash"],
+      "properties": {
+        "version": { "const": "ctxid/1" },
+        "iss": { "type": "string" },
+        "sub": { "type": "string" },
+        "aud": { "type": "string" },
+        "run_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "principal_chain": { "type": "array", "items": { "$ref": "#/$defs/Principal" } },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "nbf": { "type": "string", "format": "date-time" },
+        "exp": { "type": "string", "format": "date-time" },
+        "kid": { "type": "string" },
+        "claim_hash": { "type": "string" },
+        "sig": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "AgentIdentity": {
+      "type": "object",
+      "required": ["agent_id", "workload_identity", "role"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "agent_urn": { "type": "string" },
+        "workload_identity": { "type": "string" },
+        "role": { "type": "string" },
+        "token_ref": { "type": "string" },
+        "lifecycle": { "type": "string", "enum": ["active", "deprecated", "revoked"] },
+        "identity_scopes": { "type": "array", "items": { "type": "string" } },
+        "principal_chain": { "type": "array", "items": { "$ref": "#/$defs/Principal" } },
+        "identity_claim": { "$ref": "#/$defs/IdentityClaim" }
+      },
+      "additionalProperties": true
+    },
+    "RunBudget": {
+      "type": "object",
+      "required": ["total_tokens", "bucket_tokens", "max_tool_calls", "max_replan_attempts", "wall_clock_ms", "max_cost_cents"],
+      "properties": {
+        "total_tokens": { "type": "integer", "minimum": 0 },
+        "bucket_tokens": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "max_tool_calls": { "type": "integer", "minimum": 0 },
+        "max_replan_attempts": { "type": "integer", "minimum": 0 },
+        "wall_clock_ms": { "type": "integer", "minimum": 0 },
+        "max_cost_cents": { "type": "number", "minimum": 0 },
+        "tokens_used": { "type": "integer", "minimum": 0 },
+        "tool_calls_used": { "type": "integer", "minimum": 0 },
+        "latency_ms_used": { "type": "integer", "minimum": 0 },
+        "cost_cents_used": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "run_id": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "tenant_id": { "type": "string" },
+    "user": { "$ref": "#/$defs/UserClaims" },
+    "agent": { "$ref": "#/$defs/AgentIdentity" },
+    "intent": { "type": "string" },
+    "locale": { "type": "string" },
+    "safety_mode": { "$ref": "#/$defs/ApprovalMode" },
+    "run_budget": { "$ref": "#/$defs/RunBudget" },
+    "metadata": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

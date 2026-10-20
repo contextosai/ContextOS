@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextosai.com/schemas/compiled-context.v1.schema.json",
+  "title": "CompiledContext v1",
+  "type": "object",
+  "required": ["compiled_prompt", "manifests", "runtime_controls", "budget_report", "context_ledger"],
+  "$defs": {
+    "ContextBucket": {
+      "type": "string",
+      "enum": ["business", "policy", "tool", "evidence", "memory", "session"]
+    },
+    "ActionRisk": {
+      "type": "object",
+      "required": ["effect", "authority", "reversibility", "interaction", "data_scope"],
+      "properties": {
+        "effect": { "type": "string", "enum": ["none", "local_state", "external_state", "physical_world"] },
+        "authority": { "type": "string", "enum": ["agent", "service", "user_delegated", "human_approved"] },
+        "reversibility": { "type": "string", "enum": ["read_only", "reversible", "compensatable", "irreversible"] },
+        "interaction": { "type": "string", "enum": ["api", "browser", "computer", "agent_to_agent", "human_handoff"] },
+        "data_scope": { "type": "string", "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        "decision_ttl_seconds": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "ActionRiskEvaluation": {
+      "type": "object",
+      "required": ["verdict", "policy_applied", "approval_mode_projection", "violations"],
+      "properties": {
+        "verdict": { "type": "string", "enum": ["allow", "deny"] },
+        "policy_applied": { "type": "boolean" },
+        "approval_mode_projection": { "type": "string", "enum": ["read_only", "local_write", "network", "delegated", "destructive"] },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "unsupported_action_risk",
+              "unsupported_action_risk_policy",
+              "effect_not_allowed",
+              "authority_not_allowed",
+              "reversibility_not_allowed",
+              "interaction_not_allowed",
+              "data_scope_exceeds_ceiling",
+              "decision_ttl_required",
+              "decision_ttl_exceeds_maximum"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CapabilityMetadata": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["read", "write", "network", "delegated", "destructive"] },
+        "risk_level": { "type": "string" },
+        "approval_mode": { "type": "string", "enum": ["read_only", "local_write", "network", "delegated", "destructive"] },
+        "action_risk": { "$ref": "#/$defs/ActionRisk" },
+        "action_risk_evaluation": { "$ref": "#/$defs/ActionRiskEvaluation" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ContextProvenance": {
+      "type": "object",
+      "required": [
+        "source_refs",
+        "origin",
+        "integrity",
+        "freshness",
+        "instruction_treatment",
+        "inclusion_reason",
+        "content_hash"
+      ],
+      "properties": {
+        "source_refs": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "origin": {
+          "type": "string",
+          "enum": ["pack", "policy", "tool_registry", "retrieval", "memory", "runtime"]
+        },
+        "integrity": {
+          "type": "string",
+          "enum": ["authoritative", "verified", "untrusted"]
+        },
+        "freshness": {
+          "type": "string",
+          "enum": ["current", "stale", "unknown", "not_applicable"]
+        },
+        "instruction_treatment": {
+          "type": "string",
+          "enum": ["control", "data_only"]
+        },
+        "inclusion_reason": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": "string" },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "valid_until": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "ContextBlock": {
+      "type": "object",
+      "required": ["block_id", "bucket", "content", "priority"],
+      "properties": {
+        "block_id": { "type": "string" },
+        "bucket": { "$ref": "#/$defs/ContextBucket" },
+        "content": { "type": "string" },
+        "priority": { "type": "integer" },
+        "provenance": { "$ref": "#/$defs/ContextProvenance" },
+        "provenance_refs": { "type": "array", "items": { "type": "string" } },
+        "truncated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "PolicyManifestEntry": {
+      "type": "object",
+      "required": ["bundle_id", "rule_ids"],
+      "properties": {
+        "bundle_id": { "type": "string" },
+        "rule_ids": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "ToolManifestEntry": {
+      "type": "object",
+      "required": ["adapter_id", "capabilities"],
+      "properties": {
+        "adapter_id": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "constraints": { "type": "object", "additionalProperties": true },
+        "capability_metadata": { "type": "object", "additionalProperties": { "$ref": "#/$defs/CapabilityMetadata" } }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceManifestEntry": {
+      "type": "object",
+      "required": ["evidence_ref"],
+      "properties": {
+        "evidence_ref": { "type": "string" },
+        "source_id": { "type": "string" },
+        "hash": { "type": "string" },
+        "integrity": { "type": "string", "enum": ["verified", "untrusted"] },
+        "freshness": { "type": "string", "enum": ["current", "stale", "unknown"] },
+        "instruction_treatment": { "type": "string", "const": "data_only" },
+        "satisfies": { "type": "array", "items": { "type": "string" } },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "valid_until": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceConflictMarker": {
+      "type": "object",
+      "required": ["conflict_id", "evidence_refs", "requirements", "status"],
+      "properties": {
+        "conflict_id": { "type": "string", "minLength": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string", "enum": ["unresolved", "resolved"] },
+        "subject": { "type": "string" },
+        "predicate": { "type": "string" },
+        "values": { "type": "array" },
+        "resolution": {
+          "type": "object",
+          "required": ["resolution_ref", "selected_evidence_refs"],
+          "properties": {
+            "resolution_ref": { "type": "string", "minLength": 1 },
+            "selected_evidence_refs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "resolved" } },
+            "required": ["status"]
+          },
+          "then": { "required": ["resolution"] },
+          "else": { "not": { "required": ["resolution"] } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "EvidenceGate": {
+      "type": "object",
+      "required": [
+        "decision_key",
+        "required",
+        "satisfied",
+        "unresolved",
+        "rejected_evidence",
+        "commit_allowed"
+      ],
+      "properties": {
+        "decision_key": { "type": "string" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "satisfied": { "type": "array", "items": { "type": "string" } },
+        "unresolved": { "type": "array", "items": { "type": "string" } },
+        "rejected_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["evidence_ref", "requirements", "reasons"],
+            "properties": {
+              "evidence_ref": { "type": "string" },
+              "requirements": { "type": "array", "items": { "type": "string" } },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "untrusted",
+                    "stale",
+                    "freshness_unknown",
+                    "budget_omitted",
+                    "unresolved_conflict",
+                    "superseded_by_resolution"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceConflictMarker" }
+        },
+        "sufficiency": {
+          "type": "string",
+          "enum": ["sufficient", "insufficient"]
+        },
+        "commit_allowed": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ContextAdmissionControls": {
+      "type": "object",
+      "required": ["data_only_block_ids", "untrusted_block_ids", "privileged_sink_policy"],
+      "properties": {
+        "data_only_block_ids": { "type": "array", "items": { "type": "string" } },
+        "untrusted_block_ids": { "type": "array", "items": { "type": "string" } },
+        "privileged_sink_policy": {
+          "type": "string",
+          "const": "verified_or_user_intent"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContextOmission": {
+      "type": "object",
+      "required": [
+        "block_id",
+        "bucket",
+        "reason",
+        "estimated_tokens",
+        "priority",
+        "source_refs"
+      ],
+      "properties": {
+        "block_id": { "type": "string" },
+        "bucket": { "$ref": "#/$defs/ContextBucket" },
+        "reason": { "type": "string", "const": "budget_exceeded" },
+        "estimated_tokens": { "type": "integer", "minimum": 0 },
+        "priority": { "type": "integer" },
+        "source_refs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "compiled_prompt": {
+      "type": "object",
+      "required": ["system", "developer", "task", "context_blocks"],
+      "properties": {
+        "system": { "type": "string" },
+        "developer": { "type": "string" },
+        "task": { "type": "string" },
+        "context_blocks": { "type": "array", "items": { "$ref": "#/$defs/ContextBlock" } }
+      },
+      "additionalProperties": false
+    },
+    "manifests": {
+      "type": "object",
+      "required": ["policy_manifest", "tool_manifest", "evidence_manifest"],
+      "properties": {
+        "policy_manifest": { "type": "array", "items": { "$ref": "#/$defs/PolicyManifestEntry" } },
+        "tool_manifest": { "type": "array", "items": { "$ref": "#/$defs/ToolManifestEntry" } },
+        "evidence_manifest": { "type": "array", "items": { "$ref": "#/$defs/EvidenceManifestEntry" } }
+      },
+      "additionalProperties": false
+    },
+    "runtime_controls": {
+      "type": "object",
+      "required": ["must_refuse", "must_escalate", "approval_gates_active", "redaction_rules_active"],
+      "properties": {
+        "must_refuse": { "type": "array", "items": { "type": "string" } },
+        "must_escalate": { "type": "array", "items": { "type": "string" } },
+        "approval_gates_active": { "type": "array", "items": { "type": "string" } },
+        "redaction_rules_active": { "type": "array", "items": { "type": "string" } },
+        "context_admission": { "$ref": "#/$defs/ContextAdmissionControls" },
+        "evidence_gates": { "type": "array", "items": { "$ref": "#/$defs/EvidenceGate" } }
+      },
+      "additionalProperties": false
+    },
+    "budget_report": {
+      "type": "object",
+      "required": ["tokens_allocated", "tokens_used_at_compile", "tokens_used_by_bucket", "bucket_truncations", "dropped_block_ids", "warnings"],
+      "properties": {
+        "tokens_allocated": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "tokens_used_at_compile": { "type": "integer", "minimum": 0 },
+        "tokens_used_by_bucket": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "bucket_truncations": { "type": "object", "additionalProperties": { "type": "boolean" } },
+        "dropped_block_ids": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+        "omissions": { "type": "array", "items": { "$ref": "#/$defs/ContextOmission" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "context_ledger": {
+      "type": "object",
+      "required": ["pack_ref", "intent", "request_id", "policy_bundles", "policy_rule_ids", "tools", "evidence_refs", "memory_refs", "dropped_block_ids", "budget", "compiled_context_hash"],
+      "properties": {
+        "pack_ref": { "type": "string" },
+        "intent": { "type": "string" },
+        "request_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "policy_bundles": { "type": "array", "items": { "type": "string" } },
+        "policy_rule_ids": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "memory_refs": { "type": "array", "items": { "type": "string" } },
+        "dropped_block_ids": { "type": "array", "items": { "type": "string" } },
+        "omissions": { "type": "array", "items": { "$ref": "#/$defs/ContextOmission" } },
+        "budget": {
+          "type": "object",
+          "required": ["tokens_used_at_compile", "tokens_used_by_bucket", "truncated_buckets"],
+          "properties": {
+            "tokens_used_at_compile": { "type": "integer", "minimum": 0 },
+            "tokens_used_by_bucket": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "truncated_buckets": { "type": "array", "items": { "$ref": "#/$defs/ContextBucket" } }
+          },
+          "additionalProperties": false
+        },
+        "compiled_context_hash": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
