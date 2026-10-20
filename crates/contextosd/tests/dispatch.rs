@@ -81,9 +81,59 @@ async fn world(controls: &[&str]) -> World {
     world_n(controls, 1).await
 }
 
-/// `replicas` servers sharing one store and one audit log, as separate processes
-/// sharing a database would.
+/// `replicas` servers sharing one in-memory store and one audit log, as separate
+/// processes sharing a database would.
 async fn world_n(controls: &[&str], replicas: usize) -> World {
+    let (config, provider_calls) = world_setup(controls).await;
+    let (store, log) = (Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
+    let mut bases = Vec::new();
+    let mut first = None;
+    for _ in 0..replicas.max(1) {
+        let state = replica_state(&config, store.clone(), log.clone());
+        first.get_or_insert_with(|| state.clone());
+        bases.push(serve(router(state, Duration::from_secs(10))).await);
+    }
+    World {
+        base: bases[0].clone(),
+        bases,
+        state: first.unwrap(),
+        provider_calls,
+    }
+}
+
+/// One replica's server state over a shared store and log.
+fn replica_state<S, L>(config: &Config, store: Arc<S>, log: L) -> Arc<contextosd::app::AppState<S, L>>
+where
+    S: contextos_store::DocumentStore + 'static,
+    L: contextos_store::AppendLog + 'static,
+{
+    build_state(
+        config,
+        store,
+        log,
+        AuditSigner::from_seed("audit-test", [5; 32]),
+        world_packs(),
+        dispatch_setup_from_config(config).unwrap(),
+    )
+    .unwrap()
+}
+
+/// The pack and a candidate version that drops the high-value approval (for rollouts).
+fn world_packs() -> HashMap<String, contextosd::app::LoadedPack> {
+    let vectors = compiler_vectors();
+    let mut packs = HashMap::new();
+    let (pack_ref, loaded) = load_pack(&vectors["cases"][0]["pack"].to_string()).unwrap();
+    packs.insert(pack_ref, loaded);
+    let mut candidate = vectors["cases"][0]["pack"].clone();
+    candidate["pack_meta"]["pack_version"] = json!("5.3.0");
+    candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
+    let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
+    packs.insert(pack_ref, loaded);
+    packs
+}
+
+/// The fake fact services and MCP tool server, and the configuration pointing at them.
+async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>) {
     let authority = serve(
         Router::new().fallback(post(|axum::Json(r): axum::Json<Value>| async move {
             axum::Json(authority_facts(&r))
@@ -238,49 +288,7 @@ async fn world_n(controls: &[&str], replicas: usize) -> World {
         meter = hash_api_key("meter-key")
     ))
     .unwrap();
-    let vectors: Value = serde_json::from_str(
-        &std::fs::read_to_string(format!(
-            "{}/../../conformance/vectors/compiler.json",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap(),
-    )
-    .unwrap();
-    let load = || {
-        let mut packs = HashMap::new();
-        let (pack_ref, loaded) = load_pack(&vectors["cases"][0]["pack"].to_string()).unwrap();
-        packs.insert(pack_ref, loaded);
-        // A candidate version that drops the high-value approval (for rollout tests).
-        let mut candidate = vectors["cases"][0]["pack"].clone();
-        candidate["pack_meta"]["pack_version"] = json!("5.3.0");
-        candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
-        let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
-        packs.insert(pack_ref, loaded);
-        packs
-    };
-    let (store, log) = (Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
-    let mut bases = Vec::new();
-    let mut first = None;
-    for _ in 0..replicas.max(1) {
-        let dispatch = dispatch_setup_from_config(&config).unwrap();
-        let state = build_state(
-            &config,
-            store.clone(),
-            log.clone(),
-            AuditSigner::from_seed("audit-test", [5; 32]),
-            load(),
-            dispatch,
-        )
-        .unwrap();
-        first.get_or_insert_with(|| state.clone());
-        bases.push(serve(router(state, Duration::from_secs(10))).await);
-    }
-    World {
-        base: bases[0].clone(),
-        bases,
-        state: first.unwrap(),
-        provider_calls,
-    }
+    (config, provider_calls)
 }
 
 const ALL_CONTROLS: [&str; 9] = [
@@ -2213,7 +2221,36 @@ async fn load_across_replicas() {
         env("CONTEXTOS_LOAD_AGENTS", 64),
         env("CONTEXTOS_LOAD_RUNS", 20),
     );
-    let w = world_n(&ALL_CONTROLS, replicas).await;
+    // PostgreSQL when CONTEXTOS_TEST_DATABASE_URL is set (replicas share the database),
+    // otherwise one shared in-memory store.
+    let (bases, provider_calls, backend) = if let Ok(url) = std::env::var("CONTEXTOS_TEST_DATABASE_URL") {
+        {
+            let (config, provider_calls) = world_setup(&ALL_CONTROLS).await;
+            let store = Arc::new(
+                contextos_store::postgres::PostgresStore::connect(&url, 64)
+                    .await
+                    .unwrap(),
+            );
+            store.migrate().await.unwrap();
+            let mut bases = Vec::new();
+            for _ in 0..replicas.max(1) {
+                let state = replica_state(&config, store.clone(), (*store).clone());
+                bases.push(serve(router(state, Duration::from_secs(10))).await);
+            }
+            (bases, provider_calls, "postgres")
+        }
+    } else {
+        let w = world_n(&ALL_CONTROLS, replicas).await;
+        (w.bases, w.provider_calls, "memory")
+    };
+    // Run ids unique to this execution (a database keeps earlier runs).
+    let prefix = format!(
+        "{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
     let http = reqwest::Client::builder()
         .pool_max_idle_per_host(agents)
         .build()
@@ -2221,12 +2258,12 @@ async fn load_across_replicas() {
     let started = std::time::Instant::now();
     let mut tasks = Vec::new();
     for agent in 0..agents {
-        let (http, bases) = (http.clone(), w.bases.clone());
+        let (http, bases, prefix) = (http.clone(), bases.clone(), prefix.clone());
         tasks.push(tokio::spawn(async move {
             let mut latencies = Vec::with_capacity(runs * 2);
             let mut admissions = Vec::with_capacity(runs);
             for i in 0..runs {
-                let run = format!("run_load_{agent}_{i}");
+                let run = format!("run_load_{prefix}_{agent}_{i}");
                 // Admit on one replica, act on another: ownership and audit are shared.
                 let (admit_at, act_at) = (&bases[(agent + i) % bases.len()], &bases[(agent + i + 1) % bases.len()]);
                 let t = std::time::Instant::now();
@@ -2278,7 +2315,7 @@ async fn load_across_replicas() {
     let pct = |per_mille: usize| latencies[(latencies.len() - 1) * per_mille / 1000];
     let effects = agents * runs;
     println!(
-        "{replicas} replicas, {agents} agents x {runs} runs: {effects} admitted runs + governed effects in {elapsed:.2?} \
+        "{backend}: {replicas} replicas, {agents} agents x {runs} runs: {effects} admitted runs + governed effects in {elapsed:.2?} \
          ({:.0} effects/s, {:.0} requests/s); request latency p50 {:.2?} p99 {:.2?} max {:.2?}",
         effects as f64 / elapsed.as_secs_f64(),
         (effects * 2) as f64 / elapsed.as_secs_f64(),
@@ -2286,19 +2323,37 @@ async fn load_across_replicas() {
         pct(990),
         latencies.last().unwrap()
     );
-    // Every replica appended to one tenant chain; it must still verify end to end.
-    let verified: Value = http
-        .get(format!("{}/v1/audit/verify", w.bases[0]))
-        .bearer_auth("acme-key")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(verified["verified"], true, "{verified}");
+    // Every replica appended to one tenant chain. It must verify: here, this execution's
+    // segment, continuing the entry before it (a shared database also holds entries other
+    // suites signed with other keys), exactly as `ctx audit-verify --continues` does.
+    let mut entries: Vec<contextos_audit::AuditEntry> = Vec::new();
+    let mut cursor = Some(1_u64);
+    while let Some(from) = cursor {
+        let page: Value = http
+            .get(format!("{}/v1/audit/entries?from={from}&limit=1000", bases[0]))
+            .bearer_auth("acme-key")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        entries.extend(serde_json::from_value::<Vec<contextos_audit::AuditEntry>>(page["entries"].clone()).unwrap());
+        cursor = page["next"].as_u64();
+    }
+    let marker = format!("run_load_{prefix}_");
+    let start = entries
+        .iter()
+        .position(|e| e.payload.to_string().contains(&marker))
+        .expect("this run's entries");
+    let mut ring = contextos_audit::KeyRing::new();
+    let signer = AuditSigner::from_seed("audit-test", [5; 32]);
+    ring.insert(signer.kid(), signer.verifying_key());
+    let anchor = start.checked_sub(1).map(|i| &entries[i]);
+    contextos_audit::verify_chain(&entries[start..], anchor, &ring)
+        .expect("every replica's entries verify as one chain");
     assert_eq!(
-        w.provider_calls.load(Ordering::SeqCst),
+        provider_calls.load(Ordering::SeqCst),
         effects,
         "exactly one provider call per effect"
     );
