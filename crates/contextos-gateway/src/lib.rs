@@ -36,6 +36,7 @@ use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::validation::{add_contract_seconds, compare_contract_times};
 use contextos_kernel::TransitionResult;
 use contextos_kernel::authorization::{digest_action_binding, evaluate_authorization, transition_approval_redemption};
+use contextos_kernel::budget_compaction::compact_budget_ledger;
 use contextos_kernel::budget_ledger::{reserve_budget, settle_budget, settlement_intent_digest};
 use contextos_kernel::operation_ledger::{claim_operation, record_effect_observation};
 use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact};
@@ -50,6 +51,11 @@ pub use ports::{
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
+
+/// Receipts at which the run's budget ledger is compacted before the next
+/// reservation (ADR-0003). Keeps the ledger, and its per-effect validation cost, small,
+/// and lifts the 128-receipt (about 64-effect) ceiling of a single ledger.
+pub const BUDGET_COMPACT_AT: usize = 32;
 
 /// How long the gateway's own observations remain valid.
 pub const OBSERVATION_VALIDITY_SECONDS: u64 = 300;
@@ -666,6 +672,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         p.report.attempt_id = Some(attempt_id.clone());
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
         let reservation_id = format!("reservation:{attempt_id}");
+        self.compact_budget_if_due(admission, &budget_key, &now).await?;
         let cost_unit = json!({"currency": "USD", "units_per_cent": 100});
         let reserve_request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
@@ -913,6 +920,62 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 )
             }
         })
+    }
+
+    /// Compacts the run's budget ledger once it holds [`BUDGET_COMPACT_AT`] receipts.
+    /// The archive is written first; its id derives from the ledger revision, and a
+    /// revision has exactly one state, so a retried or concurrent compaction writes the
+    /// same archive. Losing the ledger race is harmless: the next reservation re-reads.
+    async fn compact_budget_if_due(
+        &self,
+        admission: &RunAdmission,
+        budget_key: &DocKey,
+        now: &str,
+    ) -> Result<(), GatewayError> {
+        let Some(read) = self.store.get(budget_key).await? else {
+            return Ok(());
+        };
+        if read.body["mutations"].as_array().map_or(0, Vec::len) < BUDGET_COMPACT_AT {
+            return Ok(());
+        }
+        let archive_id = format!("{}:archive:{}", admission.budget_ledger_id, read.body["revision"]);
+        let Ok(compaction) = compact_budget_ledger(
+            &read.body,
+            &archive_id,
+            &read.body["revision"],
+            &json!(admission.executor_generation),
+        ) else {
+            return Ok(());
+        };
+        let archive_key = DocKey::new(&admission.tenant_id, DocKind::BudgetArchive, &archive_id);
+        match self.store.create(&archive_key, &compaction.archive).await {
+            Ok(_) => {}
+            Err(e) if e.is_conflict() => {}
+            Err(e) => return Err(e.into()),
+        }
+        match self
+            .store
+            .compare_and_swap(budget_key, read.revision, &compaction.ledger)
+            .await
+        {
+            Ok(_) => {
+                self.audit
+                    .append(
+                        &admission.tenant_id,
+                        "budget_compaction",
+                        json!({"ledger_id": admission.budget_ledger_id, "archive_id": archive_id,
+                            "from_revision": compaction.archive["from_revision"],
+                            "to_revision": compaction.archive["to_revision"],
+                            "previous_ledger_digest": compaction.archive["previous_ledger_digest"],
+                            "archive_digest": sha256_canonical(&compaction.archive).unwrap_or_default()}),
+                        now,
+                    )
+                    .await?;
+                Ok(())
+            }
+            Err(e) if e.is_conflict() => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn release_reservation(

@@ -196,7 +196,7 @@ fn ids<'a>(items: &'a [Value], key: &str) -> std::collections::HashSet<&'a str> 
     items.iter().map(|i| s(&i[key])).collect()
 }
 
-fn valid_ledger(v: &Value) -> bool {
+pub(crate) fn valid_ledger(v: &Value) -> bool {
     let structural = exact_keys(
         v,
         &[

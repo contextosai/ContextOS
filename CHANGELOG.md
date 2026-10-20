@@ -40,6 +40,9 @@ First release candidate of the ContextOS runtime.
 - Distroless non-root image, hardened Helm chart, signed releases with provenance and
   SBOMs, cargo-deny policy, property fuzzing, threat model, benchmarks.
 
+- Budget-ledger compaction (ADR-0003): settled reservations move to chained archives
+  with unchanged counters, so runs are no longer limited to about 64 effects and
+  per-effect cost stays flat.
+
 ### Known limits
-- A run's budget ledger holds at most 128 mutation receipts (about 64 effects); budget
-  rollover awaits a spec-level design (see `docs/PERFORMANCE.md`).
+- At most 64 reservations can be open at once in one run.

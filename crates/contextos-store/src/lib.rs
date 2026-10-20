@@ -35,6 +35,8 @@ pub enum DocKind {
     RunAdmission,
     /// Input requested by a tool (`input_required`) for an operation's latest attempt.
     PendingInput,
+    /// Settled reservations and receipts moved out of a budget ledger by compaction.
+    BudgetArchive,
 }
 
 impl DocKind {
@@ -49,6 +51,7 @@ impl DocKind {
             DocKind::ProfileRegistry => "profile_registry",
             DocKind::RunAdmission => "run_admission",
             DocKind::PendingInput => "pending_input",
+            DocKind::BudgetArchive => "budget_archive",
         }
     }
 }

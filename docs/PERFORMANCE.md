@@ -29,8 +29,8 @@ equals UTF-16 order.
 
 | Measure | Result |
 |---|---|
-| One run, sequential effects (average over 50 effects) | ~0.59 ms per effect |
-| 32 runs of one tenant in parallel, 50 effects each | ~138 µs per effect (~7,200 effects/s) |
+| One run, sequential effects (average over 50 effects) | ~0.37 ms per effect |
+| 32 runs of one tenant in parallel, 50 effects each | ~96 µs per effect (~10,400 effects/s) |
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:
@@ -45,7 +45,10 @@ share a chain, so throughput across tenants scales with cores and replicas.
 History: 1.2 ms → 0.74 ms per sequential effect from one ledger document per
 operation; → ~0.66 ms with mimalloc (the server's default allocator); → ~0.59 ms by
 removing a quadratic receipt-to-reservation check from budget-ledger validation and
-computing canonical string and integer lengths without encoding them. Single-tenant
+computing canonical string and integer lengths without encoding them; → ~0.37 ms by
+compacting the budget ledger every 16 effects (ADR-0003), which keeps it small.
+Single-tenant parallel throughput: ~1,900 → ~7,200 effects/s (group commit) →
+~10,400 effects/s (compaction). Single-tenant
 parallel throughput ~1,900 → ~7,200 effects/s from group commit.
 
 With PostgreSQL, a batch is one `INSERT … SELECT unnest(…)` round trip, so per-tenant
@@ -54,18 +57,13 @@ over round-trip time. Run the PostgreSQL benchmarks with
 `CONTEXTOS_BENCH_DATABASE_URL=postgres://… cargo bench -p contextos-gateway --bench dispatch -- postgres`
 (CI runs them on every push).
 
-Remaining per-effect CPU: the run's budget ledger (reserve and settle each re-validate
-and re-encode it; about half of a sequential effect, growing with its receipts),
-canonical encoding and hashing of audit payloads, and authorization. The kernel
+Remaining per-effect CPU: canonical encoding and hashing of audit payloads and ledgers,
+authorization, and re-validation of the (now bounded) budget ledger. The kernel
 deliberately re-validates every ledger it is given rather than trusting stored state.
 
 ## Known limits
 
-- One budget ledger holds at most 128 mutation receipts (spec bound), so a run supports
-  ~64 governed effects before its ledger must roll over.
-
-Open design decision: safely rolling a run's budget into a new ledger segment needs a
-fence that retires the old segment for new reservations while still accepting its
-settlements. The spec's executor generation fences stale executors, and overloading it
-for this would weaken that guarantee, so rollover waits for a spec-level design (or
-long runs delegate work to child runs with their own reserved budgets).
+- A single budget ledger holds at most 128 mutation receipts (spec bound). The gateway
+  compacts it every 16 effects (ADR-0003), so a run is limited by its budget, not by
+  receipt slots. At most 64 reservations can be open at once.
+- Each audit-chain batch holds at most 256 entries.

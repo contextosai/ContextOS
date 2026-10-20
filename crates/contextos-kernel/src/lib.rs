@@ -8,6 +8,7 @@
 
 pub mod action_risk;
 pub mod authorization;
+pub mod budget_compaction;
 pub mod budget_ledger;
 pub mod compiler;
 pub mod conformance;

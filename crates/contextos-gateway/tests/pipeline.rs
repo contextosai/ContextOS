@@ -276,6 +276,10 @@ struct Harness {
 }
 
 async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
+    harness_with_limits(verdict, behavior, 8, 25.0).await
+}
+
+async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_calls: u64, cost_cents: f64) -> Harness {
     let store = Arc::new(MemoryStore::new());
     let audit = Arc::new(AuditWriter::new(
         MemoryLog::new(),
@@ -332,9 +336,9 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
             executor_generation: 1,
             limits: BudgetLimits {
                 tokens: 10_000,
-                tool_calls: 8,
+                tool_calls,
                 replans: 2,
-                cost_cents: 25.0,
+                cost_cents,
             },
         },
     )
@@ -695,5 +699,46 @@ async fn lost_responses_need_an_operator_with_evidence() {
     let reconciliation = rows.iter().find(|r| r.body["kind"] == "effect_reconciliation").unwrap();
     assert_eq!(reconciliation.body["payload"]["principal_id"], "ops_alice");
     assert_eq!(reconciliation.body["payload"]["source"], "operator");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn long_runs_compact_their_budget_ledger() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 1_000, 100_000.0).await;
+    for i in 0..150 {
+        let out = h
+            .gateway
+            .dispatch(&h.admission, &call(&format!("tc_{i}"), Some(&format!("op_{i}"))))
+            .await
+            .unwrap();
+        assert_eq!(
+            out.result["status"], "completed",
+            "effect {i}: {:?}",
+            out.report.reason_codes
+        );
+    }
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["used"]["tool_calls"], 150, "every effect is accounted for");
+    assert_eq!(budget["reserved"]["tool_calls"], 0);
+    assert!(
+        budget["mutations"].as_array().unwrap().len() <= BUDGET_COMPACT_AT,
+        "the ledger stays small"
+    );
+    // The ledger names its latest archive, and every archive chains to its predecessor.
+    let mut archive_id = budget["opening_usage_ref"]["artifact_id"].as_str().unwrap().to_owned();
+    let mut archives = 0;
+    while let Some(archive) = h
+        .store
+        .get(&DocKey::new(TENANT, DocKind::BudgetArchive, &archive_id))
+        .await
+        .unwrap()
+    {
+        archives += 1;
+        match archive.body["previous_opening_usage_ref"]["artifact_id"].as_str() {
+            Some(previous) if previous != h.admission.budget_ledger_id => previous.clone_into(&mut archive_id),
+            _ => break,
+        }
+    }
+    assert!(archives >= 8, "{archives} archives");
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }
