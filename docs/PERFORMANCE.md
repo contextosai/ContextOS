@@ -9,6 +9,30 @@ cargo bench -p contextos-kernel --bench kernel
 cargo bench -p contextos-gateway --bench dispatch
 ```
 
+## End to end over HTTP, several replicas
+
+`load_across_replicas` (an opt-in test) starts replicas sharing one store and one
+audit log, plus fake fact providers and an MCP tool server, and drives concurrent
+agents that each admit a run on one replica and dispatch its governed effect on
+another:
+
+```sh
+CONTEXTOS_LOAD_REPLICAS=3 CONTEXTOS_LOAD_AGENTS=64 CONTEXTOS_LOAD_RUNS=40 \
+  cargo test --release -p contextosd --test dispatch load_across -- --ignored --nocapture
+```
+
+| Setup (one laptop, everything in one process) | Result |
+|---|---|
+| 1 replica, 64 agents | ~1,070 runs/s (admission + effect), ~2,130 requests/s, p50 28 ms, p99 65 ms |
+| 3 replicas, 64 agents | ~1,150 runs/s, ~2,300 requests/s, p50 23 ms, p99 105 ms; admission p50 17 ms |
+
+The test asserts what matters at scale: every effect reaches the provider exactly
+once, and one tenant's audit chain written by every replica verifies end to end. The
+throughput figures are a floor, not capacity: the load generator, the fake providers
+(which compute real authority facts) and every replica share one machine's cores, so
+adding replicas here adds no CPU. Admission (compile, negotiate, pin policy, open
+ledgers, keep the replay case) is the heavier request.
+
 ## Kernel (pure, in-process)
 
 | Operation | When | Latency |

@@ -71,11 +71,19 @@ fn constraint_facts(request: &Value) -> Value {
 
 struct World {
     base: String,
-    state: Arc<contextosd::app::AppState<MemoryStore, MemoryLog>>,
+    /// Every replica's address (they share one store and one audit log).
+    bases: Vec<String>,
+    state: Arc<contextosd::app::AppState<MemoryStore, Arc<MemoryLog>>>,
     provider_calls: Arc<AtomicUsize>,
 }
 
 async fn world(controls: &[&str]) -> World {
+    world_n(controls, 1).await
+}
+
+/// `replicas` servers sharing one store and one audit log, as separate processes
+/// sharing a database would.
+async fn world_n(controls: &[&str], replicas: usize) -> World {
     let authority = serve(
         Router::new().fallback(post(|axum::Json(r): axum::Json<Value>| async move {
             axum::Json(authority_facts(&r))
@@ -170,6 +178,11 @@ async fn world(controls: &[&str]) -> World {
         mode = "development"
         [store]
         kind = "memory"
+        [limits]
+        requests_per_second = 1000000.0
+        burst = 1000000.0
+        max_concurrent_dispatch = 100000
+        max_in_flight = 100000
         [audit]
         signing_seed_env = "UNUSED"
         key_id = "audit-test"
@@ -227,29 +240,39 @@ async fn world(controls: &[&str]) -> World {
         .unwrap(),
     )
     .unwrap();
-    let pack = vectors["cases"][0]["pack"].to_string();
-    let mut packs = HashMap::new();
-    let (pack_ref, loaded) = load_pack(&pack).unwrap();
-    packs.insert(pack_ref, loaded);
-    // A candidate version that drops the high-value approval (for rollout tests).
-    let mut candidate = vectors["cases"][0]["pack"].clone();
-    candidate["pack_meta"]["pack_version"] = json!("5.3.0");
-    candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
-    let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
-    packs.insert(pack_ref, loaded);
-    let dispatch = dispatch_setup_from_config(&config).unwrap();
-    let state = build_state(
-        &config,
-        Arc::new(MemoryStore::new()),
-        MemoryLog::new(),
-        AuditSigner::from_seed("audit-test", [5; 32]),
-        packs,
-        dispatch,
-    )
-    .unwrap();
+    let load = || {
+        let mut packs = HashMap::new();
+        let (pack_ref, loaded) = load_pack(&vectors["cases"][0]["pack"].to_string()).unwrap();
+        packs.insert(pack_ref, loaded);
+        // A candidate version that drops the high-value approval (for rollout tests).
+        let mut candidate = vectors["cases"][0]["pack"].clone();
+        candidate["pack_meta"]["pack_version"] = json!("5.3.0");
+        candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
+        let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
+        packs.insert(pack_ref, loaded);
+        packs
+    };
+    let (store, log) = (Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
+    let mut bases = Vec::new();
+    let mut first = None;
+    for _ in 0..replicas.max(1) {
+        let dispatch = dispatch_setup_from_config(&config).unwrap();
+        let state = build_state(
+            &config,
+            store.clone(),
+            log.clone(),
+            AuditSigner::from_seed("audit-test", [5; 32]),
+            load(),
+            dispatch,
+        )
+        .unwrap();
+        first.get_or_insert_with(|| state.clone());
+        bases.push(serve(router(state, Duration::from_secs(10))).await);
+    }
     World {
-        state: state.clone(),
-        base: serve(router(state, Duration::from_secs(10))).await,
+        base: bases[0].clone(),
+        bases,
+        state: first.unwrap(),
         provider_calls,
     }
 }
@@ -2166,5 +2189,109 @@ async fn erasure_covers_pending_input_requests() {
         documents,
         ["replay_case", "compiled_context", "pending_input"],
         "{erased}"
+    );
+}
+
+/// Load across replicas sharing one store and audit log. Opt-in:
+/// `cargo test --release -p contextosd --test dispatch load -- --ignored --nocapture`
+/// (`CONTEXTOS_LOAD_REPLICAS`, `CONTEXTOS_LOAD_AGENTS`, `CONTEXTOS_LOAD_RUNS`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "load test; run explicitly"]
+#[allow(clippy::cast_precision_loss)]
+async fn load_across_replicas() {
+    let env = |name: &str, default: usize| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+    let (replicas, agents, runs) = (
+        env("CONTEXTOS_LOAD_REPLICAS", 3),
+        env("CONTEXTOS_LOAD_AGENTS", 64),
+        env("CONTEXTOS_LOAD_RUNS", 20),
+    );
+    let w = world_n(&ALL_CONTROLS, replicas).await;
+    let http = reqwest::Client::builder()
+        .pool_max_idle_per_host(agents)
+        .build()
+        .unwrap();
+    let started = std::time::Instant::now();
+    let mut tasks = Vec::new();
+    for agent in 0..agents {
+        let (http, bases) = (http.clone(), w.bases.clone());
+        tasks.push(tokio::spawn(async move {
+            let mut latencies = Vec::with_capacity(runs * 2);
+            let mut admissions = Vec::with_capacity(runs);
+            for i in 0..runs {
+                let run = format!("run_load_{agent}_{i}");
+                // Admit on one replica, act on another: ownership and audit are shared.
+                let (admit_at, act_at) = (&bases[(agent + i) % bases.len()], &bases[(agent + i + 1) % bases.len()]);
+                let t = std::time::Instant::now();
+                let admitted: Value = http
+                    .post(format!("{admit_at}/v1/runs"))
+                    .bearer_auth("acme-key")
+                    .json(&run_body(&run, 1200))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                latencies.push(t.elapsed());
+                admissions.push(t.elapsed());
+                let generation = admitted["executor_generation"].as_u64().unwrap();
+                let t = std::time::Instant::now();
+                let out: Value = http
+                    .post(format!("{act_at}/v1/runs/{run}/tool-calls"))
+                    .bearer_auth("acme-key")
+                    .header("contextos-executor-generation", generation.to_string())
+                    .json(&tool_call(&run, "tc_1", 120_000))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                latencies.push(t.elapsed());
+                assert_eq!(out["result"]["status"], "completed", "{out}");
+            }
+            (latencies, admissions)
+        }));
+    }
+    let (mut latencies, mut admissions): (Vec<Duration>, Vec<Duration>) = (Vec::new(), Vec::new());
+    for task in tasks {
+        let (all, admitted) = task.await.unwrap();
+        latencies.extend(all);
+        admissions.extend(admitted);
+    }
+    admissions.sort();
+    println!(
+        "admission latency p50 {:.2?} p99 {:.2?}",
+        admissions[admissions.len() / 2],
+        admissions[admissions.len() * 99 / 100]
+    );
+    let elapsed = started.elapsed();
+    latencies.sort();
+    let pct = |per_mille: usize| latencies[(latencies.len() - 1) * per_mille / 1000];
+    let effects = agents * runs;
+    println!(
+        "{replicas} replicas, {agents} agents x {runs} runs: {effects} admitted runs + governed effects in {elapsed:.2?} \
+         ({:.0} effects/s, {:.0} requests/s); request latency p50 {:.2?} p99 {:.2?} max {:.2?}",
+        effects as f64 / elapsed.as_secs_f64(),
+        (effects * 2) as f64 / elapsed.as_secs_f64(),
+        pct(500),
+        pct(990),
+        latencies.last().unwrap()
+    );
+    // Every replica appended to one tenant chain; it must still verify end to end.
+    let verified: Value = http
+        .get(format!("{}/v1/audit/verify", w.bases[0]))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true, "{verified}");
+    assert_eq!(
+        w.provider_calls.load(Ordering::SeqCst),
+        effects,
+        "exactly one provider call per effect"
     );
 }
