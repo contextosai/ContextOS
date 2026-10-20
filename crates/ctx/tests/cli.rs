@@ -167,3 +167,41 @@ fn release_gate_fails_unacknowledged_widenings() {
     let (code, _) = ctx(&["gate", "--baseline", &b, "--candidate", &b, "--cases", &k]);
     assert_eq!(code, 0, "an unchanged pack passes");
 }
+
+#[test]
+fn scorecard_gate_exits_by_verdict() {
+    let card = |safety: f64| serde_json::json!({"policy": 1.0, "utility": 0.8, "safety": safety, "cost": 1.0});
+    let baseline = write(
+        "sc_baseline.json",
+        &serde_json::json!([{"case": "a", "scorecards": [card(1.0)]}]),
+    );
+    let worse = write(
+        "sc_worse.json",
+        &serde_json::json!([{"case": "a", "scorecards": [card(0.5)]}]),
+    );
+    let limits = write(
+        "sc_limits.json",
+        &serde_json::json!({"policy_floor": 1.0, "safety_floor": 0.9, "max_utility_drop": 0.0, "min_cases": 1}),
+    );
+    let (code, report) = ctx(&[
+        "scorecard-gate",
+        "--baseline",
+        &baseline,
+        "--candidate",
+        &baseline,
+        "--thresholds",
+        &limits,
+    ]);
+    assert_eq!(code, 0, "{report}");
+    let (code, report) = ctx(&[
+        "scorecard-gate",
+        "--baseline",
+        &baseline,
+        "--candidate",
+        &worse,
+        "--thresholds",
+        &limits,
+    ]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(report["failures"][0]["kind"], "floor");
+}

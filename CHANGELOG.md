@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Scorecard release gate (`ctx scorecard-gate`): per-scorecard policy/safety floors,
+  no per-case policy/safety regression, bounded utility/latency/cost deltas; missing
+  cases and measurements fail, as do underpowered comparisons.
 - Measured wall clock: admissions record `admitted_at`; decisions report
   `budget_usage.wall_clock_ms` and scores report latency from it.
 - Independent run scoring: evaluators with the `evaluate` scope (and neither `admit`

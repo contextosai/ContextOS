@@ -62,6 +62,19 @@ enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Scorecard release gate: compare candidate scorecards with the baseline's on
+    /// paired replay cases; fails on floors, policy/safety regressions, utility,
+    /// latency or cost beyond limits, and missing cases or measurements.
+    ScorecardGate {
+        /// JSON array of `{case, scorecards: [{policy, utility, safety, latency?, cost?}]}`.
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+        /// `{policy_floor, safety_floor, max_utility_drop, max_latency_ratio?, max_cost_ratio?, min_cases}`.
+        #[arg(long)]
+        thresholds: PathBuf,
+    },
     /// Release gate: compare a candidate Context Pack with the baseline on replay
     /// cases; fails on unacknowledged widenings of capabilities, policy or evidence
     /// gates, and on cases the candidate cannot compile.
@@ -195,6 +208,24 @@ fn run(command: Command) -> Result<Value, Failure> {
                 None => Acknowledgements::default(),
             };
             let report = evaluate_release_gate(&baseline, &candidate, &cases, &acknowledged)
+                .map_err(|e| Failure::Rejected(json!({"error": e})))?;
+            let value = serde_json::to_value(&report).unwrap_or(Value::Null);
+            if report.verdict == "pass" {
+                Ok(value)
+            } else {
+                Err(Failure::Rejected(value))
+            }
+        }
+        Command::ScorecardGate {
+            baseline,
+            candidate,
+            thresholds,
+        } => {
+            use contextos_kernel::scorecard_gate::{CaseScores, ScorecardThresholds, evaluate_scorecard_gate};
+            let baseline: Vec<CaseScores> = typed(read(&baseline)?, "baseline")?;
+            let candidate: Vec<CaseScores> = typed(read(&candidate)?, "candidate")?;
+            let thresholds: ScorecardThresholds = typed(read(&thresholds)?, "thresholds")?;
+            let report = evaluate_scorecard_gate(&baseline, &candidate, &thresholds)
                 .map_err(|e| Failure::Rejected(json!({"error": e})))?;
             let value = serde_json::to_value(&report).unwrap_or(Value::Null);
             if report.verdict == "pass" {

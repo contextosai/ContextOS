@@ -351,6 +351,25 @@ names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
 "compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
 replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
 
+### Gate on scorecards
+
+`ctx gate` checks what a candidate *permits*; `ctx scorecard-gate` checks how it
+*performs*. Replay the corpus under baseline and candidate, collect each case's
+evaluator scorecards (from the evidence bundles, below), and compare:
+
+```sh
+ctx scorecard-gate --baseline base.json --candidate cand.json --thresholds limits.json
+# files: [{"case": "<name>", "scorecards": [{"policy", "utility", "safety", "latency", "cost"}]}]
+# limits: {"policy_floor": 1.0, "safety_floor": 0.95, "max_utility_drop": 0.02,
+#          "max_latency_ratio": 1.2, "max_cost_ratio": 1.1, "min_cases": 50}
+```
+
+It fails (exit 1) when any candidate scorecard is below a floor (each one, never an
+average), when policy or safety drops on any paired case, when mean utility drops or
+latency or cost rise beyond the limits, when a baseline case has no candidate
+scorecards or a measured dimension is no longer measured, and when fewer cases pair
+than `min_cases`. Floors have no defaults: they are the release owner's decision.
+
 ## 6. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
