@@ -1047,7 +1047,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemoryState"
                 }
               }
             }
@@ -1131,7 +1131,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/McpResponse"
                 }
               }
             }
@@ -3573,6 +3573,178 @@
             }
           }
         ]
+      },
+      "McpTool": {
+        "type": "object",
+        "required": [
+          "name",
+          "inputSchema"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The capability id"
+          },
+          "description": {
+            "type": "string"
+          },
+          "inputSchema": {
+            "type": "object"
+          },
+          "annotations": {
+            "type": "object",
+            "properties": {
+              "readOnlyHint": {
+                "type": "boolean"
+              },
+              "destructiveHint": {
+                "type": "boolean"
+              },
+              "idempotentHint": {
+                "type": "boolean"
+              },
+              "openWorldHint": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "McpResponse": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {},
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "protocolVersion",
+                  "capabilities"
+                ],
+                "properties": {
+                  "protocolVersion": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "type": "object"
+                  },
+                  "serverInfo": {
+                    "type": "object"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "tools"
+                ],
+                "properties": {
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpTool"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "content",
+                  "isError"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "structuredContent": {
+                    "type": "object"
+                  },
+                  "isError": {
+                    "type": "boolean"
+                  }
+                },
+                "description": "tools/call: a governed outcome; refusals are isError with reason codes in structuredContent"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "resultType"
+                ],
+                "properties": {
+                  "resultType": {
+                    "enum": [
+                      "input_required",
+                      "task"
+                    ]
+                  }
+                },
+                "description": "Passed through from the tool: input_required (with requestState = the operation id) or a long-running task"
+              }
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {}
+            }
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "required": [
+              "error"
+            ]
+          }
+        ]
+      },
+      "MemoryState": {
+        "type": "object",
+        "required": [
+          "record",
+          "decision",
+          "record_digest"
+        ],
+        "properties": {
+          "record": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/MemoryLifecycleRecord"
+          },
+          "decision": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/DataFlowDecision"
+          },
+          "record_digest": {
+            "type": "string"
+          }
+        }
       }
     }
   }

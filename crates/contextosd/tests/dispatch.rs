@@ -1000,9 +1000,11 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
     )
     .await;
     assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+    conforms("McpResponse", &init);
 
-    let tools = rpc(2, "tools/list", json!({})).await;
-    let tools = tools["result"]["tools"].as_array().unwrap();
+    let listed = rpc(2, "tools/list", json!({})).await;
+    conforms("McpResponse", &listed);
+    let tools = listed["result"]["tools"].as_array().unwrap();
     let refund = tools
         .iter()
         .find(|t| t["name"] == "adp_payments.issue_refund")
@@ -1024,11 +1026,13 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
     let args = json!({"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 120_000});
     let done = call(3, args.clone()).await;
     assert_eq!(done["result"]["isError"], false, "{done}");
+    conforms("McpResponse", &done);
     assert_eq!(done["result"]["structuredContent"]["refund_id"], "rf_77");
 
     // A host retrying what it believes failed cannot refund twice.
     let retried = call(4, args.clone()).await;
     assert_eq!(retried["result"]["isError"], true);
+    conforms("McpResponse", &retried);
     assert_eq!(
         retried["result"]["structuredContent"]["reason_codes"],
         json!(["retry_unsafe"])
