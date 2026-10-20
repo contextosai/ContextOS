@@ -9,6 +9,7 @@ pub mod membership;
 pub mod metrics;
 pub mod oidc;
 pub mod retention;
+pub mod rollout;
 pub mod runtime;
 pub mod telemetry;
 

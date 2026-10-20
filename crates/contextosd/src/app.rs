@@ -11,6 +11,9 @@
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
+//! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
+//! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
+//! | `POST /v1/rollouts/clear` | `control` | return all of a baseline's new runs to it |
 //! | `POST /v1/conformance/assess` | `audit:read` | assess a conformance report for this deployment against configured trust anchors; audited |
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
 //! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
@@ -475,9 +478,30 @@ where
             "Budget limits are required.",
         )
     })?;
+    // Staged rollout: a run asking for a baseline may be admitted on its candidate.
+    let requested = input["pack_ref"].as_str().unwrap_or_default();
+    let rollouts = state
+        .store
+        .get(&crate::rollout::key(&caller.tenant_id))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .map(|r| r.body);
+    let routing_id = parent.as_ref().map_or_else(
+        || run_context_value["run_id"].as_str().unwrap_or_default(),
+        |p| p.run_id.as_str(),
+    );
+    let (selected, rollout) = crate::rollout::route(rollouts.as_ref(), requested, &caller.tenant_id, routing_id);
+    let rollout = rollout.cloned();
+    let selected = selected.to_owned();
     let pack = state
         .packs
-        .get(input["pack_ref"].as_str().unwrap_or_default())
+        .get(&selected)
         .filter(|p| p.tenant_id == caller.tenant_id)
         .ok_or_else(|| {
             ApiError::new(
@@ -653,6 +677,12 @@ where
             ));
         }
     };
+    if let Some(r) = rollout
+        .as_ref()
+        .filter(|r| r["shadow"] == true && selected == requested)
+    {
+        shadow_diff(&state, r, &admission.run_id, &input);
+    }
     Ok((
         StatusCode::CREATED,
         axum::Json(json!({
@@ -663,6 +693,9 @@ where
             "policy_refs": admission.policy_refs,
             "policy_outcomes": admission.policy_outcomes,
             "features": features,
+            "pack_ref": selected,
+            "rollout": rollout.as_ref().map(|r| json!({"baseline": r["baseline"], "candidate": r["candidate"],
+                "percent": r["percent"], "on_candidate": selected != requested})),
             "compiled": compiled,
         })),
     )
@@ -1232,6 +1265,180 @@ struct AssessmentBody {
     scope: AssessmentScope,
 }
 
+/// The tenant's staged rollouts.
+async fn list_rollouts<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let current = state
+        .store
+        .get(&crate::rollout::key(&caller.tenant_id))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?;
+    Ok(axum::Json(current.map_or_else(|| json!({"rollouts": []}), |r| r.body)).into_response())
+}
+
+/// Sets a staged rollout from a baseline pack to a candidate pack; audited first.
+async fn set_rollout<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let change: crate::rollout::RolloutChange = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid rollout: {e}"),
+        )
+    })?;
+    let ours = |r: &str| state.packs.get(r).is_some_and(|p| p.tenant_id == caller.tenant_id);
+    if change.baseline == change.candidate
+        || !ours(&change.baseline)
+        || !ours(&change.candidate)
+        || change.percent > 100
+        || change.reason.trim().is_empty()
+        || change.reason.len() > 1024
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "rollout_invalid",
+            "Baseline and candidate must be different packs of this tenant, percent 0 to 100, with a reason.",
+        ));
+    }
+    let now = dispatch_gateway(&state)?.now();
+    let rollout = json!({"baseline": change.baseline, "candidate": change.candidate, "percent": change.percent,
+        "shadow": change.shadow, "reason": change.reason, "by": caller.principal_id, "at": now});
+    state
+        .audit
+        .append(&caller.tenant_id, "rollout_set", rollout.clone(), &now)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
+    rollout_result(
+        crate::rollout::change(state.store.as_ref(), &caller.tenant_id, &change.baseline, Some(rollout)).await,
+    )
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClearRollout {
+    baseline: String,
+    reason: String,
+}
+
+/// Clears a rollout: all of the baseline's new runs return to it.
+async fn clear_rollout<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let clear: ClearRollout = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid request: {e}"),
+        )
+    })?;
+    if clear.reason.trim().is_empty() || clear.reason.len() > 1024 {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "A reason is required.",
+        ));
+    }
+    let now = dispatch_gateway(&state)?.now();
+    state
+        .audit
+        .append(
+            &caller.tenant_id,
+            "rollout_cleared",
+            json!({"baseline": clear.baseline, "reason": clear.reason, "by": caller.principal_id}),
+            &now,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
+    rollout_result(crate::rollout::change(state.store.as_ref(), &caller.tenant_id, &clear.baseline, None).await)
+}
+
+fn rollout_result(result: Result<Value, crate::rollout::RolloutError>) -> ApiResult {
+    match result {
+        Ok(rollouts) => Ok(axum::Json(rollouts).into_response()),
+        Err(crate::rollout::RolloutError::TooMany) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "rollouts_full",
+            "The tenant has the maximum number of rollouts.",
+        )),
+        Err(crate::rollout::RolloutError::Store(_)) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
+}
+
+/// Shadow stage: compiles a baseline run's case under the candidate too, off the
+/// request path, and audits the governance difference (`shadow_diff`).
+fn shadow_diff<S, L>(state: &Arc<AppState<S, L>>, rollout: &Value, run_id: &str, input: &Value)
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    use contextos_kernel::release_gate::{Acknowledgements, ReplayCase, evaluate_release_gate};
+    let pack = |key: &Value| {
+        state
+            .packs
+            .get(key.as_str().unwrap_or_default())
+            .map(|p| p.compiler.pack().clone())
+    };
+    let (Some(baseline), Some(candidate)) = (pack(&rollout["baseline"]), pack(&rollout["candidate"])) else {
+        return;
+    };
+    let Ok(case) = serde_json::from_value::<ReplayCase>(json!({"name": run_id, "request": input["request"],
+        "run_context": input["run_context"], "deps": if input["deps"].is_null() { json!({}) } else { input["deps"].clone() }}))
+    else {
+        return;
+    };
+    let (state, rollout, run_id) = (state.clone(), rollout.clone(), run_id.to_owned());
+    tokio::spawn(async move {
+        let Ok(report) = evaluate_release_gate(&baseline, &candidate, &[case], &Acknowledgements::default()) else {
+            return;
+        };
+        let tenant = state
+            .packs
+            .get(rollout["baseline"].as_str().unwrap_or_default())
+            .map(|p| p.tenant_id.clone());
+        let now = state.gateway.as_ref().map(|g| g.now()).unwrap_or_default();
+        if let Some(tenant) = tenant {
+            let entry = json!({"run_id": run_id, "baseline": rollout["baseline"], "candidate": rollout["candidate"],
+                "verdict": report.verdict, "changes": report.cases[0].changes});
+            if let Err(error) = state.audit.append(&tenant, "shadow_diff", entry, &now).await {
+                tracing::warn!(%error, "shadow diff not recorded");
+            }
+        }
+    });
+}
+
 /// Assesses a conformance report for this deployment and audits the outcome.
 async fn assess_conformance<S, L>(
     State(state): State<Arc<AppState<S, L>>>,
@@ -1687,6 +1894,8 @@ where
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
         .route("/v1/revocations/restore", post(restore::<S, L>))
         .route("/v1/conformance/assess", post(assess_conformance::<S, L>))
+        .route("/v1/rollouts", get(list_rollouts::<S, L>).post(set_rollout::<S, L>))
+        .route("/v1/rollouts/clear", post(clear_rollout::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))

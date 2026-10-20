@@ -2003,6 +2003,204 @@
         ],
         "x-contextos-scope": "audit:read"
       }
+    },
+    "/v1/rollouts": {
+      "get": {
+        "operationId": "list_rollouts",
+        "summary": "The tenant's staged rollouts",
+        "responses": {
+          "200": {
+            "description": "Rollouts after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rollouts"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      },
+      "post": {
+        "operationId": "set_rollout",
+        "summary": "Route a share of a baseline pack's new runs to a candidate pack",
+        "description": "A run asking for the baseline is admitted on the candidate when its routing bucket (hash of tenant and run id; a delegated child uses its parent's) is below `percent`; the run pins that pack and admission reports it as `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also compiled under the candidate off the request path and the governance difference is audited as `shadow_diff`. Audited before it takes effect.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "baseline",
+                  "candidate",
+                  "percent",
+                  "reason"
+                ],
+                "properties": {
+                  "baseline": {
+                    "type": "string"
+                  },
+                  "candidate": {
+                    "type": "string"
+                  },
+                  "percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "shadow": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rollouts after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rollouts"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
+    },
+    "/v1/rollouts/clear": {
+      "post": {
+        "operationId": "clear_rollout",
+        "summary": "Return all of a baseline's new runs to it",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "baseline",
+                  "reason"
+                ],
+                "properties": {
+                  "baseline": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rollouts after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rollouts"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {
@@ -2235,6 +2433,30 @@
           },
           "compiled": {
             "$ref": "https://contextosai.com/schemas/compiled-context.v1.schema.json"
+          },
+          "pack_ref": {
+            "type": "string",
+            "description": "The pack the run was admitted on (a rollout may choose the candidate)"
+          },
+          "rollout": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "baseline": {
+                "type": "string"
+              },
+              "candidate": {
+                "type": "string"
+              },
+              "percent": {
+                "type": "integer"
+              },
+              "on_candidate": {
+                "type": "boolean"
+              }
+            }
           }
         }
       },
@@ -2826,6 +3048,56 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "Rollouts": {
+        "type": "object",
+        "required": [
+          "rollouts"
+        ],
+        "properties": {
+          "rollouts": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": [
+                "baseline",
+                "candidate",
+                "percent",
+                "shadow",
+                "reason",
+                "by",
+                "at"
+              ],
+              "properties": {
+                "baseline": {
+                  "type": "string"
+                },
+                "candidate": {
+                  "type": "string"
+                },
+                "percent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "shadow": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "by": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
             }
           }
         }

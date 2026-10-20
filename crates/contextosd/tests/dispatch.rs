@@ -231,6 +231,12 @@ async fn world(controls: &[&str]) -> World {
     let mut packs = HashMap::new();
     let (pack_ref, loaded) = load_pack(&pack).unwrap();
     packs.insert(pack_ref, loaded);
+    // A candidate version that drops the high-value approval (for rollout tests).
+    let mut candidate = vectors["cases"][0]["pack"].clone();
+    candidate["pack_meta"]["pack_version"] = json!("5.3.0");
+    candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
+    let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
+    packs.insert(pack_ref, loaded);
     let dispatch = dispatch_setup_from_config(&config).unwrap();
     let state = build_state(
         &config,
@@ -1871,4 +1877,113 @@ async fn retention_erases_finished_runs_and_waits_for_live_ones() {
         .find(|e| e["kind"] == "run_data_erased" || e["event"] == "run_data_erased");
     let erasure = erasure.unwrap_or_else(|| panic!("no erasure entry: {audit}"));
     assert!(erasure.to_string().contains("contextos.retention"), "{erasure}");
+}
+
+#[tokio::test]
+async fn rollouts_route_runs_and_shadow_the_rest() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let (baseline, candidate) = ("ctxpack.support@5.2.0", "ctxpack.support@5.3.0");
+    let set = |key: &'static str, percent: u8, shadow: bool| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/rollouts", w.base));
+        async move {
+            plain.post(url).bearer_auth(key)
+                .json(&json!({"baseline": baseline, "candidate": candidate, "percent": percent, "shadow": shadow, "reason": "v5.3 canary"}))
+                .send().await.unwrap()
+        }
+    };
+    let admit = |run: String| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/runs", w.base));
+        async move {
+            let response = plain
+                .post(url)
+                .bearer_auth("acme-key")
+                .json(&run_body(&run, 4200))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 201, "{run}");
+            response.json::<Value>().await.unwrap()
+        }
+    };
+    assert_eq!(
+        set("acme-key", 0, true).await.status(),
+        403,
+        "only operators steer traffic"
+    );
+
+    // Shadow: the run stays on the baseline; the candidate's difference is audited.
+    assert_eq!(set("ops-key", 0, true).await.status(), 200);
+    let shadowed = admit("run_shadow".into()).await;
+    assert_eq!(shadowed["pack_ref"], baseline);
+    assert_eq!(shadowed["rollout"]["on_candidate"], false);
+    let mut diff = None;
+    for _ in 0..50 {
+        let audit: Value = plain
+            .get(format!("{}/v1/audit/entries?from=1&limit=500", w.base))
+            .bearer_auth("acme-key")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        diff = audit["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e.to_string().contains("shadow_diff"))
+            .cloned();
+        if diff.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let diff = diff.expect("the shadow diff is audited").to_string();
+    assert!(
+        diff.contains("policy require_approval -> allow") && diff.contains("run_shadow"),
+        "{diff}"
+    );
+
+    // 100%: new runs are admitted on, and pinned to, the candidate.
+    assert_eq!(set("ops-key", 100, false).await.status(), 200);
+    let canary = admit("run_canary".into()).await;
+    assert_eq!(canary["pack_ref"], candidate);
+    assert_eq!(canary["rollout"]["on_candidate"], true);
+    let evidence: Value = plain
+        .get(format!("{}/v1/runs/run_canary/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(evidence["admission"]["pack_ref"], candidate);
+
+    // 50%: routing follows the published, sticky bucket of each run.
+    assert_eq!(set("ops-key", 50, false).await.status(), 200);
+    let mut on_candidate = 0;
+    for i in 0..8 {
+        let run = format!("run_split_{i}");
+        let expected = if contextosd::rollout::bucket(TENANT, &run) < 50 {
+            candidate
+        } else {
+            baseline
+        };
+        on_candidate += usize::from(expected == candidate);
+        assert_eq!(admit(run).await["pack_ref"], expected);
+    }
+    assert!((1..8).contains(&on_candidate), "the split exercised both packs");
+
+    // Cleared: everything returns to the baseline.
+    let cleared = plain
+        .post(format!("{}/v1/rollouts/clear", w.base))
+        .bearer_auth("ops-key")
+        .json(&json!({"baseline": baseline, "reason": "rolled back"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), 200);
+    assert_eq!(admit("run_after_clear".into()).await["pack_ref"], baseline);
 }

@@ -51,6 +51,8 @@ pub enum DocKind {
     Revocations,
     /// Live server replicas (shared tenant limits).
     Replicas,
+    /// The tenant's staged rollouts of Context Pack versions.
+    Rollouts,
 }
 
 impl DocKind {
@@ -73,6 +75,7 @@ impl DocKind {
             DocKind::RunScore => "run_score",
             DocKind::Revocations => "revocations",
             DocKind::Replicas => "replicas",
+            DocKind::Rollouts => "rollouts",
         }
     }
 }

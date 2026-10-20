@@ -351,6 +351,26 @@ names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
 "compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
 replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
 
+### Roll out in stages
+
+Load both pack versions, then steer a share of the baseline's new runs to the
+candidate (`control` scope), from shadow to 100%:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/rollouts" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "baseline": "ctxpack.support@5.2.0", "candidate": "ctxpack.support@5.3.0",
+  "percent": 0, "shadow": true, "reason": "v5.3 shadow"}'
+```
+
+Routing is by a hash of tenant and run id (a delegated child follows its parent), so it
+is sticky and reproducible; each run pins the pack it was admitted on, and admission
+reports `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also
+compiled under the candidate off the request path and the governance difference
+(capabilities, policy, evidence gates) is audited as `shadow_diff`: live evidence for
+the next stage that changes no outcome. `POST /v1/rollouts/clear` returns all new runs
+to the baseline; revoking the candidate pack (the kill switch) also stops runs already
+on it.
+
 ### Gate on scorecards
 
 `ctx gate` checks what a candidate *permits*; `ctx scorecard-gate` checks how it

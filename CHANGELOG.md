@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Staged rollout of pack versions (`/v1/rollouts`, `control` scope): sticky
+  percentage routing from baseline to candidate, shadow governance diffs audited on
+  live traffic, clear to roll back.
 - Conformance assessment over HTTP (`POST /v1/conformance/assess`): the deployment
   supplies identity, support, registry, clock and configured trust anchors; audited.
 - Time-based retention (`[retention] run_content_days`, off by default): the leader
