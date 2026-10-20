@@ -22,7 +22,7 @@ max_connections = 32
 signing_seed_env = "CONTEXTOS_AUDIT_SEED"
 key_id = "audit-2026-10"
 # After a rotation, keep the previous key so entries it signed still verify:
-# retired_keys = [{ kid = "audit-2026-04", public_key = "<base64url, from GET /v1/audit/keys>" }]
+# retired_keys = [{ kid = "audit-2026-04", public_key = "<base64url, from GET /v1/audit/keys>", retired_at = "2026-10-01T00:00:00Z" }]
 
 [support]
 implementation_id = "contextos-rs"

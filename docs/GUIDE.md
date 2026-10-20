@@ -582,8 +582,10 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
   deletes are also blocked by trigger).
 - **Keys:** the audit signing seed comes from your KMS/HSM via environment. To rotate,
   give the servers a new seed and `key_id`, and list the old key under
-  `[audit] retired_keys = [{ kid = "…", public_key = "…" }]` (the value `GET
-  /v1/audit/keys` published), so entries it signed keep verifying and stay published;
+  `[audit] retired_keys = [{ kid = "…", public_key = "…", retired_at = "…" }]` (the
+  key `GET /v1/audit/keys` published, and when it stopped signing), so entries it
+  signed keep verifying and stay published. A retired key verifies only entries emitted
+  up to `retired_at`, so if it later leaks it cannot sign new history;
   give independent verifiers the new key before switching writers.
 - **Overload protection:** `[limits]` caps concurrent requests per instance
   (`max_in_flight`, default 4096; beyond it, `503` with `Retry-After`), request rate

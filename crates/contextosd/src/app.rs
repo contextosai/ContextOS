@@ -251,7 +251,10 @@ async fn audit_keys<S, L>(State(state): State<Arc<AppState<S, L>>>) -> Response 
         .audit_keys
         .public_keys()
         .into_iter()
-        .map(|(kid, key)| json!({"kid": kid, "alg": "ed25519", "public_key": key}))
+        .map(|(kid, key, retired_at)| match retired_at {
+            Some(retired_at) => json!({"kid": kid, "alg": "ed25519", "public_key": key, "retired_at": retired_at}),
+            None => json!({"kid": kid, "alg": "ed25519", "public_key": key}),
+        })
         .collect();
     axum::Json(json!({"keys": keys})).into_response()
 }

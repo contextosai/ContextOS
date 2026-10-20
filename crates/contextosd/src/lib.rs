@@ -72,7 +72,7 @@ where
     keys.insert(signer.kid(), signer.verifying_key());
     for retired in &config.audit.retired_keys {
         if let Some(key) = retired.verifying_key() {
-            keys.insert(&retired.kid, key);
+            keys.insert_retired(&retired.kid, key, &retired.retired_at);
         }
     }
     let _ = &*STANDARD_PROFILE_REGISTRY;

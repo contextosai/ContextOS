@@ -244,6 +244,8 @@ pub fn link_entry(
 #[derive(Debug, Clone, Default)]
 pub struct KeyRing {
     keys: HashMap<String, VerifyingKey>,
+    /// For retired keys: the last emission time they may have signed.
+    retired_at: HashMap<String, String>,
 }
 
 impl KeyRing {
@@ -257,15 +259,35 @@ impl KeyRing {
 
     pub fn remove(&mut self, kid: &str) {
         self.keys.remove(kid);
+        self.retired_at.remove(kid);
     }
 
-    /// `(kid, base64url public key)` for every trusted key, sorted by key id, so they
-    /// can be published to independent verifiers.
-    pub fn public_keys(&self) -> Vec<(String, String)> {
-        let mut keys: Vec<(String, String)> = self
+    /// Trusts a retired key only for entries emitted at or before `retired_at` (a
+    /// contract timestamp): a retired key that later leaks cannot sign new history.
+    pub fn insert_retired(&mut self, kid: impl Into<String>, key: VerifyingKey, retired_at: impl Into<String>) {
+        let kid = kid.into();
+        self.keys.insert(kid.clone(), key);
+        self.retired_at.insert(kid, retired_at.into());
+    }
+
+    /// When a key was retired, if it was.
+    pub fn retired_at(&self, kid: &str) -> Option<&str> {
+        self.retired_at.get(kid).map(String::as_str)
+    }
+
+    /// `(kid, base64url public key, retired_at)` for every trusted key, sorted by key
+    /// id, so they can be published to independent verifiers.
+    pub fn public_keys(&self) -> Vec<(String, String, Option<String>)> {
+        let mut keys: Vec<(String, String, Option<String>)> = self
             .keys
             .iter()
-            .map(|(kid, key)| (kid.clone(), URL_SAFE_NO_PAD.encode(key.as_bytes())))
+            .map(|(kid, key)| {
+                (
+                    kid.clone(),
+                    URL_SAFE_NO_PAD.encode(key.as_bytes()),
+                    self.retired_at.get(kid).cloned(),
+                )
+            })
             .collect();
         keys.sort();
         keys
@@ -311,6 +333,16 @@ pub fn verify_entry(entry: &AuditEntry, keys: &KeyRing, index: usize) -> Result<
     }
     if !keys.verify(&entry.signature, &entry.record_hash) {
         return Err(invalid(index, "signature invalid or key not trusted"));
+    }
+    if let Some(retired_at) = keys.retired_at(&entry.signature.kid) {
+        // Only history the key signed before it was retired; unparseable times fail.
+        let before = matches!(
+            compare_contract_times(&entry.emitted_at, retired_at),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        );
+        if !before {
+            return Err(invalid(index, "signed by a key after it was retired"));
+        }
     }
     Ok(())
 }

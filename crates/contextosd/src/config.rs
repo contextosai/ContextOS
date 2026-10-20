@@ -71,6 +71,9 @@ pub struct RetiredKey {
     /// Base64url (unpadded) of the 32-byte Ed25519 public key, as `GET /v1/audit/keys`
     /// published it.
     pub public_key: String,
+    /// When the key stopped signing: it verifies only entries emitted up to then, so a
+    /// retired key that later leaks cannot sign new history.
+    pub retired_at: String,
 }
 
 impl RetiredKey {
@@ -334,9 +337,13 @@ impl Config {
             )));
         }
         for retired in &self.audit.retired_keys {
-            if retired.kid.is_empty() || retired.kid == self.audit.key_id || retired.verifying_key().is_none() {
+            if retired.kid.is_empty()
+                || retired.kid == self.audit.key_id
+                || retired.verifying_key().is_none()
+                || !contextos_contract::validation::is_contract_timestamp(&retired.retired_at)
+            {
                 return Err(ConfigError::Invalid(format!(
-                    "retired audit key {:?} needs its own kid and a valid Ed25519 public key",
+                    "retired audit key {:?} needs its own kid, a valid Ed25519 public key and a retired_at time",
                     retired.kid
                 )));
             }

@@ -260,7 +260,11 @@ fn run(command: Command) -> Result<Value, Failure> {
                     .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
                     .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
                     .ok_or_else(|| Failure::Usage(format!("{}: invalid public key", keys.display())))?;
-                ring.insert(key["kid"].as_str().unwrap_or_default(), bytes);
+                let kid = key["kid"].as_str().unwrap_or_default();
+                match key["retired_at"].as_str() {
+                    Some(retired_at) => ring.insert_retired(kid, bytes, retired_at),
+                    None => ring.insert(kid, bytes),
+                }
             }
             let anchor: Option<AuditEntry> = match continues {
                 Some(path) => Some(typed(read(&path)?, "anchor entry")?),

@@ -62,7 +62,9 @@ async fn entries_signed_before_a_rotation_still_verify() {
     }
 
     // Rotated: a new signing key, the old one kept as retired.
-    let retired = format!(r#"retired_keys = [{{ kid = "audit-a", public_key = "{old_public}" }}]"#);
+    let retired = format!(
+        r#"retired_keys = [{{ kid = "audit-a", public_key = "{old_public}", retired_at = "2026-10-20T10:00:30Z" }}]"#
+    );
     let after = build_state(
         &config("audit-b", &retired),
         store.clone(),
@@ -112,6 +114,40 @@ async fn entries_signed_before_a_rotation_still_verify() {
         .map(|k| k["kid"].as_str().unwrap())
         .collect();
     assert_eq!(kids, ["audit-a", "audit-b"]);
+    assert_eq!(keys["keys"][0]["retired_at"], "2026-10-20T10:00:30Z");
+
+    // A retired key that leaks cannot sign new history: an entry it signs after its
+    // retirement does not verify.
+    let forged_log = Arc::new(MemoryLog::new());
+    let forger = contextos_audit::AuditWriter::new(forged_log.clone(), AuditSigner::from_seed("audit-a", [1; 32]));
+    forger
+        .append(
+            "tenant_acme_prod",
+            "note",
+            json!({"forged": true}),
+            "2026-10-20T11:00:00Z",
+        )
+        .await
+        .unwrap();
+    let mut ring = contextos_audit::KeyRing::new();
+    ring.insert_retired(
+        "audit-a",
+        AuditSigner::from_seed("audit-a", [1; 32]).verifying_key(),
+        "2026-10-20T10:00:30Z",
+    );
+    assert!(
+        contextos_audit::verify_tenant_chain(forged_log.as_ref(), "tenant_acme_prod", &ring)
+            .await
+            .is_err()
+    );
+    // (The same chain verifies when the key is trusted without a window: the window is what refuses it.)
+    let mut unbounded = contextos_audit::KeyRing::new();
+    unbounded.insert("audit-a", AuditSigner::from_seed("audit-a", [1; 32]).verifying_key());
+    assert!(
+        contextos_audit::verify_tenant_chain(forged_log.as_ref(), "tenant_acme_prod", &unbounded)
+            .await
+            .is_ok()
+    );
 
     // Without the retired key, the history before the rotation does not verify.
     let forgetful = build_state(
@@ -132,10 +168,11 @@ async fn entries_signed_before_a_rotation_still_verify() {
     // A retired key must be distinct from the signing key and valid.
     assert!(Config::parse(&toml_with_retired("audit-b", "audit-b", &old_public)).is_err());
     assert!(Config::parse(&toml_with_retired("audit-b", "audit-a", "not-a-key")).is_err());
+    assert!(Config::parse(&toml_with_retired("audit-b", "audit-a", &old_public)).is_ok());
 }
 
 fn toml_with_retired(key_id: &str, kid: &str, public_key: &str) -> String {
     format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[store]\nkind = \"memory\"\n[audit]\nsigning_seed_env = \"UNUSED\"\nkey_id = \"{key_id}\"\nretired_keys = [{{ kid = \"{kid}\", public_key = \"{public_key}\" }}]\n[support]\nimplementation_id = \"x\"\nimplementation_version = \"1\"\nprofiles = []\ncontrols = []\n"
+        "[server]\nlisten = \"127.0.0.1:0\"\n[store]\nkind = \"memory\"\n[audit]\nsigning_seed_env = \"UNUSED\"\nkey_id = \"{key_id}\"\nretired_keys = [{{ kid = \"{kid}\", public_key = \"{public_key}\", retired_at = \"2026-10-20T10:00:30Z\" }}]\n[support]\nimplementation_id = \"x\"\nimplementation_version = \"1\"\nprofiles = []\ncontrols = []\n"
     )
 }
