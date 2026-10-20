@@ -72,6 +72,10 @@ enum Command {
         /// `{"keys": [{"kid", "alg", "public_key"}]}` as served by `GET /v1/audit/keys`.
         #[arg(long)]
         keys: PathBuf,
+        /// The last entry of an export verified earlier: the entries must continue it
+        /// exactly (next sequence, linked hash), so only new entries need checking.
+        #[arg(long)]
+        continues: Option<PathBuf>,
     },
     /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
     /// into `ctx scorecard-gate` input, one case per run.
@@ -238,7 +242,11 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Err(Failure::Rejected(value))
             }
         }
-        Command::AuditVerify { entries, keys } => {
+        Command::AuditVerify {
+            entries,
+            keys,
+            continues,
+        } => {
             use base64::Engine as _;
             use contextos_audit::{AuditEntry, KeyRing, verify_chain};
             let loaded = read(&entries)?;
@@ -254,7 +262,11 @@ fn run(command: Command) -> Result<Value, Failure> {
                     .ok_or_else(|| Failure::Usage(format!("{}: invalid public key", keys.display())))?;
                 ring.insert(key["kid"].as_str().unwrap_or_default(), bytes);
             }
-            match verify_chain(&chain, None, &ring) {
+            let anchor: Option<AuditEntry> = match continues {
+                Some(path) => Some(typed(read(&path)?, "anchor entry")?),
+                None => None,
+            };
+            match verify_chain(&chain, anchor.as_ref(), &ring) {
                 Ok(()) => Ok(json!({"verified": true, "entries": chain.len(),
                     "tenant_id": chain.first().map(|e| e.tenant_id.clone()),
                     "last_sequence": chain.last().map(|e| e.sequence),

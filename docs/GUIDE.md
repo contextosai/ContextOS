@@ -563,8 +563,17 @@ ctx audit-verify --entries entries.json --keys keys.json
 
 Every entry's payload digest, record hash and Ed25519 signature are checked, and the
 chain's linkage from genesis: an edited, deleted, reordered or foreign-signed entry
-fails (exit 1). Pin the published keys out of band (they change only on rotation), and
-record `last_record_hash` so a later export can be checked to extend the same history.
+fails (exit 1). Pin the published keys out of band (they change only on rotation).
+
+Large chains verify incrementally: keep the last entry of each verified export, then
+check only what was appended since (`GET /v1/audit/entries?from=<last_sequence + 1>`):
+
+```sh
+ctx audit-verify --entries new.json --keys keys.json --continues last-verified-entry.json
+```
+
+The new entries must continue that head exactly (next sequence, linked hash, same
+tenant), so a rewritten or truncated history cannot pass as a continuation.
 
 ## 12. Operate
 

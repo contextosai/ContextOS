@@ -314,3 +314,32 @@ fn exported_audit_chains_verify_offline_and_tampering_is_caught() {
     ]);
     assert_ne!(untrusted.0, 0, "a chain signed by an untrusted key does not verify");
 }
+
+#[test]
+fn audit_exports_verify_incrementally_from_a_trusted_head() {
+    let (chain, keys) = signed_chain(6);
+    let k = write("inc_keys.json", &keys);
+    let (first, rest) = chain.split_at(3);
+    let run = |entries: &[serde_json::Value], anchor: Option<&serde_json::Value>, name: &str| {
+        let e = write(&format!("inc_{name}_entries.json"), &serde_json::json!(entries));
+        let mut args = vec![
+            "audit-verify".to_owned(),
+            "--entries".into(),
+            e,
+            "--keys".into(),
+            k.clone(),
+        ];
+        if let Some(anchor) = anchor {
+            args.extend(["--continues".into(), write(&format!("inc_{name}_anchor.json"), anchor)]);
+        }
+        ctx(&args.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    assert_eq!(run(first, None, "first").0, 0);
+    // Only the new entries are checked, continuing the head verified before.
+    let (code, report) = run(rest, Some(&first[2]), "next");
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["last_sequence"], 6);
+    // A segment that does not continue that head exactly is refused.
+    assert_eq!(run(rest, Some(&first[1]), "gap").0, 1, "a skipped entry");
+    assert_eq!(run(rest, None, "headless").0, 1, "not genesis and no trusted head");
+}
