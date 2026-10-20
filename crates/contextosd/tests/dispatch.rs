@@ -535,3 +535,90 @@ async fn tools_that_need_input_continue_the_same_operation() {
     assert_eq!(replay["report"]["reason_codes"], json!(["input_not_requested"]));
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn delegated_children_are_admitted_narrowed_and_closed() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = reqwest::Client::new();
+    let parent: Value = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_parent", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut child = run_body("run_child", 1200);
+    let agent = child["run_context"]["agent"]["agent_id"].clone();
+    let delegation = |capabilities: Value, child_run: &str| {
+        json!({
+            "envelope_version": "contextos.agent_delegation.v1", "delegation_id": format!("dlg_{child_run}"),
+            "parent_run_id": "run_parent", "child_run_id": child_run, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "tenant_id": TENANT, "issuer": agent, "subject": agent,
+            "principal_chain": [{"kind": "agent", "id": agent}],
+            "scope": {"allowed_intents": [child["request"]["input"]["intent"]], "allowed_capabilities": capabilities,
+                "data_classification_ceiling": "CONFIDENTIAL", "output_schema_ref": "schema://refund-evidence.v1"},
+            "sub_budget": {"total_tokens": 100, "bucket_tokens": {}, "max_tool_calls": 2, "max_replan_attempts": 0,
+                "wall_clock_ms": 60_000, "max_cost_cents": 5},
+            "effect_policy": "read_only", "issued_at": "2020-01-01T00:00:00Z", "expires_at": "2098-01-01T00:00:00Z",
+            "parent_claim_hash": parent["compiled_context_hash"],
+        })
+    };
+
+    let mut widened = run_body("run_wide", 1200);
+    widened["delegation"] = delegation(json!(["adp_payments.issue_refund", "adp_other.anything"]), "run_wide");
+    let refused = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&widened)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 422);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["detail"], json!(["delegation_scope_expanded"]));
+
+    child["delegation"] = delegation(json!(["adp_payments.issue_refund"]), "run_child");
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
+
+    // read_only: the effectful refund is not in the child's lane.
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_child/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_child", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["report"]["reason_codes"], json!(["capability_not_surfaced"]));
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 0);
+
+    let close = |run: &'static str| {
+        let http = http.clone();
+        let url = format!("{}/v1/runs/{run}/close", w.base);
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&json!({"decision": "accept"}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let closed = close("run_child").await;
+    assert_eq!(closed.status(), 200);
+    let closed: Value = closed.json().await.unwrap();
+    assert_eq!(closed["usage"]["tool_calls"], 0);
+    assert_eq!(close("run_parent").await.status(), 422, "only delegated runs close");
+}

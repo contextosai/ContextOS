@@ -46,8 +46,12 @@ struct Authority;
 #[async_trait]
 impl AuthorityProvider for Authority {
     async fn authority(&self, admission: &RunAdmission, binding: &Value) -> Result<AuthorityFacts, PortError> {
+        let root_run_id = admission
+            .lineage
+            .as_ref()
+            .map_or(admission.run_id.as_str(), |l| l.root_run_id.as_str());
         let mut scope = json!({
-            "root_run_id": admission.run_id, "purpose_ids": [binding["purpose_id"]],
+            "root_run_id": root_run_id, "purpose_ids": [binding["purpose_id"]],
             "capability_ids": [binding["capability_id"]], "resource_ids": binding["resource_ids"],
             "destination_ids": binding["destination_ids"], "classification_labels": ["CONFIDENTIAL"],
             "argument_constraints": [{"pointer": "/amount_minor", "kind": "max_integer", "maximum": 500_000}],
@@ -68,6 +72,9 @@ impl AuthorityProvider for Authority {
             "observed_at": "2026-10-20T09:59:00Z", "valid_until": "2026-10-20T11:00:00Z",
             "revocation_status": "active", "observer": principal("grant_observer"),
         });
+        if admission.lineage.is_some() {
+            return Ok(delegated_facts(admission, root_run_id, &scope));
+        }
         Ok(AuthorityFacts {
             authenticated: json!({
                 "principal": admission.actor, "audience": "gateway.test", "root_run_id": admission.run_id,
@@ -81,6 +88,44 @@ impl AuthorityProvider for Authority {
             observations: vec![observation],
             run_links: vec![],
         })
+    }
+}
+
+/// A broker's view of a delegated run: a root grant to the parent agent, and a
+/// narrower grant from that agent to the child. The gateway is trusted to observe
+/// run links because it creates the lineage.
+fn delegated_facts(admission: &RunAdmission, root_run_id: &str, scope: &Value) -> AuthorityFacts {
+    let grant = |id: &str, issuer: Value, subject: Value, depth: u64| {
+        json!({
+            "grant_id": id, "grant_revision": "1", "issuer": issuer, "subject": subject, "audience": "gateway.test",
+            "scope": scope, "not_before": "2026-10-20T00:00:00Z", "expires_at": "2026-10-21T00:00:00Z",
+            "delegation_depth_remaining": depth, "verification_ref": artifact("authority_grant", id),
+        })
+    };
+    let root = grant("grant_root", principal("mandate_broker"), principal("agt_support"), 3);
+    let mut leaf = grant("grant_child", principal("agt_support"), admission.actor.clone(), 2);
+    leaf["parent_grant_ref"] = json!({"grant_id": "grant_root", "grant_revision": "1"});
+    let observe = |g: &Value| {
+        json!({
+            "grant_id": g["grant_id"], "grant_revision": "1",
+            "grant_digest": sha256_canonical(&json!({"domain": "contextos.authority_grant.v1", "grant": g})).unwrap(),
+            "verification_ref": g["verification_ref"], "verification_status": "verified",
+            "observed_at": "2026-10-20T09:59:00Z", "valid_until": "2026-10-20T11:00:00Z",
+            "revocation_status": "active", "observer": principal("grant_observer"),
+        })
+    };
+    AuthorityFacts {
+        authenticated: json!({
+            "principal": admission.actor, "audience": "gateway.test", "root_run_id": root_run_id,
+            "run_id": admission.run_id, "mandate_kind": "workload", "trusted_issuers": [principal("mandate_broker")],
+            "trusted_observers": [principal("grant_observer"), principal("gateway")], "verification_status": "verified",
+            "verification_ref": artifact("authentication", "agt_research"),
+            "observed_at": "2026-10-20T09:59:00Z", "valid_until": "2026-10-20T11:00:00Z",
+        }),
+        leaf_grant_ref: json!({"grant_id": "grant_child", "grant_revision": "1"}),
+        observations: vec![observe(&root), observe(&leaf)],
+        grants: vec![leaf, root],
+        run_links: vec![],
     }
 }
 
@@ -741,4 +786,242 @@ async fn long_runs_compact_their_budget_ledger() {
     }
     assert!(archives >= 8, "{archives} archives");
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+fn envelope(h: &Harness, child: &str, capabilities: &[&str], policy: &str, max_tool_calls: u64) -> Value {
+    json!({
+        "envelope_version": "contextos.agent_delegation.v1", "delegation_id": format!("dlg_{child}"),
+        "parent_run_id": "run_1", "child_run_id": child, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "tenant_id": TENANT, "issuer": "agt_support", "subject": "agt_research",
+        "principal_chain": [{"kind": "agent", "id": "agt_support"}, {"kind": "agent", "id": "agt_research"}],
+        "scope": {"allowed_intents": [compiled().2.input.intent], "allowed_capabilities": capabilities,
+            "data_classification_ceiling": "CONFIDENTIAL", "output_schema_ref": "schema://refund-evidence.v1"},
+        "sub_budget": {"total_tokens": 100, "bucket_tokens": {}, "max_tool_calls": max_tool_calls, "max_replan_attempts": 0,
+            "wall_clock_ms": 60_000, "max_cost_cents": 5},
+        "effect_policy": policy, "issued_at": "2026-10-20T09:59:00Z", "expires_at": "2026-10-20T10:30:00Z",
+        "parent_claim_hash": h.admission.compiled_context_hash,
+    })
+}
+
+async fn delegate(h: &Harness, envelope: &Value) -> Result<RunAdmission, AdmissionError> {
+    let child = envelope["child_run_id"].as_str().unwrap();
+    let (_, compiler, request, mut run_context) = compiled();
+    run_context.run_id = child.to_owned();
+    let compiled = compiler
+        .compile(
+            &request,
+            &run_context,
+            &CompileDeps {
+                evidence: compiled_evidence(),
+                ..CompileDeps::default()
+            },
+        )
+        .unwrap();
+    let registry = &*STANDARD_PROFILE_REGISTRY;
+    let contract = json!({"envelope_version": "contextos.execution_contract.v1", "contract_id": format!("contract_{child}"),
+        "run_id": child, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
+        "profiles": [{"profile_id": "contextos.core", "profile_version": "1"}], "required_controls": [],
+        "optional_controls": [], "release_refs": [artifact("release", "runtime@0.1.0")]});
+    let support = json!({"implementation_id": "contextos-rs", "implementation_version": "0.1.0",
+        "supported_profiles": registry.profiles.iter().map(|p| &p.profile).collect::<Vec<_>>(),
+        "supported_controls": registry.controls.iter().map(|c| &c.control).collect::<Vec<_>>()});
+    h.gateway
+        .delegate(
+            &h.admission,
+            envelope,
+            AdmissionRequest {
+                contract: &contract,
+                support: &support,
+                registry,
+                features: WorkflowFeatureSet {
+                    external_effects: true,
+                    ..WorkflowFeatureSet::default()
+                },
+                compiled: &compiled,
+                compiler: &compiler,
+                request: &request,
+                run_context: &run_context,
+                actor: principal("agt_research"),
+                gateway_observer: principal("gateway"),
+                deadline: String::new(),
+                executor_generation: 1,
+                limits: BudgetLimits {
+                    tokens: 0,
+                    tool_calls: 0,
+                    replans: 0,
+                    cost_cents: 0.0,
+                },
+            },
+        )
+        .await
+}
+
+fn child_call(run_id: &str, id: &str) -> Value {
+    let mut c = call(id, Some(&format!("{run_id}:{id}")));
+    c["run_id"] = json!(run_id);
+    c
+}
+
+#[tokio::test]
+async fn delegated_children_act_within_a_narrowed_lane_and_settle_into_the_parent() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let child = delegate(
+        &h,
+        &envelope(
+            &h,
+            "run_child",
+            &["adp_payments.issue_refund"],
+            "isolate_until_accepted",
+            2,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(child.lineage.as_ref().unwrap().root_run_id, "run_1");
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(
+        parent_budget["reserved"]["tool_calls"], 2,
+        "the sub-budget is reserved from the parent first"
+    );
+
+    let out = h
+        .gateway
+        .dispatch(&child, &child_call("run_child", "tc_1"))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes);
+    let out = h
+        .gateway
+        .dispatch(&child, &child_call("run_child", "tc_2"))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed");
+    let out = h
+        .gateway
+        .dispatch(&child, &child_call("run_child", "tc_3"))
+        .await
+        .unwrap();
+    assert_eq!(
+        out.result["status"], "blocked",
+        "the child cannot exceed its sub-budget"
+    );
+
+    let closed = h
+        .gateway
+        .close_delegation(&h.admission, &child, CloseDecision::Accept, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(closed.status, "closed", "{:?}", closed.reason_codes);
+    assert_eq!(closed.usage.as_ref().unwrap()["tool_calls"], 2);
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(
+        parent_budget["used"]["tool_calls"], 2,
+        "the child's usage is the parent's"
+    );
+    assert_eq!(parent_budget["reserved"]["tool_calls"], 0);
+    let again = h
+        .gateway
+        .close_delegation(&h.admission, &child, CloseDecision::Accept, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(
+        again.status, "closed",
+        "closing is idempotent: {:?}",
+        again.reason_codes
+    );
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(parent_budget["used"]["tool_calls"], 2, "and never double counts");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn closed_children_cannot_spend() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let child = delegate(
+        &h,
+        &envelope(
+            &h,
+            "run_child",
+            &["adp_payments.issue_refund"],
+            "isolate_until_accepted",
+            5,
+        ),
+    )
+    .await
+    .unwrap();
+    h.gateway
+        .close_delegation(&h.admission, &child, CloseDecision::Reject, "agt_support")
+        .await
+        .unwrap();
+    let out = h
+        .gateway
+        .dispatch(&child, &child_call("run_child", "tc_late"))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "blocked");
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(
+        parent_budget["reserved"]["tool_calls"], 0,
+        "unused sub-budget returned to the parent"
+    );
+}
+
+#[tokio::test]
+async fn delegations_cannot_widen_the_parent() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let reason = |r: Result<RunAdmission, AdmissionError>| match r {
+        Err(AdmissionError::Delegation(reasons)) => reasons,
+        other => panic!("{other:?}"),
+    };
+    let mut e = envelope(
+        &h,
+        "run_c1",
+        &["adp_payments.issue_refund", "adp_crm.delete_customer"],
+        "read_only",
+        1,
+    );
+    assert_eq!(reason(delegate(&h, &e).await), vec!["delegation_scope_expanded"]);
+    e = envelope(&h, "run_c2", &["adp_payments.issue_refund"], "read_only", 1);
+    e["expires_at"] = json!("2026-10-20T12:00:00Z");
+    assert_eq!(
+        reason(delegate(&h, &e).await),
+        vec!["delegation_expired_or_exceeds_parent"]
+    );
+    e = envelope(&h, "run_c3", &["adp_payments.issue_refund"], "read_only", 1);
+    e["parent_claim_hash"] = json!("sha256:forged");
+    assert_eq!(reason(delegate(&h, &e).await), vec!["delegation_claim_mismatch"]);
+    e = envelope(&h, "run_c4", &["adp_payments.issue_refund"], "read_only", 1);
+    e["issuer"] = json!("agt_someone_else");
+    assert_eq!(reason(delegate(&h, &e).await), vec!["delegation_principal_mismatch"]);
+    let too_big = envelope(&h, "run_c5", &["adp_payments.issue_refund"], "read_only", 21);
+    assert!(
+        matches!(delegate(&h, &too_big).await, Err(AdmissionError::Delegation(_))),
+        "sub-budget beyond the parent"
+    );
+
+    // A read-only child never sees effectful capabilities.
+    let ro = delegate(
+        &h,
+        &envelope(&h, "run_ro", &["adp_payments.issue_refund"], "read_only", 1),
+    )
+    .await
+    .unwrap();
+    assert!(ro.surfaced_capabilities.is_empty());
+    let out = h.gateway.dispatch(&ro, &child_call("run_ro", "tc_1")).await.unwrap();
+    assert_eq!(out.report.reason_codes, vec!["capability_not_surfaced".to_owned()]);
+}
+
+fn compiled_evidence() -> Vec<Value> {
+    let path = format!("{}/../../conformance/vectors/compiler.json", env!("CARGO_MANIFEST_DIR"));
+    let vectors: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    vectors["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "grid:support.refund:true:4200:support_agent")
+        .unwrap()["deps"]["evidence"]
+        .as_array()
+        .unwrap()
+        .clone()
 }

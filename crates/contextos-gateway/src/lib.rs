@@ -21,6 +21,7 @@
 //! decide everything else.
 
 pub mod admission;
+mod delegation;
 mod input;
 pub mod manifest;
 pub mod ports;
@@ -44,6 +45,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
 pub use ports::{
@@ -562,11 +564,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             redemption_key = Some(key);
         }
         let decision_id = self.ports.ids.new_id("authz");
+        // For delegated runs the gateway, which created the lineage, attests the run
+        // links up to the root; links the broker supplied take precedence.
+        let mut run_links = facts.run_links.clone();
+        run_links.extend(delegation::attested_links(admission, &now, &facts.run_links));
         let authorization = evaluate_authorization(&json!({
             "decision_id": decision_id,
             "authority": {
                 "binding": binding, "authenticated": facts.authenticated, "leaf_grant_ref": facts.leaf_grant_ref,
-                "grants": facts.grants, "observations": facts.observations, "run_links": facts.run_links,
+                "grants": facts.grants, "observations": facts.observations,
+                "run_links": run_links,
                 "evaluation_time": now,
             },
             "policy_outcomes": policy_outcomes,
@@ -1017,11 +1024,42 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         usage: &Value,
         known: bool,
     ) -> Result<(), GatewayError> {
+        self.settle_scoped(
+            admission,
+            budget_key,
+            reservation_id,
+            mutation_id,
+            ("run", &admission.run_id),
+            now,
+            valid_until,
+            evidence_ref,
+            usage,
+            known,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Settles a reservation of `scope` (`run`, or `child` for a delegated run).
+    #[allow(clippy::too_many_arguments)]
+    async fn settle_scoped(
+        &self,
+        admission: &RunAdmission,
+        budget_key: &DocKey,
+        reservation_id: &str,
+        mutation_id: &str,
+        (scope, run_id): (&str, &str),
+        now: &str,
+        valid_until: &str,
+        evidence_ref: &Value,
+        usage: &Value,
+        known: bool,
+    ) -> Result<Commit, GatewayError> {
         let mut request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
             "parent_run_id": admission.run_id, "tenant_id": admission.tenant_id,
-            "mutation_id": mutation_id, "reservation_id": reservation_id, "scope": "run",
-            "run_id": admission.run_id, "cost_unit": {"currency": "USD", "units_per_cent": 100}, "usage": usage,
+            "mutation_id": mutation_id, "reservation_id": reservation_id, "scope": scope,
+            "run_id": run_id, "cost_unit": {"currency": "USD", "units_per_cent": 100}, "usage": usage,
             "usage_status": if known { "known" } else { "unknown" },
             "execution_status": if known { "completed" } else { "unknown" },
             "expected_revision": 0, "executor_generation": admission.executor_generation, "evaluation_time": now,
@@ -1029,12 +1067,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "evidence_ref": evidence_ref, "observed_at": now, "valid_until": valid_until},
         });
         request["usage_observation"]["intent_digest"] = json!(settlement_intent_digest(&request).unwrap_or_default());
-        transact(self.store.as_ref(), budget_key, |ledger| {
+        Ok(transact(self.store.as_ref(), budget_key, |ledger| {
             let mut request = request.clone();
             request["expected_revision"] = ledger["revision"].clone();
             settle_budget(ledger, &request)
         })
-        .await?;
-        Ok(())
+        .await?)
     }
 }

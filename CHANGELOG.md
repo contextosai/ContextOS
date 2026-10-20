@@ -24,6 +24,9 @@ First release candidate of the ContextOS runtime.
   claim the operation, dispatch, observe, settle and audit, failing closed throughout.
 - Reconciliation of unknown effects by provider query (MCP `tasks/get`) or evidenced
   operator assertion.
+- Delegated child runs: narrowed tool surface, sub-budgets reserved from the parent,
+  gateway-attested run links for kernel authority checks, and close that locks the
+  child's remaining capacity before settling into the parent.
 - Continuation of MCP tools that answer `input_required`, bound to the same action.
 - MCP `2026-07-28` (stateless) and HTTP adapters with pinned HTTPS endpoints, no
   redirects and brokered credentials; remote authority, constraint and approval

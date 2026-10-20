@@ -43,6 +43,12 @@ pub struct RunAdmission {
     pub deadline: String,
     /// The gateway's own principal; it observes adapter outcomes and usage.
     pub gateway_observer: Value,
+    /// `compiled_context_hash` of the run's compiled context; delegations bind to it.
+    #[serde(default)]
+    pub compiled_context_hash: String,
+    /// Present for delegated child runs.
+    #[serde(default)]
+    pub lineage: Option<crate::delegation::Lineage>,
 }
 
 /// Inputs to admission. `features` must be derived by trusted admission from the
@@ -86,6 +92,8 @@ pub enum AdmissionError {
     Store(#[from] StoreError),
     #[error("policy resolution failed: {0}")]
     Policy(#[from] CompileError),
+    #[error("delegation rejected: {0:?}")]
+    Delegation(Vec<String>),
 }
 
 /// Pins the compile-time policy resolution as normalized outcomes. Every applicable
@@ -231,6 +239,8 @@ pub async fn admit_run<S: DocumentStore>(
         executor_generation: request.executor_generation,
         deadline: request.deadline,
         gateway_observer: request.gateway_observer,
+        compiled_context_hash: request.compiled.context_ledger.compiled_context_hash.clone(),
+        lineage: None,
         tenant_id,
         run_id,
     })

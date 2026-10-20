@@ -67,9 +67,19 @@ impl RemoteFacts {
     }
 }
 
+/// What a fact service learns about the run. For a delegated run it also gets the
+/// lineage, so an authority broker can return the narrowing grant chain to the root.
 fn run_summary(admission: &RunAdmission) -> Value {
-    json!({"tenant_id": admission.tenant_id, "run_id": admission.run_id, "contract_id": admission.contract_id,
-        "trace_id": admission.trace_id, "actor": admission.actor, "policy_refs": admission.policy_refs})
+    let mut run = json!({"tenant_id": admission.tenant_id, "run_id": admission.run_id, "contract_id": admission.contract_id,
+        "trace_id": admission.trace_id, "actor": admission.actor, "policy_refs": admission.policy_refs,
+        "root_run_id": admission.run_id});
+    if let Some(lineage) = &admission.lineage {
+        run["root_run_id"] = json!(lineage.root_run_id);
+        run["parent_run_id"] = json!(lineage.parent_run_id);
+        run["delegation_id"] = json!(lineage.delegation_id);
+        run["ancestry"] = json!(lineage.links);
+    }
+    run
 }
 
 /// Mandate/identity broker.

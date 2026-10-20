@@ -10,6 +10,8 @@
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
+//! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
+//! | `POST /v1/runs/{run_id}/close` | `admit` | close a delegated child (`accept`/`reject`) and settle its usage into the parent |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
@@ -34,8 +36,8 @@ use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
-    AdmissionError, AdmissionRequest, BudgetLimits, Continuation, EffectOutcome, Gateway, Resolution, RunAdmission,
-    admit_run,
+    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, EffectOutcome, Gateway, Resolution,
+    RunAdmission, admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -403,9 +405,18 @@ where
             "The contract is not bound to this run.",
         ));
     }
+    // A delegated child takes its deadline and budget from the envelope.
+    let delegation = input.get("delegation").filter(|d| !d.is_null());
+    let parent = match delegation {
+        Some(envelope) => {
+            Some(load_admission(&state, &caller, envelope["parent_run_id"].as_str().unwrap_or_default()).await?)
+        }
+        None => None,
+    };
     let deadline = input["deadline"]
         .as_str()
         .filter(|d| is_contract_timestamp(d))
+        .or(parent.as_ref().map(|_| "1970-01-01T00:00:00Z"))
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -413,7 +424,11 @@ where
                 "A contract timestamp deadline is required.",
             )
         })?;
-    let limits: BudgetLimits = serde_json::from_value(input["limits"].clone()).map_err(|_| {
+    let limits_input = match &parent {
+        Some(_) => json!({"tokens": 0, "tool_calls": 0, "replans": 0, "cost_cents": 0}),
+        None => input["limits"].clone(),
+    };
+    let limits: BudgetLimits = serde_json::from_value(limits_input).map_err(|_| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "limits_invalid",
@@ -473,26 +488,32 @@ where
     )
     .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "features_invalid", message))?;
     let principal = |id: &str, kind: &str| json!({"principal_id": id, "principal_type": kind, "trust_domain": state.trust_domain, "tenant_id": caller.tenant_id});
-    let admission = admit_run(
-        state.store.as_ref(),
-        AdmissionRequest {
-            contract: &input["contract"],
-            support: &state.support,
-            registry: &STANDARD_PROFILE_REGISTRY,
-            features,
-            compiled: &compiled,
-            compiler: &pack.compiler,
-            request: &request,
-            run_context: &run_context,
-            actor: principal(&run_context.agent.agent_id, "agent"),
-            gateway_observer: principal(&state.gateway_principal_id, "workload"),
-            deadline: deadline.to_owned(),
-            executor_generation: 1,
-            limits,
-        },
-    )
-    .await
-    .map_err(|e| match e {
+    let admission_request = AdmissionRequest {
+        contract: &input["contract"],
+        support: &state.support,
+        registry: &STANDARD_PROFILE_REGISTRY,
+        features,
+        compiled: &compiled,
+        compiler: &pack.compiler,
+        request: &request,
+        run_context: &run_context,
+        actor: principal(&run_context.agent.agent_id, "agent"),
+        gateway_observer: principal(&state.gateway_principal_id, "workload"),
+        deadline: deadline.to_owned(),
+        executor_generation: 1,
+        limits,
+    };
+    let admitted = match (&parent, delegation) {
+        (Some(parent), Some(envelope)) => gateway.delegate(parent, envelope, admission_request).await,
+        _ => admit_run(state.store.as_ref(), admission_request).await,
+    };
+    let admission = admitted.map_err(|e| match e {
+        AdmissionError::Delegation(reasons) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "delegation_rejected",
+            "The delegation exceeds the parent run or is not bound to it.",
+        )
+        .with_detail(json!(reasons)),
         AdmissionError::ContractRejected(reasons) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "contract_rejected",
@@ -739,6 +760,59 @@ async fn shed<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, 
     next.run(request).await
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CloseBody {
+    decision: CloseDecision,
+}
+
+/// Closes a delegated child run and settles its usage into the parent.
+async fn close_child<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("admit"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: CloseBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "Expected decision: accept or reject.",
+        )
+    })?;
+    let child = load_admission(&state, &caller, &run_id).await?;
+    let Some(lineage) = &child.lineage else {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "not_delegated",
+            "Only delegated runs are closed.",
+        ));
+    };
+    let parent = load_admission(&state, &caller, &lineage.parent_run_id).await?;
+    let outcome = gateway
+        .close_delegation(&parent, &child, request.decision, &caller.principal_id)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "close_unavailable",
+                "Closing is temporarily unavailable.",
+            )
+        })?;
+    let status = if outcome.status == "closed" {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    Ok((status, axum::Json(outcome)).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -770,6 +844,7 @@ where
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
+        .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",
             post(provide_input::<S, L>),

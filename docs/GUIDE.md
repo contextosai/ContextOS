@@ -82,6 +82,31 @@ Tool-call results use `contextos.tool_result.v1`:
 | `rejected` | malformed, unpinned, unsurfaced or incompatible reuse | fix the call |
 | `failed` | provider definitively did not apply the effect | may retry per the capability's recovery policy |
 
+### Delegating to child runs (subagent lanes)
+
+Admit a child with the usual `POST /v1/runs` body for the child, plus an
+`AgentDelegationEnvelope` under `delegation`. The child's budget and deadline come
+from the envelope (`sub_budget`, `expires_at`), not the request. The gateway refuses a
+delegation whose capabilities, deadline or sub-budget exceed the parent, whose issuer
+is not the parent's agent or whose subject is not the child's, or whose
+`parent_claim_hash` is not the parent's `compiled_context_hash`. The sub-budget is
+reserved from the parent before the child exists. The child's tool surface is narrowed
+to the envelope's capabilities and classification ceiling, and `read_only` children
+get no effectful capabilities at all.
+
+Child actions are authorized like any other, against grants from your authority
+broker: the broker must return a grant chain from the root mandate to the child's
+agent, each grant narrowing its parent (`parent_grant_ref`), and must list the
+gateway's principal among `trusted_observers` so the run links the gateway attests are
+accepted. Brokers receive `root_run_id`, `parent_run_id`, `delegation_id` and
+`ancestry` with each request.
+
+Close a child with `POST /v1/runs/{child}/close` and `{"decision": "accept"}` (or
+`"reject"`). Closing locks the child's remaining capacity so nothing more can be spent,
+settles the child's usage into the parent and releases the rest. A child with
+unresolved effects cannot close (`409`, `delegation_effects_unresolved`) until they are
+reconciled.
+
 ### Tools that ask for input
 
 An MCP tool may answer `input_required` instead of running. The result is `paused` with
