@@ -93,6 +93,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # [guards]
 # identical_tool_calls = 5     # loop guard: refuse the next identical call in a run
 # required_release_refs = ["model_profile", "evaluator_suite"]   # runs must pin them
+# trust_supplied_memory = false  # without [providers.memory], admit caller-supplied memory?
 
 # [retention]
 # run_content_days = 30        # erase finished runs' personal content after 30 days

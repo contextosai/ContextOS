@@ -363,6 +363,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         &self.audit
     }
 
+    /// True when a memory-governance service decides memory lifecycle operations.
+    pub fn governs_memory(&self) -> bool {
+        self.ports.memory.is_some()
+    }
+
     /// The current time by the gateway's clock port.
     pub fn now(&self) -> String {
         self.ports.clock.now()

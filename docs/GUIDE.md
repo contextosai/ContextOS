@@ -317,6 +317,11 @@ minimal, development-only implementation):
   retention, data-flow policy, and verified propagation for deletions); every decision
   is audited and only allowed records become the memory's state
   (`GET /v1/memory/{record_id}`). Without the service, memory operations are refused.
+  With it, memory a run recalls (`deps.promoted_memory`) is verified at admission: each
+  item's `memory_ref` must name a record whose state is `promote` or `correct`, within
+  its retention, and whose `memory_ref.sha256` is the digest of the recalled `content`;
+  anything else is refused (`memory_unverified`). Without the service, production
+  refuses recalled memory unless `[guards] trust_supplied_memory = true`.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
   action that sends data (a capability whose manifest names recipients in
   `destination_pointers`, or declares `"sends_data": true` for a fixed recipient),

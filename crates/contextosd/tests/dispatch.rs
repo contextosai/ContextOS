@@ -3229,3 +3229,68 @@ async fn decisions_record_the_pinned_model_and_evaluators() {
     assert_eq!(lineage["model_profile"], "claude-opus-5-5.support@1", "{recorded}");
     assert_eq!(lineage["evaluator_suite"], "support.refund.judges@1");
 }
+
+#[tokio::test]
+async fn recalled_memory_must_be_promoted_current_and_unchanged() {
+    use contextos_store::{DocKey, DocKind, DocumentStore as _};
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    // A memory-governance service is configured; verification reads only stored state.
+    config.providers.as_mut().unwrap().memory =
+        Some(serde_json::from_value(json!({"url": "http://127.0.0.1:9"})).unwrap());
+    let store = Arc::new(MemoryStore::new());
+    let state = replica_state(&config, store.clone(), Arc::new(MemoryLog::new()));
+    let base = serve(router(state, Duration::from_secs(10))).await;
+    let content = "customer:cus_77 prefers_communication_channel=email";
+    let promoted = |operation: &str, until: &str, text: &str| {
+        json!({"record": {"operation": operation, "retention_expires_at": until,
+            "memory_ref": {"sha256": contextos_contract::canonical::sha256_text(text)}}})
+    };
+    for (id, record) in [
+        ("mem_ok", promoted("promote", "2099-01-01T00:00:00Z", content)),
+        ("mem_deleted", promoted("delete", "2099-01-01T00:00:00Z", content)),
+        ("mem_expired", promoted("promote", "2000-01-01T00:00:00Z", content)),
+        ("mem_proposed", promoted("propose", "2099-01-01T00:00:00Z", content)),
+    ] {
+        store
+            .create(&DocKey::new(TENANT, DocKind::MemoryRecord, id), &record)
+            .await
+            .unwrap();
+    }
+    let plain = reqwest::Client::new();
+    let admit = |run: &'static str, memory_ref: &'static str, text: &'static str| {
+        let (plain, url) = (plain.clone(), format!("{base}/v1/runs"));
+        async move {
+            let mut body = run_body(run, 1200);
+            body["deps"]["promoted_memory"] =
+                json!([{"memory_ref": memory_ref, "content": text, "freshness": "current", "source_refs": []}]);
+            plain
+                .post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let ok = admit("run_mem_ok", "mem_ok", content).await;
+    assert_eq!(ok.status(), 201, "{}", ok.text().await.unwrap());
+    for (run, memory_ref, text) in [
+        (
+            "run_mem_changed",
+            "mem_ok",
+            "customer:cus_77 prefers_communication_channel=sms",
+        ),
+        ("run_mem_deleted", "mem_deleted", content),
+        ("run_mem_expired", "mem_expired", content),
+        ("run_mem_proposed", "mem_proposed", content),
+        ("run_mem_unknown", "mem_nope", content),
+    ] {
+        let refused = admit(run, memory_ref, text).await;
+        assert_eq!(refused.status(), 422, "{run}");
+        assert_eq!(
+            refused.json::<Value>().await.unwrap()["error"]["code"],
+            "memory_unverified",
+            "{run}"
+        );
+    }
+}

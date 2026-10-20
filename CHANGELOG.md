@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Recalled memory is verified at admission against promoted, current memory state
+  (`memory_unverified`); production without memory governance refuses it unless
+  `[guards] trust_supplied_memory`.
 - Capability manifests take an `output_schema`: non-conforming tool output is withheld
   from the agent and audited, while the effect is still recorded.
 - Tool results carry `risk_tags` (the action's effect and reversibility, `human_approved`

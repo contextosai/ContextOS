@@ -129,6 +129,11 @@ pub struct GuardsConfig {
     /// records which model and evaluators produced it; empty by default.
     #[serde(default)]
     pub required_release_refs: Vec<String>,
+    /// Admit recalled memory (`deps.promoted_memory`) that no memory-governance service
+    /// can verify. Without `[providers.memory]`, production refuses such memory unless
+    /// this is set; with it, every item is verified against promoted state regardless.
+    #[serde(default)]
+    pub trust_supplied_memory: bool,
 }
 
 fn default_model_call_tokens() -> u64 {
@@ -145,6 +150,7 @@ impl Default for GuardsConfig {
             identical_tool_calls: default_identical_calls(),
             model_call_min_tokens: default_model_call_tokens(),
             required_release_refs: Vec::new(),
+            trust_supplied_memory: false,
         }
     }
 }

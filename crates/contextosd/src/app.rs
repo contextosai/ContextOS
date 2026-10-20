@@ -111,6 +111,8 @@ pub struct AppState<S, L> {
     pub shadow_slots: Arc<tokio::sync::Semaphore>,
     /// `[guards] required_release_refs`.
     pub required_release_refs: Vec<String>,
+    /// Whether recalled memory without a memory-governance service is admitted.
+    pub trust_supplied_memory: bool,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -472,6 +474,7 @@ where
             "The contract is not bound to this run.",
         ));
     }
+    check_recalled_memory(&state, gateway, &caller.tenant_id, &input["deps"]["promoted_memory"]).await?;
     // The deployment may require the executing model profile (and evaluators) to be
     // pinned, so every decision records what produced it.
     let pinned = input["contract"]["release_refs"].as_array();
@@ -1947,6 +1950,74 @@ where
     rollout_result(
         crate::rollout::change(state.store.as_ref(), &caller.tenant_id, &change.baseline, Some(rollout)).await,
     )
+}
+
+/// Recalled memory is trusted context, so it must be what the memory governance
+/// promoted: each item names a stored record (`memory_ref` = record id) that is promoted
+/// or corrected, not deleted or past its retention, and whose pinned content digest is
+/// the recalled content's. Without a memory-governance service, recalled memory is
+/// admitted only where the deployment trusts its caller to supply it.
+async fn check_recalled_memory<S, L>(
+    state: &Arc<AppState<S, L>>,
+    gateway: &Gateway<S, L>,
+    tenant_id: &str,
+    recalled: &Value,
+) -> Result<(), ApiError>
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let items = recalled.as_array().map(Vec::as_slice).unwrap_or_default();
+    if items.is_empty() {
+        return Ok(());
+    }
+    let refused = |detail: Value| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "memory_unverified",
+            "Recalled memory must be promoted, current and unchanged.",
+        )
+        .with_detail(detail)
+    };
+    if !gateway.governs_memory() {
+        return if state.trust_supplied_memory {
+            Ok(())
+        } else {
+            Err(refused(
+                json!({"reason": "no memory governance verifies recalled memory"}),
+            ))
+        };
+    }
+    let now = gateway.now();
+    for item in items {
+        let memory_ref = item["memory_ref"].as_str().unwrap_or_default();
+        let content = item["content"].as_str();
+        let stored = match (memory_ref.is_empty(), content) {
+            (false, Some(_)) => gateway.memory_state(tenant_id, memory_ref).await.map_err(|_| {
+                ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "store_unavailable",
+                    "The store is unavailable.",
+                )
+            })?,
+            _ => None,
+        };
+        let record = stored.as_ref().map(|s| &s["record"]);
+        let current = record.is_some_and(|r| {
+            matches!(r["operation"].as_str(), Some("promote" | "correct"))
+                && r["retention_expires_at"].as_str().is_some_and(|until| {
+                    contextos_contract::validation::compare_contract_times(until, &now)
+                        == Some(std::cmp::Ordering::Greater)
+                })
+                && content.is_some_and(|c| {
+                    r["memory_ref"]["sha256"] == contextos_contract::canonical::sha256_text(c).as_str()
+                })
+        });
+        if !current {
+            return Err(refused(json!({"memory_ref": memory_ref})));
+        }
+    }
+    Ok(())
 }
 
 /// Runs the release gate for a rollout: the named runs' replay cases plus every open
