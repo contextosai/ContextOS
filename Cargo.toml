@@ -48,7 +48,7 @@ bytes = "1"
 toml = "0.8"
 uuid = { version = "1", features = ["v7"] }
 clap = { version = "4", features = ["derive"] }
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 ring = "0.17"
 mimalloc = { version = "0.1", default-features = false }
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
