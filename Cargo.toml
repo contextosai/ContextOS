@@ -28,7 +28,7 @@ icu_collator = "2"
 proptest = "1"
 flate2 = "1"
 url = "2"
-ed25519-dalek = { version = "2", features = ["zeroize"] }
+ed25519-dalek = { version = "3", features = ["zeroize"] }
 base64 = "0.22"
 zeroize = "1"
 async-trait = "0.1"
