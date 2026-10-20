@@ -107,7 +107,17 @@ async fn world(controls: &[&str]) -> World {
     let mcp = serve(Router::new().fallback(post(move |axum::Json(r): axum::Json<Value>| {
         let counter = counter.clone();
         async move {
+            if r["method"] == "tasks/get" {
+                // The long-running refund has finished.
+                return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {"task": {
+                    "taskId": r["params"]["taskId"], "status": "completed",
+                    "result": {"structuredContent": {"refund_id": "rf_task"}}}}}));
+            }
             counter.fetch_add(1, Ordering::SeqCst);
+            if r["params"]["arguments"]["amount_minor"] == 777 {
+                return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {
+                    "resultType": "task", "task": {"taskId": "task_e2e_1", "status": "working"}}}));
+            }
             axum::Json(
                 json!({"jsonrpc": "2.0", "id": r["id"], "result": {"structuredContent": {"refund_id": "rf_77"}}}),
             )
@@ -166,7 +176,7 @@ async fn world(controls: &[&str]) -> World {
         key_sha256 = "{key}"
         tenant_id = "{TENANT}"
         principal_id = "svc_orchestrator"
-        scopes = ["admit", "dispatch", "audit:read"]
+        scopes = ["admit", "dispatch", "reconcile", "audit:read"]
         "#,
         manifest = manifest_path.display(),
         key = hash_api_key("acme-key")
@@ -363,4 +373,71 @@ async fn deployment_without_effect_controls_cannot_admit_effectful_runs() {
     let error: Value = response.json().await.unwrap();
     assert_eq!(error["error"]["code"], "contract_rejected");
     assert!(error["error"]["detail"].to_string().contains("effects.reconciled"));
+}
+
+#[tokio::test]
+async fn long_running_mcp_tasks_are_reconciled() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = reqwest::Client::new();
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_task", 1200))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_task/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_task", "tc_1", 777))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    let operation_id = out["report"]["operation_id"].as_str().unwrap().to_owned();
+    let url = format!("{}/v1/runs/run_task/operations/{operation_id}/reconcile", w.base);
+
+    let invalid = http
+        .post(&url)
+        .bearer_auth("acme-key")
+        .json(&json!({"source": "operator", "outcome": "maybe", "evidence_ref": {}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), 422);
+
+    let resolved: Value = http
+        .post(&url)
+        .bearer_auth("acme-key")
+        .json(&json!({"source": "provider"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(resolved["status"], "resolved", "{resolved}");
+    assert_eq!(resolved["outcome"], "confirmed");
+    assert_eq!(resolved["output"]["refund_id"], "rf_task");
+    assert_eq!(
+        w.provider_calls.load(Ordering::SeqCst),
+        1,
+        "querying never re-invokes the tool"
+    );
+
+    let unknown: Value = http
+        .post(format!("{}/v1/runs/run_task/operations/op_missing/reconcile", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"source": "provider"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unknown["reason_codes"], json!(["operation_not_found"]));
 }

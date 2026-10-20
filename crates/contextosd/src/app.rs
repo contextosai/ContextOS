@@ -11,6 +11,7 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
+//! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
 //! bound to the caller's tenant; a mismatched tenant is refused without detail.
@@ -31,7 +32,9 @@ use contextos_contract::ingress::parse_strict;
 use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
-use contextos_gateway::{AdmissionError, AdmissionRequest, BudgetLimits, Gateway, RunAdmission, admit_run};
+use contextos_gateway::{
+    AdmissionError, AdmissionRequest, BudgetLimits, EffectOutcome, Gateway, Resolution, RunAdmission, admit_run,
+};
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
 };
@@ -521,27 +524,7 @@ where
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
     let envelope = parse_body(&state, &body)?;
-    // The admission is looked up under the caller's tenant, so another tenant's run
-    // is indistinguishable from a missing one.
-    let stored = state
-        .store
-        .get(&DocKey::new(&caller.tenant_id, DocKind::RunAdmission, &run_id))
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "store_unavailable",
-                "The store is unavailable.",
-            )
-        })?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "run_not_found", "No such run."))?;
-    let admission: RunAdmission = serde_json::from_value(stored.body).map_err(|_| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "admission_corrupt",
-            "The stored admission is unreadable.",
-        )
-    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
     let outcome = gateway.dispatch(&admission, &envelope).await.map_err(|_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -551,6 +534,95 @@ where
     })?;
     state.metrics.dispatch_outcome(outcome.report.status.as_str());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
+}
+
+/// The admission is looked up under the caller's tenant, so another tenant's run is
+/// indistinguishable from a missing one.
+async fn load_admission<S: DocumentStore, L>(
+    state: &AppState<S, L>,
+    caller: &Caller,
+    run_id: &str,
+) -> Result<RunAdmission, ApiError> {
+    let stored = state
+        .store
+        .get(&DocKey::new(&caller.tenant_id, DocKind::RunAdmission, run_id))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "run_not_found", "No such run."))?;
+    serde_json::from_value(stored.body).map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "admission_corrupt",
+            "The stored admission is unreadable.",
+        )
+    })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, tag = "source", rename_all = "snake_case")]
+enum ReconcileBody {
+    /// Ask the provider about the attempt (for example an MCP task).
+    Provider,
+    /// Assert a definitive outcome with evidence; the caller is recorded as the source.
+    Operator { outcome: String, evidence_ref: Value },
+}
+
+async fn reconcile<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, operation_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("reconcile"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: ReconcileBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "The reconcile request is invalid.",
+        )
+    })?;
+    let resolution = match request {
+        ReconcileBody::Provider => Resolution::Query,
+        ReconcileBody::Operator { outcome, evidence_ref } => Resolution::Assert {
+            outcome: match outcome.as_str() {
+                "confirmed" => EffectOutcome::Confirmed,
+                "not_applied" => EffectOutcome::NotApplied,
+                "partial" => EffectOutcome::Partial,
+                _ => {
+                    return Err(ApiError::new(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "request_invalid",
+                        "outcome must be confirmed, not_applied or partial.",
+                    ));
+                }
+            },
+            evidence_ref,
+            principal_id: caller.principal_id.clone(),
+        },
+    };
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let outcome = gateway
+        .reconcile(&admission, &operation_id, resolution)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "reconcile_unavailable",
+                "Reconciliation is temporarily unavailable.",
+            )
+        })?;
+    Ok(axum::Json(outcome).into_response())
 }
 
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
@@ -584,6 +656,10 @@ where
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/operations/{operation_id}/reconcile",
+            post(reconcile::<S, L>),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,

@@ -179,10 +179,13 @@ impl ApprovalProvider for Approvals {
 enum Behavior {
     Confirm,
     Hang,
+    /// Returns an MCP-style task handle; the task completes on the second query.
+    Task,
 }
 
 struct Payments {
     calls: AtomicUsize,
+    queries: AtomicUsize,
     behavior: Behavior,
 }
 #[async_trait]
@@ -201,7 +204,29 @@ impl Adapter for Payments {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 AdapterResponse::unknown()
             }
+            Behavior::Task => AdapterResponse {
+                external_ref: Some("task_7f3a".into()),
+                ..AdapterResponse::unknown()
+            },
         }
+    }
+
+    async fn query(&self, _: &CapabilityManifest, call: &AdapterCall, external_ref: &str) -> Option<AdapterResponse> {
+        if !matches!(self.behavior, Behavior::Task) {
+            return None;
+        }
+        assert_eq!(external_ref, "task_7f3a");
+        assert!(call.attempt_id.starts_with("query"), "queries use fresh request ids");
+        if self.queries.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Some(AdapterResponse::unknown());
+        }
+        Some(AdapterResponse {
+            outcome: EffectOutcome::Confirmed,
+            definitive: true,
+            output: serde_json::from_value(json!({"refund_id": "rf_task"})).unwrap(),
+            external_ref: Some(external_ref.into()),
+            cost_units: Some(40),
+        })
     }
 }
 
@@ -272,6 +297,7 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),
+        queries: AtomicUsize::new(0),
         behavior,
     });
     let mut gateway = Gateway::new(store.clone(), audit.clone(), ports);
@@ -549,4 +575,125 @@ async fn pinned_pack_policy_governs_dispatch() {
     assert_eq!(out.result["status"], "paused");
     assert!(out.report.reason_codes.contains(&"approval_required".to_owned()));
     assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+}
+
+fn operation_id_of(out: &DispatchOutcome) -> String {
+    out.report.operation_id.clone().unwrap()
+}
+
+async fn operation(h: &Harness, operation_id: &str) -> Value {
+    let key = operation_ledger_key(&h.admission, operation_id);
+    h.store.get(&key).await.unwrap().unwrap().body["operations"][0].clone()
+}
+
+#[tokio::test]
+async fn task_effects_are_reconciled_by_querying_the_provider() {
+    let h = harness("allow", Behavior::Task).await;
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "paused");
+    let op_id = operation_id_of(&out);
+
+    let first = h
+        .gateway
+        .reconcile(&h.admission, &op_id, Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(first.status, "pending", "a running task stays unknown");
+    assert_eq!(operation(&h, &op_id).await["outcome"], "unknown");
+
+    let second = h
+        .gateway
+        .reconcile(&h.admission, &op_id, Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(second.status, "resolved");
+    assert_eq!(second.outcome.as_deref(), Some("confirmed"));
+    assert_eq!(second.output["refund_id"], "rf_task");
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["reservations"][0]["status"], "settled");
+    assert_eq!(budget["reserved"]["cost_units"], 0, "the held reservation is released");
+
+    let again = h
+        .gateway
+        .reconcile(&h.admission, &op_id, Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(again.status, "no_change");
+    let retry = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_2", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(
+        retry.report.reason_codes,
+        vec!["retry_unsafe".to_owned()],
+        "a confirmed effect is never redone"
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn lost_responses_need_an_operator_with_evidence() {
+    let h = harness("allow", Behavior::Hang).await;
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    let op_id = operation_id_of(&out);
+
+    let query = h
+        .gateway
+        .reconcile(&h.admission, &op_id, Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(query.reason_codes, vec!["reconcile_requires_operator".to_owned()]);
+
+    let unsupported = Resolution::Assert {
+        outcome: EffectOutcome::NotApplied,
+        evidence_ref: json!({"artifact_type": "ticket"}),
+        principal_id: "ops_alice".into(),
+    };
+    let refused = h.gateway.reconcile(&h.admission, &op_id, unsupported).await.unwrap();
+    assert_eq!(refused.reason_codes, vec!["reconcile_assertion_invalid".to_owned()]);
+    assert_eq!(operation(&h, &op_id).await["outcome"], "unknown");
+
+    let asserted = Resolution::Assert {
+        outcome: EffectOutcome::NotApplied,
+        evidence_ref: artifact("provider_ledger_extract", "payments-2026-10-20"),
+        principal_id: "ops_alice".into(),
+    };
+    let resolved = h.gateway.reconcile(&h.admission, &op_id, asserted).await.unwrap();
+    assert_eq!(resolved.status, "resolved");
+    assert_eq!(resolved.outcome.as_deref(), Some("not_applied"));
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["reservations"][0]["status"], "settled");
+
+    // A contradicting assertion cannot overwrite the recorded fact.
+    let contradiction = Resolution::Assert {
+        outcome: EffectOutcome::Confirmed,
+        evidence_ref: artifact("provider_ledger_extract", "other"),
+        principal_id: "ops_bob".into(),
+    };
+    assert_eq!(
+        h.gateway
+            .reconcile(&h.admission, &op_id, contradiction)
+            .await
+            .unwrap()
+            .status,
+        "no_change"
+    );
+
+    let rows = contextos_store::AppendLog::range(h.audit.log(), TENANT, 1, 100)
+        .await
+        .unwrap();
+    let reconciliation = rows.iter().find(|r| r.body["kind"] == "effect_reconciliation").unwrap();
+    assert_eq!(reconciliation.body["payload"]["principal_id"], "ops_alice");
+    assert_eq!(reconciliation.body["payload"]["source"], "operator");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }

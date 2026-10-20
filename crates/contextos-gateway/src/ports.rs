@@ -157,4 +157,18 @@ impl AdapterResponse {
 #[async_trait]
 pub trait Adapter: Send + Sync {
     async fn invoke(&self, manifest: &CapabilityManifest, call: &AdapterCall) -> AdapterResponse;
+
+    /// Asks the provider for the current outcome of an earlier attempt, identified by
+    /// the external reference that attempt returned (for example an MCP task id).
+    /// `call.attempt_id` is a fresh request id; operation identity and the provider
+    /// key are the original ones. `None` when the provider cannot be queried, in
+    /// which case only an authorized operator can reconcile.
+    async fn query(
+        &self,
+        _manifest: &CapabilityManifest,
+        _call: &AdapterCall,
+        _external_ref: &str,
+    ) -> Option<AdapterResponse> {
+        None
+    }
 }

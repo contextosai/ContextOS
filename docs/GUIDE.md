@@ -67,6 +67,7 @@ have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized
 | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | Govern and dispatch one tool call |
 | `POST /v1/contracts/negotiate` | `admit` | Check a contract against this deployment |
 | `POST /v1/schemas/{schema}/validate` | any | Validate a payload against a published schema |
+| `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | Resolve an unknown effect |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
 | `GET /metrics`, `/healthz`, `/readyz` | – | Operations |
 
@@ -79,6 +80,28 @@ Tool-call results use `contextos.tool_result.v1`:
 | `blocked` | authority, policy, constraint or budget refused | do not retry unchanged |
 | `rejected` | malformed, unpinned, unsurfaced or incompatible reuse | fix the call |
 | `failed` | provider definitively did not apply the effect | may retry per the capability's recovery policy |
+
+### Reconciling unknown effects
+
+A `paused` result with `reconcile_effect_before_retry` means the effect may or may not
+have happened (lost response, timeout, an effectful tool error, or an MCP task still
+running). The operation's budget stays reserved and retries are refused until it is
+resolved:
+
+```sh
+# Ask the provider (MCP tasks/get on the task handle the attempt returned)
+curl -X POST …/v1/runs/$RUN/operations/$OP/reconcile -d '{"source":"provider"}'
+# Or assert the outcome you verified, citing the evidence (recorded with your identity)
+curl -X POST …/v1/runs/$RUN/operations/$OP/reconcile -d '{"source":"operator",
+  "outcome":"not_applied","evidence_ref":{"artifact_type":"provider_ledger_extract",
+  "artifact_id":"payments-2026-10-20","version":"1","sha256":"sha256:…"}}'
+```
+
+`status` is `resolved`, `pending` (still running), `no_change` (nothing unknown to
+resolve; conflicting facts need escalation) or `rejected` with reasons such as
+`reconcile_requires_operator`. A recorded fact cannot be overwritten by a later
+contradicting assertion. Grant `reconcile` only to operators and automation that verify
+outcomes at the provider.
 
 ## 3. Integrate your services
 

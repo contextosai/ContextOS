@@ -23,6 +23,7 @@
 pub mod admission;
 pub mod manifest;
 pub mod ports;
+mod reconcile;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -46,6 +47,7 @@ pub use ports::{
     Adapter, AdapterCall, AdapterResponse, ApprovalProvider, AuthorityFacts, AuthorityProvider, Clock,
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
+pub use reconcile::{ReconcileOutcome, Resolution};
 
 /// How long the gateway's own observations remain valid.
 pub const OBSERVATION_VALIDITY_SECONDS: u64 = 300;
@@ -769,7 +771,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             admission,
             &budget_key,
             &reservation_id,
-            &attempt_id,
+            &format!("settle:{attempt_id}"),
             &observed_at,
             &valid_until,
             &evidence_ref,
@@ -826,7 +828,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             admission,
             budget_key,
             reservation_id,
-            attempt_id,
+            &format!("settle:{attempt_id}"),
             now,
             &valid_until,
             &evidence_ref,
@@ -842,7 +844,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         budget_key: &DocKey,
         reservation_id: &str,
-        attempt_id: &str,
+        mutation_id: &str,
         now: &str,
         valid_until: &str,
         evidence_ref: &Value,
@@ -852,7 +854,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let mut request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
             "parent_run_id": admission.run_id, "tenant_id": admission.tenant_id,
-            "mutation_id": format!("settle:{attempt_id}"), "reservation_id": reservation_id, "scope": "run",
+            "mutation_id": mutation_id, "reservation_id": reservation_id, "scope": "run",
             "run_id": admission.run_id, "cost_unit": {"currency": "USD", "units_per_cent": 100}, "usage": usage,
             "usage_status": if known { "known" } else { "unknown" },
             "execution_status": if known { "completed" } else { "unknown" },
