@@ -7,7 +7,7 @@
 //! all children. Resume re-checks current controls and never resets the original
 //! budgets or held reservations.
 
-use contextos_contract::canonical::{canonicalize, sha256_canonical};
+use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::shape::{
     bounded_array, exact_keys, is_artifact_ref, is_digest, is_identifier, is_safe_non_negative_integer, is_timestamp,
 };
@@ -211,7 +211,9 @@ pub(crate) fn int(value: &Value) -> i64 {
 /// Intended immutable lifecycle transition for one authenticated controller event.
 pub fn transition_run(state: &Value, event: &Value, evaluation_time: &Value) -> TransitionResult {
     let reject = |reason: &str| TransitionResult::rejected(state.clone(), reason);
-    if canonicalize(state).is_err() || canonicalize(event).is_err() {
+    if contextos_contract::canonical::check_canonical(state).is_err()
+        || contextos_contract::canonical::check_canonical(event).is_err()
+    {
         return reject("transition_invalid");
     }
     if !valid_run_state(state) || !valid_event(event) || !evaluation_time.as_str().is_some_and(is_contract_timestamp) {
@@ -609,7 +611,7 @@ pub fn checkpoint_digest(checkpoint: &Value) -> Option<String> {
 /// observations. Ownership CAS and target fencing must still be enforced atomically
 /// by the deployment.
 pub fn validate_resume(input: &Value) -> Result<TransitionResult, ResumeError> {
-    if canonicalize(input).is_err() {
+    if contextos_contract::canonical::check_canonical(input).is_err() {
         return Err(ResumeError::NotPlainJson);
     }
     let Some(saved) = input

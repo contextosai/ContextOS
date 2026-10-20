@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 toml = "0.8"
 uuid = { version = "1", features = ["v7"] }
 clap = { version = "4", features = ["derive"] }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
 jsonschema = { version = "0.59", default-features = false }
@@ -60,6 +61,7 @@ too_many_lines = "allow"
 match_same_arms = "allow"
 needless_pass_by_value = "allow"
 similar_names = "allow"
+many_single_char_names = "allow"
 # Kernel `expect`s only assert invariants established by prior shape validation.
 missing_panics_doc = "allow"
 # Contract semantics require exact IEEE-754 comparison (JavaScript parity), never an epsilon.

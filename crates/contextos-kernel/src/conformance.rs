@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use contextos_contract::canonical::{canonicalize, sha256_canonical, utf16_cmp};
+use contextos_contract::canonical::{sha256_canonical, utf16_cmp};
 use contextos_contract::shape::{
     exact_keys, is_artifact_ref, is_control_ref, is_digest, is_identifier, is_profile_selection, is_timestamp,
 };
@@ -276,7 +276,7 @@ pub fn assess_conformance_report(value: &Value) -> ConformanceAssessment {
         result.limitations = l;
         result
     };
-    if canonicalize(value).is_err() || !input_shape(value) {
+    if contextos_contract::canonical::check_canonical(value).is_err() || !input_shape(value) {
         reasons.insert("report_invalid".into());
         return finish(result, reasons);
     }

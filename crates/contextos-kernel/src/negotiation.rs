@@ -337,7 +337,7 @@ pub fn negotiate_execution_contract(
         ("registry", registry),
         ("features", features),
     ] {
-        if canonicalize(input).is_err() {
+        if contextos_contract::canonical::check_canonical(input).is_err() {
             let code = if name == "features" {
                 Code::FeatureStateInvalid
             } else {

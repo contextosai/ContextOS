@@ -5,11 +5,16 @@ use std::sync::RwLock;
 
 use serde_json::Value;
 
-use crate::{DocKey, DocumentStore, StoreError, Versioned, decode, encode};
+use crate::{DocKey, DocumentStore, Encoded, StoreError, Versioned, encode};
+
+/// A stored document: revision, parsed body and the digest of its canonical form.
+/// The in-process store keeps the parsed body, so reads cost one clone and no
+/// re-parsing; bodies are only ever written through canonical encoding.
+type StoredDoc = (u64, Value, String);
 
 #[derive(Debug, Default)]
 pub struct MemoryStore {
-    docs: RwLock<HashMap<DocKey, (u64, String, String)>>,
+    docs: RwLock<HashMap<DocKey, StoredDoc>>,
 }
 
 impl MemoryStore {
@@ -25,13 +30,17 @@ impl MemoryStore {
 impl DocumentStore for MemoryStore {
     async fn get(&self, key: &DocKey) -> Result<Option<Versioned>, StoreError> {
         let docs = self.docs.read().map_err(|_| Self::poisoned())?;
-        docs.get(key)
-            .map(|(revision, text, digest)| decode(*revision, text, digest))
-            .transpose()
+        Ok(docs.get(key).map(|(revision, body, digest)| Versioned {
+            revision: *revision,
+            body: body.clone(),
+            digest: digest.clone(),
+        }))
     }
 
     async fn create(&self, key: &DocKey, body: &Value) -> Result<Versioned, StoreError> {
-        let (text, digest) = encode(body)?;
+        let Encoded { text, digest } = Encoded::of(body)?;
+        // Store the decoded canonical form so reads match what Postgres would return.
+        let canonical: Value = serde_json::from_str(&text).map_err(|_| StoreError::Integrity)?;
         let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
         if let Some((revision, _, _)) = docs.get(key) {
             return Err(StoreError::Conflict {
@@ -39,10 +48,10 @@ impl DocumentStore for MemoryStore {
                 actual: Some(*revision),
             });
         }
-        docs.insert(key.clone(), (1, text, digest.clone()));
+        docs.insert(key.clone(), (1, canonical.clone(), digest.clone()));
         Ok(Versioned {
             revision: 1,
-            body: body.clone(),
+            body: canonical,
             digest,
         })
     }
@@ -53,7 +62,25 @@ impl DocumentStore for MemoryStore {
         expected_revision: u64,
         body: &Value,
     ) -> Result<Versioned, StoreError> {
-        let (text, digest) = encode(body)?;
+        let encoded = Encoded::of(body)?;
+        let digest = encoded.digest.clone();
+        let revision = self
+            .compare_and_swap_encoded(key, expected_revision, body.clone(), encoded)
+            .await?;
+        Ok(Versioned {
+            revision,
+            body: body.clone(),
+            digest,
+        })
+    }
+
+    async fn compare_and_swap_encoded(
+        &self,
+        key: &DocKey,
+        expected_revision: u64,
+        body: Value,
+        encoded: Encoded,
+    ) -> Result<u64, StoreError> {
         let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
         let Some(entry) = docs.get_mut(key) else {
             return Err(StoreError::NotFound);
@@ -65,12 +92,8 @@ impl DocumentStore for MemoryStore {
             });
         }
         let revision = entry.0 + 1;
-        *entry = (revision, text, digest.clone());
-        Ok(Versioned {
-            revision,
-            body: body.clone(),
-            digest,
-        })
+        *entry = (revision, body, encoded.digest);
+        Ok(revision)
     }
 }
 

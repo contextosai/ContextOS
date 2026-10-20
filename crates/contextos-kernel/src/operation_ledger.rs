@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use contextos_contract::canonical::{canonicalize, utf16_cmp};
+use contextos_contract::canonical::utf16_cmp;
 use contextos_contract::shape::{
     exact_keys, is_artifact_ref, is_digest, is_identifier, is_safe_non_negative_integer, is_timestamp,
 };
@@ -412,7 +412,9 @@ pub fn claim_operation(
     executor_generation: &Value,
 ) -> TransitionResult {
     let reject = |reason: &str| TransitionResult::rejected(ledger.clone(), reason);
-    if canonicalize(ledger).is_err() || canonicalize(input).is_err() {
+    if contextos_contract::canonical::check_canonical(ledger).is_err()
+        || contextos_contract::canonical::check_canonical(input).is_err()
+    {
         return reject("operation_binding_mismatch");
     }
     if !valid_ledger(ledger)
@@ -567,7 +569,9 @@ pub fn claim_operation(
 /// and retry eligibility. Never transfers executor ownership or settles budgets.
 pub fn record_effect_observation(ledger: &Value, observed: &Value, expected_revision: &Value) -> TransitionResult {
     let reject = |reason: &str| TransitionResult::rejected(ledger.clone(), reason);
-    if canonicalize(ledger).is_err() || canonicalize(observed).is_err() {
+    if contextos_contract::canonical::check_canonical(ledger).is_err()
+        || contextos_contract::canonical::check_canonical(observed).is_err()
+    {
         return reject("operation_binding_mismatch");
     }
     if !valid_ledger(ledger) || !observation(observed) || !is_safe_non_negative_integer(expected_revision) {

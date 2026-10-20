@@ -22,4 +22,9 @@ async-trait.workspace = true
 workspace = true
 
 [dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
 contextos-policy.workspace = true
+
+[[bench]]
+name = "dispatch"
+harness = false

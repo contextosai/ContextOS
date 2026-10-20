@@ -33,10 +33,7 @@ fn s(value: &Value) -> &str {
 }
 
 fn same_json(a: &Value, b: &Value) -> bool {
-    match (canonicalize(a), canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => false,
-    }
+    contextos_contract::canonical::canonical_eq(a, b)
 }
 
 fn encoded(value: &Value) -> String {
@@ -542,7 +539,7 @@ pub fn validate_authority(input: &Value) -> AuthorityValidationResult {
     let add = |reasons: &mut HashSet<String>, code: &str| {
         reasons.insert(code.to_owned());
     };
-    if canonicalize(input).is_err() {
+    if contextos_contract::canonical::check_canonical(input).is_err() {
         add(&mut reasons, "grant_invalid");
         finish!();
     }
@@ -792,7 +789,9 @@ pub fn compose_policy_outcomes(outcomes: &Value) -> ComposedPolicyOutcome {
         policy_refs: vec![],
         rule_ids: vec![],
     };
-    if canonicalize(outcomes).is_err() || !list(outcomes, MAX_LIST, valid_policy_outcome) {
+    if contextos_contract::canonical::check_canonical(outcomes).is_err()
+        || !list(outcomes, MAX_LIST, valid_policy_outcome)
+    {
         return error("policy_invalid");
     }
     let mut normalized: Vec<((String, String, String), &Value)> = Vec::new();
@@ -1042,12 +1041,18 @@ pub struct ApprovalValidationResult {
 /// observations: exact action binding, validity windows, eligible and entitled
 /// distinct approvers, self-approval prohibition, quorum and single redemption.
 pub fn validate_approval_binding(input: &Value) -> ApprovalValidationResult {
+    validate_approval_binding_with(input, None)
+}
+
+/// As [`validate_approval_binding`], reusing a digest already computed for an
+/// identical binding.
+fn validate_approval_binding_with(input: &Value, known: Option<(&Value, &str)>) -> ApprovalValidationResult {
     let mut reasons: HashSet<String> = HashSet::new();
     let mut approval_refs: Vec<Value> = Vec::new();
     let add = |reasons: &mut HashSet<String>, code: &str| {
         reasons.insert(code.to_owned());
     };
-    let shape_ok = canonicalize(input).is_ok()
+    let shape_ok = contextos_contract::canonical::check_canonical(input).is_ok()
         && exact_keys(
             input,
             &[
@@ -1087,7 +1092,10 @@ pub fn validate_approval_binding(input: &Value) -> ApprovalValidationResult {
     let observations = input["verification_observations"].as_array().expect("validated");
     let entitlements = input["entitlements"].as_array().expect("validated");
     let trusted_observers = input["trusted_observers"].as_array().expect("validated");
-    let digest = digest_action_binding(binding).expect("validated binding");
+    let digest = match known {
+        Some((known_binding, digest)) if same_json(known_binding, binding) => digest.to_owned(),
+        _ => digest_action_binding(binding).expect("validated binding"),
+    };
 
     for record in std::iter::once(proposal)
         .chain(std::iter::once(request))
@@ -1229,7 +1237,7 @@ pub fn transition_approval_redemption(input: &Value) -> ApprovalRedemptionResult
     };
     let expected = exact_keys(input, &["approval", "expected_revision"])
         .and_then(|o| as_safe_integer(&o["expected_revision"]).filter(|n| *n >= 0));
-    let Some(expected) = expected.filter(|_| canonicalize(input).is_ok()) else {
+    let Some(expected) = expected.filter(|_| contextos_contract::canonical::check_canonical(input).is_ok()) else {
         return rejected(None, None, vec!["approval_binding_mismatch".into()]);
     };
     let approval = &input["approval"];
@@ -1354,7 +1362,7 @@ pub fn evaluate_authorization(input: &Value) -> AuthorizationOutcome {
             verdict: "error".into(),
         },
     };
-    let shape_ok = canonicalize(input).is_ok()
+    let shape_ok = contextos_contract::canonical::check_canonical(input).is_ok()
         && exact_keys(
             input,
             &[
@@ -1439,7 +1447,7 @@ pub fn evaluate_authorization(input: &Value) -> AuthorizationOutcome {
             reasons.insert("approval_required".into());
         }
     } else {
-        let approval = validate_approval_binding(approval_input);
+        let approval = validate_approval_binding_with(approval_input, Some((binding, action_digest.as_str())));
         let mandating = authenticated.get("mandating_person");
         let self_approval = approval.allowed
             && approval_input["request"]["prohibit_self_approval"] == true

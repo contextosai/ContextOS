@@ -16,7 +16,7 @@ pub(crate) fn s(value: &Value) -> &str {
 }
 
 pub(crate) fn same(a: &Value, b: &Value) -> bool {
-    matches!((canonicalize(a), canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    contextos_contract::canonical::canonical_eq(a, b)
 }
 
 pub(crate) fn encoded(value: &Value) -> String {

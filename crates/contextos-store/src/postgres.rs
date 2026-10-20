@@ -119,7 +119,25 @@ impl DocumentStore for PostgresStore {
         expected_revision: u64,
         body: &Value,
     ) -> Result<Versioned, StoreError> {
-        let (text, digest) = encode(body)?;
+        let encoded = crate::Encoded::of(body)?;
+        let digest = encoded.digest.clone();
+        let revision = self
+            .compare_and_swap_encoded(key, expected_revision, body.clone(), encoded)
+            .await?;
+        Ok(Versioned {
+            revision,
+            body: body.clone(),
+            digest,
+        })
+    }
+
+    async fn compare_and_swap_encoded(
+        &self,
+        key: &DocKey,
+        expected_revision: u64,
+        _body: Value,
+        encoded: crate::Encoded,
+    ) -> Result<u64, StoreError> {
         let expected = i64::try_from(expected_revision).map_err(|_| StoreError::Integrity)?;
         let updated = sqlx::query(
             "UPDATE contextos_documents SET revision = revision + 1, body = $5, digest = $6, updated_at = now() \
@@ -129,17 +147,13 @@ impl DocumentStore for PostgresStore {
         .bind(key.kind.as_str())
         .bind(&key.id)
         .bind(expected)
-        .bind(&text)
-        .bind(&digest)
+        .bind(&encoded.text)
+        .bind(&encoded.digest)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| backend(&e))?;
         match updated {
-            Some(row) => Ok(Versioned {
-                revision: revision_of(row.get::<i64, _>(0))?,
-                body: body.clone(),
-                digest,
-            }),
+            Some(row) => revision_of(row.get::<i64, _>(0)),
             None => match self.current_revision(key).await? {
                 None => Err(StoreError::NotFound),
                 actual => Err(StoreError::Conflict {

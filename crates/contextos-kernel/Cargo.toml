@@ -16,8 +16,13 @@ thiserror.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 flate2.workspace = true
 proptest.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "kernel"
+harness = false

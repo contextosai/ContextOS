@@ -8,7 +8,7 @@
 //! charge nor mint capacity. Original limits and opening usage are content-addressed,
 //! so resume can never silently reset them.
 
-use contextos_contract::canonical::{canonicalize, js_number, sha256_canonical};
+use contextos_contract::canonical::{js_number, sha256_canonical};
 use contextos_contract::shape::{
     exact_keys, is_artifact_ref, is_digest, is_identifier, is_safe_non_negative_integer, is_timestamp,
 };
@@ -496,8 +496,8 @@ fn finish(
 /// authority.
 pub fn reserve_budget(ledger: &Value, request: &Value) -> TransitionResult {
     let reject = |reason: &str| TransitionResult::rejected(ledger.clone(), reason);
-    if canonicalize(ledger).is_err()
-        || canonicalize(request).is_err()
+    if contextos_contract::canonical::check_canonical(ledger).is_err()
+        || contextos_contract::canonical::check_canonical(request).is_err()
         || !valid_ledger(ledger)
         || !reserve_request(request)
     {
@@ -543,8 +543,8 @@ pub fn reserve_budget(ledger: &Value, request: &Value) -> TransitionResult {
 /// usage releases the remainder.
 pub fn settle_budget(ledger: &Value, request: &Value) -> TransitionResult {
     let reject = |reason: &str| TransitionResult::rejected(ledger.clone(), reason);
-    if canonicalize(ledger).is_err()
-        || canonicalize(request).is_err()
+    if contextos_contract::canonical::check_canonical(ledger).is_err()
+        || contextos_contract::canonical::check_canonical(request).is_err()
         || !valid_ledger(ledger)
         || !settle_request(request)
     {

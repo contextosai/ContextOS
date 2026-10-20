@@ -45,6 +45,98 @@ pub fn canonicalize(value: &Value) -> Result<String, CanonicalError> {
     Ok(writer.out)
 }
 
+/// Checks that `value` canonicalizes within the resource limits, without producing
+/// the text. Equivalent to `canonicalize(value).map(|_| ())`, but allocation-free.
+pub fn check_canonical(value: &Value) -> Result<(), CanonicalError> {
+    let mut counter = LimitCounter { bytes: 0, values: 0 };
+    counter.visit(value, 0)
+}
+
+struct LimitCounter {
+    bytes: usize,
+    values: usize,
+}
+
+impl LimitCounter {
+    fn add(&mut self, n: usize) -> Result<(), CanonicalError> {
+        self.bytes += n;
+        if self.bytes > MAX_BYTES {
+            Err(CanonicalError::ResourceLimit)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn visit(&mut self, value: &Value, depth: usize) -> Result<(), CanonicalError> {
+        self.values += 1;
+        if depth > MAX_DEPTH || self.values > MAX_VALUES {
+            return Err(CanonicalError::ResourceLimit);
+        }
+        match value {
+            Value::Null => self.add(4),
+            Value::Bool(b) => self.add(if *b { 4 } else { 5 }),
+            Value::Number(n) => {
+                let mut buffer = ryu_js::Buffer::new();
+                let len = number_len(n, &mut buffer)?;
+                self.add(len)
+            }
+            Value::String(s) => {
+                check_string(s)?;
+                self.add(quoted_len(s))
+            }
+            Value::Array(items) => {
+                if items.len() > MAX_VALUES - self.values {
+                    return Err(CanonicalError::ResourceLimit);
+                }
+                self.add(2 + items.len().saturating_sub(1))?;
+                items.iter().try_for_each(|item| self.visit(item, depth + 1))
+            }
+            Value::Object(map) => {
+                if map.len() > MAX_VALUES - self.values {
+                    return Err(CanonicalError::ResourceLimit);
+                }
+                self.add(2 + map.len().saturating_sub(1))?;
+                for (key, item) in map {
+                    check_string(key)?;
+                    self.add(quoted_len(key) + 1)?;
+                    self.visit(item, depth + 1)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn number_len(number: &serde_json::Number, buffer: &mut ryu_js::Buffer) -> Result<usize, CanonicalError> {
+    #[allow(clippy::cast_precision_loss)]
+    let value = if let Some(i) = number.as_i64() {
+        i as f64
+    } else if let Some(u) = number.as_u64() {
+        u as f64
+    } else {
+        number.as_f64().ok_or(CanonicalError::InvalidJson)?
+    };
+    if !value.is_finite() {
+        return Err(CanonicalError::InvalidJson);
+    }
+    Ok(if value == 0.0 {
+        1
+    } else {
+        buffer.format_finite(value).len()
+    })
+}
+
+fn quoted_len(value: &str) -> usize {
+    2 + value
+        .chars()
+        .map(|c| match c {
+            '"' | '\\' | '\u{08}' | '\u{0c}' | '\n' | '\r' | '\t' => 2,
+            c if (c as u32) < 0x20 => 6,
+            c => c.len_utf8(),
+        })
+        .sum::<usize>()
+}
+
 /// Canonicalizes any serializable value through its JSON form.
 pub fn canonicalize_serialize<T: Serialize + ?Sized>(value: &T) -> Result<String, CanonicalError> {
     let json = serde_json::to_value(value).map_err(|_| CanonicalError::InvalidJson)?;
@@ -87,12 +179,31 @@ struct JcsWriter {
 }
 
 impl JcsWriter {
-    fn emit(&mut self, text: &str) -> Result<(), CanonicalError> {
-        if self.out.len() + text.len() > MAX_BYTES {
-            return Err(CanonicalError::ResourceLimit);
+    fn reserve(&self, n: usize) -> Result<(), CanonicalError> {
+        if self.out.len() + n > MAX_BYTES {
+            Err(CanonicalError::ResourceLimit)
+        } else {
+            Ok(())
         }
+    }
+
+    fn emit(&mut self, text: &str) -> Result<(), CanonicalError> {
+        self.reserve(text.len())?;
         self.out.push_str(text);
         Ok(())
+    }
+
+    fn emit_quoted(&mut self, text: &str) -> Result<(), CanonicalError> {
+        check_string(text)?;
+        if !text.bytes().any(|b| b < 0x20 || b == b'"' || b == b'\\') {
+            self.reserve(text.len() + 2)?;
+            self.out.push('"');
+            self.out.push_str(text);
+            self.out.push('"');
+            return Ok(());
+        }
+        let quoted = quote(text);
+        self.emit(&quoted)
     }
 
     fn visit(&mut self, value: &Value, depth: usize) -> Result<(), CanonicalError> {
@@ -104,14 +215,11 @@ impl JcsWriter {
             Value::Null => self.emit("null"),
             Value::Bool(b) => self.emit(if *b { "true" } else { "false" }),
             Value::Number(n) => {
-                let text = format_number(n)?;
-                self.emit(&text)
+                let mut buffer = ryu_js::Buffer::new();
+                let text = format_number_into(n, &mut buffer)?;
+                self.emit(text)
             }
-            Value::String(s) => {
-                check_string(s)?;
-                let text = quote(s);
-                self.emit(&text)
-            }
+            Value::String(s) => self.emit_quoted(s),
             Value::Array(items) => {
                 if items.len() > MAX_VALUES - self.values {
                     return Err(CanonicalError::ResourceLimit);
@@ -129,23 +237,39 @@ impl JcsWriter {
                 if map.len() > MAX_VALUES - self.values {
                     return Err(CanonicalError::ResourceLimit);
                 }
-                let mut keys: Vec<&String> = map.keys().collect();
-                keys.sort_by(|a, b| utf16_cmp(a, b));
+                let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+                entries.sort_unstable_by(|a, b| utf16_cmp(a.0, b.0));
                 self.emit("{")?;
-                for (index, key) in keys.into_iter().enumerate() {
+                for (index, (key, item)) in entries.into_iter().enumerate() {
                     if index > 0 {
                         self.emit(",")?;
                     }
-                    check_string(key)?;
-                    let quoted = quote(key);
-                    self.emit(&quoted)?;
+                    self.emit_quoted(key)?;
                     self.emit(":")?;
-                    self.visit(&map[key], depth + 1)?;
+                    self.visit(item, depth + 1)?;
                 }
                 self.emit("}")
             }
         }
     }
+}
+
+fn format_number_into<'b>(
+    number: &serde_json::Number,
+    buffer: &'b mut ryu_js::Buffer,
+) -> Result<&'b str, CanonicalError> {
+    #[allow(clippy::cast_precision_loss)]
+    let value = if let Some(i) = number.as_i64() {
+        i as f64
+    } else if let Some(u) = number.as_u64() {
+        u as f64
+    } else {
+        number.as_f64().ok_or(CanonicalError::InvalidJson)?
+    };
+    if !value.is_finite() {
+        return Err(CanonicalError::InvalidJson);
+    }
+    Ok(if value == 0.0 { "0" } else { buffer.format_finite(value) })
 }
 
 fn check_string(value: &str) -> Result<(), CanonicalError> {
@@ -158,7 +282,14 @@ fn check_string(value: &str) -> Result<(), CanonicalError> {
 }
 
 /// Orders strings by UTF-16 code units, as RFC 8785 and JavaScript's default sort do.
+///
+/// UTF-8 byte order equals code point order, which equals UTF-16 order unless a
+/// supplementary character is compared with one in U+E000..=U+FFFF. Those start with
+/// bytes >= 0xEE, so byte comparison is exact whenever neither string has such a byte.
 pub fn utf16_cmp(a: &str, b: &str) -> Ordering {
+    if !a.bytes().chain(b.bytes()).any(|byte| byte >= 0xEE) {
+        return a.as_bytes().cmp(b.as_bytes());
+    }
     a.encode_utf16().cmp(b.encode_utf16())
 }
 
@@ -185,6 +316,41 @@ pub fn js_number(value: f64) -> Option<String> {
     }
     let mut buffer = ryu_js::Buffer::new();
     Some(buffer.format_finite(value).to_owned())
+}
+
+/// True when `a` and `b` have the same RFC 8785 canonical form, without allocating.
+///
+/// Canonical text compares numbers by their ECMAScript value (`1` and `1.0` are equal,
+/// as are `0` and `-0`), objects by key set and values, and arrays element-wise. Inputs
+/// that cannot be canonicalized (resource limits) are compared structurally; callers
+/// that need the limit enforced canonicalize at their entry point first.
+pub fn canonical_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Number(x), Value::Number(y)) => {
+            const SAFE: i64 = 1 << 53;
+            match (x.as_i64(), y.as_i64()) {
+                (Some(i), Some(j)) if i.abs() <= SAFE && j.abs() <= SAFE => i == j,
+                _ => number_value(x) == number_value(y),
+            }
+        }
+        (Value::String(x), Value::String(y)) => x == y,
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| canonical_eq(p, q)),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| canonical_eq(v, w)))
+        }
+        _ => false,
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn number_value(n: &serde_json::Number) -> f64 {
+    n.as_i64()
+        .map(|i| i as f64)
+        .or_else(|| n.as_u64().map(|u| u as f64))
+        .or_else(|| n.as_f64())
+        .unwrap_or(f64::NAN)
 }
 
 /// `JSON.stringify` for a string value.
@@ -336,6 +502,45 @@ mod tests {
             legacy_stable_stringify(&value),
             "{\"a\":5,\"A\":4,\"a_b\":2,\"ab\":3,\"b\":1}"
         );
+    }
+
+    #[test]
+    fn limit_check_matches_canonicalize() {
+        let big = Value::String("é\"\u{1}".repeat(MAX_BYTES / 9));
+        let cases = [
+            json!({"a": [1, 2.5, "x\ny", null, true], "b": {"c": -0.0}}),
+            Value::Array(vec![json!(1); MAX_VALUES - 1]),
+            Value::Array(vec![json!(1); MAX_VALUES]),
+            big.clone(),
+            json!([big.clone(), big]),
+        ];
+        for value in cases {
+            assert_eq!(check_canonical(&value).is_ok(), canonicalize(&value).is_ok());
+            if let Ok(text) = canonicalize(&value) {
+                let mut counter = LimitCounter { bytes: 0, values: 0 };
+                counter.visit(&value, 0).unwrap();
+                assert_eq!(counter.bytes, text.len());
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_equality_matches_canonical_text() {
+        let pairs = [
+            (json!({"a": 1, "b": [1.0, "x"]}), json!({"b": [1, "x"], "a": 1.0})),
+            (json!(0), json!(-0.0)),
+            (json!(9_007_199_254_740_993_u64), json!(9_007_199_254_740_992_u64)),
+            (json!({"a": 1}), json!({"a": 1, "b": null})),
+            (json!([1, 2]), json!([2, 1])),
+            (json!("1"), json!(1)),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(
+                canonical_eq(&a, &b),
+                canonicalize(&a).unwrap() == canonicalize(&b).unwrap(),
+                "{a} vs {b}"
+            );
+        }
     }
 
     #[test]

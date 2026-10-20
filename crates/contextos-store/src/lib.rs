@@ -131,6 +131,30 @@ pub trait DocumentStore: Send + Sync {
         expected_revision: u64,
         body: &Value,
     ) -> impl Future<Output = Result<Versioned, StoreError>> + Send;
+
+    /// As [`DocumentStore::compare_and_swap`] for a body already encoded with
+    /// [`encode`]; returns the new revision. Lets callers encode once.
+    fn compare_and_swap_encoded(
+        &self,
+        key: &DocKey,
+        expected_revision: u64,
+        body: Value,
+        encoded: Encoded,
+    ) -> impl Future<Output = Result<u64, StoreError>> + Send;
+}
+
+/// Canonical text and digest of a body, computed once per write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Encoded {
+    pub text: String,
+    pub digest: String,
+}
+
+impl Encoded {
+    pub fn of(body: &Value) -> Result<Self, StoreError> {
+        let (text, digest) = encode(body)?;
+        Ok(Self { text, digest })
+    }
 }
 
 /// What happened when a kernel transition was committed.
@@ -158,14 +182,14 @@ pub async fn commit_transition<S: DocumentStore>(
         });
     }
     let obligations = result.obligations.unwrap_or_default();
-    if encode(&result.state)?.1 == read.digest {
+    let encoded = Encoded::of(&result.state)?;
+    if encoded.digest == read.digest {
         return Ok(Commit::Unchanged { obligations });
     }
-    let written = store.compare_and_swap(key, read.revision, &result.state).await?;
-    Ok(Commit::Written {
-        revision: written.revision,
-        obligations,
-    })
+    let revision = store
+        .compare_and_swap_encoded(key, read.revision, result.state, encoded)
+        .await?;
+    Ok(Commit::Written { revision, obligations })
 }
 
 /// Maximum optimistic retries before reporting contention.

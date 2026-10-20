@@ -30,7 +30,7 @@ fn s(value: &Value) -> &str {
 }
 
 fn identical(a: &Value, b: &Value) -> bool {
-    matches!((canonicalize(a), canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    contextos_contract::canonical::canonical_eq(a, b)
 }
 
 fn encoded(value: &Value) -> String {
@@ -284,7 +284,9 @@ pub fn evaluate_boundary_readiness(
         result.unsatisfied_obligations = sorted(obligations);
         result
     };
-    if canonicalize(required).is_err() || canonicalize(observed).is_err() {
+    if contextos_contract::canonical::check_canonical(required).is_err()
+        || contextos_contract::canonical::check_canonical(observed).is_err()
+    {
         reasons.insert("configuration_invalid".into());
         return finish(result, reasons, obligations);
     }
@@ -703,7 +705,10 @@ pub fn evaluate_data_flow(request: &Value, policy: &Value, evaluation_time: &Val
         decision.unsatisfied_obligations.clone_from(&decision.reason_codes);
         decision
     };
-    if canonicalize(policy).is_err() || canonicalize(request).is_err() || !flow_policy(policy) {
+    if contextos_contract::canonical::check_canonical(policy).is_err()
+        || contextos_contract::canonical::check_canonical(request).is_err()
+        || !flow_policy(policy)
+    {
         reasons.insert("policy_unavailable".into());
         return finish(decision, reasons);
     }
@@ -1083,8 +1088,8 @@ pub fn memory_intent_digest(record: &Value) -> Option<String> {
 /// exact intent, tracked derived copies and honest propagation status. Completion is
 /// verified only when every known copy confirms against a complete inventory.
 pub fn validate_memory_lifecycle(record: &Value, context: &Value, evaluation_time: &Value) -> DataFlowDecision {
-    if canonicalize(record).is_err()
-        || canonicalize(context).is_err()
+    if contextos_contract::canonical::check_canonical(record).is_err()
+        || contextos_contract::canonical::check_canonical(context).is_err()
         || !memory_record(record)
         || !memory_context(context)
     {
