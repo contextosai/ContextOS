@@ -798,20 +798,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
 
-        // Re-check ownership immediately before the claim: the linearization point
-        // against a concurrent takeover.
-        if let Some(generation) = fence
-            && let Ownership::Refused(reason) = self.check_owner(admission, generation).await?
-        {
-            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
-                .await?;
-            return Ok(p.stop(
-                "rejected",
-                vec![reason.into()],
-                "The executor lost ownership of this run.",
-            ));
-        }
-
         // 5. Claim.
         let idempotency = manifest.recovery.idempotency.as_ref();
         let provider_key = idempotency.map(|_| format!("ctxos:{operation_id}"));
@@ -895,6 +881,33 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         p.report.audit_sequences.push(claim_entry.sequence);
+
+        // Ownership is re-checked after the claim commits and before dispatch: this is
+        // the linearization point against a concurrent takeover. If the run changed
+        // hands, the attempt is recorded as definitively not dispatched and its budget
+        // released, so nothing claimed after a takeover reaches a provider; anything
+        // claimed before it is in the operation ledger for the new executor.
+        if let Some(generation) = fence
+            && let Ownership::Refused(reason) = self.check_owner(admission, generation).await?
+        {
+            self.withhold_dispatch(
+                admission,
+                &operations_key,
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+                &now,
+                reason,
+            )
+            .await?;
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            return Ok(p.stop(
+                "rejected",
+                vec![reason.into()],
+                "The executor lost ownership of this run.",
+            ));
+        }
         if let (Some(continuation), Some((_, digest))) = (continuation, &adapter_input) {
             let entry = self
                 .audit
@@ -1117,6 +1130,42 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Err(e) if e.is_conflict() => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Records that a claimed attempt was never sent to the provider.
+    #[allow(clippy::too_many_arguments)]
+    async fn withhold_dispatch(
+        &self,
+        admission: &RunAdmission,
+        operations_key: &DocKey,
+        operation_id: &str,
+        attempt_id: &str,
+        action_digest: &str,
+        claimed_at: &str,
+        reason: &str,
+    ) -> Result<(), GatewayError> {
+        let observed_at = later(self.now(), claimed_at);
+        let valid_until =
+            add_contract_seconds(&observed_at, OBSERVATION_VALIDITY_SECONDS).unwrap_or_else(|| observed_at.clone());
+        let observation_id = self.ports.ids.new_id("observation");
+        let evidence_ref = json!({"artifact_type": "dispatch_withheld", "artifact_id": observation_id, "version": "1",
+            "sha256": sha256_canonical(&json!([operation_id, attempt_id, reason])).unwrap_or_default()});
+        let observation = json!({
+            "observation_id": observation_id, "contract_id": admission.contract_id, "run_id": admission.run_id,
+            "tenant_id": admission.tenant_id, "operation_id": operation_id, "attempt_id": attempt_id,
+            "action_digest": action_digest, "executor_generation": admission.executor_generation,
+            "outcome": "not_dispatched", "finality": "definitive", "external_ref": null, "evidence_ref": evidence_ref,
+            "verification_status": "verified", "observer": admission.gateway_observer, "observed_at": observed_at,
+            "valid_until": valid_until, "evaluation_time": observed_at,
+        });
+        transact(self.store.as_ref(), operations_key, |ledger| {
+            record_effect_observation(ledger, &observation, &ledger["revision"])
+        })
+        .await?;
+        self.audit
+            .append(&admission.tenant_id, "effect_observation", observation, &observed_at)
+            .await?;
+        Ok(())
     }
 
     async fn release_reservation(

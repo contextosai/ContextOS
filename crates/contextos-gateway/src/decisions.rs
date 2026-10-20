@@ -20,7 +20,7 @@ use contextos_contract::types::{
     DecisionRationale, DecisionRecord, DecisionStatus, JsonObject, PolicyVerdict, ReplayPacket, ToolLineageEntry,
 };
 use contextos_kernel::TransitionResult;
-use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, transact};
+use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, transact};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -29,6 +29,10 @@ use crate::{Gateway, GatewayError, operation_ledger_key};
 
 /// Decisions recorded per run at most.
 pub const MAX_DECISIONS_PER_RUN: usize = 1024;
+/// Tool calls one decision may cite.
+pub const MAX_DECISION_TOOL_CALLS: usize = 256;
+/// Canonical size of a decision's free-form parts (outputs, rationale, subjects).
+pub const MAX_DECISION_DETAIL_BYTES: usize = 64 * 1024;
 
 /// What the orchestrator reports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +84,8 @@ pub enum DecisionRefusal {
     Decision(#[from] DecisionError),
     #[error("the run has too many recorded decisions")]
     TooManyDecisions,
+    #[error("the decision report is too large")]
+    TooLarge,
     #[error(transparent)]
     Gateway(#[from] GatewayError),
 }
@@ -113,6 +119,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         report: DecisionReport,
     ) -> Result<RecordedDecision, DecisionRefusal> {
+        // Bound the work and storage one report can cause before touching anything.
+        let detail = json!([
+            report.outputs,
+            report.rationale,
+            report.subject_ids,
+            report.allowed_outcomes
+        ]);
+        if report.tool_calls.len() > MAX_DECISION_TOOL_CALLS
+            || contextos_contract::canonical::canonicalize(&detail)
+                .map_or(true, |t| t.len() > MAX_DECISION_DETAIL_BYTES)
+        {
+            return Err(DecisionRefusal::TooLarge);
+        }
         let compiled: CompiledContext = self
             .store
             .get(&compiled_key(admission))
@@ -228,6 +247,36 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             confidence: report.confidence,
             rationale: report.rationale,
         })?;
+        // Reserve the record's place in the run's index before signing, so a refused
+        // decision never leaves a signed entry behind.
+        let index_key = decisions_key(admission);
+        if self.store.get(&index_key).await.map_err(GatewayError::from)?.is_none() {
+            match self
+                .store
+                .create(&index_key, &json!({"run_id": admission.run_id, "record_ids": []}))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {}
+                Err(e) => return Err(GatewayError::from(e).into()),
+            }
+        }
+        let reserved = transact(self.store.as_ref(), &index_key, |index| {
+            let mut next = index.clone();
+            let Some(ids) = next["record_ids"].as_array_mut() else {
+                return TransitionResult::rejected(index.clone(), "decision_index_invalid");
+            };
+            if ids.len() >= MAX_DECISIONS_PER_RUN {
+                return TransitionResult::rejected(index.clone(), "too_many_decisions");
+            }
+            ids.push(json!(record_id));
+            TransitionResult::accepted(next, vec![])
+        })
+        .await
+        .map_err(GatewayError::from)?;
+        if matches!(reserved, Commit::Rejected { .. }) {
+            return Err(DecisionRefusal::TooManyDecisions);
+        }
         let record = self
             .audit
             .record_decision(&admission.tenant_id, record, &now)
@@ -241,37 +290,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )?;
         let entry = json!({"record": record, "replay_packet": packet});
 
-        let key = decisions_key(admission);
-        if self.store.get(&key).await.map_err(GatewayError::from)?.is_none() {
-            match self
-                .store
-                .create(&key, &json!({"run_id": admission.run_id, "decisions": []}))
-                .await
-            {
-                Ok(_) => {}
-                Err(e) if e.is_conflict() => {}
-                Err(e) => return Err(GatewayError::from(e).into()),
-            }
-        }
-        let mut full = false;
-        transact(self.store.as_ref(), &key, |log| {
-            let mut next = log.clone();
-            let Some(decisions) = next["decisions"].as_array_mut() else {
-                return TransitionResult::rejected(log.clone(), "decision_log_invalid");
-            };
-            if decisions.len() >= MAX_DECISIONS_PER_RUN {
-                full = true;
-                return TransitionResult::rejected(log.clone(), "too_many_decisions");
-            }
-            full = false;
-            decisions.push(entry.clone());
-            TransitionResult::accepted(next, vec![])
-        })
-        .await
-        .map_err(GatewayError::from)?;
-        if full {
-            return Err(DecisionRefusal::TooManyDecisions);
-        }
+        // One document per decision: storage per write stays bounded.
+        let entry_key = DocKey::new(
+            &admission.tenant_id,
+            DocKind::DecisionLog,
+            format!("{}/{record_id}", admission.run_id),
+        );
+        self.store
+            .create(&entry_key, &entry)
+            .await
+            .map_err(GatewayError::from)?;
         Ok(RecordedDecision {
             record,
             replay_packet: packet,
@@ -301,10 +329,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .map(str::to_owned);
             archives.push(archive);
         }
-        let decisions = get(decisions_key(admission))
+        let mut decisions = Vec::new();
+        let ids = get(decisions_key(admission))
             .await?
-            .map(|d| d["decisions"].clone())
+            .map(|d| d["record_ids"].clone())
             .unwrap_or(json!([]));
+        for id in ids.as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let key = DocKey::new(
+                &admission.tenant_id,
+                DocKind::DecisionLog,
+                format!("{}/{id}", admission.run_id),
+            );
+            // A reserved slot whose signing failed has no document.
+            if let Some(entry) = get(key).await? {
+                decisions.push(entry);
+            }
+        }
         Ok(json!({
             "evidence_version": "contextos-rs.run_evidence.v1",
             "run_id": admission.run_id,

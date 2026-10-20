@@ -106,7 +106,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 28b PostgreSQL validated | done — store suite and full gateway on PostgreSQL 16; 13→8 statements per effect, concurrent fact fetching, seeded transactions, no per-acquire ping; ~5,100 effects/s single tenant over a socket; `scripts/dev-postgres.sh` |
 | 29 Audit batching | `AuditWriter::append_all` (consecutive entries in one batch). Deferring the authorization decision to share the claim's batch measured no gain on PostgreSQL (group commit already batches under load), so it was not adopted; per-run audit streams wait for a workload that needs them |
 | 30 MCP gateway mode | done — per-run MCP server (tools/list of surfaced capabilities, governed tools/call, input_required passthrough, retry-safe operation identity); manifest input schemas enforced |
-| 31 Next: review pass over the whole system (security review of new surfaces), then remaining gaps | next |
+| 31 Security review | done — six findings fixed with regression tests (see the threat model's review log) |
+| 32 Next: remaining gaps | next |
 
 ## Non-negotiables carried from the spec
 

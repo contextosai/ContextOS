@@ -94,6 +94,9 @@ pub enum AdmissionError {
     Policy(#[from] CompileError),
     #[error("delegation rejected: {0:?}")]
     Delegation(Vec<String>),
+    /// A store or audit dependency failed; the detail is for server logs only.
+    #[error("a dependency is unavailable")]
+    Unavailable(String),
 }
 
 /// Pins the compile-time policy resolution as normalized outcomes. Every applicable

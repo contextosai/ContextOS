@@ -102,7 +102,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let parent_state = self
             .run_state(parent)
             .await
-            .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
+            .map_err(|e| AdmissionError::Unavailable(e.to_string()))?;
         if parent_state.as_ref().is_some_and(|s| s["status"] != "running") {
             return Err(reject("parent_not_running"));
         }
@@ -185,8 +185,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             reserve_child_budget(ledger, &r)
         })
         .await?;
-        if let Commit::Rejected { reason_codes } = commit {
-            return Err(AdmissionError::Delegation(reason_codes));
+        match commit {
+            Commit::Rejected { reason_codes } => return Err(AdmissionError::Delegation(reason_codes)),
+            // The reservation already existed (a replayed or concurrent delegation of
+            // this child). Never compensate a reservation this request did not create:
+            // that would hand a live child's allocation back to the parent.
+            Commit::Unchanged { .. } => return Err(reject("delegation_exists")),
+            Commit::Written { .. } => {}
         }
 
         request.limits = limits;
@@ -194,7 +199,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let mut child = match admit_run(self.store.as_ref(), request).await {
             Ok(child) => child,
             Err(error) => {
-                // Return the parent's capacity; the child never ran.
+                // Return the parent's capacity: this request created the reservation and the
+                // child never ran.
                 let zero = json!({"tokens": 0, "tool_calls": 0, "replans": 0, "cost_units": 0});
                 let _ = self.settle_child(parent, &child_run_id, &zero, &now).await;
                 return Err(error);
@@ -237,7 +243,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 &now,
             )
             .await
-            .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
+            .map_err(|e| AdmissionError::Unavailable(e.to_string()))?;
         let child_run_id = child.run_id.clone();
         self.edit_run_state(parent, move |state| {
             if let Some(children) = state["child_run_ids"].as_array_mut()
@@ -247,7 +253,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         })
         .await
-        .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
+        .map_err(|e| AdmissionError::Unavailable(e.to_string()))?;
         Ok(child)
     }
 
@@ -331,6 +337,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         });
         if settled {
             self.forget_child(parent, &child.run_id).await?;
+            self.end_child(child, decision, closed_by).await?;
             "closed".clone_into(&mut out.status);
             out.usage = Some(usage);
             return Ok(out);
@@ -352,9 +359,37 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         out.audit_sequences.push(entry.sequence);
         self.forget_child(parent, &child.run_id).await?;
+        self.end_child(child, decision, closed_by).await?;
         "closed".clone_into(&mut out.status);
         out.usage = Some(usage);
         Ok(out)
+    }
+
+    /// A closed child stops running: completed when its output is accepted, otherwise
+    /// (or if completion is refused) cancelled. Its executor is fenced either way.
+    async fn end_child(
+        &self,
+        child: &RunAdmission,
+        decision: CloseDecision,
+        closed_by: &str,
+    ) -> Result<(), GatewayError> {
+        let Some(state) = self.run_state(child).await? else {
+            return Ok(());
+        };
+        if ["completed", "failed", "cancelled", "expired"].contains(&state["status"].as_str().unwrap_or_default()) {
+            return Ok(());
+        }
+        if decision == CloseDecision::Accept
+            && self
+                .apply_event(child, "complete", None, None)
+                .await?
+                .reason_codes
+                .is_empty()
+        {
+            return Ok(());
+        }
+        self.cancel_run(child, closed_by).await?;
+        Ok(())
     }
 
     async fn forget_child(&self, parent: &RunAdmission, child_run_id: &str) -> Result<(), GatewayError> {

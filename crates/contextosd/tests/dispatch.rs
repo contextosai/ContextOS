@@ -1035,3 +1035,110 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
         .unwrap();
     assert_eq!(missing["error"]["code"], -32602, "the executor generation is required");
 }
+
+#[tokio::test]
+async fn only_the_parents_executor_can_delegate() {
+    let w = world(&ALL_CONTROLS).await;
+    let owner = executor_client(2);
+    let parent: Value = owner
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_p", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut child = run_body("run_c", 1200);
+    let agent = child["run_context"]["agent"]["agent_id"].clone();
+    child["delegation"] = json!({
+        "envelope_version": "contextos.agent_delegation.v1", "delegation_id": "dlg_c", "parent_run_id": "run_p",
+        "child_run_id": "run_c", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
+        "issuer": agent, "subject": agent, "principal_chain": [{"kind": "agent", "id": agent}],
+        "scope": {"allowed_intents": [child["request"]["input"]["intent"]], "allowed_capabilities": ["adp_payments.issue_refund"],
+            "data_classification_ceiling": "CONFIDENTIAL", "output_schema_ref": "schema://x"},
+        "sub_budget": {"total_tokens": 10, "bucket_tokens": {}, "max_tool_calls": 1, "max_replan_attempts": 0, "wall_clock_ms": 1000, "max_cost_cents": 1},
+        "effect_policy": "read_only", "issued_at": "2020-01-01T00:00:00Z", "expires_at": "2098-01-01T00:00:00Z",
+        "parent_claim_hash": parent["compiled_context_hash"],
+    });
+    let stale = executor_client(1)
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), 409, "a stale executor cannot spend the parent's budget");
+    let missing = reqwest::Client::new()
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 428);
+    let ok = owner
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 201);
+    let replay = owner
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        replay.status(),
+        422,
+        "a replayed delegation is refused without touching the budget"
+    );
+}
+
+#[tokio::test]
+async fn oversized_decisions_are_refused_before_signing() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    assert_eq!(
+        http.post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&run_body("run_big_dec", 1200))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    let entries = |http: reqwest::Client| {
+        let url = format!("{}/v1/audit/verify", w.base);
+        async move {
+            http.get(url)
+                .bearer_auth("acme-key")
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()["entries"]
+                .clone()
+        }
+    };
+    let before = entries(http.clone()).await;
+    let calls: Vec<Value> = (0..300)
+        .map(|i| json!({"tool_call_id": format!("tc_{i}"), "operation_id": format!("op_{i}")}))
+        .collect();
+    let refused = http
+        .post(format!("{}/v1/runs/run_big_dec/decisions", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DEFERRED", "tool_calls": calls}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 413);
+    assert_eq!(entries(http.clone()).await, before, "nothing was signed");
+}

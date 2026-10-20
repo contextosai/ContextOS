@@ -421,7 +421,11 @@ where
     let delegation = input.get("delegation").filter(|d| !d.is_null());
     let parent = match delegation {
         Some(envelope) => {
-            Some(load_admission(&state, &caller, envelope["parent_run_id"].as_str().unwrap_or_default()).await?)
+            let parent =
+                load_admission(&state, &caller, envelope["parent_run_id"].as_str().unwrap_or_default()).await?;
+            // Delegating spends the parent's budget: only the parent's current executor may.
+            require_owner(gateway, &parent, &headers).await?;
+            Some(parent)
         }
         None => None,
     };
@@ -538,7 +542,15 @@ where
             "This run has already been admitted.",
         ),
         AdmissionError::Budget(code) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "limits_invalid", code),
-        other => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "admission_failed", other.to_string()),
+        other => {
+            // Store and audit errors can name internals; log them, return a code.
+            tracing::error!(error = ?other, "admission failed");
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "admission_unavailable",
+                "Admission is temporarily unavailable.",
+            )
+        }
     })?;
     let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
     state
@@ -1060,6 +1072,11 @@ where
                 "A reported tool call is not a governed effect of this run.",
             )
             .with_detail(json!({"tool_call_id": id})),
+            DecisionRefusal::TooLarge => ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "decision_too_large",
+                "The decision cites too many tool calls or its details are too large.",
+            ),
             DecisionRefusal::CompiledContextMissing | DecisionRefusal::TooManyDecisions => {
                 ApiError::new(StatusCode::CONFLICT, "decision_unavailable", refusal.to_string())
             }

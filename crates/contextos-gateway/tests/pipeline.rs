@@ -42,10 +42,19 @@ impl IdSource for SeqIds {
 
 /// Grants exactly what the binding asks for, as a trusted mandate broker would after
 /// verifying a real grant; the kernel still checks scope, freshness and linkage.
-struct Authority;
+/// Runs while a dispatch is between its entry checks and its claim (to simulate a
+/// takeover committed by another replica in that window).
+type MidDispatchHook = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
+#[derive(Default)]
+struct Authority(std::sync::Mutex<Option<MidDispatchHook>>);
 #[async_trait]
 impl AuthorityProvider for Authority {
     async fn authority(&self, admission: &RunAdmission, binding: &Value) -> Result<AuthorityFacts, PortError> {
+        let hook = self.0.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook().await;
+        }
         let root_run_id = admission
             .lineage
             .as_ref()
@@ -318,6 +327,7 @@ struct Harness {
     audit: Arc<AuditWriter<MemoryLog>>,
     adapter: Arc<Payments>,
     approvals: Arc<Approvals>,
+    authority: Arc<Authority>,
 }
 
 async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
@@ -326,6 +336,7 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
 
 async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_calls: u64, cost_cents: f64) -> Harness {
     let store = Arc::new(MemoryStore::new());
+    let authority = Arc::new(Authority::default());
     let audit = Arc::new(AuditWriter::new(
         MemoryLog::new(),
         AuditSigner::from_seed("gw-1", [3; 32]),
@@ -334,7 +345,7 @@ async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_cal
     let ports = Ports {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SeqIds::default()),
-        authority: Arc::new(Authority),
+        authority: authority.clone(),
         policy: if verdict == "pinned" {
             Arc::new(PinnedPolicy)
         } else {
@@ -396,6 +407,7 @@ async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_cal
         audit,
         adapter,
         approvals,
+        authority,
     }
 }
 
@@ -1137,4 +1149,109 @@ async fn cancelling_a_parent_stops_and_settles_its_children() {
     assert_eq!(late.result["status"], "rejected");
     let again = h.gateway.cancel_run(&h.admission, "ops_alice").await.unwrap();
     assert_eq!(again.status, "cancelled", "cancelling is idempotent in effect");
+}
+
+#[tokio::test]
+async fn replayed_delegations_never_release_the_live_childs_budget() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let e = envelope(
+        &h,
+        "run_child",
+        &["adp_payments.issue_refund"],
+        "isolate_until_accepted",
+        3,
+    );
+    delegate(&h, &e).await.unwrap();
+    assert!(delegate(&h, &e).await.is_err(), "the child already exists");
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    let reservation = parent_budget["reservations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["reservation_id"] == "delegation:run_child")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        reservation["status"], "reserved",
+        "the live child's allocation stays reserved"
+    );
+    assert_eq!(parent_budget["reserved"]["tool_calls"], 3);
+}
+
+#[tokio::test]
+async fn a_takeover_mid_dispatch_stops_the_effect_before_the_provider() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let generation = running(&h).await;
+    // Another replica takes the run over while this dispatch is being authorized.
+    let store = h.store.clone();
+    let key = DocKey::new(TENANT, DocKind::RunState, &h.admission.run_id);
+    *h.authority.0.lock().unwrap() = Some(Arc::new(move || {
+        let store = store.clone();
+        let key = key.clone();
+        Box::pin(async move {
+            let read = store.get(&key).await.unwrap().unwrap();
+            let mut taken = read.body.clone();
+            taken["executor_generation"] = json!(read.body["executor_generation"].as_u64().unwrap() + 2);
+            store.compare_and_swap(&key, read.revision, &taken).await.unwrap();
+        })
+    }));
+    let out = h
+        .gateway
+        .dispatch_as(&h.admission, &call("tc_1", Some("refund_ord_881")), generation)
+        .await
+        .unwrap();
+    assert_eq!(out.report.reason_codes, vec!["executor_stale".to_owned()]);
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        0,
+        "nothing reaches the provider"
+    );
+    let op = operation(&h, "refund_ord_881").await;
+    assert_eq!(
+        op["outcome"], "not_dispatched",
+        "the withheld attempt is recorded definitively"
+    );
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["reserved"]["tool_calls"], 0, "its reservation is released");
+}
+
+#[tokio::test]
+async fn closing_a_child_ends_its_run() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    running(&h).await;
+    for (child_id, decision, ended) in [
+        ("run_ok", CloseDecision::Accept, "completed"),
+        ("run_no", CloseDecision::Reject, "cancelled"),
+    ] {
+        let child = delegate(
+            &h,
+            &envelope(
+                &h,
+                child_id,
+                &["adp_payments.issue_refund"],
+                "isolate_until_accepted",
+                2,
+            ),
+        )
+        .await
+        .unwrap();
+        let generation = match h.gateway.open_run(&child).await.unwrap() {
+            Ownership::Current(g) => g,
+            other @ Ownership::Refused(_) => panic!("{other:?}"),
+        };
+        let closed = h
+            .gateway
+            .close_delegation(&h.admission, &child, decision, "agt_support")
+            .await
+            .unwrap();
+        assert_eq!(closed.status, "closed");
+        assert_eq!(h.gateway.run_state(&child).await.unwrap().unwrap()["status"], ended);
+        let late = h
+            .gateway
+            .dispatch_as(&child, &child_call(child_id, "tc_late"), generation)
+            .await
+            .unwrap();
+        assert_eq!(late.result["status"], "rejected", "a closed child cannot act");
+    }
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
 }

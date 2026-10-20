@@ -50,7 +50,7 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Applies one kernel lifecycle event. `expected_generation` fences the caller
     /// when given.
-    async fn apply_event(
+    pub(crate) async fn apply_event(
         &self,
         admission: &RunAdmission,
         kind: &str,
