@@ -33,6 +33,8 @@ pub enum DocKind {
     ContextPack,
     ProfileRegistry,
     RunAdmission,
+    /// Input requested by a tool (`input_required`) for an operation's latest attempt.
+    PendingInput,
 }
 
 impl DocKind {
@@ -46,6 +48,7 @@ impl DocKind {
             DocKind::ContextPack => "context_pack",
             DocKind::ProfileRegistry => "profile_registry",
             DocKind::RunAdmission => "run_admission",
+            DocKind::PendingInput => "pending_input",
         }
     }
 }

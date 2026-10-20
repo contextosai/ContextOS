@@ -114,6 +114,20 @@ async fn world(controls: &[&str]) -> World {
                     "result": {"structuredContent": {"refund_id": "rf_task"}}}}}));
             }
             counter.fetch_add(1, Ordering::SeqCst);
+            if r["params"]["arguments"]["amount_minor"] == 555 {
+                // Asks why before refunding; runs once the answer arrives.
+                let answered = &r["params"]["inputResponses"]["reason"];
+                if answered["action"] == "accept" && r["params"]["requestState"] == "st_1" {
+                    return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {
+                        "structuredContent": {"refund_id": "rf_reasoned", "reason": answered["content"]["reason"]}}}));
+                }
+                return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {
+                    "resultType": "input_required", "requestState": "st_1",
+                    "inputRequests": {"reason": {"method": "elicitation/create", "params": {
+                        "message": "Why is this refund being issued?",
+                        "requestedSchema": {"type": "object", "required": ["reason"],
+                            "properties": {"reason": {"type": "string", "enum": ["damaged", "late"]}}}}}}}}));
+            }
             if r["params"]["arguments"]["amount_minor"] == 777 {
                 return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {
                     "resultType": "task", "task": {"taskId": "task_e2e_1", "status": "working"}}}));
@@ -134,7 +148,7 @@ async fn world(controls: &[&str]) -> World {
         "action_risk": {"effect": "external_state", "authority": "service", "reversibility": "compensatable", "interaction": "api", "data_scope": "CONFIDENTIAL"},
         "approval_mode": "destructive", "resource_pointers": ["/order_id"], "destination_pointers": ["/customer_id"],
         "amount": {"minor_units_pointer": "/amount_minor", "currency": "INR"},
-        "recovery": {"strategy": "manual_reconcile", "max_attempts": 1, "retry_delays_seconds": []},
+        "recovery": {"strategy": "manual_reconcile", "max_attempts": 2, "retry_delays_seconds": [0]},
         "timeout_ms": 2000, "reservation": {"tokens": 0, "tool_calls": 1, "replans": 0, "cost_units": 100},
         "adapter_ref": artifact("adapter", "payments@3"), "capability_ref": artifact("capability", "issue_refund@3"),
     }).to_string()).unwrap();
@@ -440,4 +454,84 @@ async fn long_running_mcp_tasks_are_reconciled() {
         .await
         .unwrap();
     assert_eq!(unknown["reason_codes"], json!(["operation_not_found"]));
+}
+
+#[tokio::test]
+async fn tools_that_need_input_continue_the_same_operation() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = reqwest::Client::new();
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_input", 1200))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let call = tool_call("run_input", "tc_1", 555);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_input/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&call)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    assert_eq!(
+        out["report"]["obligations"].as_array().unwrap().last().unwrap(),
+        "provide_requested_input"
+    );
+    assert!(out["result"]["output"]["result"]["inputRequests"]["reason"].is_object());
+    let operation_id = out["report"]["operation_id"].as_str().unwrap().to_owned();
+    let url = format!("{}/v1/runs/run_input/operations/{operation_id}/input", w.base);
+    let send = |body: Value| {
+        let http = http.clone();
+        let url = url.clone();
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+
+    // Answers cannot change the authorized action.
+    let altered = tool_call("run_input", "tc_2", 999_999);
+    let refused = send(json!({"tool_call": altered,
+        "input_responses": {"reason": {"action": "accept", "content": {"reason": "late"}}}}))
+    .await;
+    assert_eq!(refused["result"]["status"], "rejected", "{refused}");
+    // Answers must fit the request.
+    let refused = send(json!({"tool_call": call,
+        "input_responses": {"reason": {"action": "accept", "content": {"reason": "because"}}}}))
+    .await;
+    assert_eq!(refused["report"]["reason_codes"], json!(["input_response_invalid"]));
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    let done = send(json!({"tool_call": call,
+        "input_responses": {"reason": {"action": "accept", "content": {"reason": "damaged"}}}}))
+    .await;
+    assert_eq!(done["result"]["status"], "completed", "{done}");
+    assert_eq!(done["result"]["output"]["reason"], "damaged");
+    assert_eq!(
+        done["report"]["operation_id"],
+        json!(operation_id),
+        "same operation, new attempt"
+    );
+
+    // The request was single-use, and the confirmed effect cannot be repeated.
+    let replay = send(json!({"tool_call": call,
+        "input_responses": {"reason": {"action": "accept", "content": {"reason": "damaged"}}}}))
+    .await;
+    assert_eq!(replay["result"]["status"], "rejected");
+    assert_eq!(replay["report"]["reason_codes"], json!(["input_not_requested"]));
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 2);
 }

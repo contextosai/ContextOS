@@ -67,6 +67,7 @@ have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized
 | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | Govern and dispatch one tool call |
 | `POST /v1/contracts/negotiate` | `admit` | Check a contract against this deployment |
 | `POST /v1/schemas/{schema}/validate` | any | Validate a payload against a published schema |
+| `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | Answer a tool's input request and continue |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | Resolve an unknown effect |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
 | `GET /metrics`, `/healthz`, `/readyz` | – | Operations |
@@ -80,6 +81,26 @@ Tool-call results use `contextos.tool_result.v1`:
 | `blocked` | authority, policy, constraint or budget refused | do not retry unchanged |
 | `rejected` | malformed, unpinned, unsurfaced or incompatible reuse | fix the call |
 | `failed` | provider definitively did not apply the effect | may retry per the capability's recovery policy |
+
+### Tools that ask for input
+
+An MCP tool may answer `input_required` instead of running. The result is `paused` with
+`provide_requested_input`, and `output.result.inputRequests` holds the questions. Answer
+them by resending the *same* tool call with the answers:
+
+```sh
+curl -X POST …/v1/runs/$RUN/operations/$OP/input -d '{"tool_call": <the original call>,
+  "input_responses": {"reason": {"action": "accept", "content": {"reason": "damaged"}}}}'
+```
+
+The continuation is a new attempt of the same operation and is governed again end to
+end. Answers cannot change the action: a call with different arguments, destination or
+amount is refused. Answers must match the requested keys and schema, each request can
+be answered once, and form fields that look like secrets (passwords, PINs, codes) are
+refused outright. Only form elicitation is supported. Each answered round uses one of
+the capability's `recovery.max_attempts`, so a capability that may ask for input needs
+`max_attempts` of at least rounds + 1 and a `retry_delays_seconds` entry of `0` per
+round. The responder and a digest of the answers are audited, not the answers.
 
 ### Reconciling unknown effects
 

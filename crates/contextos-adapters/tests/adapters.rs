@@ -84,6 +84,7 @@ fn call() -> AdapterCall {
         arguments: json!({"order_id": "ord_881", "amount_minor": 420_000}),
         idempotency_key: Some("ctxos:op_refund".into()),
         deadline: "2026-10-20T10:00:05Z".into(),
+        input: None,
     }
 }
 
@@ -209,8 +210,24 @@ async fn mcp_sse_input_required_and_tasks() {
     })
     .await;
     let response = mcp(&url, "external_state").await;
-    assert_eq!(response.outcome, EffectOutcome::Unknown);
+    assert_eq!(
+        (response.outcome, response.definitive),
+        (EffectOutcome::NotApplied, true),
+        "input_required means the tool has not run"
+    );
     assert_eq!(response.output["result_type"], "input_required");
+
+    // A task result stays unknown and keeps the task id for reconciliation.
+    let (url, _) = server(|r| {
+        rpc_result(
+            r,
+            json!({"resultType": "task", "task": {"taskId": "t_1", "status": "working"}}),
+        )
+    })
+    .await;
+    let response = mcp(&url, "external_state").await;
+    assert_eq!(response.outcome, EffectOutcome::Unknown);
+    assert_eq!(response.external_ref.as_deref(), Some("t_1"));
 }
 
 #[tokio::test]

@@ -126,6 +126,10 @@ pub struct AdapterCall {
     pub arguments: Value,
     pub idempotency_key: Option<String>,
     pub deadline: String,
+    /// Validated answers to the tool's input requests (`inputResponses`, and the
+    /// tool's `requestState` when it sent one) for a continuation attempt.
+    #[serde(default)]
+    pub input: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

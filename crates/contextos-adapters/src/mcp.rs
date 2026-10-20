@@ -15,7 +15,7 @@
 //! | result, `isError` false | confirmed (definitive) |
 //! | result, `isError` true, read-only capability | not applied (definitive) |
 //! | result, `isError` true, effectful capability | unknown (the tool may have partially acted) |
-//! | `input_required` result | unknown, with the input requests in `output` |
+//! | `input_required` result | not applied (definitive): the tool has not run; requests in `output` |
 //! | task result | unknown; the task id becomes the attempt's external reference |
 //! | `tasks/get`: completed | mapped like a finished call |
 //! | `tasks/get`: failed / cancelled | like an error result (unknown for effectful tools) |
@@ -227,10 +227,17 @@ fn task_id(result: &Value) -> Option<String> {
 #[async_trait]
 impl Adapter for McpAdapter {
     async fn invoke(&self, manifest: &CapabilityManifest, call: &AdapterCall) -> AdapterResponse {
-        let body = json!({
+        let mut body = json!({
             "jsonrpc": "2.0", "id": call.attempt_id, "method": "tools/call",
             "params": {"name": manifest.protocol_tool, "arguments": call.arguments, "_meta": self.meta(call)},
         });
+        // A continuation retries the original request, with a new id, plus the
+        // validated answers and the tool's opaque request state.
+        if let Some(input) = call.input.as_ref().and_then(Value::as_object) {
+            for (key, value) in input {
+                body["params"][key] = value.clone();
+            }
+        }
         let response = match self.exchange(manifest, call, &body).await {
             Ok(response) => response,
             Err(outcome) => return outcome,
@@ -238,11 +245,22 @@ impl Adapter for McpAdapter {
         let result = &response["result"];
         let result_type = result["resultType"].as_str().unwrap_or("complete");
         if result_type != "complete" {
-            // input_required or task: the effect is not finished. A task id becomes the
-            // attempt's external reference so reconciliation can query it.
             let mut output = Map::new();
             output.insert("result_type".into(), json!(result_type));
             output.insert("result".into(), result.clone());
+            if result_type == "input_required" {
+                // The request completed without running the tool: it needs answers
+                // first. The continuation is a new attempt of the same operation.
+                return AdapterResponse {
+                    outcome: EffectOutcome::NotApplied,
+                    definitive: true,
+                    output,
+                    external_ref: None,
+                    cost_units: None,
+                };
+            }
+            // A task is still running; its id becomes the attempt's external reference
+            // so reconciliation can query it. Anything else is unknown.
             return AdapterResponse {
                 output,
                 external_ref: if result_type == "task" { task_id(result) } else { None },

@@ -91,7 +91,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 18b Helm chart, release automation | done — hardened chart (non-root, read-only FS, no SA token, PDB, NetworkPolicy, HPA, ServiceMonitor) validated in CI; tag releases build attested binaries, per-crate CycloneDX SBOMs and a keyless-signed image with provenance |
 | 18c OTLP trace export | done — OTLP/HTTP via the server's rustls client (no second TLS stack), W3C trace-context propagation, default `info` logging |
 | 19a Effect reconciliation | done — MCP task handles kept as attempt references, `tasks/get` provider queries, evidenced operator assertions under a `reconcile` scope, kernel-recorded facts, budget settlement, audit |
-| 19b MCP `input_required` continuation (authorized `inputResponses`), PostgreSQL load test, open-source readiness (license, CONTRIBUTING, governance) | next |
+| 19b MCP `input_required` continuation | done — definitive not-applied attempt, persisted single-use requests, re-authorized continuation bound to the same action digest, schema-checked answers, secret-field refusal, audited by digest |
+| 20 PostgreSQL load test in CI, open-source readiness (license decision pending, CONTRIBUTING, governance, issue templates) | next |
 
 ## Non-negotiables carried from the spec
 

@@ -21,6 +21,7 @@
 //! decide everything else.
 
 pub mod admission;
+mod input;
 pub mod manifest;
 pub mod ports;
 mod reconcile;
@@ -42,6 +43,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
 pub use ports::{
     Adapter, AdapterCall, AdapterResponse, ApprovalProvider, AuthorityFacts, AuthorityProvider, Clock,
@@ -284,7 +286,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )
     )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope).await;
+        let outcome = self.dispatch_inner(admission, envelope, None).await;
         let span = tracing::Span::current();
         match &outcome {
             Ok(outcome) => {
@@ -304,10 +306,32 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         outcome
     }
 
+    /// Continues an operation whose tool asked for input (`input_required`). The tool
+    /// call must be the same operation with the same action digest; it is governed
+    /// again end to end, and the answers are validated against the pending requests.
+    #[tracing::instrument(
+        name = "contextos.continue",
+        skip_all,
+        fields(run_id = %admission.run_id, operation_id = %continuation.operation_id, status = tracing::field::Empty)
+    )]
+    pub async fn continue_with_input(
+        &self,
+        admission: &RunAdmission,
+        envelope: &Value,
+        continuation: &Continuation,
+    ) -> Result<DispatchOutcome, GatewayError> {
+        let outcome = self.dispatch_inner(admission, envelope, Some(continuation)).await;
+        if let Ok(outcome) = &outcome {
+            tracing::Span::current().record("status", outcome.report.status.as_str());
+        }
+        outcome
+    }
+
     async fn dispatch_inner(
         &self,
         admission: &RunAdmission,
         envelope: &Value,
+        continuation: Option<&Continuation>,
     ) -> Result<DispatchOutcome, GatewayError> {
         let mut p = Pipeline {
             admission,
@@ -383,6 +407,40 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .as_str()
             .map_or_else(|| tool_call_id.clone(), str::to_owned);
         p.report.operation_id = Some(operation_id.clone());
+        let pending_key = {
+            let key = operation_ledger_key(admission, &operation_id);
+            DocKey::new(&admission.tenant_id, DocKind::PendingInput, key.id)
+        };
+        let mut adapter_input = None;
+        if let Some(continuation) = continuation {
+            if continuation.operation_id != operation_id {
+                return Ok(p.stop(
+                    "rejected",
+                    vec!["operation_binding_mismatch".into()],
+                    "The tool call is not the operation awaiting input.",
+                ));
+            }
+            let pending = self.store.get(&pending_key).await?.map(|r| r.body);
+            let latest = self
+                .store
+                .get(&operation_ledger_key(admission, &operation_id))
+                .await?
+                .and_then(|r| {
+                    r.body["operations"][0]["attempts"].as_array()?.last()?["attempt_id"]
+                        .as_str()
+                        .map(str::to_owned)
+                });
+            match input::validate_continuation(pending.as_ref(), latest.as_deref(), continuation) {
+                Ok((input, digest)) => adapter_input = Some((input, digest)),
+                Err(reason) => {
+                    return Ok(p.stop(
+                        "rejected",
+                        vec![reason.into()],
+                        "The input does not answer the pending request.",
+                    ));
+                }
+            }
+        }
         let mut resource_ids = Vec::new();
         for pointer in &manifest.resource_pointers {
             match pointer_string(&arguments, pointer) {
@@ -703,6 +761,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         p.report.audit_sequences.push(claim_entry.sequence);
+        if let (Some(continuation), Some((_, digest))) = (continuation, &adapter_input) {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "input_response",
+                    json!({"operation_id": operation_id, "attempt_id": attempt_id,
+                        "responder_id": continuation.responder_id, "responses_digest": digest}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+        }
 
         // 6. Dispatch.
         let deadline = add_contract_seconds(&now, manifest.timeout_ms.div_ceil(1000))
@@ -718,6 +789,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             arguments: envelope["args"].clone(),
             idempotency_key: provider_key,
             deadline,
+            input: adapter_input.map(|(input, _)| input),
         };
         let response = tokio::time::timeout(
             Duration::from_millis(manifest.timeout_ms),
@@ -725,6 +797,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )
         .await
         .unwrap_or_else(|_| AdapterResponse::unknown());
+
+        let input_required = response.output.get("result_type").and_then(Value::as_str) == Some("input_required");
+        if input_required {
+            let record = input::pending_record(
+                &operation_id,
+                &attempt_id,
+                response.output.get("result").unwrap_or(&Value::Null),
+                &now,
+            );
+            match self.store.get(&pending_key).await? {
+                None => match self.store.create(&pending_key, &record).await {
+                    Ok(_) => {}
+                    Err(e) if e.is_conflict() => {}
+                    Err(e) => return Err(e.into()),
+                },
+                Some(existing) => {
+                    self.store
+                        .compare_and_swap(&pending_key, existing.revision, &record)
+                        .await?;
+                }
+            }
+        }
 
         // 7. Observe & settle.
         let observed_at = later(self.now(), &now);
@@ -787,6 +881,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             vec![]
         };
         let read_only = manifest.action_risk.effect == contextos_contract::types::ActionEffect::None;
+        if input_required && known {
+            p.report.obligations.push("provide_requested_input".into());
+            return Ok(p.finish(
+                "paused",
+                response.output,
+                Some("The tool needs input before it can run.".into()),
+                vec![],
+            ));
+        }
         Ok(match (response.outcome, known) {
             (EffectOutcome::Confirmed, true) => p.finish(
                 if read_only { "ok" } else { "completed" },

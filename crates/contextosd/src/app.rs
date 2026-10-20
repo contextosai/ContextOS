@@ -11,6 +11,7 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
+//! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
@@ -33,7 +34,8 @@ use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
-    AdmissionError, AdmissionRequest, BudgetLimits, EffectOutcome, Gateway, Resolution, RunAdmission, admit_run,
+    AdmissionError, AdmissionRequest, BudgetLimits, Continuation, EffectOutcome, Gateway, Resolution, RunAdmission,
+    admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -625,6 +627,52 @@ where
     Ok(axum::Json(outcome).into_response())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputBody {
+    tool_call: Value,
+    input_responses: Value,
+}
+
+async fn provide_input<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, operation_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: InputBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "Expected tool_call and input_responses.",
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let continuation = Continuation {
+        operation_id,
+        input_responses: request.input_responses,
+        responder_id: caller.principal_id.clone(),
+    };
+    let outcome = gateway
+        .continue_with_input(&admission, &request.tool_call, &continuation)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "dispatch_unavailable",
+                "Governed dispatch is temporarily unavailable.",
+            )
+        })?;
+    state.metrics.dispatch_outcome(outcome.report.status.as_str());
+    Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -656,6 +704,10 @@ where
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/operations/{operation_id}/input",
+            post(provide_input::<S, L>),
+        )
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/reconcile",
             post(reconcile::<S, L>),
