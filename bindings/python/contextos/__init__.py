@@ -12,9 +12,12 @@ is raised only for unusable input.
 import json
 from typing import Any, Optional
 
-from . import _native
+try:
+    from . import _native
+except ImportError:  # the HTTP client (contextos.client) works without the extension
+    _native = None
 
-__version__ = _native.__version__
+__version__ = getattr(_native, "__version__", "0.1.0")
 
 
 class ContextOSError(Exception):
@@ -28,6 +31,8 @@ class ContextOSError(Exception):
 
 def call(operation: str, payload: Any) -> Any:
     """Runs one kernel operation; see the embed facade for the operation list."""
+    if _native is None:
+        raise ContextOSError("native_unavailable", "the in-process kernel is not built; install the wheel or run maturin develop")
     response = json.loads(_native.call(operation, json.dumps(payload, allow_nan=False)))
     if "error" in response:
         error = response["error"]

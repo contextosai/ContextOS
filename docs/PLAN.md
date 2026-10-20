@@ -100,7 +100,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 24 Executor failover | done — kernel run lifecycle per run, generation-fenced effectful API (re-checked before claim), takeover via suspend/resume, generation forwarded to providers |
 | 25 Run lifecycle | done — complete/fail/cancel via kernel transitions; outstanding effects and children tracked; recursive cancellation with dispatch-stop acknowledgement from the budget ledger |
 | 26 Decisions and evidence | done — verified DecisionRecords with evidence-gate enforcement, replay packets, run evidence bundles, paged audit export |
-| 27 Fold lifecycle reads into dispatch; checkpoint export/resume across deployments; Python/Node client SDKs for the HTTP API | next |
+| 27a Python HTTP client | done — stdlib-only client, typed outcomes, generation fencing, `governed_tool`, end-to-end test in CI |
+| 27b TypeScript client; fold lifecycle reads into dispatch; checkpoint export across deployments | next |
 
 ## Non-negotiables carried from the spec
 

@@ -34,7 +34,39 @@ Embedding gives you deterministic decisions. Durable effect safety — single di
 reconciliation, conserved budgets, the audit chain — needs the stores, which the
 gateway (in-process in Rust, or `contextosd`) provides.
 
-## 2. Run `contextosd`
+## 2. Govern an existing Python agent over HTTP
+
+`contextos.client` is a standard-library-only client for `contextosd`. It holds the
+executor generation for you and turns non-success results into exceptions, so agent
+code cannot mistake a pause or refusal for a result:
+
+```python
+from contextos.client import Client, ToolBlocked, ToolPaused, governed_tool
+
+client = Client("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
+run = client.admit(admission_body)
+
+@governed_tool(run, "adp_payments.issue_refund", approval_mode="destructive",
+               idempotency_key=lambda order_id, **_: f"refund:{order_id}")
+def issue_refund(order_id: str, customer_id: str, amount_minor: int): ...
+
+try:
+    issue_refund("ord_881", "cus_77", 1200)          # dispatched by the gateway
+except ToolPaused as paused:                          # approval, input or unknown outcome
+    ...                                               # wait, answer or reconcile; never blind-retry
+except ToolBlocked as blocked:
+    ...                                               # authority, policy or budget refused it
+run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
+                    tool_calls=[{"tool_call_id": "...", "operation_id": "refund:ord_881"}])
+run.complete()
+```
+
+Register `governed_tool` functions as your framework's tools (LangGraph, OpenAI Agents
+SDK, CrewAI and others accept plain Python callables); the decorated body never runs
+locally. After a crash, `client.attach(...).take_over()` resumes the run and fences the
+old process.
+
+## 3. Run `contextosd`
 
 ```sh
 ctx hash-key            # paste a ≥32-character key; configure only the hash
@@ -197,7 +229,7 @@ resolve; conflicting facts need escalation) or `rejected` with reasons such as
 contradicting assertion. Grant `reconcile` only to operators and automation that verify
 outcomes at the provider.
 
-## 3. Integrate your services
+## 4. Integrate your services
 
 Dispatch needs three fact services you operate (see `crates/contextos-adapters/src/remote.rs`
 for the request/response contracts and `examples/support-refund/dev_services.py` for a
@@ -214,7 +246,7 @@ Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); 
 discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
 HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
 
-## 4. Operate
+## 5. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Python HTTP client (`contextos.client`, standard library only) with typed outcomes,
+  fencing handled, and a `governed_tool` decorator for agent frameworks.
 - `ctx` command line; Python, Node and WebAssembly bindings over one JSON facade.
 
 ### Operations

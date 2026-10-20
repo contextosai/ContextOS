@@ -1,0 +1,291 @@
+"""HTTP client for ``contextosd``: govern an agent's tool calls from Python.
+
+Standard library only. Typical use::
+
+    from contextos.client import Client, governed_tool
+
+    client = Client("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
+    run = client.admit(admission_body)          # holds the executor generation
+    result = run.call_tool("adp_payments.issue_refund",
+                           {"order_id": "ord_881", "amount_minor": 1200},
+                           idempotency_key="refund:ord_881",
+                           approval_mode="destructive",
+                           evidence_refs=["kg:order:ord_881#snapshot"])
+
+    @governed_tool(run, "adp_orders.lookup", approval_mode="read_only")
+    def lookup_order(order_id: str): ...     # body never runs; the gateway dispatches
+
+Results that are not plain success raise typed exceptions, so agent code cannot
+mistake a pause, a refusal or an unknown outcome for a result:
+
+- ``ToolPaused``: approval pending, input required, or the outcome is unknown and
+  must be reconciled (never retry it blindly);
+- ``ToolBlocked``: authority, policy, constraints or budget refused it;
+- ``ToolRejected``: malformed, unsurfaced or incompatible reuse;
+- ``ToolFailed``: the provider definitively did not apply the effect.
+
+The client retries only requests the server did not process (``429``, ``503``),
+honouring ``Retry-After``. It never retries a tool call after a lost response on
+its own: the gateway's operation ledger makes a retry with the same idempotency key
+safe, but deciding to retry is the caller's.
+"""
+
+import functools
+import inspect
+import json
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from typing import Any, Callable, Dict, List, Optional
+
+GENERATION_HEADER = "ContextOS-Executor-Generation"
+
+
+class ContextOSHTTPError(Exception):
+    """The server refused the request (4xx/5xx other than a governed tool result)."""
+
+    def __init__(self, status: int, code: str, message: str, detail: Any = None):
+        super().__init__(f"{status} {code}: {message}")
+        self.status = status
+        self.code = code
+        self.detail = detail
+
+
+class ToolOutcome(Exception):
+    """A governed tool call that did not simply succeed."""
+
+    def __init__(self, result: dict, report: dict):
+        self.result = result
+        self.report = report
+        self.status = result.get("status")
+        self.reason_codes: List[str] = report.get("reason_codes", [])
+        self.obligations: List[str] = report.get("obligations", [])
+        self.operation_id: Optional[str] = report.get("operation_id")
+        super().__init__(f"{self.status}: {', '.join(self.reason_codes) or result.get('error') or ''}")
+
+
+class ToolPaused(ToolOutcome):
+    """Approval pending, input required, or an unknown outcome awaiting reconciliation."""
+
+    @property
+    def input_requests(self) -> Optional[dict]:
+        return (self.result.get("output") or {}).get("result", {}).get("inputRequests")
+
+
+class ToolBlocked(ToolOutcome):
+    """Authority, policy, constraints or budget refused the call."""
+
+
+class ToolRejected(ToolOutcome):
+    """The call was malformed, not surfaced to this run, or reused an operation key."""
+
+
+class ToolFailed(ToolOutcome):
+    """The provider definitively did not apply the effect."""
+
+
+_OUTCOMES = {"paused": ToolPaused, "blocked": ToolBlocked, "rejected": ToolRejected, "failed": ToolFailed}
+
+
+class Client:
+    """A connection to one ``contextosd`` deployment, authenticated as one caller."""
+
+    def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3):
+        self.base_url = base_url.rstrip("/")
+        self._token = token
+        self.timeout = timeout
+        self.max_retries = max_retries
+
+    def __repr__(self) -> str:  # never print the token
+        return f"Client({self.base_url!r})"
+
+    def request(self, method: str, path: str, body: Any = None, generation: Optional[int] = None,
+                query: Optional[Dict[str, Any]] = None) -> Any:
+        url = self.base_url + path
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
+        data = None if body is None else json.dumps(body, allow_nan=False).encode()
+        headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        if generation is not None:
+            headers[GENERATION_HEADER] = str(generation)
+        for attempt in range(self.max_retries + 1):
+            request = urllib.request.Request(url, data=data, method=method, headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = response.read()
+                    return json.loads(payload) if payload else None
+            except urllib.error.HTTPError as error:
+                payload = error.read()
+                try:
+                    decoded = json.loads(payload) if payload else {}
+                except ValueError:
+                    decoded = {}
+                # Not processed: safe to retry after the server's hint.
+                if error.code in (429, 503) and attempt < self.max_retries:
+                    time.sleep(_retry_after(error.headers.get("Retry-After"), attempt))
+                    continue
+                failure = decoded.get("error") if isinstance(decoded, dict) else None
+                if isinstance(failure, dict):
+                    raise ContextOSHTTPError(error.code, failure.get("code", "error"), failure.get("message", ""),
+                                             failure.get("detail")) from None
+                # Lifecycle refusals return their outcome body with 409.
+                raise ContextOSHTTPError(error.code, "refused", json.dumps(decoded), decoded) from None
+        raise AssertionError("unreachable")
+
+    def admit(self, body: dict, principal_chain: Optional[List[dict]] = None) -> "Run":
+        """Admits a run (``POST /v1/runs``) and returns a handle that owns it."""
+        admitted = self.request("POST", "/v1/runs", body)
+        context = body.get("run_context", {})
+        agent = (context.get("agent") or {}).get("agent_id")
+        chain = principal_chain or ([{"kind": "agent", "id": agent}] if agent else [])
+        return Run(self, admitted["run_id"], context.get("trace_id", ""), admitted["executor_generation"], chain,
+                   admitted)
+
+    def attach(self, run_id: str, trace_id: str, principal_chain: List[dict]) -> "Run":
+        """A handle on an existing run, at its current generation (no takeover)."""
+        status = self.request("GET", f"/v1/runs/{_quote(run_id)}")
+        return Run(self, run_id, trace_id, status["executor_generation"], principal_chain, status)
+
+    def audit_entries(self, start: int = 1, page: int = 500):
+        """Yields the tenant's signed audit entries in order."""
+        cursor: Optional[int] = start
+        while cursor is not None:
+            batch = self.request("GET", "/v1/audit/entries", query={"from": cursor, "limit": page})
+            yield from batch["entries"]
+            cursor = batch.get("next")
+
+
+class Run:
+    """One admitted run, held by this executor at ``executor_generation``."""
+
+    def __init__(self, client: Client, run_id: str, trace_id: str, executor_generation: int,
+                 principal_chain: List[dict], admitted: Optional[dict] = None):
+        self.client = client
+        self.run_id = run_id
+        self.trace_id = trace_id
+        self.executor_generation = executor_generation
+        self.principal_chain = principal_chain
+        self.admitted = admitted or {}
+
+    def __repr__(self) -> str:
+        return f"Run({self.run_id!r}, generation={self.executor_generation})"
+
+    def _path(self, suffix: str = "") -> str:
+        return f"/v1/runs/{_quote(self.run_id)}{suffix}"
+
+    def _post(self, suffix: str, body: Any = None) -> Any:
+        return self.client.request("POST", self._path(suffix), body if body is not None else {},
+                                   generation=self.executor_generation)
+
+    def envelope(self, capability_id: str, args: dict, *, approval_mode: str, idempotency_key: Optional[str] = None,
+                 evidence_refs: Optional[List[str]] = None, tool_call_id: Optional[str] = None) -> dict:
+        """The ``contextos.tool_call.v1`` envelope for a call."""
+        return {
+            "envelope_version": "contextos.tool_call.v1",
+            "tool_call_id": tool_call_id or f"tc_{uuid.uuid4().hex}",
+            "run_id": self.run_id, "trace_id": self.trace_id, "capability_id": capability_id, "args": args,
+            "principal_chain": self.principal_chain, "approval_mode_requested": approval_mode,
+            "approval_mode_effective": approval_mode, "approval_mode_highest": approval_mode,
+            "evidence_refs": evidence_refs or [], "idempotency_key": idempotency_key,
+        }
+
+    def call_tool(self, capability_id: str, args: dict, *, approval_mode: str = "read_only",
+                  idempotency_key: Optional[str] = None, evidence_refs: Optional[List[str]] = None,
+                  tool_call_id: Optional[str] = None) -> dict:
+        """Governs and dispatches one tool call; returns its output or raises a ``ToolOutcome``."""
+        envelope = self.envelope(capability_id, args, approval_mode=approval_mode, idempotency_key=idempotency_key,
+                                 evidence_refs=evidence_refs, tool_call_id=tool_call_id)
+        return _outcome(self._post("/tool-calls", envelope))
+
+    def provide_input(self, paused: ToolPaused, envelope: dict, responses: dict) -> dict:
+        """Answers a tool's input requests and continues the same operation."""
+        body = {"tool_call": envelope, "input_responses": responses}
+        return _outcome(self._post(f"/operations/{_quote(paused.operation_id or '')}/input", body))
+
+    def reconcile(self, operation_id: str, *, outcome: Optional[str] = None,
+                  evidence_ref: Optional[dict] = None) -> dict:
+        """Resolves an unknown effect: by provider query, or by asserting ``outcome`` with evidence."""
+        body = {"source": "provider"} if outcome is None else \
+            {"source": "operator", "outcome": outcome, "evidence_ref": evidence_ref}
+        return self._post(f"/operations/{_quote(operation_id)}/reconcile", body)
+
+    def record_decision(self, decision_key: str, status: str, *, decision_version: str = "1",
+                        outcome: Optional[str] = None, tool_calls: Optional[List[dict]] = None, **fields: Any) -> dict:
+        """Records a DecisionRecord; returns ``{"record", "replay_packet"}``."""
+        body = {"decision_key": decision_key, "decision_version": decision_version, "status": status,
+                "tool_calls": tool_calls or [], **fields}
+        if outcome is not None:
+            body["outcome"] = outcome
+        return self._post("/decisions", body)
+
+    def status(self) -> dict:
+        return self.client.request("GET", self._path())
+
+    def take_over(self) -> "Run":
+        """Takes the run over from whichever executor held it; the old one becomes stale."""
+        current = self.status()["executor_generation"]
+        taken = self.client.request("POST", self._path("/takeover"), {"expected_generation": current})
+        self.executor_generation = taken["executor_generation"]
+        return self
+
+    def complete(self) -> dict:
+        return self._post("/complete")
+
+    def fail(self) -> dict:
+        return self._post("/fail")
+
+    def cancel(self) -> dict:
+        return self.client.request("POST", self._path("/cancel"), {})
+
+    def evidence(self) -> dict:
+        return self.client.request("GET", self._path("/evidence"))
+
+
+def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_only",
+                  idempotency_key: Optional[Callable[..., str]] = None,
+                  evidence_refs: Optional[List[str]] = None) -> Callable[[Callable[..., Any]], Callable[..., dict]]:
+    """Turns a tool's signature into a governed call: arguments are bound by name and
+    sent through the gateway; the decorated body never runs locally.
+
+    ``idempotency_key`` derives the operation key from the call's arguments, so a
+    retried agent step maps to the same operation and cannot apply twice.
+    """
+
+    def wrap(function: Callable[..., Any]) -> Callable[..., dict]:
+        signature = inspect.signature(function)
+
+        @functools.wraps(function)
+        def call(*args: Any, **kwargs: Any) -> dict:
+            bound = signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            arguments = dict(bound.arguments)
+            key = idempotency_key(**arguments) if idempotency_key else None
+            return run.call_tool(capability_id, arguments, approval_mode=approval_mode, idempotency_key=key,
+                                 evidence_refs=evidence_refs)
+
+        return call
+
+    return wrap
+
+
+def _outcome(response: dict) -> dict:
+    result, report = response["result"], response["report"]
+    status = result.get("status")
+    if status in ("ok", "completed"):
+        return result.get("output") or {}
+    raise _OUTCOMES.get(status, ToolOutcome)(result, report)
+
+
+def _retry_after(header: Optional[str], attempt: int) -> float:
+    try:
+        return min(float(header), 30.0) if header else min(0.2 * 2 ** attempt, 5.0)
+    except ValueError:
+        return min(0.2 * 2 ** attempt, 5.0)
+
+
+def _quote(segment: str) -> str:
+    return urllib.parse.quote(segment, safe="")

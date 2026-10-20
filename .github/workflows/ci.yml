@@ -61,6 +61,10 @@ jobs:
           cargo build --release -p contextos-py
           cp target/release/lib_native.so bindings/python/contextos/_native.abi3.so
           PYTHONPATH=bindings/python python bindings/python/tests/test_contextos.py
+      - name: Python HTTP client against contextosd
+        run: |
+          cargo build --release -p contextosd
+          PYTHONPATH=bindings/python python bindings/python/tests/test_client.py
   supply-chain:
     runs-on: ubuntu-latest
     steps:
