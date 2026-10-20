@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Rollouts: a candidate takes live traffic only after the server's release gate passes on
+  named runs' replay cases and every open feedback case (`gate_runs`, `acknowledge`).
 - Erasing a run redacts the free text of its operator feedback.
 - `ctx gate --feedback`: the release gate fails while an open correction's replay case is
   missing from the corpus.

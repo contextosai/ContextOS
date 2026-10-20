@@ -2062,7 +2062,7 @@
       "post": {
         "operationId": "set_rollout",
         "summary": "Route a share of a baseline pack's new runs to a candidate pack",
-        "description": "A run asking for the baseline is admitted on the candidate when its routing bucket (hash of tenant and run id; a delegated child uses its parent's) is below `percent`; the run pins that pack and admission reports it as `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also compiled under the candidate off the request path and the governance difference is audited as `shadow_diff`. Audited before it takes effect.",
+        "description": "A run asking for the baseline is admitted on the candidate when its routing bucket (hash of tenant and run id; a delegated child uses its parent's) is below `percent`; the run pins that pack and admission reports it as `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also compiled under the candidate off the request path and the governance difference is audited as `shadow_diff`. Audited before it takes effect. Before `percent > 0`, the release gate runs on the named runs' replay cases plus every open feedback record's, baseline against candidate; a failing, missing or erased case refuses the change (409 `release_gate_failed` with the gate report, or `gate_cases_unavailable`), and the passing gate is recorded with the rollout.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2096,6 +2096,45 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1024
+                  },
+                  "gate_runs": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Runs whose replay cases gate the candidate before percent > 0; every open feedback record's case is added."
+                  },
+                  "acknowledge": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "policy_loosening": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "evidence_gates": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "compile_expansion": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "description": "Widenings the operator accepts, by the release gate's rules (per case or capability)."
                   }
                 }
               }

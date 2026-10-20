@@ -367,7 +367,23 @@ is sticky and reproducible; each run pins the pack it was admitted on, and admis
 reports `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also
 compiled under the candidate off the request path and the governance difference
 (capabilities, policy, evidence gates) is audited as `shadow_diff`: live evidence for
-the next stage that changes no outcome. `POST /v1/rollouts/clear` returns all new runs
+the next stage that changes no outcome.
+
+Before a candidate takes live traffic (`percent > 0`), the server runs the release
+gate itself: the replay cases of the runs named in `gate_runs`, plus the case of every
+open feedback record, compiled under baseline and candidate. A widening fails it unless
+acknowledged per case in `acknowledge` (the same rules as `ctx gate`); a missing or
+erased case refuses the change too (close feedback whose case was erased). The passing
+gate's cases and report digest are audited with the rollout:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/rollouts" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "baseline": "ctxpack.support@5.2.0", "candidate": "ctxpack.support@5.3.0",
+  "percent": 5, "reason": "v5.3 canary", "gate_runs": ["run_8812", "run_9020"],
+  "acknowledge": {"policy_loosening": ["run_8812"]}}'
+```
+
+`POST /v1/rollouts/clear` returns all new runs
 to the baseline; revoking the candidate pack (the kill switch) also stops runs already
 on it.
 

@@ -1906,9 +1906,15 @@ where
             "Baseline and candidate must be different packs of this tenant, percent 0 to 100, with a reason.",
         ));
     }
+    // Live traffic only after the release gate passes on replayed cases.
+    let gate = if change.percent > 0 {
+        Some(rollout_gate(&state, &caller.tenant_id, &change).await?)
+    } else {
+        None
+    };
     let now = dispatch_gateway(&state)?.now();
     let rollout = json!({"baseline": change.baseline, "candidate": change.candidate, "percent": change.percent,
-        "shadow": change.shadow, "reason": change.reason, "by": caller.principal_id, "at": now});
+        "shadow": change.shadow, "reason": change.reason, "by": caller.principal_id, "at": now, "gate": gate});
     state
         .audit
         .append(&caller.tenant_id, "rollout_set", rollout.clone(), &now)
@@ -1923,6 +1929,112 @@ where
     rollout_result(
         crate::rollout::change(state.store.as_ref(), &caller.tenant_id, &change.baseline, Some(rollout)).await,
     )
+}
+
+/// Runs the release gate for a rollout: the named runs' replay cases plus every open
+/// feedback record's, baseline against candidate. Refuses unless it passes.
+async fn rollout_gate<S, L>(
+    state: &Arc<AppState<S, L>>,
+    tenant_id: &str,
+    change: &crate::rollout::RolloutChange,
+) -> Result<Value, ApiError>
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let unavailable = |_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    if change.gate_runs.len() > crate::rollout::MAX_GATE_RUNS {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "rollout_invalid",
+            "Too many gate runs.",
+        ));
+    }
+    let mut runs: Vec<String> = change.gate_runs.clone();
+    let mut obligations = Vec::new();
+    for id in crate::feedback::open_ids(state.store.as_ref(), tenant_id)
+        .await
+        .map_err(feedback_error)?
+        .iter()
+        .take(crate::feedback::MAX_OPEN)
+    {
+        if let Some(record) = state
+            .store
+            .get(&crate::feedback::record_key(tenant_id, id))
+            .await
+            .map_err(unavailable)?
+            .filter(|r| r.body["status"] == "open")
+            && let Some(case) = record.body["replay_obligation"]["case"].as_str()
+        {
+            obligations.push(case.to_owned());
+            runs.push(case.to_owned());
+        }
+    }
+    runs.sort();
+    runs.dedup();
+    if runs.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "gate_cases_required",
+            "Name gate_runs whose replay cases the candidate must pass before it takes live traffic.",
+        ));
+    }
+    let mut cases = Vec::with_capacity(runs.len());
+    let mut unavailable_cases = Vec::new();
+    for run in &runs {
+        let stored = state
+            .store
+            .get(&DocKey::new(tenant_id, DocKind::ReplayCase, run))
+            .await
+            .map_err(unavailable)?
+            .filter(|d| !contextos_gateway::is_erased(&d.body));
+        match stored.and_then(|d| serde_json::from_value::<contextos_kernel::release_gate::ReplayCase>(d.body).ok()) {
+            Some(case) => cases.push(case),
+            None => unavailable_cases.push(run.clone()),
+        }
+    }
+    if !unavailable_cases.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "gate_cases_unavailable",
+            "Some replay cases are missing or erased; close feedback whose case was erased.",
+        )
+        .with_detail(json!({"runs": unavailable_cases})));
+    }
+    let (baseline, candidate) = (
+        state.packs[&change.baseline].compiler.pack().clone(),
+        state.packs[&change.candidate].compiler.pack().clone(),
+    );
+    let acknowledged = change.acknowledge.clone();
+    let report = tokio::task::spawn_blocking(move || {
+        contextos_kernel::release_gate::evaluate_release_gate(&baseline, &candidate, &cases, &acknowledged)
+    })
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "gate_failed",
+            "The release gate failed.",
+        )
+    })?
+    .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "gate_invalid", e))?;
+    let report = serde_json::to_value(&report).unwrap_or(Value::Null);
+    if report["verdict"] != "pass" {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "release_gate_failed",
+            "The candidate fails the release gate on replayed cases.",
+        )
+        .with_detail(report));
+    }
+    Ok(json!({"verdict": "pass", "cases": runs, "feedback_cases": obligations,
+        "report_digest": contextos_contract::canonical::sha256_canonical(&report).unwrap_or_default()}))
 }
 
 #[derive(serde::Deserialize)]

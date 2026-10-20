@@ -33,7 +33,17 @@ pub struct RolloutChange {
     #[serde(default)]
     pub shadow: bool,
     pub reason: String,
+    /// Runs whose replay cases gate the candidate before it takes live traffic
+    /// (`percent > 0`); every open feedback record's replay case is added to them.
+    #[serde(default)]
+    pub gate_runs: Vec<String>,
+    /// Widenings the operator accepts, by the release gate's rules.
+    #[serde(default)]
+    pub acknowledge: contextos_kernel::release_gate::Acknowledgements,
 }
+
+/// Runs named to gate one rollout at most.
+pub const MAX_GATE_RUNS: usize = 200;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RolloutError {

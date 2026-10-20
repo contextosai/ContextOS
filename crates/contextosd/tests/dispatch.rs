@@ -1931,14 +1931,15 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
     let w = world(&ALL_CONTROLS).await;
     let plain = reqwest::Client::new();
     let (baseline, candidate) = ("ctxpack.support@5.2.0", "ctxpack.support@5.3.0");
-    let set = |key: &'static str, percent: u8, shadow: bool| {
+    let set_gated = |key: &'static str, percent: u8, shadow: bool, gate: Value| {
         let (plain, url) = (plain.clone(), format!("{}/v1/rollouts", w.base));
         async move {
-            plain.post(url).bearer_auth(key)
-                .json(&json!({"baseline": baseline, "candidate": candidate, "percent": percent, "shadow": shadow, "reason": "v5.3 canary"}))
-                .send().await.unwrap()
+            let mut body = json!({"baseline": baseline, "candidate": candidate, "percent": percent, "shadow": shadow, "reason": "v5.3 canary"});
+            body.as_object_mut().unwrap().extend(gate.as_object().unwrap().clone());
+            plain.post(url).bearer_auth(key).json(&body).send().await.unwrap()
         }
     };
+    let set = |key: &'static str, percent: u8, shadow: bool| set_gated(key, percent, shadow, json!({}));
     let admit = |run: String| {
         let (plain, url) = (plain.clone(), format!("{}/v1/runs", w.base));
         async move {
@@ -1992,8 +1993,20 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
         "{diff}"
     );
 
+    // Live traffic only through the release gate on replayed cases: none named is
+    // refused; the candidate's dropped approval fails it until acknowledged per case.
+    assert_eq!(set("ops-key", 100, false).await.status(), 422);
+    let failed = set_gated("ops-key", 100, false, json!({"gate_runs": ["run_shadow"]})).await;
+    assert_eq!(failed.status(), 409);
+    let failed: Value = failed.json().await.unwrap();
+    assert_eq!(failed["error"]["code"], "release_gate_failed", "{failed}");
+    let missing = set_gated("ops-key", 100, false, json!({"gate_runs": ["run_nope"]})).await;
+    assert_eq!(missing.status(), 409);
+    let acknowledged = json!({"gate_runs": ["run_shadow"], "acknowledge": {"policy_loosening": ["run_shadow"]}});
+
     // 100%: new runs are admitted on, and pinned to, the candidate.
-    assert_eq!(set("ops-key", 100, false).await.status(), 200);
+    let live = set_gated("ops-key", 100, false, acknowledged.clone()).await;
+    assert_eq!(live.status(), 200);
     let canary = admit("run_canary".into()).await;
     assert_eq!(canary["pack_ref"], candidate);
     assert_eq!(canary["rollout"]["on_candidate"], true);
@@ -2009,7 +2022,7 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
     assert_eq!(evidence["admission"]["pack_ref"], candidate);
 
     // 50%: routing follows the published, sticky bucket of each run.
-    assert_eq!(set("ops-key", 50, false).await.status(), 200);
+    assert_eq!(set_gated("ops-key", 50, false, acknowledged).await.status(), 200);
     let mut on_candidate = 0;
     for i in 0..8 {
         let run = format!("run_split_{i}");
