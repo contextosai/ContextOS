@@ -166,6 +166,41 @@ fn release_gate_fails_unacknowledged_widenings() {
     assert_eq!(code, 0, "{report}");
     let (code, _) = ctx(&["gate", "--baseline", &b, "--candidate", &b, "--cases", &k]);
     assert_eq!(code, 0, "an unchanged pack passes");
+
+    // Open feedback whose replay case is not in the corpus fails the gate.
+    let open = |case: &str| {
+        serde_json::json!({"open": 2, "feedback": [
+            {"feedback_id": "fb_1", "status": "open", "replay_obligation": {"case": "high_value"}},
+            {"feedback_id": "fb_2", "status": "open", "replay_obligation": {"case": case}}]})
+    };
+    let (code, report) = ctx(&[
+        "gate",
+        "--baseline",
+        &b,
+        "--candidate",
+        &b,
+        "--cases",
+        &k,
+        "--feedback",
+        &write("gate_fb_missing.json", &open("run_77")),
+    ]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(
+        report["missing_replay_obligations"],
+        serde_json::json!([{"feedback_id": "fb_2", "case": "run_77"}])
+    );
+    let (code, report) = ctx(&[
+        "gate",
+        "--baseline",
+        &b,
+        "--candidate",
+        &b,
+        "--cases",
+        &k,
+        "--feedback",
+        &write("gate_fb_covered.json", &open("high_value")),
+    ]);
+    assert_eq!(code, 0, "{report}");
 }
 
 #[test]

@@ -115,6 +115,10 @@ enum Command {
         /// Operator acknowledgements: `{capabilities, policy_loosening, evidence_gates}`.
         #[arg(long)]
         acknowledge: Option<PathBuf>,
+        /// Open feedback (`GET /v1/feedback`): the gate fails unless every open
+        /// record's replay obligation is among the cases.
+        #[arg(long)]
+        feedback: Option<PathBuf>,
     },
 }
 
@@ -224,6 +228,7 @@ fn run(command: Command) -> Result<Value, Failure> {
             candidate,
             cases,
             acknowledge,
+            feedback,
         } => {
             use contextos_kernel::release_gate::{Acknowledgements, ReplayCase, evaluate_release_gate};
             let baseline: contextos_contract::types::ContextPack = typed(read(&baseline)?, "baseline")?;
@@ -233,10 +238,37 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Some(path) => typed(read(&path)?, "acknowledgements")?,
                 None => Acknowledgements::default(),
             };
+            // Every open correction's run must be replayed against the candidate.
+            let mut missing: Vec<Value> = Vec::new();
+            if let Some(path) = &feedback {
+                let open = read(path)?;
+                let records = open.get("feedback").cloned().unwrap_or(open);
+                let records = records
+                    .as_array()
+                    .ok_or_else(|| Failure::Usage(format!("{}: not a feedback list", path.display())))?;
+                let names: std::collections::HashSet<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+                for record in records.iter().filter(|r| r["status"] == "open") {
+                    let case = record["replay_obligation"]["case"].as_str().ok_or_else(|| {
+                        Failure::Usage(format!(
+                            "{}: a feedback record has no replay obligation",
+                            path.display()
+                        ))
+                    })?;
+                    if !names.contains(case) {
+                        missing.push(json!({"feedback_id": record["feedback_id"], "case": case}));
+                    }
+                }
+            }
             let report = evaluate_release_gate(&baseline, &candidate, &cases, &acknowledged)
                 .map_err(|e| Failure::Rejected(json!({"error": e})))?;
-            let value = serde_json::to_value(&report).unwrap_or(Value::Null);
-            if report.verdict == "pass" {
+            let mut value = serde_json::to_value(&report).unwrap_or(Value::Null);
+            if feedback.is_some() {
+                value["missing_replay_obligations"] = json!(missing);
+                if !missing.is_empty() {
+                    value["verdict"] = json!("fail");
+                }
+            }
+            if value["verdict"] == "pass" {
                 Ok(value)
             } else {
                 Err(Failure::Rejected(value))

@@ -383,7 +383,10 @@ When a reviewer corrects or overrides an agent, file it against the run
 
 The run's replay case becomes the feedback's replay obligation, so `GET /v1/feedback`
 (open feedback, oldest first) is the corpus a candidate change must pass through
-`ctx gate` and `ctx scorecard-gate`. An operator closes it as `fixed`, `still_failing`,
+`ctx gate` and `ctx scorecard-gate`. Pass it to the release gate with
+`ctx gate … --feedback open-feedback.json`: the gate fails, listing them under
+`missing_replay_obligations`, while any open record's replay case (fetched from
+`GET /v1/runs/{run_id}/replay-case`) is missing from `--cases`. An operator closes it as `fixed`, `still_failing`,
 `invalid` or `superseded` only with an evidence reference (for example the digest of
 the passing gate report): `POST /v1/feedback/{feedback_id}/close`. Filing and closing are
 audited.
