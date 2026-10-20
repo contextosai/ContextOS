@@ -1,13 +1,20 @@
 //! Caller authentication.
 //!
-//! API keys are configured as SHA-256 hashes and compared in constant time. Every
+//! Callers present either an API key or an OIDC-issued JWT as a bearer token. API
+//! keys are configured as SHA-256 hashes and compared in constant time; JWTs are
+//! verified against each issuer's published keys (see [`crate::oidc`]). Every
 //! authenticated caller is bound to exactly one tenant; handlers reject any request
-//! whose tenant differs. Production deployments typically front this with mTLS or
-//! an OIDC-validating proxy; the tenant binding still applies.
+//! whose tenant differs.
+
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
 use crate::config::ApiKey;
+use crate::oidc::{OidcIssuer, authenticate_jwt};
+
+const MAX_API_KEY_BYTES: usize = 512;
+const MAX_JWT_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
@@ -25,6 +32,7 @@ impl Caller {
 #[derive(Debug, Clone)]
 pub struct Authenticator {
     keys: Vec<([u8; 32], Caller)>,
+    issuers: Vec<Arc<OidcIssuer>>,
 }
 
 fn constant_time_eq(a: &[u8; 32], b: &[u8; 32]) -> bool {
@@ -48,13 +56,34 @@ impl Authenticator {
                 ))
             })
             .collect();
-        Self { keys }
+        Self {
+            keys,
+            issuers: Vec::new(),
+        }
     }
 
-    /// Authenticates an `Authorization: Bearer <key>` header value.
+    #[must_use]
+    pub fn with_issuers(mut self, issuers: Vec<Arc<OidcIssuer>>) -> Self {
+        self.issuers = issuers;
+        self
+    }
+
+    pub fn issuers(&self) -> &[Arc<OidcIssuer>] {
+        &self.issuers
+    }
+
+    /// Whether every OIDC issuer has a key set loaded.
+    pub fn ready(&self) -> bool {
+        self.issuers.iter().all(|i| i.ready())
+    }
+
+    /// Authenticates an `Authorization: Bearer <token>` header value.
     pub fn authenticate(&self, header: Option<&str>) -> Option<Caller> {
         let token = header?.strip_prefix("Bearer ")?.trim();
-        if token.is_empty() || token.len() > 512 {
+        if !self.issuers.is_empty() && token.bytes().filter(|b| *b == b'.').count() == 2 {
+            return (token.len() <= MAX_JWT_BYTES).then(|| authenticate_jwt(&self.issuers, token))?;
+        }
+        if token.is_empty() || token.len() > MAX_API_KEY_BYTES {
             return None;
         }
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();

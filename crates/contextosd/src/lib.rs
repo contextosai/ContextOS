@@ -4,6 +4,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod metrics;
+pub mod oidc;
 pub mod runtime;
 
 use std::collections::HashMap;
@@ -74,11 +75,22 @@ where
         )),
         None => None,
     };
+    let development = config.server.mode == config::Mode::Development;
+    let issuers = config
+        .oidc
+        .iter()
+        .map(|c| oidc::OidcIssuer::new(c.clone(), development).map(Arc::new))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        for issuer in &issuers {
+            runtime.spawn(issuer.clone().run_refresh());
+        }
+    }
     Ok(Arc::new(AppState {
         store,
         audit,
         audit_keys: keys,
-        auth: auth::Authenticator::new(&config.api_keys),
+        auth: auth::Authenticator::new(&config.api_keys).with_issuers(issuers),
         metrics: Arc::default(),
         packs,
         support: support_declaration(config),

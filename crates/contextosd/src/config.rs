@@ -141,6 +141,9 @@ pub struct Config {
     pub support: SupportConfig,
     #[serde(default)]
     pub api_keys: Vec<ApiKey>,
+    /// OIDC issuers whose JWTs authenticate callers.
+    #[serde(default)]
+    pub oidc: Vec<crate::oidc::OidcConfig>,
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
@@ -192,6 +195,10 @@ impl Config {
                     "api keys need a tenant, principal and scopes".into(),
                 ));
             }
+        }
+        let development = self.server.mode == Mode::Development;
+        for issuer in &self.oidc {
+            issuer.check(development).map_err(ConfigError::Invalid)?;
         }
         if self.server.max_body_bytes == 0 || self.server.max_body_bytes > 64 * 1024 * 1024 {
             return Err(ConfigError::Invalid("max_body_bytes must be in (0, 64 MiB]".into()));

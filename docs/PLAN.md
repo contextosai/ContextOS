@@ -87,7 +87,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 15 Security hardening | done — threat model (17 threats → controls → tests), property fuzzing of every kernel entry point (80k cases clean), cargo-deny policy, security headers, SECURITY.md |
 | 16 Performance | done — kernel and gateway benchmarks; authorization 161→63 µs; dispatch 1.2→0.74 ms via per-operation ledgers; budget rollover is an open spec decision |
 | 17 Observability, docs, quickstart | done — dispatch tracing spans, HTTP trace layer, runnable quickstart (verified end to end), usage/integration/operations guide |
-| 18 Enterprise auth (OIDC/JWT callers), OTLP export, Helm chart, release automation (signed binaries, SBOM) | next |
+| 18a OIDC/JWT caller authentication | done — background JWKS refresh, rate-limited rotation, issuer-scoped tenants, asymmetric algorithms only, readiness gating |
+| 18b OTLP export, Helm chart, release automation (signed binaries, SBOM) | next |
 
 ## Non-negotiables carried from the spec
 

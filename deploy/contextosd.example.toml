@@ -64,3 +64,10 @@ id = "adp_payments"
 kind = "mcp"                   # stateless MCP 2026-07-28 over Streamable HTTP
 endpoint = "https://payments-mcp.internal.example/mcp"
 token_env = "CONTEXTOS_PAYMENTS_TOKEN"
+
+# Callers may also authenticate with JWTs from your identity provider.
+# [[oidc]]
+# issuer = "https://login.example.com/"
+# audience = "contextosd"
+# jwks_url = "https://login.example.com/.well-known/jwks.json"
+# tenants = ["tenant_acme_prod"]

@@ -3,7 +3,7 @@
 //! | Route | Scope | Purpose |
 //! |---|---|---|
 //! | `GET /healthz` | – | liveness |
-//! | `GET /readyz` | – | store reachable |
+//! | `GET /readyz` | – | store reachable and OIDC keys loaded |
 //! | `GET /metrics` | – | Prometheus metrics |
 //! | `POST /v1/compile` | `compile` | compile a pinned Context Pack for a request |
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
@@ -175,6 +175,9 @@ async fn healthz() -> &'static str {
 }
 
 async fn readyz<S: DocumentStore, L>(State(state): State<Arc<AppState<S, L>>>) -> Response {
+    if !state.auth.ready() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "identity keys not loaded").into_response();
+    }
     let probe = DocKey::new("__contextos", DocKind::ProfileRegistry, "__readiness");
     match state.store.get(&probe).await {
         Ok(_) => (StatusCode::OK, "ready").into_response(),

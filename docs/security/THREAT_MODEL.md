@@ -35,6 +35,7 @@ budgets, and the integrity of the evidence record.
 | T14 | Credential exposure to the model | credentials come from a broker per call, never from model-visible state; `Debug` redacts | adapter tests |
 | T15 | Denial of service | body limits, request timeouts, JsonLogic step/depth limits, canonicalization limits, bounded retries with backoff | ingress/jsonlogic tests |
 | T16 | Supply chain | rustls only, cargo-deny (advisories, licenses, sources), lockfile, distroless non-root image | CI |
+| T18 | Forged or misdirected caller tokens | JWTs verified against the issuer's published asymmetric keys only (no `HS*`/`none`, key-declared algorithm enforced); exact `iss`/`aud`; `exp`/`nbf` with bounded leeway; each issuer may assert only its configured tenants; unknown `kid` refresh rate-limited; HTTPS-only, no-redirect, size-limited JWKS fetch | `oidc.rs` tests (audience, issuer, expiry, foreign tenant, wrong key, algorithm confusion, tampering) |
 | T17 | Panics on hostile input | kernel validators are total; facade isolates panics; property fuzzing | `fuzz.rs` |
 
 ## Residual risks and deployment obligations

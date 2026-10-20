@@ -41,6 +41,25 @@ ctx hash-key            # paste a ≥32-character key; configure only the hash
 contextosd --config deploy/contextosd.example.toml
 ```
 
+Callers authenticate with a bearer token: an API key (configured only as its hash),
+or a JWT from an OIDC issuer you configure:
+
+```toml
+[[oidc]]
+issuer = "https://login.example.com/"        # exact iss
+audience = "contextosd"                      # required aud
+jwks_url = "https://login.example.com/.well-known/jwks.json"
+tenants = ["tenant_acme_prod"]               # tenants this issuer may assert
+tenant_claim = "tenant_id"                   # default
+scope_claim = "scope"                        # default; string or array
+algorithms = ["RS256", "ES256"]              # default; HS* and none are refused
+```
+
+Keys are fetched in the background (every `refresh_seconds`, and soon after an unknown
+`kid`, at most once per 30 s); `/readyz` reports not ready until every issuer's keys
+have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized:
+`compile`, `admit`, `dispatch`, `audit:read`.
+
 | Route | Scope | Use |
 |---|---|---|
 | `POST /v1/compile` | `compile` | Compile a pinned pack |

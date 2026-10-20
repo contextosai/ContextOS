@@ -41,6 +41,8 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 toml = "0.8"
 uuid = { version = "1", features = ["v7"] }
 clap = { version = "4", features = ["derive"] }
+jsonwebtoken = "9"
+ring = "0.17"
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
