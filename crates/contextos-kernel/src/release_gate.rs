@@ -49,15 +49,16 @@ pub struct Acknowledgements {
     /// Capability ids the candidate may newly surface.
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// Allow looser policy verdicts.
+    /// Replay cases (by name) whose policy may loosen: a looser verdict or dropped
+    /// obligations. Named per case so one approval cannot cover unseen ones.
     #[serde(default)]
-    pub policy_loosening: bool,
+    pub policy_loosening: Vec<String>,
     /// Decision keys whose evidence gates may newly allow commit or be removed.
     #[serde(default)]
     pub evidence_gates: Vec<String>,
-    /// Allow the candidate to compile cases the baseline refused.
+    /// Replay cases (by name) the candidate may compile although the baseline refused.
     #[serde(default)]
-    pub compile_expansion: bool,
+    pub compile_expansion: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -198,7 +199,7 @@ pub fn evaluate_release_gate(
                 "compile",
                 "widens",
                 "candidate compiles a case the baseline refused".into(),
-                acknowledged.compile_expansion,
+                acknowledged.compile_expansion.contains(&case.name),
             )),
             (Ok(_), Err(error)) => changes.push(change(
                 "compile",
@@ -222,7 +223,12 @@ pub fn evaluate_release_gate(
                 if c.verdict != b.verdict {
                     let detail = format!("policy {} -> {}", VERDICTS[b.verdict], VERDICTS[c.verdict]);
                     if c.verdict > b.verdict {
-                        changes.push(change("policy", "widens", detail, acknowledged.policy_loosening));
+                        changes.push(change(
+                            "policy",
+                            "widens",
+                            detail,
+                            acknowledged.policy_loosening.contains(&case.name),
+                        ));
                     } else {
                         changes.push(change("policy", "narrows", detail, true));
                     }
@@ -230,7 +236,12 @@ pub fn evaluate_release_gate(
                 let dropped: Vec<&String> = b.obligations.difference(&c.obligations).collect();
                 if !dropped.is_empty() {
                     let detail = format!("obligations no longer required: {dropped:?}");
-                    changes.push(change("policy", "widens", detail, acknowledged.policy_loosening));
+                    changes.push(change(
+                        "policy",
+                        "widens",
+                        detail,
+                        acknowledged.policy_loosening.contains(&case.name),
+                    ));
                 }
                 for (key, allowed) in &b.gates {
                     if !*allowed && !c.gates.contains_key(key) {

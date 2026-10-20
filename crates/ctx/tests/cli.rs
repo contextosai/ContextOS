@@ -148,7 +148,10 @@ fn release_gate_fails_unacknowledged_widenings() {
     let (code, report) = ctx(&["gate", "--baseline", &b, "--candidate", &c, "--cases", &k]);
     assert_eq!(code, 1, "{report}");
     assert_eq!(report["verdict"], "fail");
-    let ack = write("gate_ack.json", &serde_json::json!({"policy_loosening": true}));
+    let ack = write(
+        "gate_ack.json",
+        &serde_json::json!({"policy_loosening": ["high_value"]}),
+    );
     let (code, report) = ctx(&[
         "gate",
         "--baseline",

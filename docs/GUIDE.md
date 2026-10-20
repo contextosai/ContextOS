@@ -339,8 +339,11 @@ Each case is compiled under both packs. The gate **fails** (exit 1) on any
 unacknowledged widening (a capability newly surfaced, the most restrictive policy
 verdict loosening from deny to approval to allow, an evidence gate newly allowing
 commit) and on any case the candidate cannot compile. Narrowings are reported but pass.
-Acknowledgements (`{"capabilities": [...], "policy_loosening": true,
-"evidence_gates": [...]}`) belong to the release owner, never to the candidate pack.
+Acknowledgements belong to the release owner, never to the candidate pack, and each
+names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
+"evidence_gates": ["support.refund.execute"], "policy_loosening": ["<case name>"],
+"compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
+replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
 
 ## 6. Operate
 

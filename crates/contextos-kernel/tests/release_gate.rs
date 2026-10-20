@@ -75,7 +75,7 @@ fn removing_an_approval_gate_is_a_widening_that_needs_acknowledgement() {
         "the low-value path did not change"
     );
     let acknowledged = Acknowledgements {
-        policy_loosening: true,
+        policy_loosening: vec!["high_value_refund".into()],
         ..Acknowledgements::default()
     };
     assert_eq!(gate(&baseline, &candidate, &cases, &acknowledged).verdict, "pass");
@@ -119,7 +119,7 @@ fn a_candidate_that_cannot_compile_a_case_is_a_regression() {
         &candidate,
         &cases,
         &Acknowledgements {
-            policy_loosening: true,
+            policy_loosening: vec!["high_value_refund".into(), "low_value_refund".into()],
             ..Acknowledgements::default()
         },
     );
@@ -230,6 +230,26 @@ fn empty_corpora_and_newly_admitted_cases_fail() {
             .changes
             .iter()
             .any(|c| c.kind == "compile" && c.effect == "widens")
+    );
+    assert_eq!(report.verdict, "fail");
+}
+
+#[test]
+fn a_policy_acknowledgement_covers_only_the_cases_it_names() {
+    let (baseline, cases) = setup();
+    let mut candidate = baseline.clone();
+    // Drop the identity requirement: both cases loosen.
+    candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][0]["then"] = json!({"allow": true});
+    let only_high = Acknowledgements {
+        policy_loosening: vec!["high_value_refund".into()],
+        ..Acknowledgements::default()
+    };
+    let report = gate(&baseline, &candidate, &cases, &only_high);
+    let low = report.cases.iter().find(|c| c.name == "low_value_refund").unwrap();
+    assert!(
+        low.changes.iter().any(|c| c.kind == "policy" && !c.acknowledged),
+        "{:?}",
+        low.changes
     );
     assert_eq!(report.verdict, "fail");
 }
