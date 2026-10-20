@@ -52,6 +52,7 @@ mimalloc = ["dep:mimalloc"]
 otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:opentelemetry-http", "dep:http", "dep:bytes"]
 
 [dev-dependencies]
+jsonschema.workspace = true
 ring.workspace = true
 base64.workspace = true
 

@@ -1241,3 +1241,116 @@ async fn the_api_description_is_served() {
     assert_eq!(doc["openapi"], "3.1.0");
     assert!(doc["paths"]["/v1/runs/{run_id}/tool-calls"]["post"].is_object());
 }
+
+/// Validates `value` against a component schema of the published OpenAPI document,
+/// resolving its references into the normative ContextOS schemas.
+fn conforms(component: &str, value: &Value) {
+    use contextos_contract::schema::SchemaDoc;
+    use std::sync::LazyLock;
+    const OPENAPI_ID: &str = "https://contextosai.com/openapi/contextosd.v1.json";
+    static OPENAPI: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(contextosd::app::OPENAPI).unwrap());
+    static REGISTRY: LazyLock<jsonschema::Registry<'static>> = LazyLock::new(|| {
+        let mut registry = jsonschema::Registry::new().add(OPENAPI_ID, &*OPENAPI).unwrap();
+        for doc in SchemaDoc::ALL {
+            registry = registry.add(doc.id(), doc.document()).unwrap();
+        }
+        registry.prepare().unwrap()
+    });
+    let root = json!({"$ref": format!("{OPENAPI_ID}#/components/schemas/{component}")});
+    let validator = jsonschema::options()
+        .offline()
+        .with_registry(&REGISTRY)
+        .build(&root)
+        .unwrap();
+    let errors: Vec<String> = validator
+        .iter_errors(value)
+        .map(|e| format!("{} {e}", e.instance_path()))
+        .collect();
+    assert!(errors.is_empty(), "{component} does not describe the body: {errors:#?}");
+}
+
+#[tokio::test]
+async fn bodies_match_the_api_description() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(1);
+    let body = run_body("run_shapes", 1200);
+    conforms("AdmissionRequest", &body);
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let admitted: Value = admitted.json().await.unwrap();
+    conforms("Admission", &admitted);
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+
+    let status: Value = http
+        .get(format!("{}/v1/runs/run_shapes", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("RunStatus", &status);
+
+    let call = tool_call("run_shapes", "tc_1", 120_000);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_shapes/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&call)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed", "{}", out["report"]);
+    conforms("ToolCallOutcome", &out);
+    let audit = executor_client(0)
+        .get(format!("{}/v1/audit/entries?from=1&limit=2", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(audit.status(), 200);
+    let page: Value = audit.json().await.unwrap();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 2);
+    conforms("AuditPage", &page);
+
+    let case: Value = http
+        .get(format!("{}/v1/runs/run_shapes/replay-case", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("ReplayCase", &case);
+
+    let missing = http
+        .get(format!("{}/v1/runs/run_absent", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 404);
+    conforms("Error", &missing.json().await.unwrap());
+
+    let taken: Value = http
+        .post(format!("{}/v1/runs/run_shapes/takeover", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"expected_generation": status["executor_generation"]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("Ownership", &taken);
+}

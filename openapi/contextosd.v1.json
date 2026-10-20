@@ -368,25 +368,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "entries",
-                    "next"
-                  ],
-                  "properties": {
-                    "entries": {
-                      "type": "array",
-                      "items": {
-                        "type": "object"
-                      }
-                    },
-                    "next": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    }
-                  }
+                  "$ref": "#/components/schemas/AuditPage"
                 }
               }
             }
@@ -1756,20 +1738,26 @@
           "required_controls": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/ControlRef"
             }
           },
           "policy_refs": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/ArtifactRef"
             }
           },
           "policy_outcomes": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/NormalizedPolicyOutcome"
             }
+          },
+          "features": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/WorkflowFeatureSet"
+          },
+          "compiled": {
+            "$ref": "https://contextosai.com/schemas/compiled-context.v1.schema.json"
           }
         }
       },
@@ -1961,6 +1949,27 @@
           },
           "executor_generation": {
             "type": "integer"
+          }
+        }
+      },
+      "AuditPage": {
+        "type": "object",
+        "required": [
+          "entries",
+          "next"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "next": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         }
       }

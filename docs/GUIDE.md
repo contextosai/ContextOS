@@ -120,7 +120,8 @@ violations report argument paths only, never values.
 The HTTP API is described by OpenAPI 3.1 in `openapi/contextosd.v1.json`, also served
 at `GET /v1/openapi.json`. Request and record bodies reference the normative ContextOS
 JSON Schemas by `$id`, so generated clients in any language validate against the spec
-itself. A test keeps the document and the router in step.
+itself. Tests keep the document and the router in step and validate live request
+and response bodies against it.
 
 ```sh
 ctx hash-key            # paste a ≥32-character key; configure only the hash

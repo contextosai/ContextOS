@@ -599,6 +599,7 @@ dependencies = [
  "contextos-store",
  "hex",
  "http",
+ "jsonschema",
  "jsonwebtoken",
  "mimalloc",
  "opentelemetry",
