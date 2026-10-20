@@ -82,7 +82,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 11b MCP (2026-07-28 stateless) and HTTP adapters | done — effect-knowledge classification, pinned HTTPS endpoints, no redirects, brokered credentials; 9 tests against live local servers |
 | 12a contextosd: config, API-key auth + tenant binding, strict ingress, compile/negotiate/validate/audit, metrics, health, container | done |
 | 12b Run admission + governed dispatch API, remote fact providers, pinned pack policy | done — derived workflow features, end-to-end HTTP tests with remote providers and MCP |
-| 13 `ctx` CLI | next |
+| 13 `ctx` CLI | done — validate, compile, digest, negotiate, manifest, profiles, hash-key; exit codes tested |
+| 14 Python / Node / WASM bindings | next |
 
 ## Non-negotiables carried from the spec
 

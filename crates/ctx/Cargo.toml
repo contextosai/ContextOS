@@ -1,0 +1,21 @@
+[package]
+name = "ctx"
+description = "ContextOS command line: validate, compile, digest and negotiate offline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+contextos-contract.workspace = true
+contextos-kernel.workspace = true
+contextos-gateway.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[lints]
+workspace = true
