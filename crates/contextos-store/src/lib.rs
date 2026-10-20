@@ -45,6 +45,8 @@ pub enum DocKind {
     MemoryRecord,
     /// The inputs a run was admitted with, for release-gate replay.
     ReplayCase,
+    /// The evaluator scores of one decision.
+    RunScore,
 }
 
 impl DocKind {
@@ -64,6 +66,7 @@ impl DocKind {
             DocKind::DecisionLog => "decision_log",
             DocKind::MemoryRecord => "memory_record",
             DocKind::ReplayCase => "replay_case",
+            DocKind::RunScore => "run_score",
         }
     }
 }

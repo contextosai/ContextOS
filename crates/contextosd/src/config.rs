@@ -209,6 +209,17 @@ impl Config {
                     "api keys need a tenant, principal and scopes".into(),
                 ));
             }
+            // A misspelt scope would silently grant nothing; refuse it instead.
+            if let Some(unknown) = key
+                .scopes
+                .iter()
+                .find(|s| !crate::oidc::KNOWN_SCOPES.contains(&s.as_str()))
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "api key for {} has unknown scope {unknown:?}",
+                    key.principal_id
+                )));
+            }
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
@@ -219,5 +230,21 @@ impl Config {
             return Err(ConfigError::Invalid("max_body_bytes must be in (0, 64 MiB]".into()));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXAMPLE: &str = include_str!("../../../deploy/contextosd.example.toml");
+
+    #[test]
+    fn the_example_parses_and_unknown_scopes_are_refused() {
+        Config::parse(EXAMPLE).unwrap();
+        let typo = EXAMPLE.replace(r#""audit:read"]"#, r#""audit_read"]"#);
+        assert_ne!(typo, EXAMPLE);
+        let error = Config::parse(&typo).unwrap_err().to_string();
+        assert!(error.contains("unknown scope"), "{error}");
     }
 }

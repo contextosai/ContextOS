@@ -12,6 +12,7 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out |
 //! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
+//! | `POST /v1/runs/{run_id}/decisions/{record_id}/scores` | `evaluate` (without `admit`/`dispatch`) | an independent evaluator's score of a decision, signed into the audit chain |
 //! | `GET /v1/runs/{run_id}/replay-case` | `audit:read` | the run's admission inputs as a release-gate case (`ctx gate`) |
 //! | `GET /v1/runs/{run_id}/evidence` | `audit:read` | the run's evidence bundle |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
@@ -53,7 +54,7 @@ use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
-    EffectOutcome, Gateway, Ownership, Resolution, RunAdmission, admit_run,
+    EffectOutcome, Gateway, Ownership, Resolution, RunAdmission, ScoreRefusal, ScoreReport, admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1113,6 +1114,62 @@ where
     }
 }
 
+/// Records an evaluator's score of one of the run's decisions. Separation of duties:
+/// a principal that may run or admit agents cannot also score them.
+async fn score_decision<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, record_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("evaluate"))?;
+    if caller.has("dispatch") || caller.has("admit") {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "evaluator_not_independent",
+            "An evaluator cannot also run or admit agents.",
+        ));
+    }
+    let gateway = dispatch_gateway(&state)?;
+    let report: ScoreReport = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid score: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    match gateway
+        .score_decision(&admission, &record_id, &caller.principal_id, &report)
+        .await
+    {
+        Ok(score) => Ok((StatusCode::CREATED, axum::Json(score)).into_response()),
+        Err(refusal) => Err(match refusal {
+            ScoreRefusal::Invalid => {
+                ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "score_invalid", refusal.to_string())
+            }
+            ScoreRefusal::UnknownDecision => {
+                ApiError::new(StatusCode::NOT_FOUND, "decision_not_found", refusal.to_string())
+            }
+            ScoreRefusal::SelfScoring => {
+                ApiError::new(StatusCode::FORBIDDEN, "evaluator_not_independent", refusal.to_string())
+            }
+            ScoreRefusal::AlreadyScored | ScoreRefusal::TooManyScores => {
+                ApiError::new(StatusCode::CONFLICT, "score_exists", refusal.to_string())
+            }
+            ScoreRefusal::Gateway(_) => ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            ),
+        }),
+    }
+}
+
 /// The run's evidence bundle: admission, lifecycle, budget ledger with its archive
 /// chain, and DecisionRecords with replay packets.
 async fn run_evidence<S, L>(
@@ -1355,6 +1412,10 @@ where
         .route("/v1/runs/{run_id}/mcp", post(mcp_endpoint::<S, L>))
         .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
         .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/decisions/{record_id}/scores",
+            post(score_decision::<S, L>),
+        )
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(

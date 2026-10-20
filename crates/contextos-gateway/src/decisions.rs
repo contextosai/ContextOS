@@ -365,7 +365,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 format!("{}/{id}", admission.run_id),
             );
             // A reserved slot whose signing failed has no document.
-            if let Some(entry) = get(key).await? {
+            if let Some(mut entry) = get(key).await? {
+                entry["scores"] = Value::Array(self.decision_scores(admission, id).await?);
                 decisions.push(entry);
             }
         }

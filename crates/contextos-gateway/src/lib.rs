@@ -30,6 +30,7 @@ mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
+mod scores;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +65,7 @@ pub use ports::{
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
+pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 
 /// Receipts at which the run's budget ledger is compacted before the next
 /// reservation (ADR-0003). Keeps the ledger, and its per-effect validation cost, small,

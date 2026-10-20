@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Independent run scoring: evaluators with the `evaluate` scope (and neither `admit`
+  nor `dispatch`) score recorded decisions; cost is measured by the runtime; scores
+  are signed and kept in the evidence bundle. Unknown API-key scopes are refused.
 - OpenAPI 3.1 description of the HTTP API (`openapi/contextosd.v1.json`, served at
   `GET /v1/openapi.json`), kept in step with the router by a test.
 - Release gate for Context Pack changes (`ctx gate`; acknowledgements name the exact

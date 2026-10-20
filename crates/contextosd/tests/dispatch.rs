@@ -195,9 +195,27 @@ async fn world(controls: &[&str]) -> World {
         tenant_id = "{TENANT}"
         principal_id = "svc_orchestrator"
         scopes = ["admit", "dispatch", "reconcile", "audit:read"]
+        [[api_keys]]
+        key_sha256 = "{evaluator}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_quality_judge"
+        scopes = ["evaluate"]
+        [[api_keys]]
+        key_sha256 = "{conflicted}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_self_grader"
+        scopes = ["evaluate", "dispatch"]
+        [[api_keys]]
+        key_sha256 = "{agent_judge}"
+        tenant_id = "{TENANT}"
+        principal_id = "agt_support"
+        scopes = ["evaluate"]
         "#,
         manifest = manifest_path.display(),
-        key = hash_api_key("acme-key")
+        key = hash_api_key("acme-key"),
+        evaluator = hash_api_key("judge-key"),
+        agent_judge = hash_api_key("agent-judge-key"),
+        conflicted = hash_api_key("self-grader-key")
     ))
     .unwrap();
     let vectors: Value = serde_json::from_str(
@@ -1393,4 +1411,140 @@ async fn bodies_match_the_api_description() {
         .await
         .unwrap();
     conforms("Ownership", &taken);
+}
+
+#[tokio::test]
+async fn independent_evaluators_score_decisions() {
+    let w = world(&ALL_CONTROLS).await;
+    let admitted: Value = reqwest::Client::new()
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_scored", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_scored/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_scored", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed");
+    let recorded: Value = http.post(format!("{}/v1/runs/run_scored/decisions", w.base)).bearer_auth("acme-key")
+        .json(&json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
+            "outcome": "refund_issued", "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out["report"]["operation_id"]}]}))
+        .send().await.unwrap().json().await.unwrap();
+    let record_id = recorded["record"]["record_id"].as_str().unwrap();
+    let url = format!("{}/v1/runs/run_scored/decisions/{record_id}/scores", w.base);
+    let score = json!({"evaluator_ref": "evaluator.refund_quality@3", "policy": 1.0, "utility": 0.8, "safety": 1.0});
+    let post = |key: &'static str, body: Value| {
+        let url = url.clone();
+        async move {
+            reqwest::Client::new()
+                .post(url)
+                .bearer_auth(key)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // The executor's own key cannot score, nor can a key that could also run agents.
+    assert_eq!(post("acme-key", score.clone()).await.status(), 403);
+    let conflicted = post("self-grader-key", score.clone()).await;
+    assert_eq!(conflicted.status(), 403);
+    assert_eq!(
+        conflicted.json::<Value>().await.unwrap()["error"]["code"],
+        "evaluator_not_independent"
+    );
+    // The run's own agent cannot grade itself, even with an evaluator-only key.
+    let own = post("agent-judge-key", score.clone()).await;
+    assert_eq!(own.status(), 403);
+    assert_eq!(
+        own.json::<Value>().await.unwrap()["error"]["code"],
+        "evaluator_not_independent"
+    );
+    // Scores are bounded and the evaluator must be named.
+    assert_eq!(
+        post(
+            "judge-key",
+            json!({"evaluator_ref": "e@1", "policy": 1.5, "utility": 0.8, "safety": 1.0})
+        )
+        .await
+        .status(),
+        422
+    );
+    assert_eq!(
+        post(
+            "judge-key",
+            json!({"evaluator_ref": " ", "policy": 1.0, "utility": 0.8, "safety": 1.0})
+        )
+        .await
+        .status(),
+        422
+    );
+    let unknown = reqwest::Client::new()
+        .post(format!("{}/v1/runs/run_scored/decisions/decision_nope/scores", w.base))
+        .bearer_auth("judge-key")
+        .json(&score)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), 404);
+
+    let scored = post("judge-key", score.clone()).await;
+    assert_eq!(scored.status(), 201);
+    let scored: Value = scored.json().await.unwrap();
+    conforms("RunScore", &scored);
+    assert_eq!(scored["score"]["evaluator"], "svc_quality_judge");
+    assert_eq!(scored["score"]["run_id"], "run_scored");
+    assert_eq!(scored["score"]["record_id"], record_id);
+    assert_eq!(
+        scored["score"]["trace_id"],
+        run_body("run_scored", 1200)["run_context"]["trace_id"]
+    );
+    // Cost is measured by the runtime from the signed decision, not reported.
+    assert_eq!(
+        scored["score"]["scorecard"]["cost"],
+        recorded["record"]["budget_usage"]["cost_usd_cents"]
+    );
+    assert!(
+        scored["score"]["scorecard"].get("latency").is_none(),
+        "unmeasured latency is not invented"
+    );
+    // One score per evaluator per decision.
+    assert_eq!(post("judge-key", score).await.status(), 409);
+
+    let evidence: Value = reqwest::Client::new()
+        .get(format!("{}/v1/runs/run_scored/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("EvidenceBundle", &evidence);
+    let scores = &evidence["decisions"][0]["scores"];
+    assert_eq!(scores.as_array().unwrap().len(), 1);
+    assert_eq!(scores[0]["score"]["evaluator_ref"], "evaluator.refund_quality@3");
+    let verified: Value = reqwest::Client::new()
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true, "the score is signed into the chain");
 }

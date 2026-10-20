@@ -1572,6 +1572,83 @@
         ],
         "x-contextos-scope": "admit"
       }
+    },
+    "/v1/runs/{run_id}/decisions/{record_id}/scores": {
+      "post": {
+        "operationId": "score_decision",
+        "summary": "An independent evaluator's score of a decision, signed into the audit chain",
+        "description": "Policy, utility and safety come from the evaluator; cost is measured by the runtime from the signed decision; unmeasured latency is omitted. A caller that also holds `admit` or `dispatch`, or is the run's own agent, is refused (`evaluator_not_independent`). Each evaluator scores a decision once.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded score",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunScore"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "evaluate"
+            ]
+          }
+        ],
+        "x-contextos-scope": "evaluate"
+      }
     }
   },
   "components": {
@@ -1579,7 +1656,7 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read."
+        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only)."
       }
     },
     "parameters": {
@@ -2077,7 +2154,8 @@
               "type": "object",
               "required": [
                 "record",
-                "replay_packet"
+                "replay_packet",
+                "scores"
               ],
               "properties": {
                 "record": {
@@ -2085,6 +2163,12 @@
                 },
                 "replay_packet": {
                   "$ref": "https://contextosai.com/schemas/replay-packet.v1.schema.json"
+                },
+                "scores": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunScore"
+                  }
                 }
               }
             }
@@ -2127,6 +2211,95 @@
             }
           }
         ]
+      },
+      "ScoreReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evaluator_ref",
+          "policy",
+          "utility",
+          "safety"
+        ],
+        "properties": {
+          "evaluator_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The pinned evaluator (suite, rubric or judge) and version"
+          },
+          "policy": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "utility": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "safety": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "RunScore": {
+        "type": "object",
+        "required": [
+          "score",
+          "audit_sequence"
+        ],
+        "properties": {
+          "audit_sequence": {
+            "type": "integer"
+          },
+          "score": {
+            "type": "object",
+            "required": [
+              "score_version",
+              "run_id",
+              "trace_id",
+              "record_id",
+              "evaluator",
+              "evaluator_ref",
+              "scorecard",
+              "scored_at"
+            ],
+            "properties": {
+              "score_version": {
+                "const": "contextos-rs.run_score.v1"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "trace_id": {
+                "type": "string"
+              },
+              "record_id": {
+                "type": "string"
+              },
+              "decision_key": {
+                "type": "string"
+              },
+              "evaluator": {
+                "type": "string",
+                "description": "The scoring principal"
+              },
+              "evaluator_ref": {
+                "type": "string"
+              },
+              "scorecard": {
+                "$ref": "https://contextosai.com/schemas/decision-record.v1.schema.json#/properties/scorecard"
+              },
+              "scored_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -351,7 +351,26 @@ names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
 "compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
 replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
 
-## 6. Operate
+## 6. Score decisions independently
+
+The system under evaluation cannot score itself. Give each evaluator (a rubric
+service, an LLM judge, a human review queue) its own API key or OIDC client with only
+the `evaluate` scope, and have it post to
+`POST /v1/runs/{run_id}/decisions/{record_id}/scores`:
+
+```json
+{"evaluator_ref": "evaluator.refund_quality@3", "policy": 1.0, "utility": 0.8, "safety": 1.0}
+```
+
+A caller that also holds `admit` or `dispatch`, or whose principal is the run's own
+agent, is refused (`evaluator_not_independent`). Policy, utility and safety are the
+evaluator's, in `[0, 1]`; cost is measured by the runtime from the signed decision,
+and latency is left out until wall-clock usage is measured (unknown is never zero).
+Each evaluator scores a decision once. Scores are signed into the audit chain and
+appear beside their decision in the evidence bundle. Unknown scope names in API-key
+configuration are refused at startup.
+
+## 7. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
