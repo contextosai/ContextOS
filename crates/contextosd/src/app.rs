@@ -474,7 +474,14 @@ where
             "The contract is not bound to this run.",
         ));
     }
-    check_recalled_memory(&state, gateway, &caller.tenant_id, &input["deps"]["promoted_memory"]).await?;
+    check_recalled_memory(
+        &state,
+        gateway,
+        &caller.tenant_id,
+        &input["run_context"],
+        &input["deps"]["promoted_memory"],
+    )
+    .await?;
     // The deployment may require the executing model profile (and evaluators) to be
     // pinned, so every decision records what produced it.
     let pinned = input["contract"]["release_refs"].as_array();
@@ -1979,13 +1986,14 @@ where
 
 /// Recalled memory is trusted context, so it must be what the memory governance
 /// promoted: each item names a stored record (`memory_ref` = record id) that is promoted
-/// or corrected, not deleted or past its retention, and whose pinned content digest is
-/// the recalled content's. Without a memory-governance service, recalled memory is
+/// or corrected, not deleted or past its retention, readable by the run's user or agent,
+/// and whose pinned content digest is the recalled content's. Without a memory-governance service, recalled memory is
 /// admitted only where the deployment trusts its caller to supply it.
 async fn check_recalled_memory<S, L>(
     state: &Arc<AppState<S, L>>,
     gateway: &Gateway<S, L>,
     tenant_id: &str,
+    run_context: &Value,
     recalled: &Value,
 ) -> Result<(), ApiError>
 where
@@ -2028,8 +2036,13 @@ where
             _ => None,
         };
         let record = stored.as_ref().map(|s| &s["record"]);
+        // Readership is rechecked at recall: the run reads on behalf of its user, by its agent.
+        let principals = [&run_context["user"]["user_id"], &run_context["agent"]["agent_id"]];
         let current = record.is_some_and(|r| {
             matches!(r["operation"].as_str(), Some("promote" | "correct"))
+                && r["readers"]
+                    .as_array()
+                    .is_some_and(|readers| principals.iter().any(|p| p.as_str().is_some() && readers.contains(p)))
                 && r["retention_expires_at"].as_str().is_some_and(|until| {
                     contextos_contract::validation::compare_contract_times(until, &now)
                         == Some(std::cmp::Ordering::Greater)

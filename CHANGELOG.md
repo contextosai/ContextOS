@@ -54,7 +54,8 @@ First release candidate of the ContextOS runtime.
   exposure, outages), recovery gated on feedback, and a postmortem template.
 - Dispatch returns the policy's obligations with every verdict; an `escalate` verdict is a
   structured hand-off (`policy_escalation`, obligation `escalate`), not a bare block.
-- Recalled memory is verified at admission against promoted, current memory state
+- Recalled memory is verified at admission against promoted, current memory state the
+  run's user or agent may read
   (`memory_unverified`); production without memory governance refuses it unless
   `[guards] trust_supplied_memory`.
 - Capability manifests take an `output_schema`: non-conforming tool output is withheld

@@ -3251,7 +3251,7 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
     let base = serve(router(state, Duration::from_secs(10))).await;
     let content = "customer:cus_77 prefers_communication_channel=email";
     let promoted = |operation: &str, until: &str, text: &str| {
-        json!({"record": {"operation": operation, "retention_expires_at": until,
+        json!({"record": {"operation": operation, "retention_expires_at": until, "readers": ["usr_771"],
             "memory_ref": {"sha256": contextos_contract::canonical::sha256_text(text)}}})
     };
     for (id, record) in [
@@ -3259,6 +3259,11 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
         ("mem_deleted", promoted("delete", "2099-01-01T00:00:00Z", content)),
         ("mem_expired", promoted("promote", "2000-01-01T00:00:00Z", content)),
         ("mem_proposed", promoted("propose", "2099-01-01T00:00:00Z", content)),
+        ("mem_unreadable", {
+            let mut r = promoted("promote", "2099-01-01T00:00:00Z", content);
+            r["record"]["readers"] = json!(["usr_someone_else"]);
+            r
+        }),
     ] {
         store
             .create(&DocKey::new(TENANT, DocKind::MemoryRecord, id), &record)
@@ -3293,6 +3298,7 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
         ("run_mem_expired", "mem_expired", content),
         ("run_mem_proposed", "mem_proposed", content),
         ("run_mem_unknown", "mem_nope", content),
+        ("run_mem_unreadable", "mem_unreadable", content),
     ] {
         let refused = admit(run, memory_ref, text).await;
         assert_eq!(refused.status(), 422, "{run}");

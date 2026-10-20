@@ -319,7 +319,9 @@ minimal, development-only implementation):
   (`GET /v1/memory/{record_id}`). Without the service, memory operations are refused.
   With it, memory a run recalls (`deps.promoted_memory`) is verified at admission: each
   item's `memory_ref` must name a record whose state is `promote` or `correct`, within
-  its retention, and whose `memory_ref.sha256` is the digest of the recalled `content`;
+  its retention, whose `readers` include the run's user or agent (readership is
+  rechecked at recall, not only at promotion), and whose `memory_ref.sha256` is the
+  digest of the recalled `content`;
   anything else is refused (`memory_unverified`). Without the service, production
   refuses recalled memory unless `[guards] trust_supplied_memory = true`.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
