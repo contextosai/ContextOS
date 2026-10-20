@@ -49,6 +49,7 @@ fn refused(reason: &str, now: &str) -> DataFlowDecision {
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Governs one memory lifecycle operation of the run.
+    #[tracing::instrument(name = "contextos.memory", skip_all, fields(tenant_id = %admission.tenant_id, run_id = %admission.run_id, trace_id = %admission.trace_id))]
     pub async fn govern_memory(
         &self,
         admission: &RunAdmission,

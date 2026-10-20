@@ -139,6 +139,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// Verifies, assembles, signs and stores a decision of the run.
     /// `recorded_by` is the authenticated principal reporting it; it may not score it.
+    #[tracing::instrument(name = "contextos.decision", skip_all, fields(tenant_id = %admission.tenant_id, run_id = %admission.run_id, trace_id = %admission.trace_id))]
     pub async fn record_decision(
         &self,
         admission: &RunAdmission,

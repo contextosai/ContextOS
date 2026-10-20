@@ -162,6 +162,7 @@ fn artifact(kind: &str, id: &str, sha256: String) -> Value {
 
 /// Admits a run: negotiates the exact contract, then creates its operation and budget
 /// ledgers. Unsupported required controls block admission.
+#[tracing::instrument(name = "contextos.admit", skip_all)]
 pub async fn admit_run<S: DocumentStore>(
     store: &S,
     request: AdmissionRequest<'_>,

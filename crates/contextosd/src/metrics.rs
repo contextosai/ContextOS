@@ -1,4 +1,8 @@
-//! Prometheus text exposition for request counts and latency.
+//! Prometheus text exposition for request counts and latency, and governance outcomes.
+//!
+//! Labels are bounded: capabilities and packs are the ones pinned at startup (anything
+//! else is counted as `unpinned`), statuses and reason codes are the runtime's own.
+//! Tenants are not a label; per-tenant evidence is in the audit chain.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -20,7 +24,19 @@ struct Histogram {
 pub struct Metrics {
     requests: Mutex<BTreeMap<(String, u16), u64>>,
     latency: Mutex<BTreeMap<String, Histogram>>,
-    outcomes: Mutex<BTreeMap<String, u64>>,
+    outcomes: Mutex<BTreeMap<(String, String), u64>>,
+    refusals: Mutex<BTreeMap<String, u64>>,
+    admissions: Mutex<BTreeMap<String, u64>>,
+    decisions: Mutex<BTreeMap<String, u64>>,
+}
+
+/// One labelled counter: label value to count.
+type Counter = Mutex<BTreeMap<String, u64>>;
+
+fn bump<K: Ord>(map: &Mutex<BTreeMap<K, u64>>, key: K) {
+    if let Ok(mut map) = map.lock() {
+        *map.entry(key).or_default() += 1;
+    }
 }
 
 impl Metrics {
@@ -41,11 +57,25 @@ impl Metrics {
         }
     }
 
-    /// Counts governed dispatch outcomes by tool-result status.
-    pub fn dispatch_outcome(&self, status: &str) {
-        if let Ok(mut outcomes) = self.outcomes.lock() {
-            *outcomes.entry(status.to_owned()).or_default() += 1;
+    /// Counts a governed dispatch by capability (pinned, or `unpinned`) and status, and
+    /// each reason code of one that did not complete.
+    pub fn dispatch_outcome(&self, capability: &str, status: &str, reasons: &[String]) {
+        bump(&self.outcomes, (capability.to_owned(), status.to_owned()));
+        if !matches!(status, "completed" | "ok") {
+            for reason in reasons {
+                bump(&self.refusals, reason.clone());
+            }
         }
+    }
+
+    /// Counts an admitted run by the pack it was admitted on.
+    pub fn admission(&self, pack: &str) {
+        bump(&self.admissions, pack.to_owned());
+    }
+
+    /// Counts a recorded decision by its status.
+    pub fn decision(&self, status: &str) {
+        bump(&self.decisions, status.to_owned());
     }
 
     pub fn render(&self) -> String {
@@ -88,11 +118,42 @@ impl Metrics {
                 );
             }
         }
-        out.push_str("# HELP contextos_dispatch_outcomes_total Governed tool dispatch outcomes by status.\n");
+        out.push_str("# HELP contextos_dispatch_outcomes_total Governed tool dispatches by capability and status.\n");
         out.push_str("# TYPE contextos_dispatch_outcomes_total counter\n");
         if let Ok(outcomes) = self.outcomes.lock() {
-            for (status, n) in outcomes.iter() {
-                let _ = writeln!(out, "contextos_dispatch_outcomes_total{{status=\"{status}\"}} {n}");
+            for ((capability, status), n) in outcomes.iter() {
+                let _ = writeln!(
+                    out,
+                    "contextos_dispatch_outcomes_total{{capability=\"{capability}\",status=\"{status}\"}} {n}"
+                );
+            }
+        }
+        let counters: [(&str, &str, &str, &Counter); 3] = [
+            (
+                "contextos_dispatch_refusals_total",
+                "Reason codes of dispatches that did not complete.",
+                "reason",
+                &self.refusals,
+            ),
+            (
+                "contextos_admissions_total",
+                "Admitted runs by Context Pack release.",
+                "pack",
+                &self.admissions,
+            ),
+            (
+                "contextos_decisions_total",
+                "Recorded decisions by status.",
+                "status",
+                &self.decisions,
+            ),
+        ];
+        for (name, help, label, map) in counters {
+            let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} counter");
+            if let Ok(map) = map.lock() {
+                for (value, n) in map.iter() {
+                    let _ = writeln!(out, "{name}{{{label}=\"{value}\"}} {n}");
+                }
             }
         }
         out

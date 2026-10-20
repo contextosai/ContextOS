@@ -589,9 +589,8 @@ where
         evidence_conflicts: list("evidence_conflicts"),
         promoted_memory: list("promoted_memory"),
     };
-    let compiled = pack
-        .compiler
-        .compile(&request, &run_context, &deps)
+    let compiled = tracing::info_span!("contextos.compile", pack_id = %pack.compiler.pack().pack_meta.pack_id)
+        .in_scope(|| pack.compiler.compile(&request, &run_context, &deps))
         .map_err(|e| match e {
             CompileError::PolicyEval(detail) => ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -745,6 +744,7 @@ where
     {
         shadow_diff(&state, r, &admission.run_id, &input);
     }
+    state.metrics.admission(&selected);
     Ok((
         StatusCode::CREATED,
         axum::Json(json!({
@@ -797,7 +797,15 @@ where
                 "Governed dispatch is temporarily unavailable.",
             )
         })?;
-    state.metrics.dispatch_outcome(outcome.report.status.as_str());
+    let capability = outcome.result["capability_id"].as_str().unwrap_or_default();
+    let capability = if gateway.manifest(capability).is_some() {
+        capability
+    } else {
+        "unpinned"
+    };
+    state
+        .metrics
+        .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
 
@@ -989,7 +997,15 @@ where
                 "Governed dispatch is temporarily unavailable.",
             )
         })?;
-    state.metrics.dispatch_outcome(outcome.report.status.as_str());
+    let capability = outcome.result["capability_id"].as_str().unwrap_or_default();
+    let capability = if gateway.manifest(capability).is_some() {
+        capability
+    } else {
+        "unpinned"
+    };
+    state
+        .metrics
+        .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
 
@@ -1209,7 +1225,16 @@ where
     let admission = load_admission(&state, &caller, &run_id).await?;
     require_owner(gateway, &admission, &headers).await?;
     match gateway.record_decision(&admission, report, &caller.principal_id).await {
-        Ok(recorded) => Ok((StatusCode::CREATED, axum::Json(recorded)).into_response()),
+        Ok(recorded) => {
+            state.metrics.decision(
+                serde_json::to_value(recorded.record.status)
+                    .ok()
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+            );
+            Ok((StatusCode::CREATED, axum::Json(recorded)).into_response())
+        }
         Err(refusal) => Err(match refusal {
             DecisionRefusal::Decision(DecisionError::EvidenceGateOpen(key)) => ApiError::new(
                 StatusCode::CONFLICT,

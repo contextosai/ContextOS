@@ -91,6 +91,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// admission (its compiled context, contract and actor); its limits and deadline
     /// are replaced by the envelope's sub-budget and expiry. The caller persists the
     /// returned admission like any other.
+    #[tracing::instrument(name = "contextos.delegate", skip_all, fields(tenant_id = %parent.tenant_id, parent_run_id = %parent.run_id))]
     pub async fn delegate(
         &self,
         parent: &RunAdmission,

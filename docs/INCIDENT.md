@@ -98,8 +98,10 @@ effects*). Never re-run an effect to find out whether it happened.
 - **What the chain shows**: admissions, authorization decisions with policy and grant
   references, approvals and their redemption, dispatches and effect observations,
   revocations, rollouts and their gate results, erasures, feedback, key rotations.
-- **Metrics** (`/metrics`): `contextos_dispatch_outcomes_total{status}` and request
-  rates and latencies by route show onset and blast radius.
+- **Metrics** (`/metrics`): `contextos_dispatch_outcomes_total{capability,status}`,
+  `contextos_dispatch_refusals_total{reason}` (e.g. a spike of `revoked_capability`
+  confirms containment), `contextos_admissions_total{pack}`, and request rates and
+  latencies by route show onset and blast radius.
 
 ## Specific incidents
 

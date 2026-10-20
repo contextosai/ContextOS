@@ -408,7 +408,16 @@ async fn admitted_run_dispatches_governed_effects() {
         .text()
         .await
         .unwrap();
-    assert!(metrics.contains(r#"contextos_dispatch_outcomes_total{status="completed"} 1"#));
+    assert!(
+        metrics.contains(
+            r#"contextos_dispatch_outcomes_total{capability="adp_payments.issue_refund",status="completed"} 1"#
+        ),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains(r#"contextos_admissions_total{pack="ctxpack.support@5.2.0"}"#),
+        "{metrics}"
+    );
 
     let missing = http
         .post(format!("{}/v1/runs/run_nope/tool-calls", w.base))

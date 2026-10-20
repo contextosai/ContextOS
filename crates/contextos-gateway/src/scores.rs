@@ -63,6 +63,7 @@ const MAX_ATTEMPTS: usize = 8;
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Records `evaluator`'s score of decision `record_id` of the run.
+    #[tracing::instrument(name = "contextos.score", skip_all, fields(tenant_id = %admission.tenant_id, run_id = %admission.run_id, trace_id = %admission.trace_id))]
     pub async fn score_decision(
         &self,
         admission: &RunAdmission,

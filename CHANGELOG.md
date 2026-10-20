@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Metrics by capability, refusal reason, pack and decision status (bounded labels); spans
+  for compile, admission, delegation, decisions, scores, memory and erasure.
+  `contextos_dispatch_outcomes_total` gains a `capability` label.
 - `docs/INCIDENT.md`: roles, severity matrix, containment with the kill switch, evidence
   collection, specific incidents (key compromise, failed verification, injection, data
   exposure, outages), recovery gated on feedback, and a postmortem template.

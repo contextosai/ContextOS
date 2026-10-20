@@ -702,9 +702,18 @@ For incidents (containment with the kill switch, evidence, recovery, postmortems
   OTLP/HTTP. A caller's W3C `traceparent` becomes the parent of the request span, so
   each governed dispatch appears inside the agent's distributed trace. Build with
   `--no-default-features` to leave the exporter out entirely.
-- **Metrics:** `contextos_http_requests_total`, `contextos_http_request_duration_ms`,
-  `contextos_dispatch_outcomes_total{status}`. Logs are JSON with a `contextos.dispatch`
-  span per tool call (run, operation, capability, digest, status, reasons).
+- **Metrics:** `contextos_http_requests_total{route,status}`,
+  `contextos_http_request_duration_ms{route}`,
+  `contextos_dispatch_outcomes_total{capability,status}`,
+  `contextos_dispatch_refusals_total{reason}`, `contextos_admissions_total{pack}` and
+  `contextos_decisions_total{status}`. Labels are bounded: capabilities and packs are
+  those pinned at startup (anything else counts as `unpinned`); tenants are not a label
+  (per-tenant evidence is in the audit chain).
+- **Spans:** `http.request`, with `contextos.compile`, `contextos.admit`,
+  `contextos.delegate`, `contextos.dispatch` (run, operation, capability, digest,
+  status, reasons), `contextos.continue`, `contextos.reconcile`, `contextos.decision`,
+  `contextos.score`, `contextos.memory` and `contextos.erase` inside it, each carrying the
+  tenant, run and trace ids. Logs are JSON with the same spans.
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).

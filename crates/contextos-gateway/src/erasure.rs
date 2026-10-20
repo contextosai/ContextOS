@@ -68,6 +68,7 @@ pub fn is_erased(body: &Value) -> bool {
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Erases the run's personal content. Idempotent: an erased document stays erased.
+    #[tracing::instrument(name = "contextos.erase", skip_all, fields(tenant_id = %admission.tenant_id, run_id = %admission.run_id, trace_id = %admission.trace_id))]
     pub async fn erase_run(
         &self,
         admission: &RunAdmission,
