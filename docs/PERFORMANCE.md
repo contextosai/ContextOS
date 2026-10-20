@@ -25,7 +25,7 @@ CONTEXTOS_LOAD_REPLICAS=3 CONTEXTOS_LOAD_AGENTS=64 CONTEXTOS_LOAD_RUNS=40 \
 |---|---|
 | 3 replicas, 64 agents | ~2,300 runs/s (admission + effect), ~4,700 requests/s, p50 10 ms, p99 52 ms; admission p50 5.6 ms |
 | PostgreSQL (local socket), 1 replica, 64 agents | ~1,750 runs/s, ~3,500 requests/s, p50 17 ms, p99 51 ms; admission p50 14 ms |
-| PostgreSQL (local socket), 3 replicas, 64 agents | ~1,300 runs/s, ~2,600 requests/s, p50 16 ms, p99 103 ms |
+| PostgreSQL (local socket), 3 replicas, 64 agents | ~1,530 runs/s, ~3,060 requests/s, p50 16 ms, p99 71 ms |
 
 The test asserts what matters at scale: every effect reaches the provider exactly
 once, and one tenant's audit chain written by every replica verifies end to end. The
@@ -43,7 +43,10 @@ chain is a serialization point: group commit batches a tenant's appends within a
 process, but replicas appending to the same chain contend on its head. Replicas add
 throughput across tenants (whose chains are independent) and add availability; a single
 very hot tenant scales with one replica's group commit, so route a tenant's traffic
-with affinity when it dominates load.
+with affinity when it dominates load. Losing writers back off on the database's scale
+(jittered, 0.4 to 3.4 ms) rather than in milliseconds-doubling steps; that raised
+three-replica throughput on one tenant from ~1,380 to ~1,530 runs/s and cut p99 from
+~95 to ~71 ms.
 
 Profiling this test first showed the load generator itself dominating: each request
 body was built by re-reading and re-parsing a 1.3 MB vector file. Parsing it once

@@ -216,8 +216,16 @@ impl<L: AppendLog> AuditWriter<L> {
                 // Another process appended. The first retry just re-reads the head (the
                 // cache was stale); repeated losses back off, bounded.
                 if attempt > 1 {
-                    let millis = 1_u64 << attempt.min(6);
-                    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+                    // Database round trips are sub-millisecond: back off on that scale,
+                    // jittered so contending replicas do not retry in lockstep.
+                    let jitter = u64::from(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.subsec_nanos())
+                            % 200,
+                    );
+                    let micros = (100_u64 << attempt.min(5)) + jitter;
+                    tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
                 }
                 *head = Head::Unknown;
             }
