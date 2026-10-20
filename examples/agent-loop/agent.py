@@ -48,13 +48,24 @@ def critic(order: dict, refund_amount: int) -> tuple:
     return True, "damaged delivery, refund within order amount"
 
 
+def model_call(run, tokens: int) -> None:
+    """Every model call spends the run's budget. A real agent passes the reservation id to
+    its LLM gateway, which meters the call (`meter` scope); settling it ourselves charges
+    the whole reservation."""
+    reservation = run.reserve_usage("model_call", tokens=tokens)
+    run.settle_usage(reservation)
+
+
 def main() -> int:
     client = Client(os.environ.get("CONTEXTOS_URL", "http://127.0.0.1:8080"), token=os.environ["CONTEXTOS_TOKEN"])
     run_id = f"run_agent_{int(time.time() * 1000)}"
     parent_body = admission_for(run_id)
     run = client.admit(parent_body)
     print(f"admitted {run.run_id} (executor generation {run.executor_generation})")
+    model_call(run, tokens=800)
     steps = plan("Refund the damaged order ord_881")
+    revision = run.checkpoint({"plan": steps, "step": 0}, 0)["revision"]
+    print(f"planned {len(steps)} steps; checkpoint revision {revision}")
 
     # Delegate research to a read-only lane: it can read the order, never act.
     research = steps[0]
@@ -90,7 +101,12 @@ def main() -> int:
     # Critic, then the governed effect.
     refund = steps[1]
     amount = order["amount_minor"]
+    model_call(run, tokens=400)
     ok, why = critic(order, amount)
+    # Checkpoint after every Critic verdict, so a takeover resumes here.
+    revision = run.checkpoint({"plan": steps, "step": 1, "verdict": "accept" if ok else "reject", "why": why},
+                              revision)["revision"]
+    print(f"critic: {'accept' if ok else 'reject'} ({why}); checkpoint revision {revision}")
     if not ok:
         run.record_decision("support.refund.execute", "REJECTED", rationale={"strategy": why})
         run.complete()
