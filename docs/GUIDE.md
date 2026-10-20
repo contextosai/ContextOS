@@ -586,8 +586,9 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
   key `GET /v1/audit/keys` published, and when it stopped signing), so entries it
   signed keep verifying and stay published. A retired key verifies only entries emitted
   up to `retired_at`, so if it later leaks it cannot sign new history. The rotation
-  is recorded in each tenant's chain: the first entry a new key signs is
-  `signing_key_rotated` (`{from_kid, to_kid}`);
+  is recorded once in each tenant's chain: the first entry a new key signs after one a
+  retired key signed is `signing_key_rotated` (`{from_kid, to_kid}`). During a rolling
+  rotation, set `retired_at` after the last old replica stops;
   give independent verifiers the new key before switching writers.
 - **Overload protection:** `[limits]` caps concurrent requests per instance
   (`max_in_flight`, default 4096; beyond it, `503` with `Retry-After`), request rate
