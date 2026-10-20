@@ -4,10 +4,12 @@
 //! The supported protocol is the HashiCorp Vault Transit secrets engine (also served by
 //! OpenBao and compatible gateways in front of cloud KMSs) with an `ed25519` key:
 //!
-//! - at startup, `GET {url}/v1/transit/keys/{key}` gives the latest key version's
-//!   public key, which every returned signature is checked against;
+//! - at startup, `GET {url}/v1/transit/keys/{key}` gives the pinned key version's
+//!   public key, which must equal the configured `public_key`; every returned
+//!   signature is checked against it;
 //! - each group commit signs all its record hashes with one
-//!   `POST {url}/v1/transit/sign/{key}` using `batch_input`.
+//!   `POST {url}/v1/transit/sign/{key}` using `batch_input` and the pinned
+//!   `key_version`, and each signature must carry that version's `vault:vN:` prefix.
 //!
 //! The token comes from an environment variable and is sent only to the configured
 //! URL. A signer that fails, or returns a signature that does not verify, fails the
@@ -98,8 +100,8 @@ impl RemoteSigner for VaultTransit {
     }
 }
 
-/// Builds the audit signer for a Vault Transit key: reads the key's latest public key
-/// and returns a signer that signs remotely.
+/// Builds the audit signer for a Vault Transit key: checks the pinned version's public
+/// key against the configured one and returns a signer that signs remotely.
 pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str, development: bool) -> Result<AuditSigner, String> {
     if config.kind != "vault_transit" {
         return Err(format!(
@@ -138,13 +140,13 @@ pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str, development:
     if key["data"]["type"] != "ed25519" {
         return Err(format!("the Transit key {} must be of type ed25519", config.key_name));
     }
-    let latest = config.key_version.to_string();
-    let public = key["data"]["keys"][&latest]["public_key"]
+    let version = config.key_version.to_string();
+    let public = key["data"]["keys"][&version]["public_key"]
         .as_str()
         .and_then(|k| STD.decode(k).ok())
         .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
         .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
-        .ok_or_else(|| format!("the KMS has no Ed25519 public key for version {latest}"))?;
+        .ok_or_else(|| format!("the KMS has no Ed25519 public key for version {version}"))?;
     if public != pinned {
         return Err("the KMS public key does not match [audit.kms] public_key".into());
     }
