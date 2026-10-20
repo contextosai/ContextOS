@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 contextos-contract = { path = "crates/contextos-contract" }
+contextos-policy = { path = "crates/contextos-policy" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11"
