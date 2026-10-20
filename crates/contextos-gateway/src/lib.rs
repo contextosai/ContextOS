@@ -25,6 +25,7 @@ mod checkpoints;
 mod decisions;
 mod delegation;
 mod erasure;
+mod escalation;
 mod input;
 mod lifecycle;
 mod loop_guard;
@@ -62,6 +63,7 @@ pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use erasure::{ErasureError, is_erased};
+pub use escalation::EscalationError;
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
@@ -217,6 +219,8 @@ struct Pipeline<'a> {
     risk_tags: Vec<String>,
     /// The authorization decision the result rests on.
     policy_decision_id: Option<String>,
+    /// The escalation opened for a call policy escalated.
+    escalation_id: Option<String>,
 }
 
 impl Pipeline<'_> {
@@ -238,6 +242,9 @@ impl Pipeline<'_> {
         }
         if let Some(id) = &self.report.approval_request_id {
             metadata.insert("approval_request_id".into(), json!(id));
+        }
+        if let Some(id) = &self.escalation_id {
+            metadata.insert("escalation_id".into(), json!(id));
         }
         // Tool output is evidence, never instructions: it cannot grant authority.
         metadata.insert("instruction_treatment".into(), json!("data_only"));
@@ -480,6 +487,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             started: std::time::Instant::now(),
             risk_tags: Vec::new(),
             policy_decision_id: None,
+            escalation_id: None,
         };
 
         // 0. Fence: only the run's current executor may start work.
@@ -883,6 +891,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 if !p.report.obligations.iter().any(|o| o == "escalate") {
                     p.report.obligations.push("escalate".into());
                 }
+                let facts = json!({"operation_id": operation_id, "capability_id": manifest.capability_id,
+                    "action_digest": action_digest, "policy_decision_id": decision_id,
+                    "reason_codes": authorization.decision.reason_codes});
+                p.escalation_id = Some(self.open_escalation(admission, facts).await?);
                 return Ok(p.stop(
                     "blocked",
                     vec!["policy_escalation".into()],

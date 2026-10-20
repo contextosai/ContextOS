@@ -19,6 +19,8 @@
 //! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
 //! | `POST /v1/rollouts/clear` | `control` | return all of a baseline's new runs to it |
 //! | `POST /v1/runs/{run_id}/feedback` | `evaluate` (independent) | file an operator correction or override, with the run's replay case as obligation |
+//! | `GET /v1/escalations` | `audit:read` | the tenant's open policy escalations, oldest first |
+//! | `POST /v1/escalations/{escalation_id}/resolve` | `control` | record how a human resolved an escalation (`handled`/`dismissed`); grants nothing |
 //! | `GET /v1/feedback` | `audit:read` | the tenant's open feedback (the replay corpus a change must pass) |
 //! | `POST /v1/feedback/{feedback_id}/close` | `control` | close feedback as fixed/still_failing/invalid/superseded, with evidence |
 //! | `POST /v1/conformance/assess` | `audit:read` | assess a conformance report for this deployment against configured trust anchors; audited |
@@ -2058,6 +2060,93 @@ where
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveEscalation {
+    resolution: String,
+    reason: String,
+}
+
+/// The tenant's open policy escalations, oldest first.
+async fn list_escalations<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Query(query): Query<FeedbackQuery>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let open = gateway
+        .open_escalations(&caller.tenant_id, query.limit.unwrap_or(500).clamp(1, 1000))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?;
+    Ok(axum::Json(json!({"open": open.len(), "escalations": open})).into_response())
+}
+
+/// Records how a human resolved an escalation (operators only).
+async fn resolve_escalation<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(escalation_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    use contextos_gateway::EscalationError;
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: ResolveEscalation = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid resolution: {e}"),
+        )
+    })?;
+    match gateway
+        .resolve_escalation(
+            &caller.tenant_id,
+            &escalation_id,
+            &caller.principal_id,
+            &request.resolution,
+            &request.reason,
+        )
+        .await
+    {
+        Ok(resolved) => Ok(axum::Json(resolved).into_response()),
+        Err(EscalationError::Invalid) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "escalation_invalid",
+            "Resolution must be handled or dismissed, with a reason.",
+        )),
+        Err(EscalationError::NotFound) => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "escalation_not_found",
+            "No such escalation.",
+        )),
+        Err(EscalationError::Resolved) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "escalation_resolved",
+            "The escalation is already resolved.",
+        )),
+        Err(EscalationError::Gateway(_)) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store or audit log is unavailable.",
+        )),
+    }
+}
+
 /// Runs the release gate for a rollout: the named runs' replay cases plus every open
 /// feedback record's, baseline against candidate. Refuses unless it passes.
 async fn rollout_gate<S, L>(
@@ -2787,6 +2876,11 @@ where
         .route("/v1/conformance/assess", post(assess_conformance::<S, L>))
         .route("/v1/runs/{run_id}/feedback", post(file_feedback::<S, L>))
         .route("/v1/feedback", get(list_feedback::<S, L>))
+        .route("/v1/escalations", get(list_escalations::<S, L>))
+        .route(
+            "/v1/escalations/{escalation_id}/resolve",
+            post(resolve_escalation::<S, L>),
+        )
         .route("/v1/feedback/{feedback_id}/close", post(close_feedback::<S, L>))
         .route("/v1/rollouts", get(list_rollouts::<S, L>).post(set_rollout::<S, L>))
         .route("/v1/rollouts/clear", post(clear_rollout::<S, L>))

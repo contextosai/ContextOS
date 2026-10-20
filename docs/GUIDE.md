@@ -541,6 +541,17 @@ Each evaluator scores a decision once. Scores are signed into the audit chain an
 appear beside their decision in the evidence bundle. Unknown scope names in API-key
 configuration are refused at startup.
 
+### Escalations
+
+When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation
+`escalate`) and an escalation is opened, one per operation, audited as
+`escalation_opened`; the result names it in `metadata.escalation_id`. Route it to a
+human from `GET /v1/escalations` (`audit:read`). When they have dealt with it, an
+operator records the outcome, `handled` or `dismissed`, with a reason:
+`POST /v1/escalations/{escalation_id}/resolve` (`control`, audited once). Resolving
+grants nothing: if the human decides the action should go ahead, it is retried and
+goes through policy and approvals like any other call.
+
 ## 8. Kill switch
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,

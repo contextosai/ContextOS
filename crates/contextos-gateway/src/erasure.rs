@@ -222,7 +222,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Adds `id` to the index; false when the index is full or stayed contended.
-    async fn note_in_index(&self, key: DocKey, id: &str, max: usize) -> Result<bool, GatewayError> {
+    pub(crate) async fn note_in_index(&self, key: DocKey, id: &str, max: usize) -> Result<bool, GatewayError> {
         for _ in 0..8 {
             let current = self.store.get(&key).await?;
             let mut keys = current

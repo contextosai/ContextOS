@@ -2927,6 +2927,168 @@
         ],
         "x-contextos-scope": "control"
       }
+    },
+    "/v1/escalations": {
+      "get": {
+        "operationId": "list_escalations",
+        "summary": "The tenant's open policy escalations, oldest first",
+        "description": "Opened when policy escalates a tool call (one per operation, audited as `escalation_opened`); the blocked call's result names it in `metadata.escalation_id`.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open escalations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "open",
+                    "escalations"
+                  ],
+                  "properties": {
+                    "open": {
+                      "type": "integer"
+                    },
+                    "escalations": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Escalation"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/escalations/{escalation_id}/resolve": {
+      "post": {
+        "operationId": "resolve_escalation",
+        "summary": "Record how a human resolved an escalation",
+        "description": "Once, audited as `escalation_resolved`. Grants nothing: a retried call still goes through policy and approvals.",
+        "parameters": [
+          {
+            "name": "escalation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "resolution",
+                  "reason"
+                ],
+                "properties": {
+                  "resolution": {
+                    "enum": [
+                      "handled",
+                      "dismissed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Escalation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {
@@ -4202,6 +4364,93 @@
           "sha256": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      },
+      "Escalation": {
+        "type": "object",
+        "required": [
+          "escalation_id",
+          "tenant_id",
+          "run_id",
+          "trace_id",
+          "operation_id",
+          "capability_id",
+          "opened_at",
+          "status"
+        ],
+        "properties": {
+          "escalation_id": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "action_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "policy_decision_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved"
+            ]
+          },
+          "resolution": {
+            "type": "object",
+            "required": [
+              "outcome",
+              "reason",
+              "by",
+              "at"
+            ],
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "handled",
+                  "dismissed"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              }
+            }
           }
         }
       }

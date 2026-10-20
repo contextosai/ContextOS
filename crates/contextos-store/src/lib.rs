@@ -57,6 +57,8 @@ pub enum DocKind {
     LoopGuard,
     /// Operator feedback records and the tenant's open index (improvement loop).
     Feedback,
+    /// Policy escalations awaiting a human, and the tenant's open index.
+    Escalation,
 }
 
 impl DocKind {
@@ -82,6 +84,7 @@ impl DocKind {
             DocKind::Rollouts => "rollouts",
             DocKind::LoopGuard => "loop_guard",
             DocKind::Feedback => "feedback",
+            DocKind::Escalation => "escalation",
         }
     }
 }

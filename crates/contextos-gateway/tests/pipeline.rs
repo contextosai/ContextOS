@@ -1882,7 +1882,11 @@ async fn output_outside_the_reviewed_schema_is_withheld_but_the_effect_stands() 
 #[tokio::test]
 async fn escalation_and_policy_obligations_reach_the_orchestrator() {
     let h = harness("escalate", Behavior::Confirm).await;
-    let out = h.gateway.dispatch(&h.admission, &call("tc_1", None)).await.unwrap();
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("esc_op")))
+        .await
+        .unwrap();
     assert_eq!(out.result["status"], "blocked");
     assert!(
         out.report.reason_codes.contains(&"policy_escalation".to_owned()),
@@ -1895,6 +1899,50 @@ async fn escalation_and_policy_obligations_reach_the_orchestrator() {
         "the rule's own obligation is kept"
     );
     assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+
+    // The hand-off is tracked: one open escalation per operation, resolved once by a human.
+    let id = out.result["metadata"]["escalation_id"].as_str().unwrap().to_owned();
+    let again = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_2", Some("esc_op")))
+        .await
+        .unwrap();
+    assert_eq!(
+        again.result["metadata"]["escalation_id"],
+        id.as_str(),
+        "a retry does not open another"
+    );
+    let open = h.gateway.open_escalations(TENANT, 100).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0]["capability_id"], "adp_payments.issue_refund");
+    assert_eq!(open[0]["operation_id"], "esc_op");
+    assert!(matches!(
+        h.gateway
+            .resolve_escalation(TENANT, &id, "ops", "approved", "looks fine")
+            .await,
+        Err(contextos_gateway::EscalationError::Invalid)
+    ));
+    let resolved = h
+        .gateway
+        .resolve_escalation(TENANT, &id, "ops", "handled", "refund reviewed by finance")
+        .await
+        .unwrap();
+    assert_eq!(resolved["resolution"]["by"], "ops");
+    assert!(matches!(
+        h.gateway
+            .resolve_escalation(TENANT, &id, "ops", "handled", "again")
+            .await,
+        Err(contextos_gateway::EscalationError::Resolved)
+    ));
+    assert!(h.gateway.open_escalations(TENANT, 100).await.unwrap().is_empty());
+    // Resolving grants nothing: a call is still escalated by policy.
+    let after = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_3", Some("esc_op_2")))
+        .await
+        .unwrap();
+    assert_eq!(after.result["status"], "blocked");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 
     // An allowed call carries the policy's obligations too.
     let h = harness("allow", Behavior::Confirm).await;
