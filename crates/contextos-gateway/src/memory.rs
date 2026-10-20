@@ -26,6 +26,9 @@ pub trait MemoryPolicyProvider: Send + Sync {
     async fn memory_context(&self, admission: &RunAdmission, record: &Value) -> Result<Value, PortError>;
 }
 
+/// Fields fixed when a memory record is first created.
+const IDENTITY: [&str; 4] = ["tenant_id", "owner_id", "namespace", "memory_ref"];
+
 fn refused(reason: &str, now: &str) -> DataFlowDecision {
     DataFlowDecision {
         allowed: false,
@@ -58,8 +61,29 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let bound = record["contract_id"] == admission.contract_id.as_str()
             && record["run_id"] == admission.run_id.as_str()
             && record["tenant_id"] == admission.tenant_id.as_str();
-        if !bound {
+        let Some(id) = record["record_id"].as_str().filter(|_| bound) else {
             return Ok(refused("memory_binding_mismatch", &now));
+        };
+        let key = DocKey::new(&admission.tenant_id, DocKind::MemoryRecord, id);
+        let current = self.store.get(&key).await?;
+        if let Some(current) = &current {
+            // A record id names one memory: its identity is fixed at creation, deletion
+            // is terminal, and a proposal only creates.
+            let stored = &current.body["record"];
+            if IDENTITY.iter().any(|field| stored[*field] != record[*field]) {
+                return Ok(refused("memory_identity_mismatch", &now));
+            }
+            if stored["operation"] == "delete" {
+                return Ok(refused("memory_deleted", &now));
+            }
+            if record["operation"] == "propose" {
+                return Ok(refused("memory_exists", &now));
+            }
+        }
+        if let Some(Err(reasons)) = self.boundary_readiness(admission, &now).await {
+            let mut decision = refused("boundary_not_ready", &now);
+            decision.reason_codes = reasons;
+            return Ok(decision);
         }
         let Ok(context) = provider.memory_context(admission, record).await else {
             return Ok(refused("memory_policy_unavailable", &now));
@@ -73,29 +97,40 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .append(
                 &admission.tenant_id,
                 "memory_lifecycle",
-                json!({"run_id": admission.run_id, "record_id": record["record_id"], "operation": record["operation"],
+                json!({"run_id": admission.run_id, "record_id": id, "operation": record["operation"],
                     "record_digest": record_digest, "decision": decision}),
                 &now,
             )
             .await?;
-        if decision.allowed {
-            let id = record["record_id"].as_str().unwrap_or_default();
-            let key = DocKey::new(&admission.tenant_id, DocKind::MemoryRecord, id);
-            let state = json!({"record": record, "decision": decision, "record_digest": record_digest});
-            match self.store.get(&key).await? {
-                None => match self.store.create(&key, &state).await {
-                    Ok(_) => {}
-                    Err(e) if e.is_conflict() => return Ok(refused("memory_concurrent_update", &now)),
-                    Err(e) => return Err(e.into()),
-                },
-                Some(current) => match self.store.compare_and_swap(&key, current.revision, &state).await {
-                    Ok(_) => {}
-                    Err(e) if e.is_conflict() => return Ok(refused("memory_concurrent_update", &now)),
-                    Err(e) => return Err(e.into()),
-                },
-            }
+        if !decision.allowed {
+            return Ok(decision);
         }
-        Ok(decision)
+        let state = json!({"record": record, "decision": decision, "record_digest": record_digest});
+        let written = match &current {
+            None => self.store.create(&key, &state).await.map(|_| ()),
+            Some(current) => self
+                .store
+                .compare_and_swap(&key, current.revision, &state)
+                .await
+                .map(|_| ()),
+        };
+        match written {
+            Ok(()) => Ok(decision),
+            Err(e) if e.is_conflict() => {
+                // The allowed decision above was not applied; say so in the trail.
+                self.audit
+                    .append(
+                        &admission.tenant_id,
+                        "memory_lifecycle_not_applied",
+                        json!({"run_id": admission.run_id, "record_id": id, "record_digest": record_digest,
+                            "reason_codes": ["memory_concurrent_update"]}),
+                        &now,
+                    )
+                    .await?;
+                Ok(refused("memory_concurrent_update", &now))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// The memory's current lifecycle state, if any allowed record exists.

@@ -9,10 +9,13 @@
 //! - **surfaced capabilities**: a capability the candidate surfaces that the baseline
 //!   did not *widens* authority; one it no longer surfaces narrows it;
 //! - **policy**: the most restrictive applicable verdict (`deny` < `require_approval`
-//!   < `allow`; no applicable rule counts as `deny`) loosening *widens*;
+//!   < `allow`, composed exactly as the runtime does: highest-priority business
+//!   bundles decide, and no applicable rule is `deny`) loosening, or required
+//!   obligations dropping, *widens*;
 //! - **evidence gates**: a decision whose commit the baseline blocked but the
-//!   candidate allows *widens*;
-//! - a case the baseline compiles and the candidate cannot is a *regression*.
+//!   candidate allows, or whose blocking gate the candidate removes, *widens*;
+//! - a case the baseline compiles and the candidate cannot is a *regression*; a case
+//!   the baseline refused and the candidate compiles *widens*.
 //!
 //! The gate fails on any widening or regression that the operator did not
 //! acknowledge. Acknowledgements are inputs to the gate, never part of the candidate.
@@ -23,6 +26,10 @@ use contextos_contract::types::{CompiledContext, ContextPack, InvokeRequest, Run
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use contextos_contract::canonical::sha256_canonical;
+use serde_json::json;
+
+use crate::authorization::compose_policy_outcomes;
 use crate::{CompileDeps, ContextPackCompiler};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,9 +52,12 @@ pub struct Acknowledgements {
     /// Allow looser policy verdicts.
     #[serde(default)]
     pub policy_loosening: bool,
-    /// Decision keys whose evidence gates may newly allow commit.
+    /// Decision keys whose evidence gates may newly allow commit or be removed.
     #[serde(default)]
     pub evidence_gates: Vec<String>,
+    /// Allow the candidate to compile cases the baseline refused.
+    #[serde(default)]
+    pub compile_expansion: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,12 +87,14 @@ pub struct GateReport {
 #[derive(Debug, Clone)]
 struct Observed {
     capabilities: BTreeSet<String>,
-    verdict: u8,
+    verdict: usize,
+    obligations: BTreeSet<String>,
     gates: BTreeMap<String, bool>,
     hash: String,
 }
 
-const VERDICTS: [&str; 3] = ["deny", "require_approval", "allow"];
+/// Composed verdicts from most to least restrictive (`error` counts as `deny`).
+const VERDICTS: [&str; 4] = ["deny", "escalate", "require_approval", "allow"];
 
 fn deps(value: &Value) -> CompileDeps {
     let list = |key: &str| value[key].as_array().cloned().unwrap_or_default();
@@ -100,20 +112,34 @@ fn observe(compiler: &ContextPackCompiler, case: &ReplayCase) -> Result<Observed
     let rules = compiler
         .resolve_active_rules(&case.request, &case.run_context)
         .map_err(|e| e.to_string())?;
-    // Most restrictive applicable verdict; no applicable rule is no allowance.
-    let verdict = rules
+    // The verdict the runtime would reach: the same normalized business outcomes
+    // admission pins, composed by the kernel (highest-priority bundles decide).
+    let pack = compiler.pack();
+    let outcomes: Vec<Value> = rules
         .iter()
-        .map(|r| {
-            if !r.allow {
-                0
-            } else if r.approval_gate.is_some() {
-                1
+        .map(|rule| {
+            let digest = pack
+                .policy_layer
+                .policy_bundles
+                .iter()
+                .find(|b| b.bundle_id == rule.bundle_id)
+                .and_then(|b| serde_json::to_value(b).ok())
+                .and_then(|b| sha256_canonical(&b).ok())
+                .unwrap_or_else(|| format!("sha256:{}", "0".repeat(64)));
+            let verdict = if !rule.allow {
+                "deny"
+            } else if rule.approval_gate.is_some() {
+                "require_approval"
             } else {
-                2
-            }
+                "allow"
+            };
+            json!({"category": "business", "priority": rule.priority, "verdict": verdict, "rule_id": rule.rule_id,
+                "bundle_ref": {"artifact_type": "policy_bundle", "artifact_id": rule.bundle_id, "version": "1", "sha256": digest},
+                "obligations": rule.requires})
         })
-        .min()
-        .unwrap_or(0);
+        .collect();
+    let composed = compose_policy_outcomes(&Value::Array(outcomes));
+    let verdict = VERDICTS.iter().position(|v| *v == composed.verdict).unwrap_or(0);
     let capabilities = compiled
         .manifests
         .tool_manifest
@@ -129,6 +155,7 @@ fn observe(compiler: &ContextPackCompiler, case: &ReplayCase) -> Result<Observed
     Ok(Observed {
         capabilities,
         verdict,
+        obligations: composed.obligations.into_iter().collect(),
         gates,
         hash: compiled.context_ledger.compiled_context_hash,
     })
@@ -150,6 +177,9 @@ pub fn evaluate_release_gate(
     cases: &[ReplayCase],
     acknowledged: &Acknowledgements,
 ) -> Result<GateReport, String> {
+    if cases.is_empty() {
+        return Err("the release gate needs at least one replay case".into());
+    }
     let base = ContextPackCompiler::new(baseline.clone()).map_err(|e| format!("baseline: {e}"))?;
     let cand = ContextPackCompiler::new(candidate.clone()).map_err(|e| format!("candidate: {e}"))?;
     let mut reports = Vec::with_capacity(cases.len());
@@ -157,11 +187,18 @@ pub fn evaluate_release_gate(
     for case in cases {
         let mut changes = Vec::new();
         match (observe(&base, case), observe(&cand, case)) {
-            (Err(_), _) => changes.push(change(
+            (Err(_), Err(_)) => changes.push(change(
                 "compile",
                 "neutral",
-                "baseline does not compile this case".into(),
+                "neither pack compiles this case".into(),
                 true,
+            )),
+            // A case the baseline refused but the candidate admits is new behaviour.
+            (Err(_), Ok(_)) => changes.push(change(
+                "compile",
+                "widens",
+                "candidate compiles a case the baseline refused".into(),
+                acknowledged.compile_expansion,
             )),
             (Ok(_), Err(error)) => changes.push(change(
                 "compile",
@@ -183,14 +220,27 @@ pub fn evaluate_release_gate(
                     ));
                 }
                 if c.verdict != b.verdict {
-                    let detail = format!(
-                        "policy {} -> {}",
-                        VERDICTS[b.verdict as usize], VERDICTS[c.verdict as usize]
-                    );
+                    let detail = format!("policy {} -> {}", VERDICTS[b.verdict], VERDICTS[c.verdict]);
                     if c.verdict > b.verdict {
                         changes.push(change("policy", "widens", detail, acknowledged.policy_loosening));
                     } else {
                         changes.push(change("policy", "narrows", detail, true));
+                    }
+                }
+                let dropped: Vec<&String> = b.obligations.difference(&c.obligations).collect();
+                if !dropped.is_empty() {
+                    let detail = format!("obligations no longer required: {dropped:?}");
+                    changes.push(change("policy", "widens", detail, acknowledged.policy_loosening));
+                }
+                for (key, allowed) in &b.gates {
+                    if !*allowed && !c.gates.contains_key(key) {
+                        let ok = acknowledged.evidence_gates.contains(key);
+                        changes.push(change(
+                            "evidence_gate",
+                            "widens",
+                            format!("{key} blocking gate removed"),
+                            ok,
+                        ));
                     }
                 }
                 for (key, allowed) in &c.gates {

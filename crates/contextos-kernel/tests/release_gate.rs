@@ -126,3 +126,110 @@ fn a_candidate_that_cannot_compile_a_case_is_a_regression() {
     assert_eq!(report.verdict, "fail");
     assert!(report.cases[0].changes.iter().any(|c| c.effect == "regression"));
 }
+
+#[test]
+fn a_higher_priority_allow_bundle_is_caught_as_the_runtime_would_see_it() {
+    let (baseline, cases) = setup();
+    let mut candidate = baseline.clone();
+    let priority = baseline["policy_layer"]["policy_bundles"][0]["priority"]
+        .as_i64()
+        .unwrap();
+    let mut overriding = baseline["policy_layer"]["policy_bundles"][0].clone();
+    overriding["bundle_id"] = json!("POLICY_FAST_REFUNDS");
+    overriding["priority"] = json!(priority + 10);
+    overriding["policy_dsl"]["rules"] = json!([{"rule_id": "R_ALWAYS_REFUND", "applies_to": {"intent": "support.refund"},
+        "if": {"==": [1, 1]}, "then": {"allow": true}, "rationale": "fast path"}]);
+    candidate["policy_layer"]["policy_bundles"]
+        .as_array_mut()
+        .unwrap()
+        .push(overriding);
+    let report = gate(&baseline, &candidate, &cases, &Acknowledgements::default());
+    let high = report.cases.iter().find(|c| c.name == "high_value_refund").unwrap();
+    assert!(
+        high.changes.iter().any(|c| c.kind == "policy" && c.effect == "widens"),
+        "the approval requirement is overridden: {:?}",
+        high.changes
+    );
+    assert_eq!(report.verdict, "fail");
+}
+
+#[test]
+fn removing_a_blocking_evidence_gate_is_a_widening() {
+    let v = vectors();
+    let blocked = v["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "grid:support.refund:false:4200:support_agent")
+        .unwrap();
+    let baseline = blocked["pack"].clone();
+    let case: ReplayCase = serde_json::from_value(json!({"name": "unverified", "request": blocked["request"],
+        "run_context": blocked["run_context"], "deps": blocked["deps"]}))
+    .unwrap();
+    let mut candidate = baseline.clone();
+    for rule in candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"]
+        .as_array_mut()
+        .unwrap()
+    {
+        rule.as_object_mut().unwrap().remove("decision_binding");
+    }
+    candidate["decision_layer"]["decision_specs"] = json!([]);
+    let baseline_report = gate(
+        &baseline,
+        &baseline,
+        std::slice::from_ref(&case),
+        &Acknowledgements::default(),
+    );
+    assert_eq!(baseline_report.verdict, "pass");
+    let report = gate(&baseline, &candidate, &[case], &Acknowledgements::default());
+    assert!(
+        report.cases[0]
+            .changes
+            .iter()
+            .any(|c| c.kind == "evidence_gate" && c.detail == "support.refund.execute blocking gate removed"),
+        "{:?}",
+        report.cases[0].changes
+    );
+    assert_eq!(report.verdict, "fail");
+    let acknowledged = Acknowledgements {
+        evidence_gates: vec!["support.refund.execute".into()],
+        ..Acknowledgements::default()
+    };
+    let report = gate(&baseline, &candidate, &[report_case(&v)], &acknowledged);
+    assert!(
+        report.cases[0]
+            .changes
+            .iter()
+            .filter(|c| c.kind == "evidence_gate")
+            .all(|c| c.acknowledged)
+    );
+}
+
+fn report_case(v: &Value) -> ReplayCase {
+    let c = v["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "grid:support.refund:false:4200:support_agent")
+        .unwrap();
+    serde_json::from_value(
+        json!({"name": "unverified", "request": c["request"], "run_context": c["run_context"], "deps": c["deps"]}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn empty_corpora_and_newly_admitted_cases_fail() {
+    let (baseline, cases) = setup();
+    assert!(evaluate_release_gate(&pack(&baseline), &pack(&baseline), &[], &Acknowledgements::default()).is_err());
+    let mut refusing = baseline.clone();
+    refusing["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][0]["if"] = json!({"no_such_op": [1]});
+    let report = gate(&refusing, &baseline, &cases, &Acknowledgements::default());
+    assert!(
+        report.cases[0]
+            .changes
+            .iter()
+            .any(|c| c.kind == "compile" && c.effect == "widens")
+    );
+    assert_eq!(report.verdict, "fail");
+}

@@ -64,6 +64,8 @@ def authority(req):
     else:
         grants = [grant("dev_grant", principal("dev_broker", tenant), 1)]
     observer = principal("dev_control_plane", tenant)
+    # Development only: trusting the gateway as an observer lets it vouch for the
+    # delegated-run facts it consumes. A production broker verifies delegation itself.
     gateway = {"principal_id": "contextosd", "principal_type": "workload", "trust_domain": TD, "tenant_id": tenant}
     return {
         "authenticated": {"principal": run["actor"], "audience": "contextosd", "root_run_id": root_run_id, "run_id": run["run_id"],

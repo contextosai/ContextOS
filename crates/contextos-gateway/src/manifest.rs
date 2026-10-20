@@ -93,6 +93,11 @@ pub struct CapabilityManifest {
     /// Pointers into arguments whose string values are effect recipients.
     #[serde(default)]
     pub destination_pointers: Vec<String>,
+    /// The capability sends data to a fixed recipient (its adapter). With a data
+    /// governance provider, data flow is evaluated for every call of a capability
+    /// that sends data or names recipients.
+    #[serde(default)]
+    pub sends_data: bool,
     #[serde(default)]
     pub amount: Option<AmountBinding>,
     pub recovery: Recovery,

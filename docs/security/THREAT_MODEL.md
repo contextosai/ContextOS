@@ -54,6 +54,16 @@ budgets, and the integrity of the evidence record.
   the parent's executor; decision reports were unbounded and signed before the per-run
   cap; a closed child's run stayed running; backend error text reached callers. Each
   fix has a regression test.
+- 2026-10-20: second review, of data permissions, the execution boundary, memory
+  lifecycle and the release gate. Fixed: the gate scored policy by the most
+  restrictive rule instead of the runtime's priority composition, so a higher-priority
+  allow bundle passed unseen; a removed blocking evidence gate, dropped obligations
+  and cases only the candidate compiles were not widenings; an empty corpus passed; a
+  memory record id could be taken over by another owner or namespace, re-proposed, or
+  revived after deletion; memory operations skipped the boundary; an allowed memory
+  decision lost to a concurrent update had no "not applied" audit entry; data flow
+  was skipped for fixed-recipient capabilities (now `sends_data`) and judged the
+  adapter rather than the recipient the arguments name. Each fix has a regression test.
 
 ## Residual risks and deployment obligations
 

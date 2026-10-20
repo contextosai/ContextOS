@@ -729,7 +729,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Data permissions are part of the conjunction: with a data-governance
         // provider, data sent to a destination must pass the kernel's flow policy.
         if let Some(provider) = &self.ports.data_flow
-            && !manifest.destination_pointers.is_empty()
+            && (manifest.sends_data || !manifest.destination_pointers.is_empty())
         {
             let refused = |p: Pipeline<'_>, reasons: Vec<String>| {
                 Ok(p.stop("blocked", reasons, "The data this action sends is not permitted."))
@@ -740,6 +740,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Err(_) => return refused(p, vec!["data_flow_unavailable".into()]),
             };
             let (request, policy) = facts;
+            // The flow is judged for the recipient the arguments name; a capability with
+            // a fixed recipient names it by its adapter. One request covers one
+            // recipient, so a call naming several distinct recipients is refused.
+            let mut recipients: Vec<&str> = binding["destination_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            recipients.sort_unstable();
+            recipients.dedup();
+            let recipient = match recipients.as_slice() {
+                [] => manifest.adapter_id.as_str(),
+                [one] => one,
+                _ => return refused(p, vec!["data_flow_multiple_destinations".into()]),
+            };
             // The provider supplies facts; it cannot redirect them to another action.
             let bound = request["contract_id"] == admission.contract_id.as_str()
                 && request["run_id"] == admission.run_id.as_str()
@@ -747,7 +763,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 && request["operation_id"] == operation_id.as_str()
                 && request["action_digest"] == action_digest.as_str()
                 && request["purpose_id"] == manifest.purpose_id.as_str()
-                && request["destination_id"] == manifest.adapter_id.as_str();
+                && request["destination_id"] == recipient;
             if !bound {
                 return refused(p, vec!["data_flow_binding_mismatch".into()]);
             }

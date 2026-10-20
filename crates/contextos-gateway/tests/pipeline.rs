@@ -1313,6 +1313,8 @@ impl DataFlowProvider for Flows {
             ("2026-10-17T00:00:00Z", "2026-10-21T00:00:00Z"),
             ("contract_reference", &admission.contract_id),
             ("run_contract", &admission.run_id),
+            // The policy judges the recipient the call names.
+            ("\"adp_payments\"", &format!("{}", binding["destination_ids"][0])),
         ] {
             text = text.replace(from, to);
         }
@@ -1327,6 +1329,7 @@ impl DataFlowProvider for Flows {
         let mut request = base["request"].clone();
         request["operation_id"] = binding["operation_id"].clone();
         request["action_digest"] = json!(digest);
+
         (self.tamper)(&mut request);
         Ok(Some((request, base["policy"].clone())))
     }
@@ -1343,7 +1346,7 @@ async fn data_sent_to_a_destination_must_pass_the_flow_policy() {
             Err("data_flow_binding_mismatch"),
         ),
         (
-            |r| r["destination_id"] = json!("adp_elsewhere"),
+            |r| r["destination_id"] = json!("adp_payments"),
             Err("data_flow_binding_mismatch"),
         ),
     ];
@@ -1569,5 +1572,30 @@ async fn memory_operations_are_governed_by_trusted_context() {
     foreign["run_id"] = json!("run_other");
     let refused = h.gateway.govern_memory(&h.admission, &foreign).await.unwrap();
     assert_eq!(refused.reason_codes, vec!["memory_binding_mismatch".to_owned()]);
+
+    // A record id names one memory: another owner cannot take it over...
+    let mut hijack = record.clone();
+    hijack["owner_id"] = json!("usr_attacker");
+    let refused = h.gateway.govern_memory(&h.admission, &reviewed(hijack)).await.unwrap();
+    assert_eq!(refused.reason_codes, vec!["memory_identity_mismatch".to_owned()]);
+    // ...nor can a proposal reset it.
+    let mut repropose = record.clone();
+    repropose["operation"] = json!("propose");
+    let refused = h
+        .gateway
+        .govern_memory(&h.admission, &reviewed(repropose))
+        .await
+        .unwrap();
+    assert_eq!(refused.reason_codes, vec!["memory_exists".to_owned()]);
+    let state = h
+        .gateway
+        .memory_state(TENANT, record["record_id"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        state["record"]["operation"], "promote",
+        "refusals leave the memory unchanged"
+    );
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }
