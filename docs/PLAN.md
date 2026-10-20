@@ -63,6 +63,17 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 16 | Performance: criterion benches, load tests, tuning | Published numbers with method |
 | 17 | Docs site + examples + adoption guide | Quickstart runs end-to-end |
 
+## Progress
+
+| Slice | Status |
+|---|---|
+| 0 Workspace, ADRs, CI | done |
+| 1 Contract: canonical JSON, schemas, types | done — vector parity |
+| 2 JsonLogic | done — 5 935/6 000 exact, 65 fail visibly by design (ADR-0002) |
+| 3 Action risk + compiler | done — 43/43 compilations byte-identical incl. `compiled_context_hash` |
+| 4 Profiles + negotiation | done — 3 000+ vectors |
+| 5 Authority, policy composition, approvals, authorization | next |
+
 ## Non-negotiables carried from the spec
 
 - Schema validity, caller labels and compilation never authorize an effect.
