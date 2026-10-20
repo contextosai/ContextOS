@@ -1300,6 +1300,11 @@ impl DataFlowProvider for Flows {
             "{}/../../conformance/vectors/boundary.json.gz",
             env!("CARGO_MANIFEST_DIR")
         );
+        // A capability with a fixed recipient names its adapter.
+        let recipient = binding["destination_ids"]
+            .get(0)
+            .cloned()
+            .unwrap_or(json!("adp_payments"));
         let mut text = String::new();
         std::io::Read::read_to_string(
             &mut flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()),
@@ -1314,7 +1319,7 @@ impl DataFlowProvider for Flows {
             ("contract_reference", &admission.contract_id),
             ("run_contract", &admission.run_id),
             // The policy judges the recipient the call names.
-            ("\"adp_payments\"", &format!("{}", binding["destination_ids"][0])),
+            ("\"adp_payments\"", &recipient.to_string()),
         ] {
             text = text.replace(from, to);
         }
@@ -1598,4 +1603,46 @@ async fn memory_operations_are_governed_by_trusted_context() {
         "refusals leave the memory unchanged"
     );
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn data_flow_covers_fixed_recipients_and_refuses_several() {
+    let restricted: fn(&mut Value) = |r| r["requested_classification"] = json!("RESTRICTED");
+    let run = |destinations: Value, sends_data: bool| async move {
+        let mut h = harness_full(
+            "allow",
+            Behavior::Confirm,
+            8,
+            25.0,
+            Some(Arc::new(Flows { tamper: restricted })),
+            None,
+        )
+        .await;
+        let mut pinned = serde_json::to_value(manifest()).unwrap();
+        pinned["destination_pointers"] = destinations;
+        pinned["sends_data"] = json!(sends_data);
+        h.gateway
+            .pin_capability(serde_json::from_value(pinned).unwrap())
+            .unwrap();
+        let out = h
+            .gateway
+            .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+            .await
+            .unwrap();
+        (out, h.adapter.calls.load(Ordering::SeqCst))
+    };
+    // A fixed recipient that sends data is still judged: the restricted flow is refused.
+    let (out, calls) = run(json!([]), true).await;
+    assert_eq!(out.result["status"], "blocked", "{:?}", out.report.reason_codes);
+    assert_eq!(calls, 0);
+    // A capability that declares no data leaving is not a data flow.
+    let (out, _) = run(json!([]), false).await;
+    assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes);
+    // One request covers one recipient.
+    let (out, calls) = run(json!(["/customer_id", "/order_id"]), false).await;
+    assert_eq!(
+        out.report.reason_codes,
+        vec!["data_flow_multiple_destinations".to_owned()]
+    );
+    assert_eq!(calls, 0);
 }

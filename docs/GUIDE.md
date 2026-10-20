@@ -308,11 +308,14 @@ minimal, development-only implementation):
   is audited and only allowed records become the memory's state
   (`GET /v1/memory/{record_id}`). Without the service, memory operations are refused.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
-  action that sends data to a destination, returns the `DataFlowRequest` (source
-  artifacts and their verified classifications, processor and residency observations,
-  stage, any transformation) and the pinned `DataFlowPolicy`. The gateway checks the
-  request is bound to this exact action (contract, run, operation, action digest,
-  purpose, and the capability's adapter as destination) and the kernel's
+  action that sends data (a capability whose manifest names recipients in
+  `destination_pointers`, or declares `"sends_data": true` for a fixed recipient),
+  returns the `DataFlowRequest` (source artifacts and their verified classifications,
+  processor and residency observations, stage, any transformation) and the pinned
+  `DataFlowPolicy`. The gateway checks the request is bound to this exact action
+  (contract, run, operation, action digest, purpose) and names the recipient the
+  arguments bind, or the adapter for a fixed recipient; a call naming several
+  distinct recipients is refused. Then the kernel's
   `evaluate_data_flow` decides; the decision is audited. Unknown or unverifiable facts
   block.
 
