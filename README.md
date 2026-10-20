@@ -36,6 +36,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
 - Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- Contributing and governance: [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [CHANGELOG.md](CHANGELOG.md)
 
 ## Verify
 

@@ -1,0 +1,14 @@
+name: Spec divergence
+description: The runtime disagrees with the ContextOS specification or its reference
+labels: [conformance]
+body:
+  - type: input
+    id: section
+    attributes:
+      label: Spec section, schema or reference function
+    validations: { required: true }
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Input that diverges, with the reference output and the runtime output
+    validations: { required: true }

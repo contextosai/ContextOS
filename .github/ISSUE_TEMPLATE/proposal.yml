@@ -1,0 +1,15 @@
+name: Proposal
+description: A new capability or a change in behaviour
+labels: [proposal]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today, and in which deployment?
+    validations: { required: true }
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+      description: Note any effect on protocols, decision semantics, stored formats or the threat model; those need an ADR.

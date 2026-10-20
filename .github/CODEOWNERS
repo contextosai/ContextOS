@@ -1,0 +1,6 @@
+# Maintainers review everything; decision-making paths need explicit review.
+*                                   @contextosai
+/crates/contextos-kernel/           @contextosai
+/crates/contextos-audit/            @contextosai
+/docs/security/                     @contextosai
+/conformance/                       @contextosai

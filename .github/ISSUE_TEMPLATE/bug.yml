@@ -1,0 +1,32 @@
+name: Bug
+description: The runtime behaves incorrectly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Inputs, configuration (without secrets) and commands. Redact tenant data.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [kernel, gateway, adapters (MCP/HTTP), store, audit, contextosd, ctx CLI, bindings, deployment]
+    validations: { required: true }
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: This could let an effect run without authority, run twice, cross tenants or alter audit. (If so, stop and use SECURITY.md instead.)

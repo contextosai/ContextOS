@@ -2,9 +2,8 @@
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities privately to the maintainers (security contact to be
-published with the first public release). Do not open public issues for security
-reports. Include affected versions, a description and, if possible, a reproduction.
+Email **security@contextosai.com**, or use GitHub's private vulnerability reporting on
+this repository. Do not open public issues for security reports. Include affected versions, a description and, if possible, a reproduction.
 We aim to acknowledge reports within 2 business days.
 
 ## Scope
