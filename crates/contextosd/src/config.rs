@@ -158,6 +158,9 @@ pub struct Config {
     /// Overload protection (see [`crate::limits`]).
     #[serde(default)]
     pub limits: crate::limits::LimitsConfig,
+    /// Retention of runs' personal content (see [`crate::retention`]); off by default.
+    #[serde(default)]
+    pub retention: crate::retention::RetentionConfig,
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
@@ -239,6 +242,7 @@ impl Config {
             )));
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
+        self.retention.check().map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {
             issuer.check(development).map_err(ConfigError::Invalid)?;

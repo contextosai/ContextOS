@@ -39,14 +39,23 @@ pub fn replica_id() -> String {
     )
 }
 
+/// The live membership as one replica sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Members {
+    pub count: usize,
+    /// This replica has the smallest id among the live ones; it runs cluster-wide
+    /// chores (retention) so they are not done twice.
+    pub leader: bool,
+}
+
 /// Records this replica's heartbeat at `now`, drops replicas not seen within `ttl`,
-/// and returns how many are live (including this one).
+/// and returns the live membership (including this one).
 pub async fn heartbeat<S: DocumentStore>(
     store: &S,
     replica: &str,
     now: u64,
     ttl: Duration,
-) -> Result<usize, StoreError> {
+) -> Result<Members, StoreError> {
     let ttl = u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX);
     for _ in 0..8 {
         let current = store.get(&key()).await?;
@@ -56,14 +65,17 @@ pub async fn heartbeat<S: DocumentStore>(
             .unwrap_or_default();
         live.retain(|_, seen| seen.as_u64().is_some_and(|seen| now.saturating_sub(seen) <= ttl));
         live.insert(replica.to_owned(), json!(now));
-        let count = live.len();
+        let members = Members {
+            count: live.len(),
+            leader: live.keys().next().is_some_and(|first| first == replica),
+        };
         let state = json!({"replicas": live});
         let written = match &current {
             None => store.create(&key(), &state).await.map(|_| ()),
             Some(c) => store.compare_and_swap(&key(), c.revision, &state).await.map(|_| ()),
         };
         match written {
-            Ok(()) => return Ok(count),
+            Ok(()) => return Ok(members),
             Err(e) if e.is_conflict() => {}
             Err(e) => return Err(e),
         }
@@ -76,7 +88,12 @@ pub async fn heartbeat<S: DocumentStore>(
 
 /// Heartbeats forever, keeping the limiter's replica count current. A failed beat
 /// keeps the last count (limits stay as tight as last observed).
-pub async fn run<S: DocumentStore + 'static>(store: Arc<S>, limiter: Arc<Limiter>, interval: Duration) {
+pub async fn run<S: DocumentStore + 'static>(
+    store: Arc<S>,
+    limiter: Arc<Limiter>,
+    leader: Arc<std::sync::atomic::AtomicBool>,
+    interval: Duration,
+) {
     let replica = replica_id();
     let ttl = interval * 3;
     let mut ticker = tokio::time::interval(interval);
@@ -84,7 +101,10 @@ pub async fn run<S: DocumentStore + 'static>(store: Arc<S>, limiter: Arc<Limiter
     loop {
         ticker.tick().await;
         match heartbeat(store.as_ref(), &replica, now_ms(), ttl).await {
-            Ok(count) => limiter.set_replicas(count),
+            Ok(members) => {
+                limiter.set_replicas(members.count);
+                leader.store(members.leader, std::sync::atomic::Ordering::Relaxed);
+            }
             Err(error) => tracing::warn!(%error, "replica heartbeat failed; keeping the last replica count"),
         }
     }
@@ -99,16 +119,34 @@ mod tests {
     async fn replicas_join_and_age_out() {
         let store = MemoryStore::new();
         let ttl = Duration::from_secs(15);
-        assert_eq!(heartbeat(&store, "a", 1_000, ttl).await.unwrap(), 1);
-        assert_eq!(heartbeat(&store, "b", 2_000, ttl).await.unwrap(), 2);
         assert_eq!(
-            heartbeat(&store, "a", 6_000, ttl).await.unwrap(),
+            heartbeat(&store, "a", 1_000, ttl).await.unwrap(),
+            Members { count: 1, leader: true }
+        );
+        assert_eq!(
+            heartbeat(&store, "b", 2_000, ttl).await.unwrap(),
+            Members {
+                count: 2,
+                leader: false
+            }
+        );
+        assert_eq!(
+            heartbeat(&store, "a", 6_000, ttl).await.unwrap().count,
             2,
             "a beat again; b is live"
         );
         // b stops; after the time-to-live only a remains.
-        assert_eq!(heartbeat(&store, "a", 18_000, ttl).await.unwrap(), 1);
+        assert_eq!(
+            heartbeat(&store, "a", 18_000, ttl).await.unwrap(),
+            Members { count: 1, leader: true }
+        );
         // b comes back.
-        assert_eq!(heartbeat(&store, "b", 19_000, ttl).await.unwrap(), 2);
+        assert_eq!(
+            heartbeat(&store, "b", 19_000, ttl).await.unwrap(),
+            Members {
+                count: 2,
+                leader: false
+            }
+        );
     }
 }

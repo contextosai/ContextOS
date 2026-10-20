@@ -11,11 +11,18 @@ use crate::{DocKey, DocumentStore, Encoded, StoreError, Versioned};
 /// The in-process store keeps the parsed body, so reads need no re-parsing; bodies
 /// are only ever written through canonical encoding. The lock covers a pointer copy
 /// only: the deep clone a reader needs happens after it is released.
-type StoredDoc = (u64, Arc<Value>, String);
+/// `(revision, body, digest, created µs since the epoch)`.
+type StoredDoc = (u64, Arc<Value>, String, u64);
 
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     docs: RwLock<HashMap<DocKey, StoredDoc>>,
+}
+
+fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
 impl MemoryStore {
@@ -38,7 +45,7 @@ impl DocumentStore for MemoryStore {
             let docs = self.docs.read().map_err(|_| Self::poisoned())?;
             docs.get(key).cloned()
         };
-        Ok(found.map(|(revision, body, digest)| Versioned {
+        Ok(found.map(|(revision, body, digest, _)| Versioned {
             revision,
             body: Value::clone(&body),
             digest,
@@ -50,13 +57,13 @@ impl DocumentStore for MemoryStore {
         // Store the decoded canonical form so reads match what Postgres would return.
         let canonical: Value = serde_json::from_str(&text).map_err(|_| StoreError::Integrity)?;
         let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
-        if let Some((revision, _, _)) = docs.get(key) {
+        if let Some((revision, _, _, _)) = docs.get(key) {
             return Err(StoreError::Conflict {
                 expected: None,
                 actual: Some(*revision),
             });
         }
-        docs.insert(key.clone(), (1, Arc::new(canonical.clone()), digest.clone()));
+        docs.insert(key.clone(), (1, Arc::new(canonical.clone()), digest.clone(), now_us()));
         Ok(Versioned {
             revision: 1,
             body: canonical,
@@ -101,11 +108,33 @@ impl DocumentStore for MemoryStore {
             });
         }
         let revision = entry.0 + 1;
-        let replaced = std::mem::replace(entry, (revision, body, encoded.digest));
+        let replaced = std::mem::replace(entry, (revision, body, encoded.digest, entry.3));
         drop(docs);
         // The replaced body is freed outside the lock.
         drop(replaced);
         Ok(revision)
+    }
+
+    async fn expiring(
+        &self,
+        kind: crate::DocKind,
+        before_us: u64,
+        after: Option<&crate::ScanCursor>,
+        limit: usize,
+    ) -> Result<Vec<crate::ScanCursor>, StoreError> {
+        let docs = self.docs.read().map_err(|_| Self::poisoned())?;
+        let mut found: Vec<crate::ScanCursor> = docs
+            .iter()
+            .filter(|(key, (_, body, _, created))| {
+                key.kind == kind && *created < before_us && !crate::is_tombstone(body)
+            })
+            .map(|(key, (_, _, _, created))| (*created, key.clone()))
+            .filter(|cursor| after.is_none_or(|after| cursor > after))
+            .collect();
+        drop(docs);
+        found.sort();
+        found.truncate(limit);
+        Ok(found)
     }
 }
 

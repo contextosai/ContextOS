@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod membership;
 pub mod metrics;
 pub mod oidc;
+pub mod retention;
 pub mod runtime;
 pub mod telemetry;
 
@@ -90,11 +91,21 @@ where
         for issuer in &issuers {
             runtime.spawn(issuer.clone().run_refresh());
         }
+        let leader = Arc::new(std::sync::atomic::AtomicBool::new(false));
         runtime.spawn(membership::run(
             store.clone(),
             limits.clone(),
+            leader.clone(),
             std::time::Duration::from_millis(config.limits.heartbeat_ms),
         ));
+        if let Some(gateway) = &gateway {
+            runtime.spawn(retention::run(
+                store.clone(),
+                gateway.clone(),
+                leader,
+                config.retention.clone(),
+            ));
+        }
     }
     Ok(Arc::new(AppState {
         store,

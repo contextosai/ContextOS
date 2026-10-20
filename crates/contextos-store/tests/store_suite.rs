@@ -155,11 +155,84 @@ async fn append_log_semantics<L: AppendLog>(log: &L, tenant: &str) {
     assert_eq!((rows[0].sequence, &rows[0].body), (2, &json!({"s": 2})));
 }
 
+fn now_us() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros(),
+    )
+    .unwrap()
+}
+
+/// Retention finds documents of a kind by age, never erasure tombstones, in pages.
+async fn expiry_semantics<S: DocumentStore>(store: &S, tenant: &str) {
+    let key = |kind, id: &str| DocKey::new(tenant, kind, id);
+    for id in ["exp_a", "exp_b", "exp_c", "exp_e"] {
+        let body = if id == "exp_e" {
+            // User content that merely mentions `erased` is not a tombstone.
+            json!({"name": id, "request": {"context": {"erased": true, "content_digest": "x"}}})
+        } else {
+            json!({"name": id})
+        };
+        store.create(&key(DocKind::ReplayCase, id), &body).await.unwrap();
+    }
+    store
+        .create(&key(DocKind::CompiledContext, "exp_d"), &json!({"x": 1}))
+        .await
+        .unwrap();
+    let tombstone = json!({"erased": true, "erased_at": "2026-10-20T10:00:00Z", "erased_by": "ops", "reason": "r",
+        "content_digest": format!("sha256:{}", "a".repeat(64))});
+    assert!(contextos_store::is_tombstone(&tombstone));
+    assert!(!contextos_store::is_tombstone(&json!({"erased": true})));
+    store
+        .compare_and_swap(&key(DocKind::ReplayCase, "exp_c"), 1, &tombstone)
+        .await
+        .unwrap();
+
+    let cutoff = now_us() + 1_000_000;
+    let ours = |found: Vec<contextos_store::ScanCursor>| -> Vec<String> {
+        found
+            .into_iter()
+            .filter(|(_, k)| k.tenant_id == tenant)
+            .map(|(_, k)| k.id)
+            .collect()
+    };
+    let mut all = ours(
+        store
+            .expiring(DocKind::ReplayCase, cutoff, None, 100_000)
+            .await
+            .unwrap(),
+    );
+    all.sort();
+    assert_eq!(all, ["exp_a", "exp_b", "exp_e"]);
+
+    // Paging with a cursor visits the same documents in creation order.
+    let mut paged = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = store
+            .expiring(DocKind::ReplayCase, cutoff, cursor.as_ref(), 1)
+            .await
+            .unwrap();
+        let Some(last) = page.last().cloned() else { break };
+        paged.extend(ours(page));
+        cursor = Some(last);
+    }
+    paged.sort();
+    assert_eq!(paged, all);
+    assert!(
+        ours(store.expiring(DocKind::ReplayCase, 1, None, 100).await.unwrap()).is_empty(),
+        "nothing that old"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn memory_store_suite() {
     append_log_semantics(&MemoryLog::new(), "tenant_a").await;
     let store = Arc::new(MemoryStore::new());
     basic_semantics(store.as_ref(), "tenant_a").await;
+    expiry_semantics(store.as_ref(), "tenant_a").await;
     concurrent_budget_is_conserved(store.clone(), "tenant_a").await;
     concurrent_claims_admit_one(store, "tenant_a").await;
 }
@@ -177,6 +250,7 @@ async fn postgres_store_suite() {
     store.migrate().await.unwrap();
     let tenant = format!("tenant_{}", std::process::id());
     basic_semantics(&store, &tenant).await;
+    expiry_semantics(&store, &tenant).await;
     append_log_semantics(&store, &tenant).await;
     let store = Arc::new(store);
     concurrent_budget_is_conserved(store.clone(), &tenant).await;

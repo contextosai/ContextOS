@@ -17,11 +17,11 @@ async fn replicas_sharing_postgres_count_each_other() {
     // Far-future clock so rows from earlier runs have aged out.
     let now = 4_000_000_000_000_u64 + u64::from(std::process::id());
     let ttl = Duration::from_secs(15);
-    let first = heartbeat(&store, "replica-a", now, ttl).await.unwrap();
-    let second = heartbeat(&store, "replica-b", now + 1, ttl).await.unwrap();
+    let first = heartbeat(&store, "replica-a", now, ttl).await.unwrap().count;
+    let second = heartbeat(&store, "replica-b", now + 1, ttl).await.unwrap().count;
     assert_eq!(second, first + 1, "the second replica sees the first");
     assert_eq!(
-        heartbeat(&store, "replica-a", now + 20_000, ttl).await.unwrap(),
+        heartbeat(&store, "replica-a", now + 20_000, ttl).await.unwrap().count,
         1,
         "b aged out"
     );

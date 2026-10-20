@@ -71,6 +71,7 @@ fn constraint_facts(request: &Value) -> Value {
 
 struct World {
     base: String,
+    state: Arc<contextosd::app::AppState<MemoryStore, MemoryLog>>,
     provider_calls: Arc<AtomicUsize>,
 }
 
@@ -241,6 +242,7 @@ async fn world(controls: &[&str]) -> World {
     )
     .unwrap();
     World {
+        state: state.clone(),
         base: serve(router(state, Duration::from_secs(10))).await,
         provider_calls,
     }
@@ -1784,4 +1786,89 @@ async fn finished_runs_can_be_erased() {
         .await
         .unwrap();
     assert_eq!(verified["verified"], true);
+}
+
+#[tokio::test]
+async fn retention_erases_finished_runs_and_waits_for_live_ones() {
+    use contextosd::retention::{Swept, sweep_once};
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let mut generations = HashMap::new();
+    for run in ["run_old_done", "run_old_live"] {
+        let admitted: Value = plain
+            .post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&run_body(run, 1200))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        generations.insert(run, admitted["executor_generation"].as_u64().unwrap());
+    }
+    let finished = executor_client(generations["run_old_done"])
+        .post(format!("{}/v1/runs/run_old_done/complete", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(finished.status(), 200);
+
+    let (store, gateway) = (w.state.store.as_ref(), w.state.gateway.as_ref().unwrap());
+    let future = u64::MAX / 2;
+    // Nothing is old enough yet.
+    let (swept, _) = sweep_once(store, gateway, 30, 1, None, 100).await.unwrap();
+    assert_eq!(swept, Swept::default());
+    // Past the cutoff: the finished run is erased, the live one waits.
+    let (swept, next) = sweep_once(store, gateway, 30, future, None, 100).await.unwrap();
+    assert_eq!(
+        swept,
+        Swept {
+            erased: 1,
+            still_running: 1
+        }
+    );
+    assert!(next.is_none(), "one page covered everything");
+    let case = plain
+        .get(format!("{}/v1/runs/run_old_done/replay-case", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(case.status(), 410);
+    let live = plain
+        .get(format!("{}/v1/runs/run_old_live/replay-case", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(live.status(), 200);
+    // Erased runs are not scanned again; the live one is revisited.
+    let (swept, _) = sweep_once(store, gateway, 30, future, None, 100).await.unwrap();
+    assert_eq!(
+        swept,
+        Swept {
+            erased: 0,
+            still_running: 1
+        }
+    );
+
+    let audit: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=500", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let erasure = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "run_data_erased" || e["event"] == "run_data_erased");
+    let erasure = erasure.unwrap_or_else(|| panic!("no erasure entry: {audit}"));
+    assert!(erasure.to_string().contains("contextos.retention"), "{erasure}");
 }

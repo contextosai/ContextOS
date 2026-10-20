@@ -118,7 +118,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 40 Kill switch | done — tenant/pack/agent/adapter/capability revocation (`control` scope), enforced in the concurrent authorization reads and at admission, audited before effect, restorable |
 | 41 Cluster-wide limits | done — replica membership heartbeat (CAS on one document), per-replica share of tenant rate/burst/dispatch cap, no per-request store traffic, `contextos_replicas` gauge |
 | 42 Erasure | done — operator erasure of a finished run's replay case and compiled context into audited tombstones (digest of removed content), 410 for erased cases; time-based retention next |
-| 43 Next | next |
+| 43 Retention | done — `DocumentStore::expiring` (age scan excluding tombstones, cursor-paged; PG index), leader-elected sweeper erasing finished runs after `run_content_days` |
+| 44 Next | next |
 
 ## Non-negotiables carried from the spec
 

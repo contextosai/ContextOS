@@ -438,6 +438,21 @@ of what was removed, audited before the content goes; the replay case then answe
 audit entries are not rewritten: keep personal data out of decision outputs and
 rationales and cite evidence by reference instead.
 
+### Retention
+
+Set a retention period to erase personal content automatically:
+
+```toml
+[retention]
+run_content_days = 30   # unset (the default): kept until erased on request
+```
+
+The leader replica (smallest id among live replicas) sweeps runs admitted more than
+that many days ago every `sweep_interval_ms` (default 60 s), `batch` runs (default 500)
+per sweep, and erases each finished run exactly as `POST /v1/runs/{id}/erase` would,
+with `contextos.retention` as the operator. Runs still in progress are revisited on a
+later sweep, never erased under their executor.
+
 ## 9. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on

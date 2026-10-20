@@ -11,6 +11,7 @@ use crate::{DocKey, DocumentStore, StoreError, Versioned, decode, encode};
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_documents.sql"),
     include_str!("../migrations/0002_audit_log.sql"),
+    include_str!("../migrations/0003_document_age.sql"),
 ];
 
 #[derive(Debug, Clone)]
@@ -167,6 +168,46 @@ impl DocumentStore for PostgresStore {
                 }),
             },
         }
+    }
+
+    async fn expiring(
+        &self,
+        kind: crate::DocKind,
+        before_us: u64,
+        after: Option<&crate::ScanCursor>,
+        limit: usize,
+    ) -> Result<Vec<crate::ScanCursor>, StoreError> {
+        let micros = |v: u64| i64::try_from(v).unwrap_or(i64::MAX);
+        let (after_us, after_tenant, after_id) = after.map_or((-1, String::new(), String::new()), |(us, key)| {
+            (micros(*us), key.tenant_id.clone(), key.id.clone())
+        });
+        // Tombstones start with this canonical prefix (64 hex digits of digest).
+        let tombstone = format!(r#"{{"content\_digest":"sha256:{}","erased":true,%"#, "_".repeat(64));
+        let rows = sqlx::query(
+            "SELECT created_us, tenant_id, id FROM ( \
+               SELECT (extract(epoch FROM created_at) * 1000000)::bigint AS created_us, tenant_id, id, body \
+               FROM contextos_documents \
+               WHERE kind = $1 AND created_at < to_timestamp($2::double precision / 1000000)) d \
+             WHERE (created_us, tenant_id, id) > ($3, $4, $5) AND body NOT LIKE $6 \
+             ORDER BY created_us, tenant_id, id LIMIT $7",
+        )
+        .bind(kind.as_str())
+        .bind(micros(before_us))
+        .bind(after_us)
+        .bind(&after_tenant)
+        .bind(&after_id)
+        .bind(&tombstone)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| backend(&e))?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let us = u64::try_from(r.get::<i64, _>(0)).unwrap_or(0);
+                (us, DocKey::new(r.get::<&str, _>(1), kind, r.get::<&str, _>(2)))
+            })
+            .collect())
     }
 }
 

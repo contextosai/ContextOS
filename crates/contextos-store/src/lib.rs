@@ -144,6 +144,25 @@ pub fn decode(revision: u64, text: &str, digest: &str) -> Result<Versioned, Stor
     })
 }
 
+/// Position in an expiry scan: creation time (microseconds since the Unix epoch) and key.
+pub type ScanCursor = (u64, DocKey);
+
+/// The canonical text every erasure tombstone starts with (RFC 8785 sorts keys, so a
+/// tombstone's `content_digest` and `erased` come first; no other document starts so).
+fn is_tombstone_text(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix(r#"{"content_digest":"sha256:"#) else {
+        return false;
+    };
+    rest.len() > 64
+        && rest.as_bytes()[..64].iter().all(u8::is_ascii_hexdigit)
+        && rest[64..].starts_with(r#"","erased":true,"#)
+}
+
+/// Whether a body is an erasure tombstone (`{"content_digest", "erased": true, ...}`).
+pub fn is_tombstone(body: &Value) -> bool {
+    encode(body).is_ok_and(|(text, _)| is_tombstone_text(&text))
+}
+
 /// Compare-and-swap document storage.
 pub trait DocumentStore: Send + Sync {
     fn get(&self, key: &DocKey) -> impl Future<Output = Result<Option<Versioned>, StoreError>> + Send;
@@ -175,6 +194,16 @@ pub trait DocumentStore: Send + Sync {
         body: Value,
         encoded: Encoded,
     ) -> impl Future<Output = Result<u64, StoreError>> + Send;
+
+    /// Documents of `kind` created before `before_us` that are not erasure tombstones,
+    /// ordered by creation time then key, strictly after `after`; at most `limit`.
+    fn expiring(
+        &self,
+        kind: DocKind,
+        before_us: u64,
+        after: Option<&ScanCursor>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<ScanCursor>, StoreError>> + Send;
 }
 
 /// Canonical text and digest of a body, computed once per write.

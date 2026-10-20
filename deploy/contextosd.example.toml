@@ -79,6 +79,9 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # burst = 1000.0
 # max_concurrent_dispatch = 256
 # heartbeat_ms = 5000          # tenant limits are shared across live replicas
+
+# [retention]
+# run_content_days = 30        # erase finished runs' personal content after 30 days
 # [[limits.tenants]]
 # tenant_id = "tenant_acme_prod"
 # requests_per_second = 2000.0
