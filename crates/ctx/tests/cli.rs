@@ -205,3 +205,42 @@ fn scorecard_gate_exits_by_verdict() {
     assert_eq!(code, 1, "{report}");
     assert_eq!(report["failures"][0]["kind"], "floor");
 }
+
+#[test]
+fn scorecards_are_collected_from_evidence_and_feed_the_gate() {
+    let bundle = |run: &str, safety: f64| {
+        serde_json::json!({"evidence_version": "contextos-rs.run_evidence.v1", "run_id": run, "decisions": [
+            {"record": {}, "replay_packet": {}, "scores": [{"score": {"scorecard":
+                {"policy": 1.0, "utility": 0.8, "safety": safety, "cost": 1.0, "latency": 120}}, "audit_sequence": 9}]}]})
+    };
+    let base = write("ev_base.json", &bundle("run_base_1", 1.0));
+    let cand = write("ev_cand.json", &bundle("run_cand_1", 0.5));
+    let map = write(
+        "ev_map.json",
+        &serde_json::json!({"run_base_1": "refund_small", "run_cand_1": "refund_small"}),
+    );
+    let (code, baseline) = ctx(&["scorecards", &base, "--case-map", &map]);
+    assert_eq!(code, 0, "{baseline}");
+    assert_eq!(baseline[0]["case"], "refund_small");
+    assert_eq!(baseline[0]["scorecards"][0]["safety"], 1.0);
+    let (_, candidate) = ctx(&["scorecards", &cand, "--case-map", &map]);
+    let (b, c) = (
+        write("sc_from_ev_b.json", &baseline),
+        write("sc_from_ev_c.json", &candidate),
+    );
+    let limits = write(
+        "sc_from_ev_limits.json",
+        &serde_json::json!({"policy_floor": 1.0, "safety_floor": 0.9, "max_utility_drop": 0.0, "min_cases": 1}),
+    );
+    let (code, report) = ctx(&[
+        "scorecard-gate",
+        "--baseline",
+        &b,
+        "--candidate",
+        &c,
+        "--thresholds",
+        &limits,
+    ]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(report["failures"][0]["kind"], "floor");
+}

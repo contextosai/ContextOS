@@ -364,6 +364,14 @@ ctx scorecard-gate --baseline base.json --candidate cand.json --thresholds limit
 #          "max_latency_ratio": 1.2, "max_cost_ratio": 1.1, "min_cases": 50}
 ```
 
+Build the scorecard files from evidence bundles with `ctx scorecards` (one case per run;
+`--case-map` maps the run ids of each replay to its case name so baseline and candidate
+pair up):
+
+```sh
+ctx scorecards evidence/base-*.json --case-map base-runs.json > base.json
+```
+
 It fails (exit 1) when any candidate scorecard is below a floor (each one, never an
 average), when policy or safety drops on any paired case, when mean utility drops or
 latency or cost rise beyond the limits, when a baseline case has no candidate

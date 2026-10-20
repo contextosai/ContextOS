@@ -55,3 +55,11 @@ key_sha256 = "sha256:99acec3e900c700b272b3f9c5e98fc3266eee5ae5d15e7f8a9b7fedcb3a
 tenant_id = "tenant_acme_prod"
 principal_id = "svc_quality_judge"
 scopes = ["evaluate"]
+
+# Development operator, key "dev-ops-0123456789abcdef0123456789abcdef": holds the kill
+# switch (revoke and restore tenants, packs, agents, adapters, capabilities).
+[[api_keys]]
+key_sha256 = "sha256:93a97c917366b95209ee98b66dfa87597d8b960ad13a8ef0fac1776d37c24385"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_oncall"
+scopes = ["control"]

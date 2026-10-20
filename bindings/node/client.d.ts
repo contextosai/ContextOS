@@ -4,6 +4,11 @@ export type ApprovalMode = "read_only" | "local_write" | "network" | "delegated"
 export type DecisionStatus = "DECIDED" | "DEFERRED" | "REJECTED" | "ESCALATED" | "IN_FLIGHT" | "CLOSED";
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
+export type RevocationKind = "tenant" | "pack" | "agent" | "adapter" | "capability";
+export interface Revocations {
+  revoked: { kind: RevocationKind; target: string; reason: string; by: string; at: string }[];
+}
+
 export interface DispatchReport {
   status: string;
   action_digest: string | null;
@@ -55,6 +60,10 @@ export declare class Client {
   attach(runId: string, traceId: string, principalChain: { kind: string; id: string }[]): Promise<Run>;
   /** Scores a recorded decision as an independent evaluator (token with only `evaluate`). */
   score(runId: string, recordId: string, scores: { evaluatorRef: string; policy: number; utility: number; safety: number }): Promise<{ score: Record<string, any>; audit_sequence: number }>;
+  /** Kill switch (token with the `control` scope). */
+  revoke(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
+  restore(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
+  revocations(): Promise<Revocations>;
   auditEntries(options?: { from?: number; page?: number }): AsyncGenerator<Record<string, Json>>;
 }
 

@@ -126,6 +126,24 @@ export class Client {
     });
   }
 
+  /**
+   * Kill switch (token with the `control` scope): revokes a `tenant`, `pack`, `agent`,
+   * `adapter` or `capability` from the next dispatch and admission.
+   */
+  revoke(kind, target, reason) {
+    return this.request("POST", "/v1/revocations", { body: { kind, target, reason } });
+  }
+
+  /** Restores a revoked target. */
+  restore(kind, target, reason) {
+    return this.request("POST", "/v1/revocations/restore", { body: { kind, target, reason } });
+  }
+
+  /** The tenant's revoked targets. */
+  revocations() {
+    return this.request("GET", "/v1/revocations");
+  }
+
   /** Yields the tenant's signed audit entries in order. */
   async *auditEntries({ from = 1, page = 500 } = {}) {
     let cursor = from;

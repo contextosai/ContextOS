@@ -22,6 +22,7 @@ BINARY = ROOT / "target/release/contextosd"
 EXAMPLE = ROOT / "examples/support-refund"
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
 JUDGE_KEY = "dev-judge-0123456789abcdef0123456789abcd"
+OPS_KEY = "dev-ops-0123456789abcdef0123456789abcdef"
 
 
 def free_port() -> int:
@@ -118,6 +119,18 @@ def main() -> None:
                              idempotency_key="refund:other", evidence_refs=call["evidence_refs"])
         response = client.request("POST", f"/v1/runs/{run.run_id}/tool-calls", stale, generation=2)
         assert response["report"]["reason_codes"] == ["executor_stale"], response
+
+        # Kill switch: a revoked capability is blocked before it is sent; restored, it runs.
+        ops = Client(client.base_url, OPS_KEY)
+        ops.revoke("capability", "adp_payments.issue_refund", "incident 4711")
+        assert ops.revocations()["revoked"][0]["by"] == "svc_oncall"
+        try:
+            replacement.call_tool(call["capability_id"], call["args"], approval_mode="destructive",
+                                  idempotency_key="refund:revoked", evidence_refs=call["evidence_refs"])
+            raise AssertionError("a revoked capability ran")
+        except ToolBlocked as blocked:
+            assert blocked.reason_codes == ["revoked_capability"], blocked.reason_codes
+        assert ops.restore("capability", "adp_payments.issue_refund", "resolved")["revoked"] == []
 
         assert replacement.complete()["status"] == "completed"
         evidence = replacement.evidence()

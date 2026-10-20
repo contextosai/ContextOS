@@ -62,6 +62,17 @@ enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
+    /// into `ctx scorecard-gate` input, one case per run.
+    Scorecards {
+        /// Evidence bundle files.
+        #[arg(required = true)]
+        evidence: Vec<PathBuf>,
+        /// JSON object mapping run ids to case names (replays of one case under
+        /// different run ids pair up); runs without an entry use their run id.
+        #[arg(long)]
+        case_map: Option<PathBuf>,
+    },
     /// Scorecard release gate: compare candidate scorecards with the baseline's on
     /// paired replay cases; fails on floors, policy/safety regressions, utility,
     /// latency or cost beyond limits, and missing cases or measurements.
@@ -215,6 +226,38 @@ fn run(command: Command) -> Result<Value, Failure> {
             } else {
                 Err(Failure::Rejected(value))
             }
+        }
+        Command::Scorecards { evidence, case_map } => {
+            let map = match case_map {
+                Some(path) => read(&path)?,
+                None => json!({}),
+            };
+            let mut cases: Vec<Value> = Vec::new();
+            for path in &evidence {
+                let bundle = read(path)?;
+                let Some(run_id) = bundle["run_id"].as_str() else {
+                    return Err(Failure::Rejected(
+                        json!({"error": format!("{}: not an evidence bundle", path.display())}),
+                    ));
+                };
+                let case = map[run_id].as_str().unwrap_or(run_id).to_owned();
+                let cards: Vec<Value> = bundle["decisions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|d| d["scores"].as_array().cloned().unwrap_or_default())
+                    .map(|s| s["score"]["scorecard"].clone())
+                    .collect();
+                // Several runs of one case (trials) accumulate under its name.
+                match cases.iter_mut().find(|c| c["case"] == case.as_str()) {
+                    Some(existing) => existing["scorecards"]
+                        .as_array_mut()
+                        .into_iter()
+                        .for_each(|a| a.extend(cards.clone())),
+                    None => cases.push(json!({"case": case, "scorecards": cards})),
+                }
+            }
+            Ok(Value::Array(cases))
         }
         Command::ScorecardGate {
             baseline,

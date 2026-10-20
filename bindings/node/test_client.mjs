@@ -15,6 +15,7 @@ const binary = join(root, "target/release/contextosd");
 const example = join(root, "examples/support-refund");
 const KEY = "dev-key-0123456789abcdef0123456789abcdef";
 const JUDGE_KEY = "dev-judge-0123456789abcdef0123456789abcd";
+const OPS_KEY = "dev-ops-0123456789abcdef0123456789abcdef";
 
 if (!existsSync(binary)) {
   console.log(`skipped: ${binary} not built`);
@@ -119,6 +120,15 @@ try {
     body: run.envelope(call.capability_id, call.args, { ...options, idempotencyKey: "refund:other" }), generation: 2,
   });
   assert.deepEqual(stale.report.reason_codes, ["executor_stale"]);
+
+  // Kill switch: a revoked capability is blocked before it is sent; restored, it runs.
+  const ops = new Client(client.baseUrl, { token: OPS_KEY });
+  await ops.revoke("capability", "adp_payments.issue_refund", "incident 4711");
+  assert.equal((await ops.revocations()).revoked[0].by, "svc_oncall");
+  await assert.rejects(
+    replacement.callTool(call.capability_id, call.args, { ...options, idempotencyKey: "refund:revoked" }),
+    (error) => error instanceof ToolBlocked && error.reasonCodes[0] === "revoked_capability");
+  assert.deepEqual((await ops.restore("capability", "adp_payments.issue_refund", "resolved")).revoked, []);
 
   assert.equal((await replacement.complete()).status, "completed");
   const sequences = [];

@@ -157,6 +157,19 @@ class Client:
         return self.request("POST", f"/v1/runs/{_quote(run_id)}/decisions/{_quote(record_id)}/scores",
                             {"evaluator_ref": evaluator_ref, "policy": policy, "utility": utility, "safety": safety})
 
+    def revoke(self, kind: str, target: str, reason: str) -> dict:
+        """Kill switch (a client whose token has the `control` scope): revokes a `tenant`,
+        `pack`, `agent`, `adapter` or `capability` from the next dispatch and admission."""
+        return self.request("POST", "/v1/revocations", {"kind": kind, "target": target, "reason": reason})
+
+    def restore(self, kind: str, target: str, reason: str) -> dict:
+        """Restores a revoked target."""
+        return self.request("POST", "/v1/revocations/restore", {"kind": kind, "target": target, "reason": reason})
+
+    def revocations(self) -> dict:
+        """The tenant's revoked targets."""
+        return self.request("GET", "/v1/revocations")
+
     def audit_entries(self, start: int = 1, page: int = 500):
         """Yields the tenant's signed audit entries in order."""
         cursor: Optional[int] = start
