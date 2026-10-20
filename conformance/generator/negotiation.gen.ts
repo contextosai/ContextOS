@@ -1,5 +1,6 @@
 import { test } from "vitest";
 import { writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import path from "node:path";
 import { negotiateExecutionContract } from "@ref/execution-contract";
 import { STANDARD_PROFILE_REGISTRY } from "@ref/profiles";
@@ -61,5 +62,5 @@ test("negotiation vectors", () => {
     if (i % 2 === 1) { try { bindRegistry(mutated.registry); } catch { /* malformed registry stays unbound */ } }
     run(`mutation:${i}`, mutated);
   }
-  writeFileSync(path.join(out, "negotiation.json"), JSON.stringify({ registry: STANDARD_PROFILE_REGISTRY, cases }) + "\n");
+  writeFileSync(path.join(out, "negotiation.json.gz"), gzipSync(JSON.stringify({ registry: STANDARD_PROFILE_REGISTRY, cases }) + "\n", { level: 9 }));
 });

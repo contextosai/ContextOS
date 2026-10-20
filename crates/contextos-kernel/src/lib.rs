@@ -7,6 +7,7 @@
 //! runtime must also enforce them at the boundary that performs the effect.
 
 pub mod action_risk;
+pub mod authorization;
 pub mod compiler;
 pub mod negotiation;
 pub mod profiles;

@@ -5,10 +5,8 @@ use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_kernel::{CompileDeps, CompileError, ContextPackCompiler, evaluate_action_risk_json};
 use serde_json::Value;
 
-fn load(name: &str) -> Value {
-    let path = format!("{}/../../conformance/vectors/{name}", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-}
+mod common;
+use common::load;
 
 fn list(value: &Value) -> Vec<Value> {
     value.as_array().cloned().unwrap_or_default()
@@ -86,7 +84,7 @@ fn action_risk_evaluations_match_reference() {
 
 #[test]
 fn standard_registry_matches_reference() {
-    let vectors = load("negotiation.json");
+    let vectors = load("negotiation.json.gz");
     let ours = serde_json::to_value(&*contextos_kernel::STANDARD_PROFILE_REGISTRY).unwrap();
     assert_eq!(
         canonicalize(&ours).unwrap(),
@@ -96,7 +94,7 @@ fn standard_registry_matches_reference() {
 
 #[test]
 fn negotiation_matches_reference() {
-    let vectors = load("negotiation.json");
+    let vectors = load("negotiation.json.gz");
     let mut checked = 0;
     for case in vectors["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();

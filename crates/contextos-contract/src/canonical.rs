@@ -29,9 +29,9 @@ pub const MAX_BYTES: usize = 1_048_576;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CanonicalError {
-    #[error("input is not a complete plain JSON value")]
+    #[error("Input is not a complete plain JSON value")]
     InvalidJson,
-    #[error("canonical JSON exceeds reference resource limits")]
+    #[error("Canonical JSON exceeds reference resource limits")]
     ResourceLimit,
 }
 
