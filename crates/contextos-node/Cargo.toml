@@ -16,7 +16,7 @@ doctest = false
 [dependencies]
 contextos-embed = { workspace = true, features = ["schema"] }
 napi = { version = "2", default-features = false, features = ["napi6"] }
-napi-derive = "2"
+napi-derive = "3"
 
 [build-dependencies]
 napi-build = "2"
