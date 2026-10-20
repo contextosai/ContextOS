@@ -2833,12 +2833,7 @@
                     ]
                   },
                   "evidence_ref": {
-                    "type": "object",
-                    "required": [
-                      "artifact_type",
-                      "artifact_id",
-                      "sha256"
-                    ]
+                    "$ref": "#/components/schemas/EvidenceRef"
                   }
                 }
               }
@@ -4115,7 +4110,32 @@
             "type": "string"
           },
           "evidence_ref": {
-            "type": "object"
+            "$ref": "#/components/schemas/EvidenceRef"
+          }
+        }
+      },
+      "EvidenceRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "sha256"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "artifact_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
           }
         }
       }

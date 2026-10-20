@@ -2950,3 +2950,126 @@ async fn operator_corrections_become_replay_obligations() {
         .unwrap();
     assert_eq!(verified["verified"], true);
 }
+
+#[tokio::test]
+async fn feedback_index_heals_and_closures_stay_bounded() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_fb", 1200))
+        .send()
+        .await
+        .unwrap();
+    let body = json!({"kind": "override", "target_surface": "tool", "summary": "Wrong tool chosen."});
+    let file = || {
+        let (plain, url, body) = (
+            plain.clone(),
+            format!("{}/v1/runs/run_fb/feedback", w.base),
+            body.clone(),
+        );
+        async move {
+            plain
+                .post(url)
+                .bearer_auth("judge-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    // Concurrent identical filings never share an id.
+    let (a, b) = tokio::join!(file(), file());
+    assert_ne!(a["feedback_id"], b["feedback_id"]);
+    let tenant = a["tenant_id"].as_str().unwrap().to_owned();
+    let (a, b) = (
+        a["feedback_id"].as_str().unwrap().to_owned(),
+        b["feedback_id"].as_str().unwrap().to_owned(),
+    );
+
+    // An id left in the index without a record (an interrupted filing) is dropped,
+    // not counted or listed forever.
+    contextosd::feedback::index_open(w.state.store.as_ref(), &tenant, "fb_phantom")
+        .await
+        .unwrap();
+    let open = || {
+        let (plain, url) = (plain.clone(), format!("{}/v1/feedback", w.base));
+        async move {
+            plain
+                .get(url)
+                .bearer_auth("acme-key")
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(open().await["open"], 2);
+    assert_eq!(
+        contextosd::feedback::open_ids(w.state.store.as_ref(), &tenant)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let close = |id: String, body: Value| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/feedback/{id}/close", w.base));
+        async move { plain.post(url).bearer_auth("ops-key").json(&body).send().await.unwrap() }
+    };
+    let digest = format!("sha256:{}", "b".repeat(64));
+    // Evidence is exactly three bounded fields: nothing else reaches the audit chain.
+    let extra = json!({"status": "invalid", "evidence_ref": {"artifact_type": "note", "artifact_id": "x", "sha256": digest, "notes": "pii"}});
+    assert_eq!(close(a.clone(), extra).await.status(), 422);
+    let long = json!({"status": "invalid", "evidence_ref": {"artifact_type": "note", "artifact_id": "x".repeat(300), "sha256": digest}});
+    assert_eq!(close(a.clone(), long).await.status(), 422);
+
+    // A record closed while its index entry survived (an interrupted close) is not
+    // listed as open, and a retried close clears the entry.
+    let good =
+        json!({"status": "invalid", "evidence_ref": {"artifact_type": "note", "artifact_id": "x", "sha256": digest}});
+    assert_eq!(close(a.clone(), good.clone()).await.status(), 200);
+    contextosd::feedback::index_open(w.state.store.as_ref(), &tenant, &a)
+        .await
+        .unwrap();
+    let listed = open().await;
+    assert_eq!(listed["open"], 1);
+    assert_eq!(listed["feedback"][0]["feedback_id"], b.as_str());
+    contextosd::feedback::index_open(w.state.store.as_ref(), &tenant, &a)
+        .await
+        .unwrap();
+    assert_eq!(close(a.clone(), good.clone()).await.status(), 409);
+    assert_eq!(
+        contextosd::feedback::open_ids(w.state.store.as_ref(), &tenant)
+            .await
+            .unwrap(),
+        vec![b.clone()]
+    );
+
+    // Racing closers: exactly one wins and exactly one closure is audited.
+    let (x, y) = tokio::join!(close(b.clone(), good.clone()), close(b.clone(), good));
+    let mut codes = [x.status().as_u16(), y.status().as_u16()];
+    codes.sort_unstable();
+    assert_eq!(codes, [200, 409]);
+    let page: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = page["entries"].as_array().unwrap();
+    let closures = entries
+        .iter()
+        .filter(|e| e["kind"] == "feedback_closed" && e["payload"]["feedback_id"] == b.as_str())
+        .count();
+    assert_eq!(closures, 1);
+}

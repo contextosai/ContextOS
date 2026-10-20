@@ -354,6 +354,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         self.ports.clock.now()
     }
 
+    /// A fresh unique id by the gateway's id port.
+    pub fn new_id(&self, prefix: &str) -> String {
+        self.ports.ids.new_id(prefix)
+    }
+
     /// Governs one tool call end to end. Errors are infrastructure failures (store,
     /// audit); every governance outcome is a normal `DispatchOutcome`.
     #[tracing::instrument(

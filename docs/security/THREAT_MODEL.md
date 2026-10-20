@@ -112,6 +112,18 @@ budgets, and the integrity of the evidence record.
   a commit could skip a sequence number (the batch now fails as a whole). Each fix has a
   regression test.
 
+- 2026-10-21: seventh review, of operator feedback. Fixed: feedback ids derived from
+  the filing time could collide under concurrent filings, and an id left in the open
+  index without a record (or a closed record whose index entry survived an interrupted
+  close) could never be removed, so repeated filings could fill the tenant's bound for
+  good (ids are now random, indexing is idempotent, and listing or closing drops such
+  entries); a closure was audited before it took effect, so racing closers both
+  appeared in the chain (the closure now takes effect first, is audited once, and is
+  put back if it cannot be audited); `evidence_ref` accepted any JSON and copied it into
+  the audit chain (now exactly three fields of bounded length). Accepted: the evidence
+  digest is recorded, not checked against a stored artifact, so closing is an
+  operator's attributable, audited assertion. Each fix has a regression test.
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

@@ -1638,13 +1638,8 @@ where
         }
     }
     let now = gateway.now();
-    let id = format!(
-        "fb_{}",
-        &contextos_contract::canonical::sha256_text(&format!(
-            "{}\u{0}{}\u{0}{}\u{0}{now}",
-            admission.tenant_id, run_id, caller.principal_id
-        ))[7..31]
-    );
+    // Random, so concurrent filings never share an id.
+    let id = gateway.new_id("fb");
     let summary_digest = contextos_contract::canonical::sha256_text(&request.summary);
     let record = json!({"feedback_id": id, "tenant_id": admission.tenant_id, "run_id": run_id, "trace_id": admission.trace_id,
         "decision_record_id": request.decision_record_id, "kind": request.kind, "target_surface": request.target_surface,
@@ -1670,6 +1665,8 @@ where
                 "The audit log is unavailable.",
             )
         })?;
+    // Indexed before the record exists so the bound holds; an id left without a record
+    // (a failed create) is dropped by the next list or close that meets it.
     crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
         .await
         .map_err(feedback_error)?;
@@ -1701,24 +1698,38 @@ where
     let ids = crate::feedback::open_ids(state.store.as_ref(), &caller.tenant_id)
         .await
         .map_err(feedback_error)?;
+    let unavailable = |_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    let wanted = query.limit.unwrap_or(500).clamp(1, 1000);
+    let mut fetched = Vec::new();
+    for id in ids.iter().take(wanted) {
+        fetched.push(
+            state
+                .store
+                .get(&crate::feedback::record_key(&caller.tenant_id, id))
+                .await
+                .map_err(unavailable)?,
+        );
+    }
     let mut records = Vec::new();
-    for id in ids.iter().take(query.limit.unwrap_or(500).min(1000)) {
-        if let Some(record) = state
-            .store
-            .get(&crate::feedback::record_key(&caller.tenant_id, id))
-            .await
-            .map_err(|_| {
-                ApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "store_unavailable",
-                    "The store is unavailable.",
-                )
-            })?
-        {
-            records.push(record.body);
+    let mut stale = Vec::new();
+    for (id, record) in ids.iter().zip(fetched) {
+        // Only open records are the replay corpus; anything else is a leftover of an
+        // interrupted file or close, dropped from the index here.
+        match record {
+            Some(r) if r.body["status"] == "open" => records.push(r.body),
+            _ => stale.push(id.clone()),
         }
     }
-    Ok(axum::Json(json!({"open": ids.len(), "feedback": records})).into_response())
+    for id in &stale {
+        let _ = crate::feedback::index_close(state.store.as_ref(), &caller.tenant_id, id).await;
+    }
+    Ok(axum::Json(json!({"open": ids.len() - stale.len(), "feedback": records})).into_response())
 }
 
 /// Closes feedback with evidence (operators only).
@@ -1732,7 +1743,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    use crate::feedback::{CLOSED, CloseBody, FeedbackError};
+    use crate::feedback::{CloseBody, FeedbackError};
     let caller = authorize(&state, &headers, Some("control"))?;
     let gateway = dispatch_gateway(&state)?;
     let request: CloseBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
@@ -1742,18 +1753,7 @@ where
             format!("Invalid closure: {e}"),
         )
     })?;
-    let evidence = &request.evidence_ref;
-    let referenced = ["artifact_type", "artifact_id"]
-        .iter()
-        .all(|k| evidence[*k].as_str().is_some_and(|v| !v.is_empty()))
-        && evidence["sha256"]
-            .as_str()
-            .is_some_and(contextos_contract::canonical::is_sha256_digest);
-    if !CLOSED.contains(&request.status.as_str()) || !referenced {
-        return Err(feedback_error(FeedbackError::Invalid(
-            "status must be fixed, still_failing, invalid or superseded, with an evidence_ref {artifact_type, artifact_id, sha256}",
-        )));
-    }
+    request.check().map_err(feedback_error)?;
     let key = crate::feedback::record_key(&caller.tenant_id, &feedback_id);
     let unavailable = |_| {
         ApiError::new(
@@ -1762,38 +1762,26 @@ where
             "The store is unavailable.",
         )
     };
-    let current = state
-        .store
-        .get(&key)
-        .await
-        .map_err(unavailable)?
-        .ok_or_else(|| feedback_error(FeedbackError::NotFound))?;
-    if current.body["status"] != "open" {
-        return Err(feedback_error(FeedbackError::Closed));
-    }
+    let current = state.store.get(&key).await.map_err(unavailable)?;
+    // Whatever is not an open record leaves the open index (an interrupted file or
+    // close must not hold a slot forever).
+    let Some(current) = current.filter(|c| c.body["status"] == "open") else {
+        let _ = crate::feedback::index_close(state.store.as_ref(), &caller.tenant_id, &feedback_id).await;
+        let exists = state.store.get(&key).await.map_err(unavailable)?.is_some();
+        return Err(feedback_error(if exists {
+            FeedbackError::Closed
+        } else {
+            FeedbackError::NotFound
+        }));
+    };
     let now = gateway.now();
     let mut closed = current.body.clone();
     closed["status"] = json!(request.status);
     closed["closed_at"] = json!(now);
     closed["closed_by"] = json!(caller.principal_id);
-    closed["evidence_ref"] = request.evidence_ref.clone();
-    state
-        .audit
-        .append(
-            &caller.tenant_id,
-            "feedback_closed",
-            json!({"feedback_id": feedback_id, "status": request.status,
-            "evidence_ref": request.evidence_ref, "closed_by": caller.principal_id}),
-            &now,
-        )
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "audit_unavailable",
-                "The audit log is unavailable.",
-            )
-        })?;
+    closed["evidence_ref"] = json!(request.evidence_ref);
+    // The closure takes effect first, so the chain never records one that lost a race;
+    // if it cannot be audited, it is put back.
     match state.store.compare_and_swap(&key, current.revision, &closed).await {
         Ok(_) => {}
         Err(e) if e.is_conflict() => return Err(feedback_error(FeedbackError::Closed)),
@@ -1804,6 +1792,29 @@ where
                 "The store is unavailable.",
             ));
         }
+    }
+    let audited = state
+        .audit
+        .append(
+            &caller.tenant_id,
+            "feedback_closed",
+            json!({"feedback_id": feedback_id, "status": request.status,
+            "evidence_ref": request.evidence_ref, "closed_by": caller.principal_id}),
+            &now,
+        )
+        .await;
+    if audited.is_err() {
+        if let Ok(Some(now_closed)) = state.store.get(&key).await {
+            let _ = state
+                .store
+                .compare_and_swap(&key, now_closed.revision, &current.body)
+                .await;
+        }
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "audit_unavailable",
+            "The audit log is unavailable.",
+        ));
     }
     crate::feedback::index_close(state.store.as_ref(), &caller.tenant_id, &feedback_id)
         .await

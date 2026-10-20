@@ -49,7 +49,34 @@ pub struct CloseBody {
     pub status: String,
     /// Evidence for the status, e.g. `{"artifact_type": "gate_report", "artifact_id":
     /// "...", "sha256": "sha256:..."}`.
-    pub evidence_ref: Value,
+    pub evidence_ref: EvidenceRef,
+}
+
+/// A reference to the evidence for a closure: exactly these three fields, bounded, so
+/// nothing else reaches the (unerasable) audit chain.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceRef {
+    pub artifact_type: String,
+    pub artifact_id: String,
+    pub sha256: String,
+}
+
+impl CloseBody {
+    pub fn check(&self) -> Result<(), FeedbackError> {
+        let e = &self.evidence_ref;
+        let bounded = |s: &str| !s.trim().is_empty() && s.len() <= 256;
+        if !CLOSED.contains(&self.status.as_str())
+            || !bounded(&e.artifact_type)
+            || !bounded(&e.artifact_id)
+            || !contextos_contract::canonical::is_sha256_digest(&e.sha256)
+        {
+            return Err(FeedbackError::Invalid(
+                "status must be fixed, still_failing, invalid or superseded, with an evidence_ref {artifact_type, artifact_id (1..256 bytes), sha256}",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -94,9 +121,12 @@ impl FeedbackBody {
     }
 }
 
-/// Adds `id` to the tenant's open index, refusing past [`MAX_OPEN`].
+/// Adds `id` to the tenant's open index (once), refusing past [`MAX_OPEN`].
 pub async fn index_open<S: DocumentStore>(store: &S, tenant_id: &str, id: &str) -> Result<(), FeedbackError> {
     change_index(store, tenant_id, |ids| {
+        if ids.iter().any(|v| v == id) {
+            return Ok(());
+        }
         if ids.len() >= MAX_OPEN {
             return Err(FeedbackError::Full);
         }
