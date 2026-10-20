@@ -259,8 +259,9 @@ path = "schemas/refund-evidence.v1.json"
 A child whose envelope names a registered schema can then be accepted only if it
 recorded at least one decision and every decision's `outputs` conform to it
 (`child_output_invalid` otherwise, checked again once the child's capacity is locked);
-the parent can still reject it. Once any schema is registered, a delegation naming an
-unregistered one is refused (`output_schema_unregistered`). A schema that does not
+the parent can still reject it. Once any schema is registered, and always in
+production mode, a delegation naming an unregistered one is refused
+(`output_schema_unregistered`). A schema that does not
 compile stops startup.
 
 ### Tools that ask for input
@@ -721,8 +722,9 @@ For incidents (containment with the kill switch, evidence, recovery, postmortems
 **Production checklist.** Production mode enforces on its own: no published
 development keys, HTTPS endpoints and KMS, scope separation, runs that pin
 `model_profile` and `evaluator_suite` in `release_refs` (`[guards]
-required_release_refs`, default in production) and user claims that state a `role`
-(`[guards] require_user_role`, default in production; `user_role_missing`). Opt out of
+required_release_refs`, default in production), user claims that state a `role`
+(`[guards] require_user_role`, default in production; `user_role_missing`), and
+delegations whose result schema is registered (`[[result_schemas]]`). Opt out of
 either only explicitly (`required_release_refs = []`, `require_user_role = false`).
 Also turn on:
 

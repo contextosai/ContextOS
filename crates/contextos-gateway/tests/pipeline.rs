@@ -2204,3 +2204,22 @@ async fn a_run_completes_only_after_its_effects_are_judged() {
     assert!(completed.reason_codes.is_empty(), "{:?}", completed.reason_codes);
     assert_eq!(completed.status, "completed");
 }
+
+#[tokio::test]
+async fn production_delegations_need_a_registered_result_schema() {
+    let mut h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let env = envelope(
+        &h,
+        "run_child_open",
+        &["adp_payments.issue_refund"],
+        "isolate_until_accepted",
+        2,
+    );
+    h.gateway.require_result_schemas(true);
+    let refused = delegate(&h, &env).await.err().unwrap();
+    assert!(refused.to_string().contains("output_schema_unregistered"), "{refused}");
+    h.gateway
+        .register_result_schema("schema://refund-evidence.v1", &json!({"type": "object"}))
+        .unwrap();
+    assert!(delegate(&h, &env).await.is_ok(), "named and registered");
+}

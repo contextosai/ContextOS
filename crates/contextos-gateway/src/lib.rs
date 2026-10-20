@@ -205,6 +205,9 @@ pub struct Gateway<S, L> {
     /// Scores every effectful decision needs from an independent evaluator before the
     /// run may complete (`policy`, `safety` floors); `None` requires none.
     completion_floor: Option<(f64, f64)>,
+    /// Refuse delegations that name no registered result schema, even before any is
+    /// registered (production).
+    require_result_schemas: bool,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -331,6 +334,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             loop_limit: None,
             model_call_floor: 0,
             completion_floor: None,
+            require_result_schemas: false,
         }
     }
 
@@ -350,6 +354,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// `policy` and `safety` at or above these floors before the run completes.
     pub fn set_completion_floor(&mut self, floor: Option<(f64, f64)>) {
         self.completion_floor = floor;
+    }
+
+    /// Requires every delegation to name a registered result schema.
+    pub fn require_result_schemas(&mut self, required: bool) {
+        self.require_result_schemas = required;
     }
 
     pub fn register_adapter(&mut self, adapter_id: impl Into<String>, adapter: Arc<dyn Adapter>) {

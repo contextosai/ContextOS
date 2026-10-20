@@ -143,7 +143,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let scope = &envelope["scope"];
         // Once a deployment registers result schemas, a delegation must name one of
         // them: an unknown reference would otherwise check nothing.
-        if !self.result_schemas.is_empty()
+        if (self.require_result_schemas || !self.result_schemas.is_empty())
             && !scope["output_schema_ref"]
                 .as_str()
                 .is_some_and(|r| self.result_schemas.contains_key(r))

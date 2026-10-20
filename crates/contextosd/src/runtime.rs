@@ -48,6 +48,8 @@ pub struct DispatchSetup {
     pub result_schemas: Vec<(String, serde_json::Value)>,
     /// `[guards] completion_requires_scores` as (policy, safety) floors.
     pub completion_floor: Option<(f64, f64)>,
+    /// Production: every delegation names a registered result schema.
+    pub require_result_schemas: bool,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -82,6 +84,7 @@ where
     gateway.set_loop_limit(setup.loop_limit);
     gateway.set_model_call_floor(setup.model_call_floor);
     gateway.set_completion_floor(setup.completion_floor);
+    gateway.require_result_schemas(setup.require_result_schemas);
     Ok(gateway)
 }
 
@@ -258,5 +261,6 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .guards
             .completion_requires_scores
             .map(|f| (f.policy_floor, f.safety_floor)),
+        require_result_schemas: config.server.mode == crate::config::Mode::Production,
     }))
 }
