@@ -1,0 +1,29 @@
+# Supply-chain policy, enforced in CI by cargo-deny.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails the build unless explicitly reviewed and listed here
+# with a justification and an expiry.
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+    "ISC", "Zlib", "Unicode-3.0", "CDLA-Permissive-2.0", "Unlicense", "BSL-1.0", "0BSD",
+]
+# Workspace crates are unpublished until the project license is decided.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# OpenSSL is never linked: TLS is rustls only.
+deny = [{ crate = "openssl-sys" }, { crate = "native-tls" }]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

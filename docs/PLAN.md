@@ -84,7 +84,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 12b Run admission + governed dispatch API, remote fact providers, pinned pack policy | done — derived workflow features, end-to-end HTTP tests with remote providers and MCP |
 | 13 `ctx` CLI | done — validate, compile, digest, negotiate, manifest, profiles, hash-key; exit codes tested |
 | 14 Python / Node / WASM bindings | done — one JSON facade; PyO3 abi3 (GIL released), N-API (async on thread pool), import-free WASM; all reproduce reference hashes; CI job |
-| 15 Security hardening: threat model, fuzzing, supply chain | next |
+| 15 Security hardening | done — threat model (17 threats → controls → tests), property fuzzing of every kernel entry point (80k cases clean), cargo-deny policy, security headers, SECURITY.md |
+| 16 Performance: benchmarks, load tests, tuning | next |
 
 ## Non-negotiables carried from the spec
 

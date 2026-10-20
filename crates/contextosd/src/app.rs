@@ -572,6 +572,14 @@ where
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            header::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        ))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(max_body))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             StatusCode::GATEWAY_TIMEOUT,

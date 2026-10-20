@@ -57,3 +57,19 @@ jobs:
           cargo build --release -p contextos-py
           cp target/release/lib_native.so bindings/python/contextos/_native.abi3.so
           PYTHONPATH=bindings/python python bindings/python/tests/test_contextos.py
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release -p contextos-embed --test fuzz
+        env:
+          CONTEXTOS_FUZZ_CASES: "20000"

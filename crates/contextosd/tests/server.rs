@@ -144,6 +144,8 @@ async fn compile_matches_reference_and_enforces_auth_and_tenancy() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let compiled: Value = response.json().await.unwrap();
     let expected =
         case("grid:support.refund:true:4200:support_agent")["expected"]["context_ledger"]["compiled_context_hash"]
