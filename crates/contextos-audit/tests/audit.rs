@@ -295,3 +295,51 @@ async fn group_commit_never_forks_across_writers() {
     keys.insert("w2", AuditSigner::from_seed("w2", [2; 32]).verifying_key());
     assert_eq!(verify_tenant_chain(&log, "tenant_a", &keys).await.unwrap(), 400);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn append_all_keeps_entries_consecutive_and_in_order() {
+    use std::sync::Arc;
+    let writer = Arc::new(AuditWriter::new(MemoryLog::new(), AuditSigner::from_seed("w", [4; 32])));
+    let mut tasks = Vec::new();
+    for i in 0..50_u32 {
+        let writer = writer.clone();
+        tasks.push(tokio::spawn(async move {
+            if i % 5 == 0 {
+                let items = (0..3)
+                    .map(|j| {
+                        (
+                            format!("group_{j}"),
+                            json!({"i": i, "j": j}),
+                            "2026-10-20T10:00:00Z".to_owned(),
+                        )
+                    })
+                    .collect();
+                let entries = writer.append_all("tenant_g", items).await.unwrap();
+                let sequences: Vec<u64> = entries.iter().map(|e| e.sequence).collect();
+                assert_eq!(
+                    entries.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+                    ["group_0", "group_1", "group_2"]
+                );
+                assert_eq!(
+                    sequences,
+                    (sequences[0]..sequences[0] + 3).collect::<Vec<_>>(),
+                    "consecutive"
+                );
+            } else {
+                writer
+                    .append("tenant_g", "single", json!({"i": i}), "2026-10-20T10:00:00Z")
+                    .await
+                    .unwrap();
+            }
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+    let mut keys = KeyRing::new();
+    keys.insert("w", AuditSigner::from_seed("w", [4; 32]).verifying_key());
+    assert_eq!(
+        verify_tenant_chain(writer.log(), "tenant_g", &keys).await.unwrap(),
+        40 + 10 * 3
+    );
+}

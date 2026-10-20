@@ -113,33 +113,58 @@ impl<L: AppendLog> AuditWriter<L> {
         payload: Value,
         emitted_at: &str,
     ) -> Result<AuditEntry, AuditError> {
-        if !contextos_contract::validation::is_contract_timestamp(emitted_at) {
-            return Err(ChainError::Invalid {
-                index: 0,
-                reason: "emitted_at is not a contract timestamp",
+        let mut entries = self
+            .append_all(tenant_id, vec![(kind.to_owned(), payload, emitted_at.to_owned())])
+            .await?;
+        entries.pop().ok_or(AuditError::Interrupted)
+    }
+
+    /// Appends several entries as consecutive chain entries, normally in one batch
+    /// (one round trip on a remote log). Returns them in order. If any fails, the
+    /// error is returned; entries before it may have been committed.
+    pub async fn append_all(
+        &self,
+        tenant_id: &str,
+        items: Vec<(String, Value, String)>,
+    ) -> Result<Vec<AuditEntry>, AuditError> {
+        let mut prepared = Vec::with_capacity(items.len());
+        let mut pending = Vec::with_capacity(items.len());
+        for (kind, payload, emitted_at) in items {
+            if !contextos_contract::validation::is_contract_timestamp(&emitted_at) {
+                return Err(ChainError::Invalid {
+                    index: 0,
+                    reason: "emitted_at is not a contract timestamp",
+                }
+                .into());
             }
-            .into());
+            // Encode and hash each payload before joining the tenant's queue.
+            let payload_text = canonicalize(&payload).map_err(ChainError::from)?;
+            let payload_digest = sha256_text(&payload_text);
+            let (reply, committed) = tokio::sync::oneshot::channel();
+            pending.push(Pending {
+                kind: kind.clone(),
+                emitted_at,
+                payload_digest: payload_digest.clone(),
+                payload_text,
+                reply,
+            });
+            prepared.push((kind, payload, payload_digest, committed));
         }
-        // Encode and hash the payload before joining the tenant's queue.
-        let payload_text = canonicalize(&payload).map_err(ChainError::from)?;
-        let payload_digest = sha256_text(&payload_text);
-        let (reply, mut committed) = tokio::sync::oneshot::channel();
+        let Some(mut last) = prepared.pop() else {
+            return Ok(Vec::new());
+        };
         let chain = self.slot(tenant_id);
         chain
             .queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(Pending {
-                kind: kind.to_owned(),
-                emitted_at: emitted_at.to_owned(),
-                payload_digest: payload_digest.clone(),
-                payload_text,
-                reply,
-            });
-        let outcome = loop {
+            .extend(pending);
+        // Batches commit in queue order, so once the last entry is committed every
+        // earlier one has been answered too.
+        let last_outcome = loop {
             tokio::select! {
                 biased;
-                outcome = &mut committed => break outcome,
+                outcome = &mut last.3 => break outcome,
                 mut head = chain.head.lock() => {
                     let batch: Vec<Pending> = {
                         let mut queue = chain.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -147,23 +172,37 @@ impl<L: AppendLog> AuditWriter<L> {
                         queue.drain(..take).collect()
                     };
                     if batch.is_empty() {
-                        // Another holder already took this entry; its reply is coming.
+                        // Another holder already took these entries; the reply is coming.
                         drop(head);
-                        break committed.await;
+                        break (&mut last.3).await;
                     }
                     self.commit(tenant_id, &mut head, batch).await;
                 }
             }
         };
-        let (link, emitted_at) = outcome.map_err(|_| AuditError::Interrupted)??;
-        Ok(assemble_entry(
+        let mut entries = Vec::with_capacity(prepared.len() + 1);
+        for (kind, payload, payload_digest, mut committed) in prepared {
+            let (link, emitted_at) = committed.try_recv().map_err(|_| AuditError::Interrupted)??;
+            entries.push(assemble_entry(
+                link,
+                tenant_id,
+                &kind,
+                &emitted_at,
+                payload,
+                payload_digest,
+            ));
+        }
+        let (kind, payload, payload_digest, _) = last;
+        let (link, emitted_at) = last_outcome.map_err(|_| AuditError::Interrupted)??;
+        entries.push(assemble_entry(
             link,
             tenant_id,
-            kind,
+            &kind,
             &emitted_at,
             payload,
             payload_digest,
-        ))
+        ));
+        Ok(entries)
     }
 
     /// Links and writes one batch, then answers every appender in it.
