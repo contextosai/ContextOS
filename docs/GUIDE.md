@@ -394,7 +394,26 @@ Each evaluator scores a decision once. Scores are signed into the audit chain an
 appear beside their decision in the evidence bundle. Unknown scope names in API-key
 configuration are refused at startup.
 
-## 7. Operate
+## 7. Kill switch
+
+Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
+a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), an `agent`, an `adapter` or a
+`capability`:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/revocations" -H "Authorization: Bearer $OPS_TOKEN" \
+  -d '{"kind": "capability", "target": "adp_payments.issue_refund", "reason": "incident 4711"}'
+```
+
+From the next call, effects of runs bound to a revoked tenant, pack or agent, and calls
+to a revoked adapter or capability, are blocked before anything is reserved, claimed
+or sent (`revoked_<kind>`), and new runs of a revoked tenant, pack or agent are
+refused. A call already past authorization completes. `POST /v1/revocations/restore`
+with the same body restores the target, and `GET /v1/revocations` lists what is
+revoked. Every change is audited before it takes effect, with the operator and reason.
+The check runs alongside the other authorization reads, so it adds no serial latency.
+
+## 8. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

@@ -47,6 +47,8 @@ pub enum DocKind {
     ReplayCase,
     /// The evaluator scores of one decision.
     RunScore,
+    /// The tenant's revoked targets (kill switch).
+    Revocations,
 }
 
 impl DocKind {
@@ -67,6 +69,7 @@ impl DocKind {
             DocKind::MemoryRecord => "memory_record",
             DocKind::ReplayCase => "replay_case",
             DocKind::RunScore => "run_score",
+            DocKind::Revocations => "revocations",
         }
     }
 }

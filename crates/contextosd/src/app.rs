@@ -10,6 +10,9 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
+//! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
+//! | `POST /v1/revocations/restore` | `control` | restore a revoked target |
 //! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out |
 //! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
 //! | `POST /v1/runs/{run_id}/decisions/{record_id}/scores` | `evaluate` (without `admit`/`dispatch`) | an independent evaluator's score of a decision, signed into the audit chain |
@@ -54,7 +57,8 @@ use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
-    EffectOutcome, Gateway, Ownership, Resolution, RunAdmission, ScoreRefusal, ScoreReport, admit_run,
+    EffectOutcome, Gateway, Ownership, REVOCATION_KINDS, Resolution, RevocationError, RunAdmission, ScoreRefusal,
+    ScoreReport, admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -508,6 +512,32 @@ where
                 ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "compile_invalid", message)
             }
         })?;
+    // Kill switch: no new runs of a revoked tenant, pack or agent.
+    match gateway
+        .admission_revoked(
+            &caller.tenant_id,
+            &compiled.context_ledger.pack_ref,
+            &run_context.agent.agent_id,
+        )
+        .await
+    {
+        Ok(None) => {}
+        Ok(Some(reason)) => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "revoked",
+                "This run has been revoked by an operator.",
+            )
+            .with_detail(json!([reason])));
+        }
+        Err(_) => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            ));
+        }
+    }
     let features = crate::runtime::derive_features(
         gateway,
         &compiled,
@@ -1172,6 +1202,94 @@ where
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevocationBody {
+    kind: String,
+    target: String,
+    reason: String,
+}
+
+/// The tenant's revoked targets.
+async fn list_revocations<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let revoked = gateway.revocations(&caller.tenant_id).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    })?;
+    Ok(axum::Json(revoked).into_response())
+}
+
+async fn change_revocation<S, L>(state: &AppState<S, L>, headers: &HeaderMap, body: &Bytes, revoke: bool) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(state, headers, Some("control"))?;
+    let gateway = dispatch_gateway(state)?;
+    let change: RevocationBody = serde_json::from_value(parse_body(state, body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid revocation: {e}"),
+        )
+    })?;
+    match gateway
+        .set_revocation(
+            &caller.tenant_id,
+            &change.kind,
+            &change.target,
+            &change.reason,
+            &caller.principal_id,
+            revoke,
+        )
+        .await
+    {
+        Ok(revoked) => Ok(axum::Json(revoked).into_response()),
+        Err(RevocationError::Invalid) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "revocation_invalid",
+            format!("kind must be one of {REVOCATION_KINDS:?}; target and reason are required"),
+        )),
+        Err(RevocationError::TooMany) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "revocations_full",
+            "The tenant has the maximum number of revocations.",
+        )),
+        Err(RevocationError::Gateway(_)) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
+}
+
+/// Revokes a target (kill switch); effective for the next dispatch and admission.
+async fn revoke<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    change_revocation(&state, &headers, &body, true).await
+}
+
+/// Restores a revoked target.
+async fn restore<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    change_revocation(&state, &headers, &body, false).await
+}
+
 /// The run's evidence bundle: admission, lifecycle, budget ledger with its archive
 /// chain, and DecisionRecords with replay packets.
 async fn run_evidence<S, L>(
@@ -1404,6 +1522,8 @@ where
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/audit/entries", get(audit_entries::<S, L>))
+        .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
+        .route("/v1/revocations/restore", post(restore::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))

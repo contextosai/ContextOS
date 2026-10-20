@@ -20,13 +20,20 @@ fn served() -> BTreeSet<(String, String)> {
     let mut routes = BTreeSet::new();
     for chunk in compact.split(".route(\"").skip(1) {
         let (path, rest) = chunk.split_once('"').unwrap();
-        let method = rest.trim_start_matches(',').split('(').next().unwrap().to_owned();
-        if path == "/v1/runs/{run_id}/{action}" {
-            for action in ["complete", "fail", "cancel"] {
-                routes.insert((method.clone(), format!("/v1/runs/{{run_id}}/{action}")));
+        // The handler and any chained methods: `,get(a).post(b)`.
+        let methods: Vec<&str> = ["get", "post", "put", "patch", "delete"]
+            .into_iter()
+            .filter(|m| rest.starts_with(&format!(",{m}(")) || rest.contains(&format!(").{m}(")))
+            .collect();
+        assert!(!methods.is_empty(), "no method for {path}");
+        for method in methods {
+            if path == "/v1/runs/{run_id}/{action}" {
+                for action in ["complete", "fail", "cancel"] {
+                    routes.insert((method.to_owned(), format!("/v1/runs/{{run_id}}/{action}")));
+                }
+            } else {
+                routes.insert((method.to_owned(), path.to_owned()));
             }
-        } else {
-            routes.insert((method, path.to_owned()));
         }
     }
     routes

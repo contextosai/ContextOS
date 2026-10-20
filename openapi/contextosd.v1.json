@@ -1649,6 +1649,163 @@
         ],
         "x-contextos-scope": "evaluate"
       }
+    },
+    "/v1/revocations": {
+      "get": {
+        "operationId": "list_revocations",
+        "summary": "The tenant's revoked targets (kill switch)",
+        "responses": {
+          "200": {
+            "description": "Current revocations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revocations"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      },
+      "post": {
+        "operationId": "revoke",
+        "summary": "Revoke a tenant, pack, agent, adapter or capability",
+        "description": "Effective for the next dispatch and admission: effects of runs bound to a revoked tenant, pack or agent, and calls to a revoked adapter or capability, are blocked before anything is claimed (`revoked_<kind>`); new runs of a revoked tenant, pack or agent are refused. Audited before it takes effect; idempotent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevocationChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revocations after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revocations"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
+    },
+    "/v1/revocations/restore": {
+      "post": {
+        "operationId": "restore_revocation",
+        "summary": "Restore a revoked target",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevocationChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revocations after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revocations"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {
@@ -1656,7 +1813,7 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only)."
+        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only), control (operators: kill switch)."
       }
     },
     "parameters": {
@@ -2296,6 +2453,77 @@
               "scored_at": {
                 "type": "string",
                 "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "RevocationChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "target",
+          "reason"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "tenant",
+              "pack",
+              "agent",
+              "adapter",
+              "capability"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "Revocations": {
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "target",
+                "reason",
+                "by",
+                "at"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "by": {
+                  "type": "string",
+                  "description": "The operator principal"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
               }
             }
           }

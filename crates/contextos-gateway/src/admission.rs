@@ -56,6 +56,9 @@ pub struct RunAdmission {
     /// The authenticated principal that admitted the run (not the caller-named agent).
     #[serde(default)]
     pub admitted_by: String,
+    /// The pinned Context Pack (release tuple) the run was compiled from.
+    #[serde(default)]
+    pub pack_ref: String,
 }
 
 /// Inputs to admission. `features` must be derived by trusted admission from the
@@ -262,6 +265,7 @@ pub async fn admit_run<S: DocumentStore>(
         lineage: None,
         admitted_at: request.admitted_at,
         admitted_by: request.admitted_by,
+        pack_ref: request.compiled.context_ledger.pack_ref.clone(),
         tenant_id,
         run_id,
     })

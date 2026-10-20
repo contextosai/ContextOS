@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Kill switch: operators (`control` scope) revoke a tenant, pack, agent, adapter or
+  capability; dispatch and admission refuse it from the next call; audited, restorable.
 - Scorecard release gate (`ctx scorecard-gate`): per-scorecard policy/safety floors,
   no per-case policy/safety regression, bounded utility/latency/cost deltas; missing
   cases and measurements fail, as do underpowered comparisons.

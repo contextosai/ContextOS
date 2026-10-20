@@ -30,6 +30,7 @@ mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
+mod revocations;
 mod scores;
 
 use std::collections::HashMap;
@@ -65,6 +66,7 @@ pub use ports::{
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
+pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 
 /// Receipts at which the run's budget ledger is compacted before the next
@@ -621,7 +623,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Policy, constraint and approval facts are independent of each other (and of
         // the operation ledger read used by the duplicate fast path): fetch them at once.
         let operations_key = operation_ledger_key(admission, &operation_id);
-        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary) = tokio::join!(
+        let revocations_key = revocations::revocations_key(&admission.tenant_id);
+        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary, revoked) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
                 .constraints
@@ -629,7 +632,29 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.ports.approvals.approval(admission, &action_digest),
             self.store.get(&operations_key),
             self.boundary_readiness(admission, &now),
+            self.store.get(&revocations_key),
         );
+        // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
+        // before anything is reserved or claimed.
+        let revoked = revoked?;
+        let mut targets = revocations::run_targets(admission).to_vec();
+        targets.extend([
+            ("adapter", manifest.adapter_id.as_str()),
+            ("capability", manifest.capability_id.as_str()),
+        ]);
+        if let Some(reason) = revocations::matching(revoked.as_ref().map(|r| &r.body), &targets) {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "revocation_refusal",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": [reason]}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
+        }
         if let Some(Err(reasons)) = boundary {
             let entry = self
                 .audit

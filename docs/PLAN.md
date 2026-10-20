@@ -115,7 +115,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 37 API description | done — OpenAPI 3.1 for every route, bodies referencing the normative schemas by `$id`, served at `/v1/openapi.json`; tests keep it in step with the router and resolve every reference |
 | 38 Independent scoring | done — `RunScore` scorecards for decisions from separate evaluator principals (`evaluate` scope, separation of duties enforced), runtime-measured cost, signed and in the evidence bundle |
 | 39 Scorecard gate | done — kernel `scorecard_gate` and `ctx scorecard-gate`: floors per scorecard, no policy/safety regression, bounded utility/latency/cost deltas, missing/unmeasured/underpowered fail |
-| 40 Next | next |
+| 40 Kill switch | done — tenant/pack/agent/adapter/capability revocation (`control` scope), enforced in the concurrent authorization reads and at admission, audited before effect, restorable |
+| 41 Next | next |
 
 ## Non-negotiables carried from the spec
 

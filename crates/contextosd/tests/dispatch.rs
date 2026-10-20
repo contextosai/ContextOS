@@ -205,11 +205,17 @@ async fn world(controls: &[&str]) -> World {
         tenant_id = "{TENANT}"
         principal_id = "agt_support"
         scopes = ["evaluate"]
+        [[api_keys]]
+        key_sha256 = "{operator}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_oncall"
+        scopes = ["control"]
         "#,
         manifest = manifest_path.display(),
         key = hash_api_key("acme-key"),
         evaluator = hash_api_key("judge-key"),
-        agent_judge = hash_api_key("agent-judge-key")
+        agent_judge = hash_api_key("agent-judge-key"),
+        operator = hash_api_key("ops-key")
     ))
     .unwrap();
     let vectors: Value = serde_json::from_str(
@@ -1568,4 +1574,124 @@ async fn independent_evaluators_score_decisions() {
         .await
         .unwrap();
     assert_eq!(verified["verified"], true, "the score is signed into the chain");
+}
+
+#[tokio::test]
+async fn operators_revoke_and_restore_targets() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let change = |path: &'static str, key: &'static str, kind: &'static str, target: &'static str| {
+        let url = format!("{}/v1/revocations{path}", w.base);
+        let plain = plain.clone();
+        async move {
+            plain
+                .post(url)
+                .bearer_auth(key)
+                .json(&json!({"kind": kind, "target": target, "reason": "incident 4711"}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    // Only operators hold the kill switch.
+    assert_eq!(
+        change("", "acme-key", "capability", "adp_payments.issue_refund")
+            .await
+            .status(),
+        403
+    );
+    assert_eq!(change("", "ops-key", "everything", "x").await.status(), 422);
+
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_killed", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let calls_before = w.provider_calls.load(Ordering::SeqCst);
+
+    // Revoke the capability: the effect stops before it is claimed or sent.
+    assert_eq!(
+        change("", "ops-key", "capability", "adp_payments.issue_refund")
+            .await
+            .status(),
+        200
+    );
+    let blocked: Value = http
+        .post(format!("{}/v1/runs/run_killed/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_killed", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(blocked["result"]["status"], "blocked", "{blocked}");
+    assert_eq!(blocked["report"]["reason_codes"], json!(["revoked_capability"]));
+    assert_eq!(
+        w.provider_calls.load(Ordering::SeqCst),
+        calls_before,
+        "nothing reached the provider"
+    );
+    let listed: Value = plain
+        .get(format!("{}/v1/revocations", w.base))
+        .bearer_auth("ops-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["revoked"][0]["by"], "svc_oncall");
+
+    // Restored, the same operation proceeds.
+    assert_eq!(
+        change("/restore", "ops-key", "capability", "adp_payments.issue_refund")
+            .await
+            .status(),
+        200
+    );
+    let done: Value = http
+        .post(format!("{}/v1/runs/run_killed/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_killed", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(done["result"]["status"], "completed", "{done}");
+
+    // A revoked agent cannot start new runs.
+    assert_eq!(change("", "ops-key", "agent", "agt_support").await.status(), 200);
+    let refused = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_after_kill", 1200))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["detail"],
+        json!(["revoked_agent"])
+    );
+
+    let verified: Value = plain
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true);
 }
