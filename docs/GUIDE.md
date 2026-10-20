@@ -580,7 +580,23 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
   deletes are also blocked by trigger).
-- **Keys:** the audit signing seed comes from your KMS/HSM via environment. To rotate,
+- **Keys:** sign the audit chain with a key held in a KMS, so the runtime never holds
+  the private key:
+
+  ```toml
+  [audit]
+  key_id = "audit-2026-10"
+  [audit.kms]
+  kind = "vault_transit"          # HashiCorp Vault / OpenBao Transit, ed25519 key
+  url = "https://vault.internal:8200"
+  key_name = "contextos-audit"
+  token_env = "VAULT_TOKEN"
+  ```
+
+  Each group commit signs all its entries in one Transit `batch_input` call, and every
+  signature is checked against the key's public key before anything is written; a KMS
+  failure fails the append. (`signing_seed_env` holds a seed in process memory instead,
+  for development.) To rotate,
   give the servers a new seed and `key_id`, and list the old key under
   `[audit] retired_keys = [{ kid = "…", public_key = "…", retired_at = "…" }]` (the
   key `GET /v1/audit/keys` published, and when it stopped signing), so entries it

@@ -109,8 +109,10 @@ budgets, and the integrity of the evidence record.
   control-plane and approval services with their own hardening and audit.
 - **Provider idempotency.** Duplicate prevention across a lost response relies on the
   provider honouring the `Idempotency-Key`/operation identity, or on reconciliation.
-- **Signing keys** must come from a KMS/HSM-backed secret; rotate by adding the new key
-  to verifiers before switching writers.
+- **Signing keys** should stay in a KMS (`[audit.kms]`): the runtime then never holds
+  the private key and checks every signature it receives. A seed in the environment
+  (`signing_seed_env`) is for development. Retired keys verify only up to their
+  `retired_at`, and rotations are recorded in each tenant's chain.
 - **PostgreSQL role** should be granted `SELECT, INSERT, UPDATE` on documents and
   `SELECT, INSERT` only on the audit log.
 - **Synthetic evidence never establishes deployed conformance**; conformance claims

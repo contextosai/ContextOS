@@ -54,9 +54,14 @@ fn default_connections() -> u32 {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditConfig {
-    /// Environment variable holding the 32-byte ed25519 seed as hex.
+    /// Environment variable holding the 32-byte ed25519 seed as hex (development, or
+    /// a secret store that only hands out seeds). Unused when `kms` is set.
+    #[serde(default)]
     pub signing_seed_env: String,
     pub key_id: String,
+    /// Sign with a key held in a KMS instead (the runtime then never holds it).
+    #[serde(default)]
+    pub kms: Option<crate::kms::KmsConfig>,
     /// Public keys of retired signing keys. Entries they signed stay verifiable after a
     /// rotation: verifiers trust them, and `GET /v1/audit/keys` publishes them, but
     /// nothing signs with them.
@@ -335,6 +340,11 @@ impl Config {
                 "principal {} cannot both evaluate or meter and admit or dispatch",
                 key.principal_id
             )));
+        }
+        if self.audit.kms.is_some() != self.audit.signing_seed_env.is_empty() {
+            return Err(ConfigError::Invalid(
+                "set exactly one of [audit] signing_seed_env or [audit.kms]".into(),
+            ));
         }
         for retired in &self.audit.retired_keys {
             if retired.kid.is_empty()

@@ -21,6 +21,12 @@ max_connections = 32
 # 32-byte ed25519 seed, hex encoded, supplied by your secret manager / KMS.
 signing_seed_env = "CONTEXTOS_AUDIT_SEED"
 key_id = "audit-2026-10"
+# Production: keep the key in a KMS instead of signing_seed_env.
+# [audit.kms]
+# kind = "vault_transit"
+# url = "https://vault.internal:8200"
+# key_name = "contextos-audit"
+# token_env = "VAULT_TOKEN"
 # After a rotation, keep the previous key so entries it signed still verify:
 # retired_keys = [{ kid = "audit-2026-04", public_key = "<base64url, from GET /v1/audit/keys>", retired_at = "2026-10-01T00:00:00Z" }]
 

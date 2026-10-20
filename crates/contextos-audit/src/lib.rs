@@ -5,8 +5,8 @@ pub mod chain;
 pub mod decision;
 
 pub use chain::{
-    AuditEntry, AuditSigner, ChainError, ChainHead, KeyRing, Link, assemble_entry, link, link_entry, next_entry,
-    verify_chain, verify_entry,
+    AuditEntry, AuditSigner, ChainError, ChainHead, KeyRing, Link, RemoteSigner, UnsignedLink, assemble_entry, link,
+    link_entry, link_unsigned, next_entry, verify_chain, verify_entry,
 };
 pub use decision::{DecisionDraft, DecisionError, assemble_decision, decision_record_hash, replay_packet};
 
@@ -29,6 +29,8 @@ pub enum AuditError {
     Malformed,
     #[error("the audit append was interrupted before its outcome was known")]
     Interrupted,
+    #[error("the audit signer failed: {0}")]
+    Signing(String),
 }
 
 /// Appends signed entries to a tenant's chain in an [`AppendLog`].
@@ -81,6 +83,15 @@ struct Pending {
     payload_text: String,
     /// The linkage and the effective `emitted_at` of the committed entry.
     reply: tokio::sync::oneshot::Sender<Result<(Link, String), AuditError>>,
+}
+
+/// An entry linked but not yet signed, within one commit.
+struct Linked {
+    link: UnsignedLink,
+    kind: String,
+    emitted_at: String,
+    digest: String,
+    text: String,
 }
 
 /// Kind of the entry recording a signing-key rotation (`{from_kid, to_kid}`).
@@ -275,8 +286,12 @@ impl<L: AppendLog> AuditWriter<L> {
                 Head::Known(known) => known.clone(),
                 Head::Unknown => None,
             };
-            let mut linked = Vec::with_capacity(batch.len());
-            let mut rows = Vec::with_capacity(batch.len() + 1);
+            // Pass 1: link every entry (the rotation record first, if any) without
+            // signing. Pass 2: sign all record hashes in one call (one KMS round trip
+            // for a remote signer). Pass 3: encode the rows.
+            let mut planned: Vec<Linked> = Vec::with_capacity(batch.len() + 1);
+            let mut outcomes: Vec<Result<usize, AuditError>> = Vec::with_capacity(batch.len());
+            let mut with_rotation = false;
             if let Some(from) = rotated_from {
                 let payload = serde_json::json!({"from_kid": from, "to_kid": self.signer.kid()});
                 let emitted_at = match (&current, batch.first()) {
@@ -289,33 +304,23 @@ impl<L: AppendLog> AuditWriter<L> {
                     (Some(h), None) => h.emitted_at.clone(),
                     (None, None) => String::new(),
                 };
-                let rotation = canonicalize(&payload)
-                    .map_err(|e| AuditError::from(ChainError::from(e)))
-                    .and_then(|text| {
-                        let digest = sha256_text(&text);
-                        let link = link(
-                            current.as_ref(),
-                            tenant_id,
-                            ROTATION_KIND,
-                            &digest,
-                            &emitted_at,
-                            &self.signer,
-                        )
-                        .map_err(AuditError::from)?;
-                        let row_text = entry_text(&link, tenant_id, ROTATION_KIND, &emitted_at, &digest, &text)?;
-                        Ok((link, row_text))
-                    });
-                if let Ok((link, text)) = rotation {
-                    current = Some(ChainHead {
-                        sequence: link.sequence,
-                        record_hash: link.record_hash.clone(),
-                        emitted_at: emitted_at.clone(),
-                    });
-                    rows.push(AppendRow {
-                        sequence: link.sequence,
-                        record_hash: link.record_hash,
-                        text,
-                    });
+                if let Ok(text) = canonicalize(&payload) {
+                    let digest = sha256_text(&text);
+                    if let Ok(link) = link_unsigned(current.as_ref(), tenant_id, ROTATION_KIND, &digest, &emitted_at) {
+                        current = Some(ChainHead {
+                            sequence: link.sequence,
+                            record_hash: link.record_hash.clone(),
+                            emitted_at: emitted_at.clone(),
+                        });
+                        planned.push(Linked {
+                            link,
+                            kind: ROTATION_KIND.into(),
+                            emitted_at,
+                            digest,
+                            text,
+                        });
+                        with_rotation = true;
+                    }
                 }
             }
             for pending in &batch {
@@ -330,48 +335,73 @@ impl<L: AppendLog> AuditWriter<L> {
                     }
                     _ => pending.emitted_at.clone(),
                 };
-                let built = link(
+                match link_unsigned(
                     current.as_ref(),
                     tenant_id,
                     &pending.kind,
                     &pending.payload_digest,
                     &emitted_at,
-                    &self.signer,
-                )
-                .map_err(AuditError::from)
-                .and_then(|link| {
-                    let text = entry_text(
-                        &link,
-                        tenant_id,
-                        &pending.kind,
-                        &emitted_at,
-                        &pending.payload_digest,
-                        &pending.payload_text,
-                    )?;
-                    Ok((link, text))
-                });
-                match built {
-                    Ok((link, text)) => {
+                ) {
+                    Ok(link) => {
                         current = Some(ChainHead {
                             sequence: link.sequence,
                             record_hash: link.record_hash.clone(),
                             emitted_at: emitted_at.clone(),
                         });
+                        outcomes.push(Ok(planned.len()));
+                        planned.push(Linked {
+                            link,
+                            kind: pending.kind.clone(),
+                            emitted_at,
+                            digest: pending.payload_digest.clone(),
+                            text: pending.payload_text.clone(),
+                        });
+                    }
+                    Err(error) => outcomes.push(Err(error.into())),
+                }
+            }
+            let hashes: Vec<String> = planned.iter().map(|l| l.link.record_hash.clone()).collect();
+            let signatures = match self.signer.sign_batch(&hashes).await {
+                Ok(signatures) => signatures,
+                Err(error) => {
+                    // Nothing unsigned or mis-signed is ever written.
+                    failure = AuditError::Signing(error);
+                    *head = Head::Unknown;
+                    break;
+                }
+            };
+            let mut rows = Vec::with_capacity(planned.len());
+            let mut links: Vec<Result<(Link, String), AuditError>> = Vec::with_capacity(planned.len());
+            for (planned, signature) in planned.into_iter().zip(signatures) {
+                let link = planned.link.signed(signature);
+                match entry_text(
+                    &link,
+                    tenant_id,
+                    &planned.kind,
+                    &planned.emitted_at,
+                    &planned.digest,
+                    &planned.text,
+                ) {
+                    Ok(text) => {
                         rows.push(AppendRow {
                             sequence: link.sequence,
                             record_hash: link.record_hash.clone(),
                             text,
                         });
-                        linked.push(Ok((link, emitted_at)));
+                        links.push(Ok((link, planned.emitted_at)));
                     }
-                    Err(error) => linked.push(Err(error)),
+                    Err(error) => links.push(Err(error)),
                 }
             }
+            let linked: Vec<Result<(Link, String), AuditError>> = outcomes
+                .into_iter()
+                .map(|outcome| outcome.and_then(|i| std::mem::replace(&mut links[i], Err(AuditError::Malformed))))
+                .collect();
             // Unknown until the write is confirmed, so an interrupted commit re-reads.
             *head = Head::Unknown;
             match self.log.append_batch(tenant_id, &rows).await {
                 Ok(()) => {
-                    if rows.len() > batch.len() {
+                    if with_rotation {
                         self.rotation_noted
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)

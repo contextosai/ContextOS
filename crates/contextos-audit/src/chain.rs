@@ -56,10 +56,28 @@ fn record_hash(entry: &Spine<'_>) -> Result<String, CanonicalError> {
     domain_digest(ENTRY_VERSION, entry)
 }
 
-/// An ed25519 signing key with a stable key id. Key material is zeroized on drop.
+/// Signs record hashes in batches with a key held elsewhere (a KMS or HSM), so the
+/// runtime never holds the private key. Returns one 64-byte Ed25519 signature per
+/// message, in order.
+#[async_trait::async_trait]
+pub trait RemoteSigner: Send + Sync {
+    async fn sign_batch(&self, messages: &[String]) -> Result<Vec<Vec<u8>>, String>;
+}
+
+enum SignerKey {
+    /// Development and tests: a seed in process memory, zeroized on drop.
+    Local(SigningKey),
+    /// Production: the key stays in the KMS; its public key checks every signature.
+    Remote {
+        public: VerifyingKey,
+        remote: std::sync::Arc<dyn RemoteSigner>,
+    },
+}
+
+/// An Ed25519 signer with a stable key id.
 pub struct AuditSigner {
     kid: String,
-    key: SigningKey,
+    key: SignerKey,
 }
 
 impl std::fmt::Debug for AuditSigner {
@@ -75,7 +93,19 @@ impl AuditSigner {
     pub fn from_seed(kid: impl Into<String>, mut seed: [u8; 32]) -> Self {
         let key = SigningKey::from_bytes(&seed);
         zeroize::Zeroize::zeroize(&mut seed);
-        Self { kid: kid.into(), key }
+        Self {
+            kid: kid.into(),
+            key: SignerKey::Local(key),
+        }
+    }
+
+    /// A signer whose private key stays in a KMS; `public` is its public key, against
+    /// which every returned signature is checked before use.
+    pub fn remote(kid: impl Into<String>, public: VerifyingKey, remote: std::sync::Arc<dyn RemoteSigner>) -> Self {
+        Self {
+            kid: kid.into(),
+            key: SignerKey::Remote { public, remote },
+        }
     }
 
     pub fn kid(&self) -> &str {
@@ -83,15 +113,57 @@ impl AuditSigner {
     }
 
     pub fn verifying_key(&self) -> VerifyingKey {
-        self.key.verifying_key()
+        match &self.key {
+            SignerKey::Local(key) => key.verifying_key(),
+            SignerKey::Remote { public, .. } => *public,
+        }
     }
 
-    fn sign(&self, message: &str) -> EntrySignature {
-        let signature = self.key.sign(message.as_bytes());
+    fn entry_signature(&self, bytes: &[u8; 64]) -> EntrySignature {
         EntrySignature {
             alg: "ed25519".into(),
             kid: self.kid.clone(),
-            sig: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+            sig: URL_SAFE_NO_PAD.encode(bytes),
+        }
+    }
+
+    /// Signs synchronously; `None` for a remote signer, which signs in batches.
+    fn sign(&self, message: &str) -> Option<EntrySignature> {
+        match &self.key {
+            SignerKey::Local(key) => Some(self.entry_signature(&key.sign(message.as_bytes()).to_bytes())),
+            SignerKey::Remote { .. } => None,
+        }
+    }
+
+    /// Signs record hashes in one call: locally, or with one round trip to the KMS.
+    /// A remote signature that does not verify under the configured public key is an
+    /// error, so nothing is ever written with a bad signature.
+    pub async fn sign_batch(&self, messages: &[String]) -> Result<Vec<EntrySignature>, String> {
+        match &self.key {
+            SignerKey::Local(key) => Ok(messages
+                .iter()
+                .map(|m| self.entry_signature(&key.sign(m.as_bytes()).to_bytes()))
+                .collect()),
+            SignerKey::Remote { public, remote } => {
+                if messages.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let signatures = remote.sign_batch(messages).await?;
+                if signatures.len() != messages.len() {
+                    return Err("the signer returned the wrong number of signatures".into());
+                }
+                messages
+                    .iter()
+                    .zip(signatures)
+                    .map(|(message, bytes)| {
+                        let bytes: [u8; 64] = bytes.try_into().map_err(|_| "a signature is not 64 bytes".to_owned())?;
+                        public
+                            .verify_strict(message.as_bytes(), &Signature::from_bytes(&bytes))
+                            .map_err(|_| "a remote signature does not verify under the configured key".to_owned())?;
+                        Ok(self.entry_signature(&bytes))
+                    })
+                    .collect()
+            }
         }
     }
 }
@@ -160,8 +232,28 @@ pub struct Link {
     pub signature: EntrySignature,
 }
 
-/// Links and signs the next entry for a payload with a known canonical digest. This
-/// is all of an append that has to happen in a chain's serial section.
+/// The linkage of the next entry before it is signed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsignedLink {
+    pub sequence: u64,
+    pub prev_hash: Option<String>,
+    pub record_hash: String,
+}
+
+impl UnsignedLink {
+    #[must_use]
+    pub fn signed(self, signature: EntrySignature) -> Link {
+        Link {
+            sequence: self.sequence,
+            prev_hash: self.prev_hash,
+            record_hash: self.record_hash,
+            signature,
+        }
+    }
+}
+
+/// Links and signs the next entry for a payload with a known canonical digest, with a
+/// local signer (a remote signer signs in batches: see [`link_unsigned`]).
 pub fn link(
     head: Option<&ChainHead>,
     tenant_id: &str,
@@ -170,6 +262,22 @@ pub fn link(
     emitted_at: &str,
     signer: &AuditSigner,
 ) -> Result<Link, ChainError> {
+    let unsigned = link_unsigned(head, tenant_id, kind, payload_digest, emitted_at)?;
+    let signature = signer
+        .sign(&unsigned.record_hash)
+        .ok_or_else(|| invalid(0, "a remote signer signs in batches"))?;
+    Ok(unsigned.signed(signature))
+}
+
+/// Links the next entry without signing it. The signature covers the record hash but
+/// is not part of it, so a whole batch can be linked first and signed in one call.
+pub fn link_unsigned(
+    head: Option<&ChainHead>,
+    tenant_id: &str,
+    kind: &str,
+    payload_digest: &str,
+    emitted_at: &str,
+) -> Result<UnsignedLink, ChainError> {
     if !is_contract_timestamp(emitted_at) {
         return Err(invalid(0, "emitted_at is not a contract timestamp"));
     }
@@ -187,12 +295,10 @@ pub fn link(
         emitted_at,
         payload_digest,
     })?;
-    let signature = signer.sign(&record_hash);
-    Ok(Link {
+    Ok(UnsignedLink {
         sequence,
         prev_hash,
         record_hash,
-        signature,
     })
 }
 

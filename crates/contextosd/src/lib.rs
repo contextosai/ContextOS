@@ -4,6 +4,7 @@ pub mod app;
 pub mod attest;
 pub mod auth;
 pub mod config;
+pub mod kms;
 pub mod limits;
 pub mod mcp;
 pub mod membership;
@@ -23,6 +24,14 @@ use serde_json::{Value, json};
 
 pub use app::{AppState, LoadedPack, load_pack, router};
 pub use config::{Config, ConfigError};
+
+/// The configured audit signer: a KMS-held key, or a seed from the environment.
+pub async fn audit_signer(config: &Config) -> Result<AuditSigner, String> {
+    match &config.audit.kms {
+        Some(kms) => kms::vault_transit_signer(kms, &config.audit.key_id).await,
+        None => signer_from_env(&config.audit.signing_seed_env, &config.audit.key_id),
+    }
+}
 
 /// Reads a 32-byte hex seed from the named environment variable.
 pub fn signer_from_env(var: &str, key_id: &str) -> Result<AuditSigner, String> {

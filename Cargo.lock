@@ -459,6 +459,7 @@ dependencies = [
 name = "contextos-audit"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "contextos-contract",
  "contextos-kernel",

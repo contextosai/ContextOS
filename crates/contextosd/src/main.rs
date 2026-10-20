@@ -7,7 +7,7 @@ use std::time::Duration;
 use contextos_store::{MemoryLog, MemoryStore};
 use contextosd::config::StoreConfig;
 use contextosd::runtime::dispatch_setup_from_config;
-use contextosd::{Config, build_state, load_pack, router, signer_from_env};
+use contextosd::{Config, build_state, load_pack, router};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -28,7 +28,7 @@ async fn main() {
         _ => fail("usage: contextosd --config <path>"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
-    let signer = signer_from_env(&config.audit.signing_seed_env, &config.audit.key_id).unwrap_or_else(|e| fail(e));
+    let signer = contextosd::audit_signer(&config).await.unwrap_or_else(|e| fail(e));
     let mut packs = HashMap::new();
     for pack_path in &config.packs {
         let text = std::fs::read_to_string(pack_path).unwrap_or_else(|e| fail(format!("{}: {e}", pack_path.display())));
