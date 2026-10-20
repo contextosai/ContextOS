@@ -144,6 +144,13 @@ pub trait DocumentStore: Send + Sync {
         body: &Value,
     ) -> impl Future<Output = Result<Versioned, StoreError>> + Send;
 
+    /// Whether a read costs less than copying a document the caller already holds.
+    /// Callers use it to decide whether to seed transactions from state they have
+    /// (saving a round trip on a remote store) or simply re-read.
+    fn reads_are_cheap(&self) -> bool {
+        false
+    }
+
     /// As [`DocumentStore::compare_and_swap`] for a body already encoded with
     /// [`encode`]; returns the new revision. Lets callers encode once.
     fn compare_and_swap_encoded(
@@ -258,6 +265,50 @@ where
         expected: None,
         actual: None,
     })
+}
+
+/// As [`transact_state`], but the first attempt starts from `seed` (a revision and
+/// state the caller already holds, for example from its previous transition) instead
+/// of reading. A stale seed costs nothing: its compare-and-swap conflicts and the next
+/// attempt reads. A rejection computed from the seed is never trusted; it is retried
+/// on a fresh read.
+pub async fn transact_from<S, F, K>(
+    store: &S,
+    key: &DocKey,
+    seed: Option<(u64, Value)>,
+    mut decide: F,
+    keep: K,
+) -> Result<(Commit, Option<(u64, Value)>), StoreError>
+where
+    S: DocumentStore,
+    F: FnMut(&Value) -> TransitionResult + Send,
+    K: Fn(&Value) -> bool + Send,
+{
+    if let Some((revision, seeded)) = seed {
+        let result = decide(&seeded);
+        if result.is_accepted() && result.state != seeded {
+            let obligations = result.obligations.unwrap_or_default();
+            let encoded = Encoded::of(&result.state)?;
+            let state = keep(&result.state).then(|| result.state.clone());
+            match store
+                .compare_and_swap_encoded(key, revision, result.state, encoded)
+                .await
+            {
+                Ok(written) => {
+                    return Ok((
+                        Commit::Written {
+                            revision: written,
+                            obligations,
+                        },
+                        state.map(|s| (written, s)),
+                    ));
+                }
+                Err(error) if error.is_conflict() => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    transact_state(store, key, decide, keep).await
 }
 
 pub async fn transact<S, F>(store: &S, key: &DocKey, mut decide: F) -> Result<Commit, StoreError>

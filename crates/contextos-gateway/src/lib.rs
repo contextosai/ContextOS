@@ -43,7 +43,9 @@ use contextos_kernel::authorization::{digest_action_binding, evaluate_authorizat
 use contextos_kernel::budget_compaction::compact_budget_ledger;
 use contextos_kernel::budget_ledger::{reserve_budget, settle_budget, settlement_intent_digest};
 use contextos_kernel::operation_ledger::{claim_operation, record_effect_observation};
-use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact, transact_state};
+use contextos_store::{
+    AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact, transact_from, transact_state,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -564,20 +566,27 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         };
         p.report.action_digest = Some(action_digest.clone());
         let now = self.now();
-        let policy_outcomes = match self.ports.policy.outcomes(admission, &binding).await {
+        // Policy, constraint and approval facts are independent of each other (and of
+        // the operation ledger read used by the duplicate fast path): fetch them at once.
+        let operations_key = operation_ledger_key(admission, &operation_id);
+        let (policy_outcomes, constraint_observations, approval_material, existing_ledger) = tokio::join!(
+            self.ports.policy.outcomes(admission, &binding),
+            self.ports
+                .constraints
+                .observations(admission, &admission.required_controls, &action_digest),
+            self.ports.approvals.approval(admission, &action_digest),
+            self.store.get(&operations_key),
+        );
+        let existing_ledger = existing_ledger?;
+        let policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
             Err(e) => return Ok(p.stop("blocked", vec!["policy_unavailable".into()], &e.to_string())),
         };
-        let constraint_observations = match self
-            .ports
-            .constraints
-            .observations(admission, &admission.required_controls, &action_digest)
-            .await
-        {
+        let constraint_observations = match constraint_observations {
             Ok(observations) => observations,
             Err(e) => return Ok(p.stop("blocked", vec!["constraints_unavailable".into()], &e.to_string())),
         };
-        let approval_material = match self.ports.approvals.approval(admission, &action_digest).await {
+        let approval_material = match approval_material {
             Ok(material) => material,
             Err(e) => return Ok(p.stop("blocked", vec!["approval_unavailable".into()], &e.to_string())),
         };
@@ -685,9 +694,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Fast path: an operation with an attempt in flight or an applied effect cannot
         // be claimed again, so turn the duplicate away before it contends on the budget
         // ledger. The claim below remains the authoritative, atomic check.
-        let operations_key = operation_ledger_key(admission, &operation_id);
-        let existing_ledger = self.store.get(&operations_key).await?;
+        // Remote stores seed the claim from this read instead of reading again.
+        let seed_transitions = !self.store.reads_are_cheap();
         let ledger_exists = existing_ledger.is_some();
+        let mut claim_seed = existing_ledger
+            .as_ref()
+            .filter(|_| seed_transitions)
+            .map(|r| (r.revision, r.body.clone()));
         if let Some(read) = existing_ledger {
             let existing = read.body["operations"]
                 .as_array()
@@ -750,16 +763,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 request["expected_revision"] = ledger["revision"].clone();
                 reserve_budget(ledger, &request)
             },
-            |ledger| ledger["mutations"].as_array().map_or(0, Vec::len) >= BUDGET_COMPACT_AT,
+            |ledger| seed_transitions || ledger["mutations"].as_array().map_or(0, Vec::len) >= BUDGET_COMPACT_AT,
         )
         .await?;
         if let Commit::Rejected { reason_codes } = commit {
             return Ok(p.stop("blocked", reason_codes, "Budget could not be reserved."));
         }
-        // Compact from the state just written instead of reading it back.
+        // Compact from the state just written instead of reading it back; otherwise the
+        // state seeds the settlement.
+        let mut settle_seed = None;
         if let Some((revision, ledger)) = reserved {
-            self.compact_budget_if_due(admission, &budget_key, revision, &ledger, &now)
-                .await?;
+            if ledger["mutations"].as_array().map_or(0, Vec::len) >= BUDGET_COMPACT_AT {
+                self.compact_budget_if_due(admission, &budget_key, revision, &ledger, &now)
+                    .await?;
+            } else if seed_transitions {
+                settle_seed = Some((revision, ledger));
+            }
         }
 
         // Re-check ownership immediately before the claim: the linearization point
@@ -809,19 +828,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 )
                 .await
             {
+                Ok(created) if seed_transitions => claim_seed = Some((created.revision, created.body)),
                 Ok(_) => {}
                 Err(e) if e.is_conflict() => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        let commit = transact(self.store.as_ref(), &operations_key, |ledger| {
-            claim_operation(
-                ledger,
-                &claim,
-                &ledger["revision"],
-                &json!(admission.executor_generation),
-            )
-        })
+        let (commit, claimed) = transact_from(
+            self.store.as_ref(),
+            &operations_key,
+            claim_seed,
+            |ledger| {
+                claim_operation(
+                    ledger,
+                    &claim,
+                    &ledger["revision"],
+                    &json!(admission.executor_generation),
+                )
+            },
+            |_| seed_transitions,
+        )
         .await?;
         match commit {
             Commit::Rejected { reason_codes } => {
@@ -930,9 +956,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "observer": admission.gateway_observer, "observed_at": observed_at, "valid_until": valid_until,
             "evaluation_time": observed_at,
         });
-        let commit = transact(self.store.as_ref(), &operations_key, |ledger| {
-            record_effect_observation(ledger, &observation, &ledger["revision"])
-        })
+        let (commit, _) = transact_from(
+            self.store.as_ref(),
+            &operations_key,
+            claimed,
+            |ledger| record_effect_observation(ledger, &observation, &ledger["revision"]),
+            |_| false,
+        )
         .await?;
         if let Commit::Written { obligations, .. } | Commit::Unchanged { obligations } = commit {
             p.report.obligations.extend(obligations);
@@ -943,34 +973,38 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         } else if !(response.definitive && response.outcome != EffectOutcome::Unknown) {
             self.note_effect(admission, &operation_id, "unknown").await?;
         }
-        let entry = self
-            .audit
-            .append(
-                &admission.tenant_id,
-                "effect_observation",
-                observation.clone(),
-                &observed_at,
-            )
-            .await?;
-        p.report.audit_sequences.push(entry.sequence);
         let known = response.definitive && response.outcome != EffectOutcome::Unknown;
         let allocation = manifest.reservation;
         let usage = json!({
             "tokens": 0, "tool_calls": allocation.tool_calls.min(1), "replans": 0,
             "cost_units": response.cost_units.unwrap_or(allocation.cost_units).min(allocation.cost_units),
         });
-        self.settle(
-            admission,
-            &budget_key,
-            &reservation_id,
-            &format!("settle:{attempt_id}"),
-            &observed_at,
-            &valid_until,
-            &evidence_ref,
-            &usage,
-            known,
-        )
-        .await?;
+        // The observation is already recorded in the operation ledger; auditing it and
+        // settling the budget are independent.
+        let settle_mutation = format!("settle:{attempt_id}");
+        let (entry, settled) = tokio::join!(
+            self.audit.append(
+                &admission.tenant_id,
+                "effect_observation",
+                observation.clone(),
+                &observed_at,
+            ),
+            self.settle_scoped(
+                admission,
+                &budget_key,
+                &reservation_id,
+                &settle_mutation,
+                ("run", &admission.run_id),
+                &observed_at,
+                &valid_until,
+                &evidence_ref,
+                &usage,
+                known,
+                settle_seed,
+            ),
+        );
+        p.report.audit_sequences.push(entry?.sequence);
+        settled?;
 
         // 8. Result.
         let mutations = if matches!(response.outcome, EffectOutcome::Confirmed | EffectOutcome::Partial) {
@@ -1118,6 +1152,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             evidence_ref,
             usage,
             known,
+            None,
         )
         .await
         .map(|_| ())
@@ -1137,6 +1172,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         evidence_ref: &Value,
         usage: &Value,
         known: bool,
+        seed: Option<(u64, Value)>,
     ) -> Result<Commit, GatewayError> {
         let mut request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
@@ -1150,11 +1186,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "evidence_ref": evidence_ref, "observed_at": now, "valid_until": valid_until},
         });
         request["usage_observation"]["intent_digest"] = json!(settlement_intent_digest(&request).unwrap_or_default());
-        Ok(transact(self.store.as_ref(), budget_key, |ledger| {
-            let mut request = request.clone();
-            request["expected_revision"] = ledger["revision"].clone();
-            settle_budget(ledger, &request)
-        })
-        .await?)
+        let (commit, _) = transact_from(
+            self.store.as_ref(),
+            budget_key,
+            seed,
+            |ledger| {
+                let mut request = request.clone();
+                request["expected_revision"] = ledger["revision"].clone();
+                settle_budget(ledger, &request)
+            },
+            |_| false,
+        )
+        .await?;
+        Ok(commit)
     }
 }

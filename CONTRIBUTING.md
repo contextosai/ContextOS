@@ -34,7 +34,8 @@ with `maturin` and Node.js 20+.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-# PostgreSQL store, audit and benchmark paths
+# PostgreSQL store, audit and benchmark paths (no Docker needed:
+# `eval "$(scripts/dev-postgres.sh)"` starts a disposable server and exports the URLs)
 CONTEXTOS_TEST_DATABASE_URL=postgres://… cargo test --workspace
 CONTEXTOS_BENCH_DATABASE_URL=postgres://… cargo bench -p contextos-gateway --bench dispatch -- postgres
 # Property fuzzing of every kernel entry point

@@ -29,8 +29,13 @@ fn revision_of(value: i64) -> Result<u64, StoreError> {
 impl PostgresStore {
     /// Connects with a bounded pool.
     pub async fn connect(url: &str, max_connections: u32) -> Result<Self, StoreError> {
+        // No ping before every acquire: that doubles round trips. Broken connections
+        // surface as errors on use, and idle/lifetime limits recycle them.
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
+            .test_before_acquire(false)
+            .idle_timeout(std::time::Duration::from_secs(300))
+            .max_lifetime(std::time::Duration::from_secs(1800))
             .connect(url)
             .await
             .map_err(|e| backend(&e))?;

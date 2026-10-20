@@ -103,7 +103,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 27a Python HTTP client | done — stdlib-only client, typed outcomes, generation fencing, `governed_tool`, end-to-end test in CI |
 | 27b TypeScript client | done — fetch-based, typed (`client.d.ts` checked with tsc), same flow tested end to end in CI |
 | 28a Dispatch store reads | done — four reads per effect removed (one run-state read, compaction from the reserve's own state, reused fast-path read, outcome from the response) |
-| 28b Checkpoint export across deployments; PostgreSQL validation (needs Docker or CI access) | next |
+| 28b PostgreSQL validated | done — store suite and full gateway on PostgreSQL 16; 13→8 statements per effect, concurrent fact fetching, seeded transactions, no per-acquire ping; ~5,100 effects/s single tenant over a socket; `scripts/dev-postgres.sh` |
+| 29 Per-run audit streams for hot tenants; checkpoint export | next |
 
 ## Non-negotiables carried from the spec
 

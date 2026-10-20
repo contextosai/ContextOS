@@ -69,6 +69,33 @@ and unresolved outcomes are recorded from the adapter response rather than re-re
 The ownership re-check immediately before the claim is deliberate (it is the fencing
 linearization point). On PostgreSQL every removed read is a round trip.
 
+## PostgreSQL
+
+Measured against PostgreSQL 16 on the same laptop (`scripts/dev-postgres.sh`), with
+`synchronous_commit` on:
+
+| Measure | Over a Unix socket | Over loopback TCP |
+|---|---|---|
+| One run, sequential effects | ~1.4 ms per effect | ~4.0 ms per effect |
+| 32 runs of one tenant in parallel | ~194 µs per effect (~5,100 effects/s) | ~0.89 ms per effect |
+
+The TCP column is bounded by this machine's loopback, not the runtime: plain
+concurrent reads through the same pool top out at ~9,400/s over TCP against ~124,000/s
+over the socket. In production, throughput per tenant is round trips per effect times
+network latency, so the runtime keeps round trips low:
+
+- about 8 statements per effect (from 13): one run-state read, policy, constraint and
+  approval facts fetched concurrently with the operation-ledger read, transactions
+  seeded from state the dispatch already holds (claim from the fast-path read,
+  observation from the claim, settlement from the reservation) on stores where reads
+  are not free, and the observation's audit entry written concurrently with the
+  settlement;
+- no ping before every pooled connection use (sqlx's default doubled round trips);
+- audit appends batched per tenant (group commit), one statement per batch.
+
+Under load the audit phases dominate: each tenant's chain is serial, so the next step
+for very hot tenants is per-run audit streams anchored to the tenant chain.
+
 ## Known limits
 
 - A single budget ledger holds at most 128 mutation receipts (spec bound). The gateway

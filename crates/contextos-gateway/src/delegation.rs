@@ -389,6 +389,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             &evidence_ref,
             usage,
             true,
+            None,
         )
         .await
     }

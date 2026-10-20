@@ -29,6 +29,10 @@ impl MemoryStore {
 }
 
 impl DocumentStore for MemoryStore {
+    fn reads_are_cheap(&self) -> bool {
+        true
+    }
+
     async fn get(&self, key: &DocKey) -> Result<Option<Versioned>, StoreError> {
         let found = {
             let docs = self.docs.read().map_err(|_| Self::poisoned())?;
