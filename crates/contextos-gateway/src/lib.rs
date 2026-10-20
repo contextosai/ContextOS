@@ -831,6 +831,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         p.report.audit_sequences.push(entry.sequence);
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
+        // Policy obligations go back to the orchestrator whatever the verdict; they are
+        // discharged independently of it.
+        p.report
+            .obligations
+            .extend(authorization.decision.obligations.iter().cloned());
         match authorization.verdict.as_str() {
             "allow" => {}
             "require_approval" => {
@@ -850,7 +855,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     },
                 );
             }
-            "escalate" => return Ok(p.stop("blocked", vec![], "Policy requires escalation.")),
+            "escalate" => {
+                // A structured hand-off, not a bare stop: the orchestrator routes the run
+                // to a human with the audited decision.
+                if !p.report.obligations.iter().any(|o| o == "escalate") {
+                    p.report.obligations.push("escalate".into());
+                }
+                return Ok(p.stop(
+                    "blocked",
+                    vec!["policy_escalation".into()],
+                    "Policy requires escalation to a human.",
+                ));
+            }
             _ => return Ok(p.stop("blocked", vec![], "Authorization denied.")),
         }
         // Data permissions are part of the conjunction: with a data-governance

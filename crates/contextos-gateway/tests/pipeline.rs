@@ -1875,3 +1875,31 @@ async fn output_outside_the_reviewed_schema_is_withheld_but_the_effect_stands() 
     broken.output_schema = Some(json!({"type": "nonsense"}));
     assert!(h.gateway.pin_capability(broken).is_err());
 }
+
+#[tokio::test]
+async fn escalation_and_policy_obligations_reach_the_orchestrator() {
+    let h = harness("escalate", Behavior::Confirm).await;
+    let out = h.gateway.dispatch(&h.admission, &call("tc_1", None)).await.unwrap();
+    assert_eq!(out.result["status"], "blocked");
+    assert!(
+        out.report.reason_codes.contains(&"policy_escalation".to_owned()),
+        "{:?}",
+        out.report
+    );
+    assert!(out.report.obligations.contains(&"escalate".to_owned()));
+    assert!(
+        out.report.obligations.contains(&"audit".to_owned()),
+        "the rule's own obligation is kept"
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+
+    // An allowed call carries the policy's obligations too.
+    let h = harness("allow", Behavior::Confirm).await;
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ok")))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed");
+    assert!(out.report.obligations.contains(&"audit".to_owned()), "{:?}", out.report);
+}

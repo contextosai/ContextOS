@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Dispatch returns the policy's obligations with every verdict; an `escalate` verdict is a
+  structured hand-off (`policy_escalation`, obligation `escalate`), not a bare block.
 - Recalled memory is verified at admission against promoted, current memory state
   (`memory_unverified`); production without memory governance refuses it unless
   `[guards] trust_supplied_memory`.
