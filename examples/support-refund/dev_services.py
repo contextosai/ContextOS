@@ -104,7 +104,11 @@ def serve(port, handler):
 
 
 if __name__ == "__main__":
-    for port, handler in [(7701, authority), (7702, constraints), (7703, approvals), (7704, payments)]:
+    import os
+
+    # CONTEXTOS_DEV_PORTS="a,b,c,d" moves the services (authority, constraints, approvals, payments).
+    ports = [int(p) for p in os.environ.get("CONTEXTOS_DEV_PORTS", "7701,7702,7703,7704").split(",")]
+    for port, handler in zip(ports, [authority, constraints, approvals, payments]):
         serve(port, handler)
-    print("dev services on :7701-7704 (DEVELOPMENT ONLY)")
+    print(f"dev services on {ports} (DEVELOPMENT ONLY)", flush=True)
     threading.Event().wait()

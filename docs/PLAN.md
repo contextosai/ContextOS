@@ -101,7 +101,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 25 Run lifecycle | done — complete/fail/cancel via kernel transitions; outstanding effects and children tracked; recursive cancellation with dispatch-stop acknowledgement from the budget ledger |
 | 26 Decisions and evidence | done — verified DecisionRecords with evidence-gate enforcement, replay packets, run evidence bundles, paged audit export |
 | 27a Python HTTP client | done — stdlib-only client, typed outcomes, generation fencing, `governed_tool`, end-to-end test in CI |
-| 27b TypeScript client; fold lifecycle reads into dispatch; checkpoint export across deployments | next |
+| 27b TypeScript client | done — fetch-based, typed (`client.d.ts` checked with tsc), same flow tested end to end in CI |
+| 28 Fold lifecycle reads into dispatch (PostgreSQL round trips); checkpoint export across deployments | next |
 
 ## Non-negotiables carried from the spec
 

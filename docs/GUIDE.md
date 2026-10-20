@@ -66,6 +66,19 @@ SDK, CrewAI and others accept plain Python callables); the decorated body never 
 locally. After a crash, `client.attach(...).take_over()` resumes the run and fences the
 old process.
 
+The same client exists for Node.js and other `fetch` runtimes, with TypeScript types:
+
+```ts
+import { Client, ToolPaused, ToolBlocked, governedTool } from "@contextos/kernel/client";
+
+const client = new Client("https://contextos.internal", { token: process.env.CONTEXTOS_TOKEN! });
+const run = await client.admit(admissionBody);
+const issueRefund = governedTool(run, "adp_payments.issue_refund", {
+  approvalMode: "destructive", idempotencyKey: (a) => `refund:${a.order_id}`,
+});
+await issueRefund({ order_id: "ord_881", customer_id: "cus_77", amount_minor: 1200 });
+```
+
 ## 3. Run `contextosd`
 
 ```sh
