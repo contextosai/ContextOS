@@ -1,0 +1,21 @@
+[package]
+name = "contextos-kernel"
+description = "Pure, deterministic ContextOS decision kernel: compilation, risk, authority, durable effects and conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+contextos-contract.workspace = true
+contextos-policy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

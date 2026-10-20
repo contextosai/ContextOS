@@ -6,7 +6,7 @@
 
 // JavaScript semantics require exact IEEE-754 comparison, never an epsilon.
 #![allow(clippy::float_cmp)]
-#![allow(clippy::too_many_lines, clippy::return_self_not_must_use)]
+#![allow(clippy::return_self_not_must_use)]
 
 pub mod jsonlogic;
 pub mod value;
