@@ -3309,3 +3309,19 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
         );
     }
 }
+
+#[tokio::test]
+async fn startup_can_require_schemas_on_effectful_tools() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    assert!(dispatch_setup_from_config(&config).is_ok(), "off by default");
+    config.guards.require_tool_schemas = true;
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("needs input_schema and output_schema"), "{refused}");
+
+    // With an output schema next to the input schema, it starts.
+    let path = &config.capabilities[0];
+    let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    manifest["output_schema"] = json!({"type": "object", "properties": {"refund_id": {"type": "string"}}});
+    std::fs::write(path, manifest.to_string()).unwrap();
+    assert!(dispatch_setup_from_config(&config).is_ok());
+}

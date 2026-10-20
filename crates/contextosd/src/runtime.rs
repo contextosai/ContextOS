@@ -232,6 +232,17 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         let manifest: CapabilityManifest =
             serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
         manifest.validate().map_err(|e| format!("{}: {e}", path.display()))?;
+        let effectful = manifest.action_risk.effect != contextos_contract::types::ActionEffect::None;
+        if config.guards.require_tool_schemas
+            && effectful
+            && (manifest.input_schema.is_none() || manifest.output_schema.is_none())
+        {
+            return Err(format!(
+                "{}: [guards] require_tool_schemas: {} changes external state and needs input_schema and output_schema",
+                path.display(),
+                manifest.capability_id
+            ));
+        }
         manifests.push(manifest);
     }
     Ok(Some(DispatchSetup {

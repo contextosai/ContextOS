@@ -134,6 +134,11 @@ pub struct GuardsConfig {
     /// this is set; with it, every item is verified against promoted state regardless.
     #[serde(default)]
     pub trust_supplied_memory: bool,
+    /// Refuse to start with a capability that changes external state but lacks an
+    /// `input_schema` or `output_schema`, so every effect's arguments and results are
+    /// checked against a reviewed shape.
+    #[serde(default)]
+    pub require_tool_schemas: bool,
 }
 
 fn default_model_call_tokens() -> u64 {
@@ -151,6 +156,7 @@ impl Default for GuardsConfig {
             model_call_min_tokens: default_model_call_tokens(),
             required_release_refs: Vec::new(),
             trust_supplied_memory: false,
+            require_tool_schemas: false,
         }
     }
 }

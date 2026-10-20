@@ -674,6 +674,27 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
 For incidents (containment with the kill switch, evidence, recovery, postmortems), see
 [INCIDENT.md](INCIDENT.md).
 
+**Production checklist.** Beyond what production mode enforces on its own (no
+published development keys, HTTPS endpoints and KMS, scope separation), turn on:
+
+```toml
+[guards]
+required_release_refs = ["model_profile", "evaluator_suite"]   # decisions name what produced them
+require_tool_schemas = true      # every effectful capability has input and output schemas
+
+[retention]
+run_content_days = 30            # personal content does not outlive its purpose
+
+[audit.kms]                      # signing key held in a KMS, pinned
+# …
+
+[providers.memory]               # if runs recall memory: verified against promoted state
+# …
+```
+
+and send `user.role` in every run's verified claims (see the threat model's residual
+risks).
+
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
   deletes are also blocked by trigger).

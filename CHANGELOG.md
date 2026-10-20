@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- `[guards] require_tool_schemas`: refuse to start with an effectful capability that lacks
+  an input or output schema; a production checklist in the guide.
 - Delegations: an accepted child's recorded decision outputs must conform to the schema
   its envelope names (`[[result_schemas]]`, `child_output_invalid`).
 - Escalation records: an escalated call opens one per operation (audited), listed at
