@@ -645,6 +645,9 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
 
 ## 12. Operate
 
+For incidents (containment with the kill switch, evidence, recovery, postmortems), see
+[INCIDENT.md](INCIDENT.md).
+
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
   deletes are also blocked by trigger).
