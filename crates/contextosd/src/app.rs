@@ -1670,11 +1670,46 @@ where
     crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
         .await
         .map_err(feedback_error)?;
+    let store_down = || {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    // Known to the run's erasure before it exists; filed after an erasure, its text is
+    // redacted at once.
+    let record_key = crate::feedback::record_key(&admission.tenant_id, &id);
+    gateway
+        .note_run_feedback(&admission, &record_key.id)
+        .await
+        .map_err(|_| store_down())?;
     state
         .store
-        .create(&crate::feedback::record_key(&admission.tenant_id, &id), &record)
+        .create(&record_key, &record)
         .await
-        .map_err(unavailable)?;
+        .map_err(|_| store_down())?;
+    let replay = state
+        .store
+        .get(&DocKey::new(
+            &admission.tenant_id,
+            DocKind::ReplayCase,
+            &admission.run_id,
+        ))
+        .await
+        .map_err(|_| store_down())?;
+    if replay.is_some_and(|r| contextos_gateway::is_erased(&r.body)) {
+        gateway
+            .erase_run(
+                &admission,
+                &caller.principal_id,
+                "feedback filed after the run was erased",
+            )
+            .await
+            .map_err(|_| store_down())?;
+        let redacted = state.store.get(&record_key).await.map_err(|_| store_down())?;
+        return Ok((StatusCode::CREATED, axum::Json(redacted.map_or(record, |r| r.body))).into_response());
+    }
     Ok((StatusCode::CREATED, axum::Json(record)).into_response())
 }
 

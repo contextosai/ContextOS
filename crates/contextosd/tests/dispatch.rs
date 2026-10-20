@@ -3077,3 +3077,91 @@ async fn feedback_index_heals_and_closures_stay_bounded() {
         .count();
     assert_eq!(closures, 1);
 }
+
+#[tokio::test]
+async fn erasing_a_run_redacts_its_feedback_text() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_forget", 1200))
+        .send()
+        .await
+        .unwrap();
+    let file = || {
+        let (plain, url) = (plain.clone(), format!("{}/v1/runs/run_forget/feedback", w.base));
+        async move {
+            plain.post(url).bearer_auth("judge-key")
+                .json(&json!({"kind": "correction", "target_surface": "memory", "summary": "Customer Jane Doe at 12 Elm St was misidentified.",
+                    "expected_outcome": "ask for the order id"}))
+                .send().await.unwrap().json::<Value>().await.unwrap()
+        }
+    };
+    let before = file().await;
+    let id = before["feedback_id"].as_str().unwrap().to_owned();
+    let cancelled = plain
+        .post(format!("{}/v1/runs/run_forget/cancel", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status(), 200);
+    let erased: Value = plain
+        .post(format!("{}/v1/runs/run_forget/erase", w.base))
+        .bearer_auth("ops-key")
+        .json(&json!({"reason": "subject request"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        erased["erased"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["document"] == "feedback_text"),
+        "{erased}"
+    );
+
+    // The record stays open with its obligation (an operator still closes it); its text is gone.
+    let open: Value = plain
+        .get(format!("{}/v1/feedback", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let record = open["feedback"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["feedback_id"] == id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(record["summary"], Value::Null);
+    assert_eq!(record["expected_outcome"], Value::Null);
+    assert_eq!(record["content_erased"]["erased_by"], "svc_oncall");
+    assert_eq!(record["replay_obligation"]["case"], "run_forget");
+
+    // Feedback filed after the erasure is redacted at once.
+    let late = file().await;
+    assert_eq!(late["summary"], Value::Null, "{late}");
+    assert!(late["content_erased"].is_object());
+    assert!(!open.to_string().contains("Jane Doe"));
+    let verified: Value = plain
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true);
+}

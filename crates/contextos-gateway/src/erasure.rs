@@ -3,7 +3,10 @@
 //! A run's user-provided content lives in the replay case (the original request,
 //! including the user's message and context), the compiled context (the task prompt
 //! and evidence blocks), the orchestrator's checkpoint, and any pending tool input
-//! requests (what a tool asked the user; indexed per run when recorded). Erasure overwrites both with a tombstone that
+//! requests (what a tool asked the user; indexed per run when recorded). Operator
+//! feedback filed against the run (indexed per run) has its free text redacted; its
+//! status and replay obligation stay, so an operator still closes it explicitly.
+//! Erasure overwrites the rest with a tombstone that
 //! records who erased them, when, why, and the digest of what was removed, so the
 //! erasure itself is provable and the content can never be re-created under the same
 //! key. A run can be erased once it is finished (completed, failed or cancelled), past
@@ -25,6 +28,20 @@ const TERMINAL: [&str; 3] = ["completed", "failed", "cancelled"];
 
 /// Pending inputs indexed per run at most (one per operation that asked for input).
 const MAX_PENDING_INDEX: usize = 4096;
+
+/// Feedback records indexed per run at most.
+const MAX_FEEDBACK_INDEX: usize = 4096;
+
+/// Free-text fields of a feedback record, removed on erasure.
+const FEEDBACK_TEXT: [&str; 2] = ["summary", "expected_outcome"];
+
+fn feedback_index_key(admission: &RunAdmission) -> DocKey {
+    DocKey::new(
+        &admission.tenant_id,
+        DocKind::Feedback,
+        format!("run:{}", admission.run_id),
+    )
+}
 
 fn pending_index_key(admission: &RunAdmission) -> DocKey {
     DocKey::new(
@@ -94,12 +111,42 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 pending.push((kind, key, sha256_canonical(&current.body).unwrap_or_default()));
             }
         }
+        // Feedback keeps its record; only its free text goes.
+        let feedback: Vec<DocKey> = self
+            .store
+            .get(&feedback_index_key(admission))
+            .await
+            .map_err(GatewayError::from)?
+            .and_then(|i| i.body["keys"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|id| DocKey::new(&admission.tenant_id, DocKind::Feedback, id))
+            .collect();
+        let mut redact = Vec::new();
+        for key in feedback {
+            if let Some(current) = self.store.get(&key).await.map_err(GatewayError::from)?
+                && current.body.get("content_erased").is_none()
+            {
+                let text: Value = FEEDBACK_TEXT
+                    .iter()
+                    .map(|f| ((*f).to_owned(), current.body[*f].clone()))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+                redact.push((key, sha256_canonical(&text).unwrap_or_default()));
+            }
+        }
         let erased: Vec<Value> = pending
             .iter()
             .map(|(kind, _, digest)| json!({"document": kind.as_str(), "content_digest": digest}))
+            .chain(
+                redact
+                    .iter()
+                    .map(|(_, digest)| json!({"document": "feedback_text", "content_digest": digest})),
+            )
             .collect();
         let record = json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased});
-        if pending.is_empty() {
+        if pending.is_empty() && redact.is_empty() {
             return Ok(record);
         }
         // Audited before the content goes: the trail never misses an erasure.
@@ -124,20 +171,68 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             }
         }
+        for (key, digest) in &redact {
+            let marker = json!({"erased_at": now, "erased_by": operator, "reason": reason, "content_digest": digest});
+            for _ in 0..8 {
+                let Some(current) = self.store.get(key).await.map_err(GatewayError::from)? else {
+                    break;
+                };
+                if current.body.get("content_erased").is_some() {
+                    break;
+                }
+                let mut body = current.body.clone();
+                for field in FEEDBACK_TEXT {
+                    body[field] = Value::Null;
+                }
+                body["content_erased"] = marker.clone();
+                match self.store.compare_and_swap(key, current.revision, &body).await {
+                    Ok(_) => break,
+                    Err(e) if e.is_conflict() => {}
+                    Err(e) => return Err(GatewayError::from(e).into()),
+                }
+            }
+        }
         Ok(record)
+    }
+
+    /// Records that the run has a feedback document (`DocKind::Feedback` id), so erasure
+    /// can find it. Call before the document is created; fails rather than leave a
+    /// document erasure would miss.
+    pub async fn note_run_feedback(&self, admission: &RunAdmission, id: &str) -> Result<(), GatewayError> {
+        if self
+            .note_in_index(feedback_index_key(admission), id, MAX_FEEDBACK_INDEX)
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(contextos_store::StoreError::Conflict {
+                expected: None,
+                actual: None,
+            }
+            .into())
+        }
     }
 
     /// Records that the run has a pending input document, so erasure can find it.
     pub(crate) async fn note_pending_input(&self, admission: &RunAdmission, id: &str) -> Result<(), GatewayError> {
-        let key = pending_index_key(admission);
+        self.note_in_index(pending_index_key(admission), id, MAX_PENDING_INDEX)
+            .await
+            .map(|_| ())
+    }
+
+    /// Adds `id` to the index; false when the index is full or stayed contended.
+    async fn note_in_index(&self, key: DocKey, id: &str, max: usize) -> Result<bool, GatewayError> {
         for _ in 0..8 {
             let current = self.store.get(&key).await?;
             let mut keys = current
                 .as_ref()
                 .and_then(|c| c.body["keys"].as_array().cloned())
                 .unwrap_or_default();
-            if keys.iter().any(|k| k == id) || keys.len() >= MAX_PENDING_INDEX {
-                return Ok(());
+            if keys.iter().any(|k| k == id) {
+                return Ok(true);
+            }
+            if keys.len() >= max {
+                return Ok(false);
             }
             keys.push(json!(id));
             let state = json!({"keys": keys});
@@ -146,11 +241,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Some(c) => self.store.compare_and_swap(&key, c.revision, &state).await.map(|_| ()),
             };
             match written {
-                Ok(()) => return Ok(()),
+                Ok(()) => return Ok(true),
                 Err(e) if e.is_conflict() => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        Ok(())
+        Ok(false)
     }
 }

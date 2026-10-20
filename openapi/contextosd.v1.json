@@ -4064,7 +4064,11 @@
             ]
           },
           "summary": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null once the run's content was erased"
           },
           "expected_outcome": {
             "type": [
@@ -4111,6 +4115,29 @@
           },
           "evidence_ref": {
             "$ref": "#/components/schemas/EvidenceRef"
+          },
+          "content_erased": {
+            "type": "object",
+            "required": [
+              "erased_at",
+              "erased_by",
+              "reason",
+              "content_digest"
+            ],
+            "properties": {
+              "erased_at": {
+                "type": "string"
+              },
+              "erased_by": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "content_digest": {
+                "type": "string"
+              }
+            }
           }
         }
       },

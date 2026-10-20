@@ -391,6 +391,11 @@ The run's replay case becomes the feedback's replay obligation, so `GET /v1/feed
 the passing gate report): `POST /v1/feedback/{feedback_id}/close`. Filing and closing are
 audited.
 
+Erasing a run (by request or retention) redacts its feedback's `summary` and
+`expected_outcome`, recording a digest under `content_erased`; the record stays open with
+its replay obligation, so an operator closes it explicitly (typically `superseded`, since
+the replay case was erased too). Feedback filed after the erasure is redacted at once.
+
 ### Gate on scorecards
 
 `ctx gate` checks what a candidate *permits*; `ctx scorecard-gate` checks how it
