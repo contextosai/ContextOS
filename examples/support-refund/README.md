@@ -11,13 +11,13 @@ Expected output:
 
 ```text
 == admit run
-{'run_id': 'run_demo_1', 'compiled_context_hash': 'sha256:…', 'features': {… 'external_effects': True, 'sensitive_data': True …}}
+{'run_id': 'run_demo_1', 'executor_generation': 2, 'features': {… 'external_effects': True, 'sensitive_data': True …}}
 == dispatch refund
-{'status': 'completed', 'output': {'refund_id': 'rf_ord_881'}, 'audit': [1, 2, 3]}
+{'status': 'completed', 'output': {'refund_id': 'rf_ord_881'}, 'audit': [2, 3, 4]}
 == replay the same operation (must not refund twice)
 {'status': 'paused', 'reasons': ['retry_unsafe']}
 == verify audit chain
-{"entries":4,"verified":true}
+{"entries":5,"verified":true}
 ```
 
 What happened:
@@ -25,7 +25,8 @@ What happened:
 1. **Admission** compiled the support pack for the request, derived the workflow's
    features from the capabilities it can use (external effects, sensitive data),
    negotiated the `contextos.core` profile plus the controls those features require,
-   pinned the policy outcomes and opened the run's budget ledger.
+   pinned the policy outcomes, opened the run's budget ledger and started the run,
+   returning the executor generation the caller presents with every effectful request.
 2. **Dispatch** bound the exact refund (order, customer, amount, evidence) into an RFC
    8785 digest, authorized it against the broker's grant, the pinned policy and the
    control plane's attestations, reserved budget, claimed the operation, called the MCP

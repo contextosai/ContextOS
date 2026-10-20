@@ -167,6 +167,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     deadline: add_contract_seconds(&now, manifest.timeout_ms.div_ceil(1000))
                         .unwrap_or_else(|| admission.deadline.clone()),
                     input: None,
+                    executor_generation: None,
                 };
                 let queried = tokio::time::timeout(
                     Duration::from_millis(manifest.timeout_ms),

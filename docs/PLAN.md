@@ -97,7 +97,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 21 Long runs and per-effect CPU | done — linear ledger validation, exact length counting, budget-ledger compaction (ADR-0003): runs beyond 64 effects, sequential 0.59→0.37 ms, ~10.4k effects/s single tenant |
 | 22 Overload protection; spec proposal | done — load shedding, per-tenant rate and dispatch-concurrency limits; `docs/proposals/spec-0001` drafted for the spec maintainers |
 | 23 Delegation (subagent lanes) | done — envelope binding and narrowing, parent-funded sub-budgets, attested run links, capacity-locking close, HTTP API |
-| 24 Executor failover and resume API (generation fencing across the run's ledgers) | next |
+| 24 Executor failover | done — kernel run lifecycle per run, generation-fenced effectful API (re-checked before claim), takeover via suspend/resume, generation forwarded to providers |
+| 25 Run completion/cancellation lifecycle (cancel children, dispatch-stop acknowledgement), checkpoint export | next |
 
 ## Non-negotiables carried from the spec
 

@@ -85,6 +85,7 @@ fn call() -> AdapterCall {
         idempotency_key: Some("ctxos:op_refund".into()),
         deadline: "2026-10-20T10:00:05Z".into(),
         input: None,
+        executor_generation: None,
     }
 }
 

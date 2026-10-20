@@ -44,6 +44,8 @@ pub struct Continuation {
     /// Object keyed like the tool's `inputRequests`.
     pub input_responses: Value,
     pub responder_id: String,
+    /// The answering executor's fenced generation, when ownership is enforced.
+    pub executor_generation: Option<u64>,
 }
 
 /// The persisted state of an `input_required` result.
@@ -179,6 +181,7 @@ mod tests {
             operation_id: "op_1".into(),
             input_responses: responses,
             responder_id: "user_9".into(),
+            executor_generation: None,
         }
     }
 

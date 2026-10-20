@@ -82,6 +82,23 @@ Tool-call results use `contextos.tool_result.v1`:
 | `rejected` | malformed, unpinned, unsurfaced or incompatible reuse | fix the call |
 | `failed` | provider definitively did not apply the effect | may retry per the capability's recovery policy |
 
+### Executors and failover
+
+Admission returns `executor_generation`. The executor driving the run sends it as the
+`ContextOS-Executor-Generation` header on every effectful request (tool calls, input,
+reconcile, close); without it the server answers `428`. If the executor dies, a
+replacement reads `GET /v1/runs/{run_id}` and calls `POST /v1/runs/{run_id}/takeover`
+with the `expected_generation` it observed. The run moves to a new generation through
+the kernel's suspend and resume transitions, and the old executor's requests are
+refused with `executor_stale` from then on.
+
+The gateway re-checks ownership immediately before claiming an operation, so nothing
+new starts under a stale generation once a takeover commits. An effect already in
+flight at that moment is recorded as claimed in the operation ledger; the new executor
+sees it and reconciles it rather than repeating it. Adapters forward the generation as
+`X-ContextOS-Executor-Generation` so providers that support target-side fencing can
+enforce it too.
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an

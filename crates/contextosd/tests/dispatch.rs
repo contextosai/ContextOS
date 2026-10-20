@@ -277,7 +277,7 @@ fn tool_call(run_id: &str, id: &str, amount: u64) -> Value {
 #[tokio::test]
 async fn admitted_run_dispatches_governed_effects() {
     let w = world(&ALL_CONTROLS).await;
-    let http = reqwest::Client::new();
+    let http = executor_client(2);
     let admitted = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -325,7 +325,8 @@ async fn admitted_run_dispatches_governed_effects() {
         .json()
         .await
         .unwrap();
-    assert_eq!(audit, json!({"verified": true, "entries": 3}));
+    // run start, authorization decision, operation claim, effect observation
+    assert_eq!(audit, json!({"verified": true, "entries": 4}));
     let metrics = http
         .get(format!("{}/metrics", w.base))
         .send()
@@ -349,7 +350,7 @@ async fn admitted_run_dispatches_governed_effects() {
 #[tokio::test]
 async fn high_value_refund_pauses_for_approval() {
     let w = world(&ALL_CONTROLS).await;
-    let http = reqwest::Client::new();
+    let http = executor_client(2);
     let admitted = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -392,7 +393,7 @@ async fn deployment_without_effect_controls_cannot_admit_effectful_runs() {
 #[tokio::test]
 async fn long_running_mcp_tasks_are_reconciled() {
     let w = world(&ALL_CONTROLS).await;
-    let http = reqwest::Client::new();
+    let http = executor_client(2);
     let admitted = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -459,7 +460,7 @@ async fn long_running_mcp_tasks_are_reconciled() {
 #[tokio::test]
 async fn tools_that_need_input_continue_the_same_operation() {
     let w = world(&ALL_CONTROLS).await;
-    let http = reqwest::Client::new();
+    let http = executor_client(2);
     let admitted = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -539,7 +540,7 @@ async fn tools_that_need_input_continue_the_same_operation() {
 #[tokio::test]
 async fn delegated_children_are_admitted_narrowed_and_closed() {
     let w = world(&ALL_CONTROLS).await;
-    let http = reqwest::Client::new();
+    let http = executor_client(2);
     let parent: Value = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -621,4 +622,99 @@ async fn delegated_children_are_admitted_narrowed_and_closed() {
     let closed: Value = closed.json().await.unwrap();
     assert_eq!(closed["usage"]["tool_calls"], 0);
     assert_eq!(close("run_parent").await.status(), 422, "only delegated runs close");
+}
+
+/// A client acting as the executor that holds `generation` (a freshly admitted run
+/// starts at generation 2: created, then started).
+fn executor_client(generation: u64) -> reqwest::Client {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("contextos-executor-generation", generation.to_string().parse().unwrap());
+    reqwest::Client::builder().default_headers(headers).build().unwrap()
+}
+
+#[tokio::test]
+async fn a_new_executor_takes_over_and_the_old_one_is_fenced() {
+    let w = world(&ALL_CONTROLS).await;
+    let old = executor_client(2);
+    let admitted: Value = old
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_failover", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(admitted["executor_generation"], 2);
+    let status: Value = old
+        .get(format!("{}/v1/runs/run_failover", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (status["status"].as_str(), status["executor_generation"].as_u64()),
+        (Some("running"), Some(2))
+    );
+
+    // A new executor takes over from what it observed.
+    let takeover = |expected: u64| {
+        let http = reqwest::Client::new();
+        let url = format!("{}/v1/runs/run_failover/takeover", w.base);
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&json!({"expected_generation": expected}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let taken: Value = takeover(2).await.json().await.unwrap();
+    assert_eq!(
+        taken["executor_generation"], 4,
+        "suspend and resume each advance the generation"
+    );
+    assert_eq!(
+        takeover(2).await.status(),
+        409,
+        "a takeover from a stale view is refused"
+    );
+
+    // The old executor can no longer start work; the new one can.
+    let stale: Value = old
+        .post(format!("{}/v1/runs/run_failover/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_failover", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stale["report"]["reason_codes"], json!(["executor_stale"]));
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 0);
+    let fresh: Value = executor_client(4)
+        .post(format!("{}/v1/runs/run_failover/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_failover", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fresh["result"]["status"], "completed", "{fresh}");
+    let missing = reqwest::Client::new()
+        .post(format!("{}/v1/runs/run_failover/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_failover", "tc_2", 120_000))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 428, "effectful requests must carry a generation");
 }

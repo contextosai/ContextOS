@@ -145,6 +145,9 @@ pub(crate) fn governance_headers(call: &AdapterCall, credential: Option<&Credent
     put("x-contextos-operation-id", &call.operation_id);
     put("x-contextos-attempt-id", &call.attempt_id);
     put("x-contextos-action-digest", &call.action_digest);
+    if let Some(generation) = call.executor_generation {
+        put("x-contextos-executor-generation", &generation.to_string());
+    }
     if let Some(value) = credential.and_then(Credential::header) {
         headers.insert(reqwest::header::AUTHORIZATION, value);
     }

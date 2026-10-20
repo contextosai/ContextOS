@@ -11,10 +11,15 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
+//! | `GET /v1/runs/{run_id}` | `dispatch` | lifecycle status and current executor generation |
+//! | `POST /v1/runs/{run_id}/takeover` | `dispatch` | move the run to a new executor; the old generation goes stale |
 //! | `POST /v1/runs/{run_id}/close` | `admit` | close a delegated child (`accept`/`reject`) and settle its usage into the parent |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
+//!
+//! Effectful routes (tool calls, input, reconcile, close) require the
+//! `ContextOS-Executor-Generation` header returned by admission or takeover.
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
 //! bound to the caller's tenant; a mismatched tenant is refused without detail.
@@ -36,8 +41,8 @@ use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
-    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, EffectOutcome, Gateway, Resolution,
-    RunAdmission, admit_run,
+    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, EffectOutcome, Gateway, Ownership,
+    Resolution, RunAdmission, admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -543,10 +548,28 @@ where
                 "This run has already been admitted.",
             )
         })?;
+    let generation = match gateway.open_run(&admission).await {
+        Ok(Ownership::Current(generation)) => generation,
+        Ok(Ownership::Refused(reason)) => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                reason,
+                "The run could not be started.",
+            ));
+        }
+        Err(_) => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            ));
+        }
+    };
     Ok((
         StatusCode::CREATED,
         axum::Json(json!({
             "run_id": admission.run_id,
+            "executor_generation": generation,
             "compiled_context_hash": compiled.context_ledger.compiled_context_hash,
             "required_controls": admission.required_controls,
             "policy_refs": admission.policy_refs,
@@ -580,15 +603,58 @@ where
     let gateway = dispatch_gateway(&state)?;
     let envelope = parse_body(&state, &body)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
-    let outcome = gateway.dispatch(&admission, &envelope).await.map_err(|_| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dispatch_unavailable",
-            "Governed dispatch is temporarily unavailable.",
-        )
-    })?;
+    let generation = executor_generation(&headers)?;
+    let outcome = gateway
+        .dispatch_as(&admission, &envelope, generation)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "dispatch_unavailable",
+                "Governed dispatch is temporarily unavailable.",
+            )
+        })?;
     state.metrics.dispatch_outcome(outcome.report.status.as_str());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
+}
+
+/// The fencing token an executor presents with effectful requests.
+pub const EXECUTOR_GENERATION_HEADER: &str = "contextos-executor-generation";
+
+fn executor_generation(headers: &HeaderMap) -> Result<u64, ApiError> {
+    headers
+        .get(EXECUTOR_GENERATION_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::PRECONDITION_REQUIRED,
+                "executor_generation_required",
+                "Effectful requests must carry the executor generation returned at admission or takeover.",
+            )
+        })
+}
+
+/// Refuses a request from an executor that no longer owns the run.
+async fn require_owner<S: DocumentStore + 'static, L: AppendLog + 'static>(
+    gateway: &Gateway<S, L>,
+    admission: &RunAdmission,
+    headers: &HeaderMap,
+) -> Result<u64, ApiError> {
+    let generation = executor_generation(headers)?;
+    match gateway.check_owner(admission, generation).await {
+        Ok(Ownership::Current(g)) => Ok(g),
+        Ok(Ownership::Refused(reason)) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            reason,
+            "The executor does not own this run; take it over or use the current generation.",
+        )),
+        Err(_) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
 }
 
 /// The admission is looked up under the caller's tenant, so another tenant's run is
@@ -675,6 +741,7 @@ where
         },
     };
     let admission = load_admission(&state, &caller, &run_id).await?;
+    require_owner(gateway, &admission, &headers).await?;
     let outcome = gateway
         .reconcile(&admission, &operation_id, resolution)
         .await
@@ -727,6 +794,7 @@ where
         operation_id,
         input_responses: request.input_responses,
         responder_id: caller.principal_id.clone(),
+        executor_generation: Some(executor_generation(&headers)?),
     };
     let outcome = gateway
         .continue_with_input(&admission, &request.tool_call, &continuation)
@@ -795,6 +863,8 @@ where
         ));
     };
     let parent = load_admission(&state, &caller, &lineage.parent_run_id).await?;
+    // The parent's executor closes its children.
+    require_owner(gateway, &parent, &headers).await?;
     let outcome = gateway
         .close_delegation(&parent, &child, request.decision, &caller.principal_id)
         .await
@@ -811,6 +881,82 @@ where
         StatusCode::CONFLICT
     };
     Ok((status, axum::Json(outcome)).into_response())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TakeoverBody {
+    /// The generation the new executor last observed (`GET /v1/runs/{run_id}`).
+    expected_generation: u64,
+}
+
+/// Moves a run to a new executor; the previous executor's generation goes stale.
+async fn take_over<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: TakeoverBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "Expected expected_generation.",
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    match gateway.take_over(&admission, request.expected_generation).await {
+        Ok(Ownership::Current(generation)) => {
+            Ok(axum::Json(json!({"run_id": run_id, "executor_generation": generation})).into_response())
+        }
+        Ok(Ownership::Refused(reason)) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            reason,
+            "The run could not be taken over at that generation.",
+        )),
+        Err(_) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
+}
+
+/// The run's lifecycle status and current executor generation.
+async fn run_status<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let run = gateway
+        .run_state(&admission)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .unwrap_or(Value::Null);
+    Ok(axum::Json(
+        json!({"run_id": run_id, "status": run["status"], "executor_generation": run["executor_generation"],
+        "deadline": admission.deadline, "parent_run_id": admission.lineage.as_ref().map(|l| l.parent_run_id.clone())}),
+    )
+    .into_response())
 }
 
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
@@ -844,6 +990,8 @@ where
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
+        .route("/v1/runs/{run_id}", get(run_status::<S, L>))
+        .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",

@@ -130,6 +130,9 @@ pub struct AdapterCall {
     /// tool's `requestState` when it sent one) for a continuation attempt.
     #[serde(default)]
     pub input: Option<Value>,
+    /// The fenced executor generation that issued this call, for target-side fencing.
+    #[serde(default)]
+    pub executor_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

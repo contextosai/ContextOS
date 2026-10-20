@@ -24,6 +24,7 @@ pub mod admission;
 mod delegation;
 mod input;
 pub mod manifest;
+mod ownership;
 pub mod ports;
 mod reconcile;
 
@@ -48,6 +49,7 @@ pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
+pub use ownership::Ownership;
 pub use ports::{
     Adapter, AdapterCall, AdapterResponse, ApprovalProvider, AuthorityFacts, AuthorityProvider, Clock,
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
@@ -294,7 +296,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )
     )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope, None).await;
+        let outcome = self.dispatch_inner(admission, envelope, None, None).await;
         let span = tracing::Span::current();
         match &outcome {
             Ok(outcome) => {
@@ -314,6 +316,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         outcome
     }
 
+    /// [`Gateway::dispatch`] for an executor fenced at `executor_generation` (see
+    /// [`Gateway::open_run`]): refused with `executor_stale` once another executor has
+    /// taken the run over.
+    pub async fn dispatch_as(
+        &self,
+        admission: &RunAdmission,
+        envelope: &Value,
+        executor_generation: u64,
+    ) -> Result<DispatchOutcome, GatewayError> {
+        self.dispatch_inner(admission, envelope, None, Some(executor_generation))
+            .await
+    }
+
     /// Continues an operation whose tool asked for input (`input_required`). The tool
     /// call must be the same operation with the same action digest; it is governed
     /// again end to end, and the answers are validated against the pending requests.
@@ -328,7 +343,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         envelope: &Value,
         continuation: &Continuation,
     ) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope, Some(continuation)).await;
+        let outcome = self
+            .dispatch_inner(
+                admission,
+                envelope,
+                Some(continuation),
+                continuation.executor_generation,
+            )
+            .await;
         if let Ok(outcome) = &outcome {
             tracing::Span::current().record("status", outcome.report.status.as_str());
         }
@@ -340,6 +362,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         envelope: &Value,
         continuation: Option<&Continuation>,
+        fence: Option<u64>,
     ) -> Result<DispatchOutcome, GatewayError> {
         let mut p = Pipeline {
             admission,
@@ -356,6 +379,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             },
             started: std::time::Instant::now(),
         };
+
+        // 0. Fence: only the run's current executor may start work.
+        if let Some(generation) = fence
+            && let Ownership::Refused(reason) = self.check_owner(admission, generation).await?
+        {
+            return Ok(p.stop("rejected", vec![reason.into()], "The executor does not own this run."));
+        }
 
         // 1. Surface.
         if validate(
@@ -699,6 +729,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(p.stop("blocked", reason_codes, "Budget could not be reserved."));
         }
 
+        // Re-check ownership immediately before the claim: the linearization point
+        // against a concurrent takeover.
+        if let Some(generation) = fence
+            && let Ownership::Refused(reason) = self.check_owner(admission, generation).await?
+        {
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            return Ok(p.stop(
+                "rejected",
+                vec![reason.into()],
+                "The executor lost ownership of this run.",
+            ));
+        }
+
         // 5. Claim.
         let idempotency = manifest.recovery.idempotency.as_ref();
         let provider_key = idempotency.map(|_| format!("ctxos:{operation_id}"));
@@ -804,6 +848,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             idempotency_key: provider_key,
             deadline,
             input: adapter_input.map(|(input, _)| input),
+            executor_generation: fence,
         };
         let response = tokio::time::timeout(
             Duration::from_millis(manifest.timeout_ms),

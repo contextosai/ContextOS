@@ -26,7 +26,7 @@ budgets, and the integrity of the evidence record.
 | T5 | Delegation widening | child grants must strictly narrow scope, depth and validity (`validate_authority`) | delegation vectors |
 | T6 | Duplicate effects (retries, races, lost responses) | operation ledger: one in-flight attempt, unknown outcomes block blind retries, idempotent retry only with verified provider proof; CAS commits | `concurrent_duplicates_dispatch_once`, `timeout_is_unknown_and_blocks_blind_retry`, store contention suite |
 | T7 | Budget overspend under concurrency | conserved budget ledger with reservations; unknown usage keeps reservations | `concurrent_budget_is_conserved` |
-| T8 | Stale executor acting after failover | executor generation fencing in run/operation/budget ledgers; resume rechecks controls | durable vectors |
+| T8 | Stale executor acting after failover | kernel run lifecycle with a generation per event; every effectful request must present the current generation, re-checked immediately before the operation claim; takeover by fenced suspend/resume; in-flight work stays visible in the operation ledger for reconciliation; generation forwarded for target-side fencing | durable vectors |
 | T9 | Cross-tenant access | every key includes tenant; callers bound to one tenant; lookups scoped by caller tenant | server tests (other tenant → 403/404) |
 | T10 | Parser differentials (duplicate keys, deep nesting) | strict ingress rejects duplicates, depth > 64, oversized bodies (`ingress`) | ingress tests, server hostile-body test, fuzz |
 | T11 | Policy evaluation errors treated as "false" | structured `policy_eval_error`; JsonLogic prototype access and identity comparisons fail visibly; bounded steps | compiler error vectors, ADR-0002 |
