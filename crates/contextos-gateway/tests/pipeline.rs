@@ -1822,3 +1822,56 @@ async fn tool_output_is_labelled_data_and_cannot_grant_authority() {
         json!(["external_state", "compensatable", "human_approved"])
     );
 }
+
+#[tokio::test]
+async fn output_outside_the_reviewed_schema_is_withheld_but_the_effect_stands() {
+    let schema = json!({"type": "object", "additionalProperties": false, "required": ["refund_id"],
+        "properties": {"refund_id": {"type": "string"}}});
+    let mut pinned = manifest();
+    pinned.output_schema = Some(schema.clone());
+
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.pin_capability(pinned.clone()).unwrap();
+    let ok = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ok")))
+        .await
+        .unwrap();
+    assert_eq!(
+        ok.result["output"]["refund_id"], "rf_refund_ok",
+        "conforming output passes through"
+    );
+
+    let mut h = harness("allow", Behavior::Inject).await;
+    h.gateway.pin_capability(pinned).unwrap();
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_odd")))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed", "the effect happened");
+    assert_eq!(out.result["output"], json!({}), "but its unexpected output is withheld");
+    assert_eq!(out.result["mutations"], json!(["refund_odd"]));
+    assert!(out.report.reason_codes.contains(&"output_schema_violation".to_owned()));
+    let ops = h
+        .store
+        .get(&operation_ledger_key(&h.admission, "refund_odd"))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(
+        ops["operations"][0]["outcome"], "confirmed",
+        "the ledger records the effect"
+    );
+    assert_eq!(
+        verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap(),
+        4,
+        "the violation is audited"
+    );
+
+    // A schema that does not compile is refused when the manifest is pinned.
+    let mut broken = manifest();
+    broken.output_schema = Some(json!({"type": "nonsense"}));
+    assert!(h.gateway.pin_capability(broken).is_err());
+}

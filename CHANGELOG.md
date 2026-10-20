@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Capability manifests take an `output_schema`: non-conforming tool output is withheld
+  from the agent and audited, while the effect is still recorded.
 - Tool results carry `risk_tags` (the action's effect and reversibility, `human_approved`
   when an approval was redeemed), `policy_decision_id`, and `metadata.instruction_treatment:
   data_only`; an injection regression test covers forged approvals in output.

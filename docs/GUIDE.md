@@ -113,7 +113,11 @@ with `inputResponses` continues the same operation.
 
 Give capability manifests an `input_schema` (JSON Schema) and `description`: the
 schema is shown to hosts and enforced on every call (`arguments_invalid`), and
-violations report argument paths only, never values.
+violations report argument paths only, never values. An `output_schema` is enforced on
+what the tool returns: a confirmed effect whose output does not conform is still
+recorded and settled (it happened), but the output is withheld from the agent, the
+result carries `output_schema_violation` and the obligation `verify_effect_out_of_band`,
+and the violation is audited (paths only).
 
 ## 3. Run `contextosd`
 

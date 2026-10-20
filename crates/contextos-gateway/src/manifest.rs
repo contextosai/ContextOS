@@ -110,6 +110,11 @@ pub struct CapabilityManifest {
     /// whose arguments do not conform are rejected before authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<Value>,
+    /// Reviewed JSON Schema for the tool's output. When present, a confirmed effect
+    /// whose output does not conform is still recorded, but its output is withheld
+    /// from the agent and the violation is audited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
     /// Human-readable description shown to agents (for example as an MCP tool).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -129,6 +134,8 @@ pub enum ManifestError {
     Timeout(String),
     #[error("capability {0} input_schema does not compile: {1}")]
     InputSchema(String, String),
+    #[error("capability {0} output_schema does not compile: {1}")]
+    OutputSchema(String, String),
 }
 
 impl CapabilityManifest {
@@ -158,6 +165,10 @@ impl CapabilityManifest {
         if let Some(schema) = &self.input_schema {
             contextos_contract::schema::ArgumentSchema::compile(schema)
                 .map_err(|e| ManifestError::InputSchema(id.clone(), e))?;
+        }
+        if let Some(schema) = &self.output_schema {
+            contextos_contract::schema::ArgumentSchema::compile(schema)
+                .map_err(|e| ManifestError::OutputSchema(id.clone(), e))?;
         }
         Ok(())
     }

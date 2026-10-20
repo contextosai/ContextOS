@@ -192,6 +192,7 @@ pub struct Gateway<S, L> {
     adapters: HashMap<String, Arc<dyn Adapter>>,
     manifests: HashMap<String, CapabilityManifest>,
     schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
+    output_schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
     /// Identical tool calls (same capability and arguments, new operation) a run may
     /// make before the loop guard refuses the next; `None` disables it.
     loop_limit: Option<u64>,
@@ -313,6 +314,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             adapters: HashMap::new(),
             manifests: HashMap::new(),
             schemas: HashMap::new(),
+            output_schemas: HashMap::new(),
             loop_limit: None,
             model_call_floor: 0,
         }
@@ -341,6 +343,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             let compiled = contextos_contract::schema::ArgumentSchema::compile(schema)
                 .map_err(|e| ManifestError::InputSchema(manifest.capability_id.clone(), e))?;
             self.schemas.insert(manifest.capability_id.clone(), compiled);
+        }
+        if let Some(schema) = &manifest.output_schema {
+            let compiled = contextos_contract::schema::ArgumentSchema::compile(schema)
+                .map_err(|e| ManifestError::OutputSchema(manifest.capability_id.clone(), e))?;
+            self.output_schemas.insert(manifest.capability_id.clone(), compiled);
         }
         self.manifests.insert(manifest.capability_id.clone(), manifest);
         Ok(())
@@ -1292,6 +1299,33 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 response.output,
                 Some("The tool needs input before it can run.".into()),
                 vec![],
+            ));
+        }
+        // Output the tool's reviewed schema does not allow never reaches the agent; the
+        // effect itself stands (it is recorded and settled above).
+        if matches!(response.outcome, EffectOutcome::Confirmed)
+            && known
+            && let Some(schema) = self.output_schemas.get(&manifest.capability_id)
+            && let Err(paths) = schema.check(&Value::Object(response.output.clone()))
+        {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "output_schema_violation",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "paths": paths}),
+                    &self.now(),
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            p.report.reason_codes.push("output_schema_violation".into());
+            p.report.obligations.push("verify_effect_out_of_band".into());
+            return Ok(p.finish(
+                if read_only { "ok" } else { "completed" },
+                Map::new(),
+                Some("The effect was applied, but the tool's output did not match its schema and was withheld.".into()),
+                mutations,
             ));
         }
         Ok(match (response.outcome, known) {
