@@ -12,7 +12,7 @@ name = "contextosd"
 path = "src/main.rs"
 
 [dependencies]
-contextos-contract.workspace = true
+contextos-contract = { workspace = true, features = ["schema"] }
 contextos-kernel.workspace = true
 contextos-store.workspace = true
 contextos-audit.workspace = true

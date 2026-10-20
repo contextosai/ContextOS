@@ -25,3 +25,11 @@ pub use action_risk::{evaluate_action_risk, evaluate_action_risk_json, project_a
 pub use compiler::{CompileDeps, CompileError, ContextPackCompiler, ResolvedRule};
 pub use negotiation::negotiate_execution_contract;
 pub use profiles::STANDARD_PROFILE_REGISTRY;
+
+/// Evaluates JsonLogic for embedders: JSON result, `null` for `undefined` or
+/// non-finite numbers, and a message on evaluation failure.
+pub fn policy_apply(logic: &serde_json::Value, data: &serde_json::Value) -> Result<serde_json::Value, String> {
+    contextos_policy::apply(logic, data)
+        .map(|value| value.to_json().unwrap_or(serde_json::Value::Null))
+        .map_err(|e| format!("{:?}", e.kind))
+}

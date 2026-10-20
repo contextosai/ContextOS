@@ -83,7 +83,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 12a contextosd: config, API-key auth + tenant binding, strict ingress, compile/negotiate/validate/audit, metrics, health, container | done |
 | 12b Run admission + governed dispatch API, remote fact providers, pinned pack policy | done — derived workflow features, end-to-end HTTP tests with remote providers and MCP |
 | 13 `ctx` CLI | done — validate, compile, digest, negotiate, manifest, profiles, hash-key; exit codes tested |
-| 14 Python / Node / WASM bindings | next |
+| 14 Python / Node / WASM bindings | done — one JSON facade; PyO3 abi3 (GIL released), N-API (async on thread pool), import-free WASM; all reproduce reference hashes; CI job |
+| 15 Security hardening: threat model, fuzzing, supply chain | next |
 
 ## Non-negotiables carried from the spec
 

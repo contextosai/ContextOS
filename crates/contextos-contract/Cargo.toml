@@ -7,6 +7,11 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["schema"]
+# JSON Schema validation against the published schemas (not needed by the pure kernel).
+schema = ["dep:jsonschema"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -15,7 +20,7 @@ hex.workspace = true
 thiserror.workspace = true
 ryu-js.workspace = true
 icu_collator.workspace = true
-jsonschema.workspace = true
+jsonschema = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true

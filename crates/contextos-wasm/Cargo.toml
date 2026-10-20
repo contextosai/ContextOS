@@ -1,0 +1,18 @@
+[package]
+name = "contextos-wasm"
+description = "ContextOS kernel as a dependency-free WebAssembly module (C ABI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+contextos-embed = { workspace = true, default-features = false }
+
+# The FFI boundary is the only place in the workspace where unsafe code is allowed.
+[lints.rust]
+unsafe_code = "deny"

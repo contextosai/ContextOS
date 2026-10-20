@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "contextos"
+description = "ContextOS kernel: governed context, authorization and durable effects for AI agents"
+requires-python = ">=3.9"
+dynamic = ["version"]
+
+[tool.maturin]
+manifest-path = "../../crates/contextos-py/Cargo.toml"
+module-name = "contextos._native"
+python-source = "."

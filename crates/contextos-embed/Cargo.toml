@@ -1,0 +1,21 @@
+[package]
+name = "contextos-embed"
+description = "Stable JSON facade over the ContextOS kernel for language bindings and WASM"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = ["schema"]
+schema = ["contextos-contract/schema"]
+
+[dependencies]
+contextos-contract.workspace = true
+contextos-kernel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

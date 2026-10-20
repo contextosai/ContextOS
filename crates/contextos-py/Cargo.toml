@@ -1,0 +1,25 @@
+[package]
+name = "contextos-py"
+description = "Python bindings for the ContextOS kernel (PyO3, stable ABI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+# Extension modules link against their host at load time; no standalone test harness.
+test = false
+doctest = false
+
+[dependencies]
+contextos-embed = { workspace = true, features = ["schema"] }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+
+[build-dependencies]
+pyo3-build-config = "0.23"
+
+[lints]
+workspace = true

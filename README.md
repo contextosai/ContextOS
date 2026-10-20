@@ -4,7 +4,7 @@ The production runtime for [ContextOS](https://contextosai.com), an open contrac
 
 This repository implements the spec. The spec's TypeScript module is a conformance reference; this runtime reproduces its decisions exactly (checked against generated golden vectors) and adds what the reference leaves to implementers: protected stores, fencing, adapters, a gateway and a server.
 
-> Status: pre-release, private. The decision kernel is complete; the store, gateway and server are in progress. See [docs/PLAN.md](docs/PLAN.md).
+> Status: pre-release, private. Kernel, stores, audit, gateway, adapters, server, CLI and bindings are implemented; hardening and performance work continue. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Design
 
@@ -21,6 +21,13 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 |---|---|
 | `contextos-contract` | Types for the published schemas, JSON Schema validation, RFC 8785 canonical JSON, contract time |
 | `contextos-policy` | Bounded JsonLogic with `json-logic-js` parity |
+| `contextos-store` | Compare-and-swap document store and append-only log: memory and PostgreSQL |
+| `contextos-audit` | ed25519-signed hash-chained audit, DecisionRecords, replay packets |
+| `contextos-gateway` | Governed Tool Gateway pipeline and run admission |
+| `contextos-adapters` | MCP 2026-07-28 and HTTP adapters, remote fact providers |
+| `contextosd` | HTTP server: compile, admit, dispatch, audit, metrics |
+| `ctx` | Offline CLI |
+| `contextos-embed`, `-py`, `-node`, `-wasm` | In-process bindings over one JSON facade |
 | `contextos-kernel` | Context Pack compiler, ActionRisk, profile negotiation, authority/approval/authorization, execution boundary, data flow, memory lifecycle, run lifecycle and resume, operation ledger, budget ledger, conformance assessment |
 
 ## Verify

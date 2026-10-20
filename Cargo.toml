@@ -10,13 +10,14 @@ repository = "https://github.com/contextosai/ContextOS"
 publish = false
 
 [workspace.dependencies]
-contextos-contract = { path = "crates/contextos-contract" }
+contextos-contract = { path = "crates/contextos-contract", default-features = false }
 contextos-policy = { path = "crates/contextos-policy" }
 contextos-kernel = { path = "crates/contextos-kernel" }
 contextos-store = { path = "crates/contextos-store" }
 contextos-audit = { path = "crates/contextos-audit" }
 contextos-gateway = { path = "crates/contextos-gateway" }
 contextos-adapters = { path = "crates/contextos-adapters" }
+contextos-embed = { path = "crates/contextos-embed", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11"

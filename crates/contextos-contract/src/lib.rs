@@ -6,6 +6,7 @@ pub mod canonical;
 pub mod errors;
 pub mod execution;
 pub mod ingress;
+#[cfg(feature = "schema")]
 pub mod schema;
 pub mod shape;
 pub mod types;

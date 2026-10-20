@@ -29,3 +29,31 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: WASM (import-free module)
+        run: |
+          cargo build --release -p contextos-wasm --target wasm32-unknown-unknown
+          node bindings/wasm/test.mjs target/wasm32-unknown-unknown/release/contextos_wasm.wasm
+      - name: Node (N-API)
+        run: |
+          cargo build --release -p contextos-node
+          cp target/release/libcontextos_node.so "$RUNNER_TEMP/contextos.node"
+          CONTEXTOS_NATIVE="$RUNNER_TEMP/contextos.node" node bindings/node/test.mjs
+      - name: Python (PyO3 abi3)
+        run: |
+          cargo build --release -p contextos-py
+          cp target/release/lib_native.so bindings/python/contextos/_native.abi3.so
+          PYTHONPATH=bindings/python python bindings/python/tests/test_contextos.py
