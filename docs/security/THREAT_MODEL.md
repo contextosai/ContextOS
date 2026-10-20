@@ -19,7 +19,7 @@ budgets, and the integrity of the evidence record.
 
 | # | Threat | Control (where) | Test |
 |---|---|---|---|
-| T1 | Prompt-injected instructions in retrieved data drive an effect | Retrieved and recalled blocks are `data_only`/`untrusted`; only pinned, surfaced capabilities dispatch; evidence must be admitted (`compiler`, `gateway`) | compiler vectors; `unsurfaced_and_unadmitted_inputs_are_rejected` |
+| T1 | Prompt-injected instructions in retrieved data or tool output drive an effect | Retrieved and recalled blocks are `data_only`/`untrusted`; tool results are labelled `instruction_treatment: data_only` and carry their risk tags and authorization id; only pinned, surfaced capabilities dispatch; evidence must be admitted; approval is digest-bound, so text claiming one grants nothing (`compiler`, `gateway`) | compiler vectors; `unsurfaced_and_unadmitted_inputs_are_rejected`; `tool_output_is_labelled_data_and_cannot_grant_authority` |
 | T2 | Arguments changed after approval | RFC 8785 action digest binds arguments, amount, resources, evidence, policy; approvals bind the digest (`authorization`) | `exact_approval_is_redeemed_once_then_dispatches` |
 | T3 | Approval replay for another operation | single-use redemption CAS bound to operation + digest (`transition_approval_redemption`, store CAS) | authorization vectors |
 | T4 | Stale/revoked authority | grant observations must be verified, current and unrevoked; unknown revocation blocks (`validate_authority`) | authorization vectors (revoked, unknown, stale) |

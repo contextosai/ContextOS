@@ -212,6 +212,10 @@ struct Pipeline<'a> {
     envelope: &'a Value,
     report: DispatchReport,
     started: std::time::Instant,
+    /// The action's risk (from its manifest) and whether a human approved it.
+    risk_tags: Vec<String>,
+    /// The authorization decision the result rests on.
+    policy_decision_id: Option<String>,
 }
 
 impl Pipeline<'_> {
@@ -234,6 +238,8 @@ impl Pipeline<'_> {
         if let Some(id) = &self.report.approval_request_id {
             metadata.insert("approval_request_id".into(), json!(id));
         }
+        // Tool output is evidence, never instructions: it cannot grant authority.
+        metadata.insert("instruction_treatment".into(), json!("data_only"));
         let result = json!({
             "envelope_version": "contextos.tool_result.v1",
             "tool_call_id": self.envelope["tool_call_id"],
@@ -246,7 +252,8 @@ impl Pipeline<'_> {
             "artifacts": [],
             "citations": [],
             "mutations": mutations,
-            "risk_tags": [],
+            "risk_tags": self.risk_tags,
+            "policy_decision_id": self.policy_decision_id,
             "latency_ms": latency_ms,
             "metadata": metadata,
         });
@@ -459,6 +466,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 audit_sequences: vec![],
             },
             started: std::time::Instant::now(),
+            risk_tags: Vec::new(),
+            policy_decision_id: None,
         };
 
         // 0. Fence: only the run's current executor may start work.
@@ -500,6 +509,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "Capability is not pinned.",
             ));
         };
+        let risk = serde_json::to_value(&manifest.action_risk).unwrap_or(Value::Null);
+        p.risk_tags = ["effect", "reversibility"]
+            .iter()
+            .filter_map(|k| risk[*k].as_str().map(str::to_owned))
+            .collect();
         if !admission.surfaced_capabilities.contains(capability_id) {
             return Ok(p.stop(
                 "rejected",
@@ -780,6 +794,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             redemption_key = Some(key);
         }
         let decision_id = self.ports.ids.new_id("authz");
+        p.policy_decision_id = Some(decision_id.clone());
         // For delegated runs the gateway, which created the lineage, attests the run
         // links up to the root; links the broker supplied take precedence.
         let mut run_links = facts.run_links.clone();
@@ -910,6 +925,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     "Approval could not be redeemed for this operation.",
                 ));
             }
+            p.risk_tags.push("human_approved".into());
         }
 
         // Fast path: an operation with an attempt in flight or an applied effect cannot
