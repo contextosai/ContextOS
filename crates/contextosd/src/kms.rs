@@ -32,6 +32,12 @@ pub struct KmsConfig {
     pub key_name: String,
     /// Environment variable holding the Vault token.
     pub token_env: String,
+    /// The Transit key version that signs (pinned: a rotation inside Vault does not
+    /// silently change what this `key_id` means).
+    pub key_version: u64,
+    /// The expected Ed25519 public key (base64url, unpadded) of that version. Startup
+    /// fails if the KMS reports another, so a hijacked endpoint cannot substitute its own.
+    pub public_key: String,
     /// Transit mount path (default `transit`).
     #[serde(default = "default_mount")]
     pub mount: String,
@@ -45,6 +51,7 @@ struct VaultTransit {
     http: reqwest::Client,
     sign_url: String,
     token: String,
+    key_version: u64,
 }
 
 const STD: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
@@ -60,7 +67,7 @@ impl RemoteSigner for VaultTransit {
             .http
             .post(&self.sign_url)
             .header("X-Vault-Token", &self.token)
-            .json(&json!({"batch_input": batch}))
+            .json(&json!({"batch_input": batch, "key_version": self.key_version}))
             .send()
             .await
             .map_err(|_| "the KMS is unreachable".to_owned())?;
@@ -80,7 +87,10 @@ impl RemoteSigner for VaultTransit {
                 let signature = result["signature"]
                     .as_str()
                     .ok_or_else(|| "the KMS did not sign an entry".to_owned())?;
-                let encoded = signature.rsplit(':').next().unwrap_or_default();
+                // By the pinned version only.
+                let encoded = signature
+                    .strip_prefix(&format!("vault:v{}:", self.key_version))
+                    .ok_or_else(|| "the KMS signed with another key version".to_owned())?;
                 STD.decode(encoded)
                     .map_err(|_| "the KMS returned an undecodable signature".to_owned())
             })
@@ -90,15 +100,25 @@ impl RemoteSigner for VaultTransit {
 
 /// Builds the audit signer for a Vault Transit key: reads the key's latest public key
 /// and returns a signer that signs remotely.
-pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str) -> Result<AuditSigner, String> {
+pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str, development: bool) -> Result<AuditSigner, String> {
     if config.kind != "vault_transit" {
         return Err(format!(
             "unsupported KMS kind {:?} (supported: vault_transit)",
             config.kind
         ));
     }
+    if !development && !config.url.starts_with("https://") {
+        return Err("[audit.kms] url must be https outside development mode".into());
+    }
+    let pinned = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&config.public_key)
+        .ok()
+        .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+        .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
+        .ok_or_else(|| "[audit.kms] public_key must be a base64url Ed25519 public key".to_owned())?;
     let token = std::env::var(&config.token_env).map_err(|_| format!("{} is not set", config.token_env))?;
     let http = reqwest::Client::builder()
+        .https_only(!development)
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -118,17 +138,21 @@ pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str) -> Result<Au
     if key["data"]["type"] != "ed25519" {
         return Err(format!("the Transit key {} must be of type ed25519", config.key_name));
     }
-    let latest = key["data"]["latest_version"].as_u64().unwrap_or(1).to_string();
+    let latest = config.key_version.to_string();
     let public = key["data"]["keys"][&latest]["public_key"]
         .as_str()
         .and_then(|k| STD.decode(k).ok())
         .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
         .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
-        .ok_or_else(|| "the KMS did not return a valid Ed25519 public key".to_owned())?;
+        .ok_or_else(|| format!("the KMS has no Ed25519 public key for version {latest}"))?;
+    if public != pinned {
+        return Err("the KMS public key does not match [audit.kms] public_key".into());
+    }
     let remote = VaultTransit {
         http,
         sign_url: format!("{base}/v1/{}/sign/{}", config.mount, config.key_name),
         token,
+        key_version: config.key_version,
     };
     Ok(AuditSigner::remote(key_id, public, Arc::new(remote)))
 }

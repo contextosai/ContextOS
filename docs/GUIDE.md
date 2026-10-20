@@ -591,7 +591,14 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
   url = "https://vault.internal:8200"
   key_name = "contextos-audit"
   token_env = "VAULT_TOKEN"
+  key_version = 1                  # pinned: a rotation inside Vault does not change this key_id
+  public_key = "<base64url Ed25519 public key of that version>"
   ```
+
+  The public key is pinned: startup fails if the KMS reports another (a hijacked or
+  misconfigured endpoint cannot substitute its own), the URL must be HTTPS outside
+  development, and a signature from any other key version is refused. To rotate in
+  Vault, add the new version under a new `key_id` and retire the old one.
 
   Each group commit signs all its entries in one Transit `batch_input` call, and every
   signature is checked against the key's public key before anything is written; a KMS

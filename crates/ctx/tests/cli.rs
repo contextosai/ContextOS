@@ -343,3 +343,64 @@ fn audit_exports_verify_incrementally_from_a_trusted_head() {
     assert_eq!(run(rest, Some(&first[1]), "gap").0, 1, "a skipped entry");
     assert_eq!(run(rest, None, "headless").0, 1, "not genesis and no trusted head");
 }
+
+#[test]
+fn audit_verify_refuses_empty_chains_and_malformed_keys() {
+    let (chain, keys) = signed_chain(2);
+    let k = write("strict_keys.json", &keys);
+    let (code, report) = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("strict_empty.json", &serde_json::json!([])),
+        "--keys",
+        &k,
+    ]);
+    assert_eq!(code, 1, "an empty export proves nothing: {report}");
+    let e = write("strict_entries.json", &serde_json::json!(chain));
+    for (name, bad) in [
+        ("null_retired", {
+            let mut k = keys.clone();
+            k["keys"][0]["retired_at"] = serde_json::Value::Null;
+            k
+        }),
+        ("bad_retired", {
+            let mut k = keys.clone();
+            k["keys"][0]["retired_at"] = serde_json::json!("yesterday");
+            k
+        }),
+        ("wrong_alg", {
+            let mut k = keys.clone();
+            k["keys"][0]["alg"] = serde_json::json!("rsa");
+            k
+        }),
+        ("duplicate", {
+            let mut k = keys.clone();
+            let first = k["keys"][0].clone();
+            k["keys"].as_array_mut().unwrap().push(first);
+            k
+        }),
+        ("none", serde_json::json!({"keys": []})),
+    ] {
+        let (code, _) = ctx(&[
+            "audit-verify",
+            "--entries",
+            &e,
+            "--keys",
+            &write(&format!("strict_{name}.json"), &bad),
+        ]);
+        assert_eq!(
+            code, 2,
+            "{name}: a malformed keys file is refused, never trusted loosely"
+        );
+    }
+    let (_, report) = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("strict_tail.json", &serde_json::json!(&chain[1..])),
+        "--keys",
+        &k,
+        "--continues",
+        &write("strict_anchor.json", &chain[0]),
+    ]);
+    assert_eq!(report["anchor_sequence"], 1, "the assumed anchor is reported");
+}

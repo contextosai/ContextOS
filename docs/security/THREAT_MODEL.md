@@ -102,6 +102,16 @@ budgets, and the integrity of the evidence record.
   silently (more retries, and an audited loss); cost arithmetic now refuses overflow.
   Each fix has a regression test.
 
+- 2026-10-21: sixth review, of independent verification, key rotation and KMS
+  signing. Fixed: the KMS public key was trusted on first use and the KMS URL could be
+  plain HTTP (the key is now pinned in configuration and HTTPS is required outside
+  development); the key id was not bound to a Vault key version (the version is pinned,
+  requested and checked on every signature); `ctx audit-verify` reported an empty export
+  as verified and loaded malformed key entries (such as a null `retired_at`) as fully
+  trusted (both refused; the assumed anchor is now reported); an encoding failure late in
+  a commit could skip a sequence number (the batch now fails as a whole). Each fix has a
+  regression test.
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

@@ -371,6 +371,7 @@ impl<L: AppendLog> AuditWriter<L> {
                 }
             };
             let mut rows = Vec::with_capacity(planned.len());
+            let mut encode_failed = false;
             let mut links: Vec<Result<(Link, String), AuditError>> = Vec::with_capacity(planned.len());
             for (planned, signature) in planned.into_iter().zip(signatures) {
                 let link = planned.link.signed(signature);
@@ -390,8 +391,17 @@ impl<L: AppendLog> AuditWriter<L> {
                         });
                         links.push(Ok((link, planned.emitted_at)));
                     }
-                    Err(error) => links.push(Err(error)),
+                    Err(error) => {
+                        // A later row would skip this sequence: fail the whole batch.
+                        failure = error;
+                        encode_failed = true;
+                        break;
+                    }
                 }
+            }
+            if encode_failed {
+                *head = Head::Unknown;
+                break;
             }
             let linked: Vec<Result<(Link, String), AuditError>> = outcomes
                 .into_iter()

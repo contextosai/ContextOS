@@ -27,6 +27,8 @@ key_id = "audit-2026-10"
 # url = "https://vault.internal:8200"
 # key_name = "contextos-audit"
 # token_env = "VAULT_TOKEN"
+# key_version = 1
+# public_key = "<base64url Ed25519 public key of that version>"
 # After a rotation, keep the previous key so entries it signed still verify:
 # retired_keys = [{ kid = "audit-2026-04", public_key = "<base64url, from GET /v1/audit/keys>", retired_at = "2026-10-01T00:00:00Z" }]
 

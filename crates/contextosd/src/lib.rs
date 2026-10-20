@@ -28,7 +28,10 @@ pub use config::{Config, ConfigError};
 /// The configured audit signer: a KMS-held key, or a seed from the environment.
 pub async fn audit_signer(config: &Config) -> Result<AuditSigner, String> {
     match &config.audit.kms {
-        Some(kms) => kms::vault_transit_signer(kms, &config.audit.key_id).await,
+        Some(kms) => {
+            let development = config.server.mode == config::Mode::Development;
+            kms::vault_transit_signer(kms, &config.audit.key_id, development).await
+        }
         None => signer_from_env(&config.audit.signing_seed_env, &config.audit.key_id),
     }
 }
