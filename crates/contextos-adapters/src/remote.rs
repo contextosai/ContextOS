@@ -11,8 +11,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
 use contextos_gateway::{
-    ApprovalProvider, AuthorityFacts, AuthorityProvider, CapabilityManifest, ConstraintProvider, IdempotencyProvider,
-    PortError, RunAdmission,
+    ApprovalProvider, AuthorityFacts, AuthorityProvider, CapabilityManifest, ConstraintProvider, DataFlowProvider,
+    IdempotencyProvider, PortError, RunAdmission,
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -158,6 +158,36 @@ impl ApprovalProvider for RemoteApprovals {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| PortError::new("approvals", "malformed facts"))
+    }
+}
+
+/// Data-governance service: returns `{"request", "policy"}` for an action, or
+/// `{"request": null}` when no data leaves with it.
+#[derive(Debug, Clone)]
+pub struct RemoteDataFlow(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl DataFlowProvider for RemoteDataFlow {
+    async fn data_flow(
+        &self,
+        admission: &RunAdmission,
+        binding: &Value,
+        action_digest: &str,
+    ) -> Result<Option<(Value, Value)>, PortError> {
+        let facts = self
+            .0
+            .call(
+                "data_flow",
+                &json!({"run": run_summary(admission), "binding": binding, "action_digest": action_digest}),
+            )
+            .await?;
+        if facts["request"].is_null() {
+            return Ok(None);
+        }
+        if !facts["request"].is_object() || !facts["policy"].is_object() {
+            return Err(PortError::new("data_flow", "malformed facts"));
+        }
+        Ok(Some((facts["request"].clone(), facts["policy"].clone())))
     }
 }
 

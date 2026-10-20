@@ -335,6 +335,16 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
 }
 
 async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_calls: u64, cost_cents: f64) -> Harness {
+    harness_full(verdict, behavior, tool_calls, cost_cents, None).await
+}
+
+async fn harness_full(
+    verdict: &'static str,
+    behavior: Behavior,
+    tool_calls: u64,
+    cost_cents: f64,
+    data_flow: Option<Arc<dyn DataFlowProvider>>,
+) -> Harness {
     let store = Arc::new(MemoryStore::new());
     let authority = Arc::new(Authority::default());
     let audit = Arc::new(AuditWriter::new(
@@ -354,6 +364,7 @@ async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_cal
         constraints: Arc::new(Constraints),
         approvals: approvals.clone(),
         idempotency: None,
+        data_flow,
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),
@@ -1254,4 +1265,87 @@ async fn closing_a_child_ends_its_run() {
         assert_eq!(late.result["status"], "rejected", "a closed child cannot act");
     }
     assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+}
+
+/// A data-governance service built from the `base` conformance case, rebased onto
+/// this run, operation and clock. `tamper` edits the request it returns.
+struct Flows {
+    tamper: fn(&mut Value),
+}
+
+#[async_trait]
+impl DataFlowProvider for Flows {
+    async fn data_flow(
+        &self,
+        admission: &RunAdmission,
+        binding: &Value,
+        digest: &str,
+    ) -> Result<Option<(Value, Value)>, PortError> {
+        let path = format!(
+            "{}/../../conformance/vectors/boundary.json.gz",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut text = String::new();
+        std::io::Read::read_to_string(
+            &mut flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()),
+            &mut text,
+        )
+        .unwrap();
+        for (from, to) in [
+            ("2026-10-16T07:59:59Z", "2026-10-20T09:59:59Z"),
+            ("2026-10-16T08:05:00Z", "2026-10-20T10:05:00Z"),
+            ("2026-10-16T00:00:00Z", "2026-10-20T00:00:00Z"),
+            ("2026-10-17T00:00:00Z", "2026-10-21T00:00:00Z"),
+            ("contract_reference", &admission.contract_id),
+            ("run_contract", &admission.run_id),
+        ] {
+            text = text.replace(from, to);
+        }
+        let vectors: Value = serde_json::from_str(&text).unwrap();
+        let base = vectors["dataflow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "base")
+            .unwrap()["input"]
+            .clone();
+        let mut request = base["request"].clone();
+        request["operation_id"] = binding["operation_id"].clone();
+        request["action_digest"] = json!(digest);
+        (self.tamper)(&mut request);
+        Ok(Some((request, base["policy"].clone())))
+    }
+}
+
+#[tokio::test]
+async fn data_sent_to_a_destination_must_pass_the_flow_policy() {
+    type Case = (fn(&mut Value), Result<(), &'static str>);
+    let cases: [Case; 4] = [
+        (|_| {}, Ok(())),
+        (|r| r["requested_classification"] = json!("RESTRICTED"), Err("blocked")),
+        (
+            |r| r["action_digest"] = json!("sha256:0000000000000000000000000000000000000000000000000000000000000000"),
+            Err("data_flow_binding_mismatch"),
+        ),
+        (
+            |r| r["destination_id"] = json!("adp_elsewhere"),
+            Err("data_flow_binding_mismatch"),
+        ),
+    ];
+    for (tamper, expected) in cases {
+        let h = harness_full("allow", Behavior::Confirm, 8, 25.0, Some(Arc::new(Flows { tamper }))).await;
+        let out = h
+            .gateway
+            .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+            .await
+            .unwrap();
+        match expected {
+            Ok(()) => assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes),
+            Err("blocked") => {
+                assert_eq!(out.result["status"], "blocked", "{:?}", out.report.reason_codes);
+                assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+            }
+            Err(reason) => assert_eq!(out.report.reason_codes, vec![reason.to_owned()]),
+        }
+    }
 }

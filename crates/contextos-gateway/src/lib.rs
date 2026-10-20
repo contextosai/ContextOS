@@ -42,6 +42,7 @@ use contextos_kernel::TransitionResult;
 use contextos_kernel::authorization::{digest_action_binding, evaluate_authorization, transition_approval_redemption};
 use contextos_kernel::budget_compaction::compact_budget_ledger;
 use contextos_kernel::budget_ledger::{reserve_budget, settle_budget, settlement_intent_digest};
+use contextos_kernel::execution_boundary::evaluate_data_flow;
 use contextos_kernel::operation_ledger::{claim_operation, record_effect_observation};
 use contextos_store::{
     AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact, transact_from, transact_state,
@@ -104,6 +105,23 @@ pub struct Ports {
     pub constraints: Arc<dyn ConstraintProvider>,
     pub approvals: Arc<dyn ApprovalProvider>,
     pub idempotency: Option<Arc<dyn IdempotencyProvider>>,
+    /// Data-governance facts. When present, every capability that sends data to a
+    /// destination must pass the kernel's data-flow evaluation.
+    pub data_flow: Option<Arc<dyn DataFlowProvider>>,
+}
+
+/// The facts a data-governance service supplies for one authorized action: a
+/// `DataFlowRequest` describing the data the action sends and the pinned
+/// `DataFlowPolicy` that governs it. `None` means the provider knows of no data
+/// leaving with this action; for a capability that sends data, that blocks.
+#[async_trait::async_trait]
+pub trait DataFlowProvider: Send + Sync {
+    async fn data_flow(
+        &self,
+        admission: &RunAdmission,
+        binding: &Value,
+        action_digest: &str,
+    ) -> Result<Option<(Value, Value)>, PortError>;
 }
 
 impl std::fmt::Debug for Ports {
@@ -678,6 +696,47 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
             "escalate" => return Ok(p.stop("blocked", vec![], "Policy requires escalation.")),
             _ => return Ok(p.stop("blocked", vec![], "Authorization denied.")),
+        }
+        // Data permissions are part of the conjunction: with a data-governance
+        // provider, data sent to a destination must pass the kernel's flow policy.
+        if let Some(provider) = &self.ports.data_flow
+            && !manifest.destination_pointers.is_empty()
+        {
+            let refused = |p: Pipeline<'_>, reasons: Vec<String>| {
+                Ok(p.stop("blocked", reasons, "The data this action sends is not permitted."))
+            };
+            let facts = match provider.data_flow(admission, &binding, &action_digest).await {
+                Ok(Some(facts)) => facts,
+                Ok(None) => return refused(p, vec!["data_flow_unknown".into()]),
+                Err(_) => return refused(p, vec!["data_flow_unavailable".into()]),
+            };
+            let (request, policy) = facts;
+            // The provider supplies facts; it cannot redirect them to another action.
+            let bound = request["contract_id"] == admission.contract_id.as_str()
+                && request["run_id"] == admission.run_id.as_str()
+                && request["tenant_id"] == admission.tenant_id.as_str()
+                && request["operation_id"] == operation_id.as_str()
+                && request["action_digest"] == action_digest.as_str()
+                && request["purpose_id"] == manifest.purpose_id.as_str()
+                && request["destination_id"] == manifest.adapter_id.as_str();
+            if !bound {
+                return refused(p, vec!["data_flow_binding_mismatch".into()]);
+            }
+            let flow = evaluate_data_flow(&request, &policy, &json!(now));
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "data_flow_decision",
+                    serde_json::to_value(&flow).unwrap_or(Value::Null),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            if !flow.allowed {
+                p.report.obligations.extend(flow.unsatisfied_obligations.clone());
+                return refused(p, flow.reason_codes);
+            }
         }
         if let Some(key) = redemption_key {
             let approval = approval_input.clone();

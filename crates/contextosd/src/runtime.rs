@@ -171,6 +171,10 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             Some(p) => Some(Arc::new(RemoteIdempotency(remote(p)?))),
             None => None,
         },
+        data_flow: match &providers.data_flow {
+            Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteDataFlow(remote(p)?))),
+            None => None,
+        },
     };
     let mut adapters: Vec<(String, Arc<dyn Adapter>)> = Vec::new();
     for adapter in &config.adapters {

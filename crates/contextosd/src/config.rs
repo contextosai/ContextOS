@@ -112,6 +112,10 @@ pub struct ProvidersConfig {
     pub approvals: RemoteProvider,
     #[serde(default)]
     pub idempotency: Option<RemoteProvider>,
+    /// Data-governance service; when set, data sent to destinations must pass the
+    /// kernel's data-flow policy evaluation.
+    #[serde(default)]
+    pub data_flow: Option<RemoteProvider>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

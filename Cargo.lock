@@ -509,6 +509,7 @@ dependencies = [
  "contextos-policy",
  "contextos-store",
  "criterion",
+ "flate2",
  "mimalloc",
  "serde",
  "serde_json",

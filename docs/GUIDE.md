@@ -290,6 +290,14 @@ minimal, development-only implementation):
   mediation, data-flow policy…) is active for this action digest and pinned policy.
 - **Approval service** — opens requests bound to the action digest and returns verified
   decisions and approver entitlements.
+- **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
+  action that sends data to a destination, returns the `DataFlowRequest` (source
+  artifacts and their verified classifications, processor and residency observations,
+  stage, any transformation) and the pinned `DataFlowPolicy`. The gateway checks the
+  request is bound to this exact action (contract, run, operation, action digest,
+  purpose, and the capability's adapter as destination) and the kernel's
+  `evaluate_data_flow` decides; the decision is audited. Unknown or unverifiable facts
+  block.
 
 Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); protocol
 discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
