@@ -2201,8 +2201,24 @@ where
             "Name gate_runs whose replay cases the candidate must pass before it takes live traffic.",
         ));
     }
+    // An open correction must be fixed (or its feedback closed with evidence), never
+    // waived: acknowledgements may not name feedback cases.
+    let ack = &change.acknowledge;
+    let waived_feedback: Vec<&String> = obligations
+        .iter()
+        .filter(|case| ack.policy_loosening.contains(case) || ack.compile_expansion.contains(case))
+        .collect();
+    if !waived_feedback.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "feedback_not_waivable",
+            "Open feedback cases cannot be acknowledged; fix them or close the feedback with evidence.",
+        )
+        .with_detail(json!({"cases": waived_feedback})));
+    }
     let mut cases = Vec::with_capacity(runs.len());
     let mut unavailable_cases = Vec::new();
+    let mut unrelated = Vec::new();
     for run in &runs {
         let stored = state
             .store
@@ -2211,9 +2227,22 @@ where
             .map_err(unavailable)?
             .filter(|d| !contextos_gateway::is_erased(&d.body));
         match stored.and_then(|d| serde_json::from_value::<contextos_kernel::release_gate::ReplayCase>(d.body).ok()) {
+            // Named gate runs must be runs of the baseline (feedback cases are whatever
+            // runs the corrections were filed against).
+            Some(case) if !obligations.contains(run) && !case.request.context_pack_refs.contains(&change.baseline) => {
+                unrelated.push(run.clone());
+            }
             Some(case) => cases.push(case),
             None => unavailable_cases.push(run.clone()),
         }
+    }
+    if !unrelated.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "gate_case_unrelated",
+            "Gate runs must be runs of the baseline pack.",
+        )
+        .with_detail(json!({"runs": unrelated})));
     }
     if !unavailable_cases.is_empty() {
         return Err(ApiError::new(
@@ -2249,8 +2278,43 @@ where
         )
         .with_detail(report));
     }
-    Ok(json!({"verdict": "pass", "cases": runs, "feedback_cases": obligations,
-        "report_digest": contextos_contract::canonical::sha256_canonical(&report).unwrap_or_default()}))
+    // Global acknowledgements (capabilities, evidence gates) may not waive a feedback case either.
+    let waived_in_feedback: Vec<&Value> = report["cases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| {
+            c["name"].as_str().is_some_and(|n| obligations.iter().any(|o| o == n))
+                && c["changes"].as_array().is_some_and(|chs| {
+                    chs.iter()
+                        .any(|ch| ch["acknowledged"] == true && ch["effect"] != "neutral")
+                })
+        })
+        .map(|c| &c["name"])
+        .collect();
+    if !waived_in_feedback.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "feedback_not_waivable",
+            "Open feedback cases cannot be acknowledged; fix them or close the feedback with evidence.",
+        )
+        .with_detail(json!({"cases": waived_in_feedback})));
+    }
+    // What was waived is part of the record, not only a digest of a report kept nowhere.
+    let waived: Vec<Value> = report["cases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|c| {
+            c["changes"].as_array().into_iter().flatten().filter(|ch| ch["acknowledged"] == true && ch["effect"] != "neutral").map(
+                move |ch| json!({"case": c["name"], "kind": ch["kind"], "effect": ch["effect"], "detail": ch["detail"]}),
+            )
+        })
+        .collect();
+    Ok(
+        json!({"verdict": "pass", "cases": runs, "feedback_cases": obligations, "waived": waived,
+        "report_digest": contextos_contract::canonical::sha256_canonical(&report).unwrap_or_default()}),
+    )
 }
 
 #[derive(serde::Deserialize)]

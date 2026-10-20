@@ -117,7 +117,9 @@ violations report argument paths only, never values. An `output_schema` is enfor
 what the tool returns: a confirmed effect whose output does not conform is still
 recorded and settled (it happened), but the output is withheld from the agent, the
 result carries `output_schema_violation` and the obligation `verify_effect_out_of_band`,
-and the violation is audited (paths only).
+and the violation is audited (paths only). With an output schema, no other raw output
+reaches the agent either: a tool's request for input is reduced to its
+`inputRequests`, and the output of a failed or unresolved call is withheld.
 
 ## 3. Run `contextosd`
 
@@ -254,10 +256,12 @@ ref = "schema://orders/refund-evidence.v1"
 path = "schemas/refund-evidence.v1.json"
 ```
 
-A child whose envelope names a registered schema can then be accepted only if every
-decision it recorded has `outputs` conforming to it (`child_output_invalid`
-otherwise); the parent can still reject it. A schema that does not compile stops
-startup.
+A child whose envelope names a registered schema can then be accepted only if it
+recorded at least one decision and every decision's `outputs` conform to it
+(`child_output_invalid` otherwise, checked again once the child's capacity is locked);
+the parent can still reject it. Once any schema is registered, a delegation naming an
+unregistered one is refused (`output_schema_unregistered`). A schema that does not
+compile stops startup.
 
 ### Tools that ask for input
 
@@ -423,7 +427,9 @@ When a reviewer corrects or overrides an agent, file it against the run
 
 The run's replay case becomes the feedback's replay obligation, so `GET /v1/feedback`
 (open feedback, oldest first) is the corpus a candidate change must pass through
-`ctx gate` and `ctx scorecard-gate`. Pass it to the release gate with
+`ctx gate` and `ctx scorecard-gate`. A rollout's gate never accepts acknowledgements
+for an open feedback case (`feedback_not_waivable`): fix it or close the feedback with
+evidence. Pass it to the release gate with
 `ctx gate … --feedback open-feedback.json`: the gate fails, listing them under
 `missing_replay_obligations`, while any open record's replay case (fetched from
 `GET /v1/runs/{run_id}/replay-case`) is missing from `--cases`. An operator closes it as `fixed`, `still_failing`,
@@ -448,9 +454,13 @@ ctx trajectory-gate --baseline base/*.json --candidate cand/*.json \
   --case-map case-map.json --max-tool-call-ratio 1.5 [--acknowledge ack.json]
 ```
 
-A case fails when the candidate used a capability the baseline did not, reached
+Pass the audit exports covering those runs with `--audit` (verified first with
+`ctx audit-verify`): capabilities called and effects applied then come from the
+runtime's signed record, not from what the agent's decisions chose to report. A case
+fails when the candidate used a capability the baseline did not, reached
 different decision outcomes, applied more effects, made more tool calls than the
-ratio allows over the baseline's most, or did not run it at all. Trials of one case
+ratio allows over the baseline's most, or did not run it at all; a case only the
+candidate ran fails unless acknowledged as `unpaired`. Trials of one case
 accumulate. Acknowledge an intended change per case:
 `{"capabilities": {"refund_big": ["adp_payments.issue_refund"]}, "outcomes": ["refund_big"], "effects": [], "tool_calls": []}`.
 
@@ -575,7 +585,8 @@ configuration are refused at startup.
 ### Escalations
 
 When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation
-`escalate`) and an escalation is opened, one per operation, audited as
+`escalate`) and an escalation is opened, one per operation (reopened, with its history,
+if the operation escalates again after being resolved), audited as
 `escalation_opened`; the result names it in `metadata.escalation_id`. Route it to a
 human from `GET /v1/escalations` (`audit:read`). When they have dealt with it, an
 operator records the outcome, `handled` or `dismissed`, with a reason:
@@ -698,7 +709,7 @@ published development keys, HTTPS endpoints and KMS, scope separation), turn on:
 ```toml
 [guards]
 required_release_refs = ["model_profile", "evaluator_suite"]   # decisions name what produced them
-require_tool_schemas = true      # every effectful capability has input and output schemas
+require_tool_schemas = true      # every capability has input and output schemas
 
 [retention]
 run_content_days = 30            # personal content does not outlive its purpose

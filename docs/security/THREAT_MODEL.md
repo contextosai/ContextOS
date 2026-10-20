@@ -136,6 +136,26 @@ budgets, and the integrity of the evidence record.
   `approval_mode_mismatch`). The test authority now pins its grant's recipients, as a
   real broker does, instead of echoing the call's.
 
+- 2026-10-21: eighth review, of rollout gating, memory verification, feedback
+  redaction, tool-output labels and schemas, envelope checks, escalations, delegated
+  result schemas and the trajectory gate. Fixed: raw tool output still reached the agent
+  on input-required, failed and unresolved outcomes despite an output schema (now
+  reduced to the input requests or withheld); an erasure could miss feedback filed
+  while it ran (the replay case is now tombstoned before feedback is read, so either
+  side sees the other); rollout acknowledgements were authority without a record and
+  could waive open-feedback cases (the waived changes are now in the audit entry,
+  feedback cases cannot be waived, and named gate runs must be runs of the baseline);
+  the delegated result check failed open on unknown schema references, on children
+  with no decisions and on decisions recorded during the close (refused, refused, and
+  rechecked after the capacity lock); `ctx trajectory-gate` trusted the agent's own
+  decision reports (it now reads claimed capabilities and confirmed effects from the
+  signed audit export, flags unpaired cases and refuses a disabling ratio, with
+  `operation_claim` entries now naming run and capability); escalations could vanish
+  from the listing, recur silently after resolution, be audited twice, or be crowded
+  out by one run (opened through an audited `opening` state, reopened with history,
+  capped per run). `require_tool_schemas` now covers read-only tools. Each fix has a
+  regression test.
+
 ## Residual risks and deployment obligations
 
 - **Invented role in policy inputs.** When the user claims carry no `role`, the

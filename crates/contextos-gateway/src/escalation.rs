@@ -18,6 +18,9 @@ use crate::{Gateway, GatewayError};
 /// audited but not listed until older ones are resolved.
 const MAX_OPEN: usize = 10_000;
 
+/// Escalations one run may list (it cannot crowd out every other run's).
+const MAX_PER_RUN: usize = 100;
+
 pub const RESOLUTIONS: [&str; 2] = ["handled", "dismissed"];
 
 #[derive(Debug, thiserror::Error)]
@@ -49,9 +52,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             &sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id))[7..31]
         );
         let key = record_key(&admission.tenant_id, &id);
-        if self.store.get(&key).await?.is_some() {
-            return Ok(id);
-        }
         let now = self.now();
         let mut record = facts;
         record["escalation_id"] = json!(id);
@@ -59,18 +59,55 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         record["run_id"] = json!(admission.run_id);
         record["trace_id"] = json!(admission.trace_id);
         record["opened_at"] = json!(now);
-        record["status"] = json!("open");
+        // Claim the hand-off as `opening`: only the caller whose write lands audits it,
+        // so concurrent escalations of one operation open it once.
+        record["status"] = json!("opening");
+        let claimed = match self.store.get(&key).await? {
+            None => match self.store.create(&key, &record).await {
+                Ok(created) => created.revision,
+                Err(e) if e.is_conflict() => return Ok(id),
+                Err(e) => return Err(e.into()),
+            },
+            Some(current) if current.body["status"] == "open" => return Ok(id),
+            // A resolved escalation that recurs is a new hand-off (history kept); one
+            // left `opening` by a failed audit is completed now.
+            Some(current) => {
+                if current.body["status"] == "resolved" {
+                    let mut history = current.body["history"].as_array().cloned().unwrap_or_default();
+                    history.push(
+                        json!({"opened_at": current.body["opened_at"], "resolution": current.body["resolution"]}),
+                    );
+                    record["history"] = json!(history);
+                } else {
+                    record["history"] = current.body["history"].clone();
+                }
+                match self.store.compare_and_swap(&key, current.revision, &record).await {
+                    Ok(written) => written.revision,
+                    Err(e) if e.is_conflict() => return Ok(id),
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        };
         self.audit
             .append(&admission.tenant_id, "escalation_opened", record.clone(), &now)
             .await?;
-        // Listed before the record exists; an entry without one is dropped on listing.
-        self.note_in_index(index_key(&admission.tenant_id), &id, MAX_OPEN)
-            .await?;
-        match self.store.create(&key, &record).await {
-            Ok(_) => Ok(id),
-            Err(e) if e.is_conflict() => Ok(id),
-            Err(e) => Err(e.into()),
+        record["status"] = json!("open");
+        match self.store.compare_and_swap(&key, claimed, &record).await {
+            Ok(_) => {}
+            Err(e) if e.is_conflict() => return Ok(id),
+            Err(e) => return Err(e.into()),
         }
+        // Listed once open; one run may hold at most MAX_PER_RUN of the tenant's listing.
+        let per_run = DocKey::new(
+            &admission.tenant_id,
+            DocKind::Escalation,
+            format!("run:{}", admission.run_id),
+        );
+        if self.note_in_index(per_run, &id, MAX_PER_RUN).await? {
+            self.note_in_index(index_key(&admission.tenant_id), &id, MAX_OPEN)
+                .await?;
+        }
+        Ok(id)
     }
 
     /// The tenant's open escalations, oldest first.
@@ -88,7 +125,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         for id in ids.iter().take(limit) {
             match self.store.get(&record_key(tenant_id, id)).await? {
                 Some(r) if r.body["status"] == "open" => open.push(r.body),
-                _ => self.drop_from_index(tenant_id, id).await?,
+                Some(r) if r.body["status"] == "resolved" => self.drop_from_index(tenant_id, id).await?,
+                _ => {}
             }
         }
         Ok(open)
@@ -148,11 +186,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Err(GatewayError::from(e).into());
         }
         self.drop_from_index(tenant_id, id).await?;
+        if let Some(run_id) = resolved["run_id"].as_str() {
+            self.drop_from(DocKey::new(tenant_id, DocKind::Escalation, format!("run:{run_id}")), id)
+                .await?;
+        }
         Ok(resolved)
     }
 
     async fn drop_from_index(&self, tenant_id: &str, id: &str) -> Result<(), GatewayError> {
-        let key = index_key(tenant_id);
+        self.drop_from(index_key(tenant_id), id).await
+    }
+
+    async fn drop_from(&self, key: DocKey, id: &str) -> Result<(), GatewayError> {
         for _ in 0..8 {
             let Some(current) = self.store.get(&key).await? else {
                 return Ok(());

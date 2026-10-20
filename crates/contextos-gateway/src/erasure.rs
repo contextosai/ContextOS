@@ -112,6 +112,38 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 pending.push((kind, key, sha256_canonical(&current.body).unwrap_or_default()));
             }
         }
+        let mut erased: Vec<Value> = pending
+            .iter()
+            .map(|(kind, _, digest)| json!({"document": kind.as_str(), "content_digest": digest}))
+            .collect();
+        // Audited before the content goes: the trail never misses an erasure.
+        if !pending.is_empty() {
+            let record = json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased});
+            self.audit
+                .append(&admission.tenant_id, "run_data_erased", record, &now)
+                .await
+                .map_err(GatewayError::from)?;
+        }
+        for (_, key, digest) in &pending {
+            let tombstone = json!({"erased": true, "erased_at": now, "erased_by": operator, "reason": reason,
+                "content_digest": digest});
+            for _ in 0..8 {
+                let Some(current) = self.store.get(key).await.map_err(GatewayError::from)? else {
+                    break;
+                };
+                if is_erased(&current.body) {
+                    break;
+                }
+                match self.store.compare_and_swap(key, current.revision, &tombstone).await {
+                    Ok(_) => break,
+                    Err(e) if e.is_conflict() => {}
+                    Err(e) => return Err(GatewayError::from(e).into()),
+                }
+            }
+        }
+        // Feedback is read only after the replay case is a tombstone: feedback filed
+        // concurrently either is indexed (with its record) by now, or its filer sees the
+        // tombstone and redacts it itself.
         // Feedback keeps its record; only its free text goes.
         let feedback: Vec<DocKey> = self
             .store
@@ -137,40 +169,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 redact.push((key, sha256_canonical(&text).unwrap_or_default()));
             }
         }
-        let erased: Vec<Value> = pending
-            .iter()
-            .map(|(kind, _, digest)| json!({"document": kind.as_str(), "content_digest": digest}))
-            .chain(
-                redact
-                    .iter()
-                    .map(|(_, digest)| json!({"document": "feedback_text", "content_digest": digest})),
-            )
-            .collect();
-        let record = json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased});
-        if pending.is_empty() && redact.is_empty() {
-            return Ok(record);
-        }
-        // Audited before the content goes: the trail never misses an erasure.
-        self.audit
-            .append(&admission.tenant_id, "run_data_erased", record.clone(), &now)
-            .await
-            .map_err(GatewayError::from)?;
-        for (_, key, digest) in &pending {
-            let tombstone = json!({"erased": true, "erased_at": now, "erased_by": operator, "reason": reason,
-                "content_digest": digest});
-            for _ in 0..8 {
-                let Some(current) = self.store.get(key).await.map_err(GatewayError::from)? else {
-                    break;
-                };
-                if is_erased(&current.body) {
-                    break;
-                }
-                match self.store.compare_and_swap(key, current.revision, &tombstone).await {
-                    Ok(_) => break,
-                    Err(e) if e.is_conflict() => {}
-                    Err(e) => return Err(GatewayError::from(e).into()),
-                }
-            }
+        if !redact.is_empty() {
+            let texts: Vec<Value> = redact
+                .iter()
+                .map(|(_, digest)| json!({"document": "feedback_text", "content_digest": digest}))
+                .collect();
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "run_data_erased",
+                    json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": texts}),
+                    &now,
+                )
+                .await
+                .map_err(GatewayError::from)?;
+            erased.extend(texts);
         }
         for (key, digest) in &redact {
             let marker = json!({"erased_at": now, "erased_by": operator, "reason": reason, "content_digest": digest});
@@ -193,7 +206,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             }
         }
-        Ok(record)
+        Ok(json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased}))
     }
 
     /// Records that the run has a feedback document (`DocKind::Feedback` id), so erasure

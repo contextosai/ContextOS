@@ -141,6 +141,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Err(reject("delegation_expired_or_exceeds_parent"));
         }
         let scope = &envelope["scope"];
+        // Once a deployment registers result schemas, a delegation must name one of
+        // them: an unknown reference would otherwise check nothing.
+        if !self.result_schemas.is_empty()
+            && !scope["output_schema_ref"]
+                .as_str()
+                .is_some_and(|r| self.result_schemas.contains_key(r))
+        {
+            return Err(reject("output_schema_unregistered"));
+        }
         if !scope["allowed_intents"].as_array().is_some_and(|i| {
             i.iter()
                 .any(|i| i.as_str() == Some(request.request.input.intent.as_str()))
@@ -263,6 +272,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Closes a child run and settles its usage into the parent. Idempotent.
+    /// True unless the delegation names a registered result schema that the child's
+    /// recorded decisions do not meet. A child with no recorded decision has no result
+    /// to accept.
+    async fn child_results_conform(&self, child: &RunAdmission) -> Result<bool, GatewayError> {
+        let Some(schema) = child
+            .lineage
+            .as_ref()
+            .and_then(|l| l.output_schema_ref.as_ref())
+            .and_then(|r| self.result_schemas.get(r))
+        else {
+            return Ok(true);
+        };
+        let entries = self.recorded_decisions(child).await?;
+        Ok(!entries.is_empty() && entries.iter().all(|e| schema.check(&e["record"]["outputs"]).is_ok()))
+    }
+
     pub async fn close_delegation(
         &self,
         parent: &RunAdmission,
@@ -283,20 +308,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(out);
         }
         // An accepted child's results must meet the delegation's output schema, when
-        // this deployment has registered it; checked before anything settles.
-        if decision == CloseDecision::Accept
-            && let Some(schema) = child
-                .lineage
-                .as_ref()
-                .and_then(|l| l.output_schema_ref.as_ref())
-                .and_then(|r| self.result_schemas.get(r))
-        {
-            for entry in self.recorded_decisions(child).await? {
-                if schema.check(&entry["record"]["outputs"]).is_err() {
-                    out.reason_codes.push("child_output_invalid".into());
-                    return Ok(out);
-                }
-            }
+        // this deployment has registered it; checked before anything settles, and again
+        // once the child's capacity is locked, so a decision recorded in between counts.
+        if decision == CloseDecision::Accept && !self.child_results_conform(child).await? {
+            out.reason_codes.push("child_output_invalid".into());
+            return Ok(out);
         }
         let now = self.now();
         // Lock the child's remaining capacity inside its own ledger, atomically.
@@ -338,6 +354,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         .await?;
         if let Commit::Rejected { reason_codes } = commit {
             out.reason_codes = reason_codes;
+            return Ok(out);
+        }
+        if decision == CloseDecision::Accept && !self.child_results_conform(child).await? {
+            // The capacity stays locked: the parent can still reject the child.
+            out.reason_codes.push("child_output_invalid".into());
             return Ok(out);
         }
         let Some(final_ledger) = self.store.get(&child_budget).await? else {

@@ -1169,7 +1169,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .append(
                 &admission.tenant_id,
                 "operation_claim",
-                json!({"operation_id": operation_id, "attempt_id": attempt_id, "action_digest": action_digest}),
+                json!({"run_id": admission.run_id, "operation_id": operation_id, "attempt_id": attempt_id,
+                    "capability_id": manifest.capability_id, "action_digest": action_digest}),
                 &now,
             )
             .await?;
@@ -1358,6 +1359,23 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             vec![]
         };
         let read_only = manifest.action_risk.effect == contextos_contract::types::ActionEffect::None;
+        // With a reviewed output schema, nothing outside it reaches the agent: an input
+        // request is reduced to its input requests, a confirmed result is checked below,
+        // and the raw output of any other outcome is withheld.
+        let schema = self.output_schemas.get(&manifest.capability_id);
+        let mut response = response;
+        if schema.is_some() && input_required {
+            let requests = response
+                .output
+                .get("result")
+                .map_or(Value::Null, |r| r["inputRequests"].clone());
+            response.output = Map::from_iter([
+                ("result_type".to_owned(), json!("input_required")),
+                ("result".to_owned(), json!({"inputRequests": requests})),
+            ]);
+        } else if schema.is_some() && !(matches!(response.outcome, EffectOutcome::Confirmed) && known) {
+            response.output = Map::new();
+        }
         if input_required && known {
             p.report.obligations.push("provide_requested_input".into());
             return Ok(p.finish(
@@ -1371,7 +1389,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // effect itself stands (it is recorded and settled above).
         if matches!(response.outcome, EffectOutcome::Confirmed)
             && known
-            && let Some(schema) = self.output_schemas.get(&manifest.capability_id)
+            && let Some(schema) = schema
             && let Err(paths) = schema.check(&Value::Object(response.output.clone()))
         {
             let entry = self

@@ -530,6 +530,62 @@ fn trajectory_gate_compares_what_agents_did() {
     ]);
     assert_eq!(code, 0, "every change acknowledged per case: {report}");
 
+    // A candidate that leaves a call out of its decision report is still caught when
+    // the signed audit record is given.
+    let hiding = write(
+        "tj_hiding.json",
+        &bundle("run_c", "escalated", &["adp_orders.lookup"], 0, 3),
+    );
+    let audit = write(
+        "tj_audit.json",
+        &serde_json::json!({"entries": [
+        {"kind": "operation_claim", "payload": {"run_id": "run_b", "operation_id": "o1", "capability_id": "adp_orders.lookup"}},
+        {"kind": "operation_claim", "payload": {"run_id": "run_c", "operation_id": "o2", "capability_id": "adp_orders.lookup"}},
+        {"kind": "operation_claim", "payload": {"run_id": "run_c", "operation_id": "o3", "capability_id": "adp_payments.issue_refund"}},
+        {"kind": "effect_observation", "payload": {"run_id": "run_c", "operation_id": "o3", "outcome": "confirmed"}}]}),
+    );
+    let (code, _) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &hiding,
+        "--case-map",
+        &map,
+    ]);
+    assert_eq!(code, 0, "the decision report alone hides it");
+    let (code, report) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &hiding,
+        "--case-map",
+        &map,
+        "--audit",
+        &audit,
+    ]);
+    assert_eq!(code, 1, "{report}");
+    let kinds: Vec<&str> = report["cases"][0]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["new_capabilities", "more_effects"]);
+    let (code, _) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &same,
+        "--case-map",
+        &map,
+        "--max-tool-call-ratio",
+        "NaN",
+    ]);
+    assert_eq!(code, 2, "a ratio that would disable the check is refused");
+
     // A case the candidate never ran fails.
     let other = write("tj_other.json", &bundle("run_other", "escalated", &[], 0, 0));
     let (code, _) = ctx(&[

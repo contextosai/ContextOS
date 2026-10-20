@@ -134,9 +134,9 @@ pub struct GuardsConfig {
     /// this is set; with it, every item is verified against promoted state regardless.
     #[serde(default)]
     pub trust_supplied_memory: bool,
-    /// Refuse to start with a capability that changes external state but lacks an
-    /// `input_schema` or `output_schema`, so every effect's arguments and results are
-    /// checked against a reviewed shape.
+    /// Refuse to start with a capability that lacks an `input_schema` or
+    /// `output_schema`, so every call's arguments and results are checked against a
+    /// reviewed shape (read-only tools too: their results carry most injected content).
     #[serde(default)]
     pub require_tool_schemas: bool,
 }

@@ -106,9 +106,14 @@ enum Command {
         /// Tool calls a candidate case may make, as a multiple of the baseline's most.
         #[arg(long, default_value_t = 1.5)]
         max_tool_call_ratio: f64,
-        /// `{"capabilities": {case: [ids]}, "outcomes": [cases], "effects": [cases], "tool_calls": [cases]}`.
+        /// `{"capabilities": {case: [ids]}, "outcomes": [cases], "effects": [cases], "tool_calls": [cases], "unpaired": [cases]}`.
         #[arg(long)]
         acknowledge: Option<PathBuf>,
+        /// Audit exports (`GET /v1/audit/entries`, verified with `ctx audit-verify`): when
+        /// given, the capabilities a run called and the effects it applied come from the
+        /// runtime's signed record instead of what its decisions reported.
+        #[arg(long, num_args = 1..)]
+        audit: Vec<PathBuf>,
     },
     /// Scorecard release gate: compare candidate scorecards with the baseline's on
     /// paired replay cases; fails on floors, policy/safety regressions, utility,
@@ -366,7 +371,24 @@ fn run(command: Command) -> Result<Value, Failure> {
             case_map,
             max_tool_call_ratio,
             acknowledge,
+            audit,
         } => {
+            if !max_tool_call_ratio.is_finite() || max_tool_call_ratio < 1.0 {
+                return Err(Failure::Usage(
+                    "--max-tool-call-ratio must be a number of at least 1".into(),
+                ));
+            }
+            let mut entries = Vec::new();
+            for path in &audit {
+                let loaded = read(path)?;
+                let list = loaded.get("entries").cloned().unwrap_or(loaded);
+                entries.extend(
+                    list.as_array()
+                        .cloned()
+                        .ok_or_else(|| Failure::Usage(format!("{}: not an audit export", path.display())))?,
+                );
+            }
+            let recorded = (!audit.is_empty()).then(|| runs_from_audit(&entries));
             let map = match case_map {
                 Some(path) => read(&path)?,
                 None => json!({}),
@@ -375,7 +397,10 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Some(path) => read(&path)?,
                 None => json!({}),
             };
-            let (base, cand) = (trajectories(&baseline, &map)?, trajectories(&candidate, &map)?);
+            let (base, cand) = (
+                trajectories(&baseline, &map, recorded.as_ref())?,
+                trajectories(&candidate, &map, recorded.as_ref())?,
+            );
             let acknowledged = |kind: &str, case: &str| {
                 ack[kind]
                     .as_array()
@@ -427,6 +452,13 @@ fn run(command: Command) -> Result<Value, Failure> {
                     );
                 }
                 reports.push(json!({"case": case, "findings": findings}));
+            }
+            // A case only the candidate ran is not compared with anything.
+            for case in cand.keys().filter(|c| !base.contains_key(*c)) {
+                let accepted = acknowledged("unpaired", case);
+                failing += usize::from(!accepted);
+                reports.push(json!({"case": case, "findings": [{"kind": "case_unpaired",
+                    "detail": "the baseline did not run this case", "acknowledged": accepted}]}));
             }
             let report = json!({"verdict": if failing == 0 { "pass" } else { "fail" },
                 "cases": reports, "unacknowledged": failing});
@@ -530,7 +562,36 @@ struct Trajectory {
     max_tool_calls: u64,
 }
 
-fn trajectories(paths: &[PathBuf], map: &Value) -> Result<std::collections::BTreeMap<String, Trajectory>, Failure> {
+/// Per run, from the audit chain: the capabilities claimed and the effects confirmed.
+type Recorded = std::collections::HashMap<String, (std::collections::BTreeSet<String>, usize)>;
+
+fn runs_from_audit(entries: &[Value]) -> Recorded {
+    let mut runs = Recorded::new();
+    for entry in entries {
+        let payload = &entry["payload"];
+        let Some(run) = payload["run_id"].as_str() else {
+            continue;
+        };
+        match entry["kind"].as_str() {
+            Some("operation_claim") => {
+                if let Some(capability) = payload["capability_id"].as_str() {
+                    runs.entry(run.to_owned()).or_default().0.insert(capability.to_owned());
+                }
+            }
+            Some("effect_observation") if matches!(payload["outcome"].as_str(), Some("confirmed" | "partial")) => {
+                runs.entry(run.to_owned()).or_default().1 += 1;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
+fn trajectories(
+    paths: &[PathBuf],
+    map: &Value,
+    recorded: Option<&Recorded>,
+) -> Result<std::collections::BTreeMap<String, Trajectory>, Failure> {
     let mut cases: std::collections::BTreeMap<String, Trajectory> = std::collections::BTreeMap::new();
     for path in paths {
         let bundle = read(path)?;
@@ -556,6 +617,12 @@ fn trajectories(paths: &[PathBuf], map: &Value) -> Result<std::collections::BTre
                 }
                 effects += call["mutation_refs"].as_array().map_or(0, Vec::len);
             }
+        }
+        // The signed record, when given, replaces what the decisions reported.
+        if let Some(recorded) = recorded {
+            let (capabilities, applied) = recorded.get(run_id).cloned().unwrap_or_default();
+            case.capabilities.extend(capabilities);
+            effects = applied;
         }
         case.max_effects = case.max_effects.max(effects);
         let calls = bundle["budget_ledger"]["used"]["tool_calls"].as_u64().unwrap_or(0);

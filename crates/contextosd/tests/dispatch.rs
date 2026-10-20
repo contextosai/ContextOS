@@ -2031,7 +2031,10 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
     assert_eq!(evidence["admission"]["pack_ref"], candidate);
 
     // 50%: routing follows the published, sticky bucket of each run.
-    assert_eq!(set_gated("ops-key", 50, false, acknowledged).await.status(), 200);
+    assert_eq!(
+        set_gated("ops-key", 50, false, acknowledged.clone()).await.status(),
+        200
+    );
     let mut on_candidate = 0;
     for i in 0..8 {
         let run = format!("run_split_{i}");
@@ -2055,6 +2058,43 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
         .unwrap();
     assert_eq!(cleared.status(), 200);
     assert_eq!(admit("run_after_clear".into()).await["pack_ref"], baseline);
+
+    // What was waived is in the audit chain, case by case.
+    let audit: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let set = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "rollout_set" && e["payload"]["percent"] == 100)
+        .unwrap()
+        .clone();
+    assert_eq!(set["payload"]["gate"]["waived"][0]["case"], "run_shadow", "{set}");
+
+    // Once a correction is open on that run, its case cannot be waived.
+    let filed = plain
+        .post(format!("{}/v1/runs/run_shadow/feedback", w.base))
+        .bearer_auth("judge-key")
+        .json(
+            &json!({"kind": "correction", "target_surface": "policy", "summary": "High-value refunds need approval."}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(filed.status(), 201);
+    let refused = set_gated("ops-key", 100, false, acknowledged.clone()).await;
+    assert_eq!(refused.status(), 422);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["code"],
+        "feedback_not_waivable"
+    );
 }
 
 fn child_of(parent: &Value, parent_id: &str, child_id: &str, pack: &str) -> Value {
