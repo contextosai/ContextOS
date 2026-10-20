@@ -43,7 +43,8 @@ chain is a serialization point: group commit batches a tenant's appends within a
 process, but replicas appending to the same chain contend on its head. Replicas add
 throughput across tenants (whose chains are independent) and add availability; a single
 very hot tenant scales with one replica's group commit, so route a tenant's traffic
-with affinity when it dominates load. Losing writers back off on the database's scale
+with affinity when it dominates load ([ADR-0004](adr/0004-partitioned-audit-chains.md)
+proposes partitioned chains if one tenant must exceed a single writer). Losing writers back off on the database's scale
 (jittered, 0.4 to 3.4 ms) rather than in milliseconds-doubling steps; that raised
 three-replica throughput on one tenant from ~1,380 to ~1,530 runs/s and cut p99 from
 ~95 to ~71 ms.
