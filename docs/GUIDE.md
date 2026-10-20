@@ -436,6 +436,24 @@ Erasing a run (by request or retention) redacts its feedback's `summary` and
 its replay obligation, so an operator closes it explicitly (typically `superseded`, since
 the replay case was erased too). Feedback filed after the erasure is redacted at once.
 
+### Gate on trajectories
+
+`ctx gate` compares what a candidate pack *permits*; `ctx trajectory-gate` compares
+what agents *did* under it. Replay (or shadow) the same cases under baseline and
+candidate, fetch each run's evidence bundle (`GET /v1/runs/{run_id}/evidence`), and
+compare per case:
+
+```sh
+ctx trajectory-gate --baseline base/*.json --candidate cand/*.json \
+  --case-map case-map.json --max-tool-call-ratio 1.5 [--acknowledge ack.json]
+```
+
+A case fails when the candidate used a capability the baseline did not, reached
+different decision outcomes, applied more effects, made more tool calls than the
+ratio allows over the baseline's most, or did not run it at all. Trials of one case
+accumulate. Acknowledge an intended change per case:
+`{"capabilities": {"refund_big": ["adp_payments.issue_refund"]}, "outcomes": ["refund_big"], "effects": [], "tool_calls": []}`.
+
 ### Gate on scorecards
 
 `ctx gate` checks what a candidate *permits*; `ctx scorecard-gate` checks how it

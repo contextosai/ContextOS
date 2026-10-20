@@ -439,3 +439,107 @@ fn audit_verify_refuses_empty_chains_and_malformed_keys() {
     ]);
     assert_eq!(report["anchor_sequence"], 1, "the assumed anchor is reported");
 }
+
+#[test]
+fn trajectory_gate_compares_what_agents_did() {
+    let bundle = |run: &str, outcome: &str, tools: &[&str], effects: usize, calls: u64| {
+        let lineage: Vec<serde_json::Value> = tools
+            .iter()
+            .enumerate()
+            .map(|(i, t)| serde_json::json!({"tool_call_id": format!("tc_{i}"), "capability_id": t,
+                "mutation_refs": if i < effects { serde_json::json!([format!("op_{i}")]) } else { serde_json::json!(null) }}))
+            .collect();
+        serde_json::json!({"evidence_version": "contextos-rs.run_evidence.v1", "run_id": run,
+            "budget_ledger": {"used": {"tool_calls": calls}},
+            "decisions": [{"record": {"decision_key": "support.refund.execute", "outcome": outcome, "tool_lineage": lineage}}]})
+    };
+    let map = write(
+        "tj_map.json",
+        &serde_json::json!({"run_b": "refund_big", "run_c": "refund_big", "run_c2": "refund_big"}),
+    );
+    let base = write(
+        "tj_base.json",
+        &bundle("run_b", "escalated", &["adp_orders.lookup"], 0, 2),
+    );
+    let same = write(
+        "tj_same.json",
+        &bundle("run_c", "escalated", &["adp_orders.lookup"], 0, 3),
+    );
+    let (code, report) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &same,
+        "--case-map",
+        &map,
+    ]);
+    assert_eq!(code, 0, "{report}");
+
+    // The candidate refunds where the baseline escalated, with a new tool and more calls.
+    let worse = write(
+        "tj_worse.json",
+        &bundle(
+            "run_c2",
+            "refund_issued",
+            &["adp_orders.lookup", "adp_payments.issue_refund"],
+            1,
+            6,
+        ),
+    );
+    let (code, report) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &worse,
+        "--case-map",
+        &map,
+    ]);
+    assert_eq!(code, 1, "{report}");
+    let kinds: Vec<&str> = report["cases"][0]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "new_capabilities",
+            "outcomes_changed",
+            "more_effects",
+            "more_tool_calls"
+        ]
+    );
+    let ack = write(
+        "tj_ack.json",
+        &serde_json::json!({"capabilities": {"refund_big": ["adp_payments.issue_refund"]},
+        "outcomes": ["refund_big"], "effects": ["refund_big"], "tool_calls": ["refund_big"]}),
+    );
+    let (code, report) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &worse,
+        "--case-map",
+        &map,
+        "--acknowledge",
+        &ack,
+    ]);
+    assert_eq!(code, 0, "every change acknowledged per case: {report}");
+
+    // A case the candidate never ran fails.
+    let other = write("tj_other.json", &bundle("run_other", "escalated", &[], 0, 0));
+    let (code, _) = ctx(&[
+        "trajectory-gate",
+        "--baseline",
+        &base,
+        "--candidate",
+        &other,
+        "--case-map",
+        &map,
+    ]);
+    assert_eq!(code, 1);
+}

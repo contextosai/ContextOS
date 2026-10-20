@@ -88,6 +88,28 @@ enum Command {
         #[arg(long)]
         case_map: Option<PathBuf>,
     },
+    /// Trajectory gate: compare what agents did on the same cases under a baseline and
+    /// a candidate (evidence bundles of replayed or shadowed runs): capabilities used,
+    /// decision outcomes, effects applied and tool calls. Fails on new capabilities,
+    /// changed outcomes, more effects, tool calls beyond a ratio of the baseline's, or a
+    /// case the candidate did not run, unless acknowledged per case.
+    TrajectoryGate {
+        /// Baseline evidence bundle files.
+        #[arg(long, required = true, num_args = 1..)]
+        baseline: Vec<PathBuf>,
+        /// Candidate evidence bundle files.
+        #[arg(long, required = true, num_args = 1..)]
+        candidate: Vec<PathBuf>,
+        /// JSON object mapping run ids to case names.
+        #[arg(long)]
+        case_map: Option<PathBuf>,
+        /// Tool calls a candidate case may make, as a multiple of the baseline's most.
+        #[arg(long, default_value_t = 1.5)]
+        max_tool_call_ratio: f64,
+        /// `{"capabilities": {case: [ids]}, "outcomes": [cases], "effects": [cases], "tool_calls": [cases]}`.
+        #[arg(long)]
+        acknowledge: Option<PathBuf>,
+    },
     /// Scorecard release gate: compare candidate scorecards with the baseline's on
     /// paired replay cases; fails on floors, policy/safety regressions, utility,
     /// latency or cost beyond limits, and missing cases or measurements.
@@ -338,6 +360,82 @@ fn run(command: Command) -> Result<Value, Failure> {
                 )),
             }
         }
+        Command::TrajectoryGate {
+            baseline,
+            candidate,
+            case_map,
+            max_tool_call_ratio,
+            acknowledge,
+        } => {
+            let map = match case_map {
+                Some(path) => read(&path)?,
+                None => json!({}),
+            };
+            let ack = match acknowledge {
+                Some(path) => read(&path)?,
+                None => json!({}),
+            };
+            let (base, cand) = (trajectories(&baseline, &map)?, trajectories(&candidate, &map)?);
+            let acknowledged = |kind: &str, case: &str| {
+                ack[kind]
+                    .as_array()
+                    .is_some_and(|cases| cases.iter().any(|c| c == case))
+            };
+            let mut reports = Vec::new();
+            let mut failing = 0;
+            for (case, b) in &base {
+                let mut findings = Vec::new();
+                let mut finding = |kind: &str, detail: Value, accepted: bool| {
+                    failing += usize::from(!accepted);
+                    findings.push(json!({"kind": kind, "detail": detail, "acknowledged": accepted}));
+                };
+                let Some(c) = cand.get(case) else {
+                    finding("case_missing", json!("the candidate did not run this case"), false);
+                    reports.push(json!({"case": case, "findings": findings}));
+                    continue;
+                };
+                let new: Vec<&String> = c.capabilities.difference(&b.capabilities).collect();
+                if !new.is_empty() {
+                    let allowed = ack["capabilities"][case.as_str()].as_array();
+                    let accepted = new
+                        .iter()
+                        .all(|n| allowed.is_some_and(|a| a.iter().any(|x| x == n.as_str())));
+                    finding("new_capabilities", json!(new), accepted);
+                }
+                if c.outcomes != b.outcomes {
+                    finding(
+                        "outcomes_changed",
+                        json!({"baseline": b.outcomes, "candidate": c.outcomes}),
+                        acknowledged("outcomes", case),
+                    );
+                }
+                if c.max_effects > b.max_effects {
+                    finding(
+                        "more_effects",
+                        json!({"baseline": b.max_effects, "candidate": c.max_effects}),
+                        acknowledged("effects", case),
+                    );
+                }
+                #[allow(clippy::cast_precision_loss)]
+                let ceiling = (b.max_tool_calls as f64 * max_tool_call_ratio).ceil();
+                #[allow(clippy::cast_precision_loss)]
+                if c.max_tool_calls as f64 > ceiling {
+                    finding(
+                        "more_tool_calls",
+                        json!({"baseline": b.max_tool_calls, "candidate": c.max_tool_calls}),
+                        acknowledged("tool_calls", case),
+                    );
+                }
+                reports.push(json!({"case": case, "findings": findings}));
+            }
+            let report = json!({"verdict": if failing == 0 { "pass" } else { "fail" },
+                "cases": reports, "unacknowledged": failing});
+            if failing == 0 {
+                Ok(report)
+            } else {
+                Err(Failure::Rejected(report))
+            }
+        }
         Command::Scorecards { evidence, case_map } => {
             let map = match case_map {
                 Some(path) => read(&path)?,
@@ -419,4 +517,49 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// What the runs of one case did, across trials.
+#[derive(Default)]
+struct Trajectory {
+    capabilities: std::collections::BTreeSet<String>,
+    /// `decision_key=outcome` of every recorded decision, across trials.
+    outcomes: std::collections::BTreeSet<String>,
+    /// The most effects (applied mutations) and tool calls any one trial made.
+    max_effects: usize,
+    max_tool_calls: u64,
+}
+
+fn trajectories(paths: &[PathBuf], map: &Value) -> Result<std::collections::BTreeMap<String, Trajectory>, Failure> {
+    let mut cases: std::collections::BTreeMap<String, Trajectory> = std::collections::BTreeMap::new();
+    for path in paths {
+        let bundle = read(path)?;
+        let Some(run_id) = bundle["run_id"].as_str() else {
+            return Err(Failure::Rejected(
+                json!({"error": format!("{}: not an evidence bundle", path.display())}),
+            ));
+        };
+        let case = cases
+            .entry(map[run_id].as_str().unwrap_or(run_id).to_owned())
+            .or_default();
+        let mut effects = 0;
+        for decision in bundle["decisions"].as_array().into_iter().flatten() {
+            let record = &decision["record"];
+            case.outcomes.insert(format!(
+                "{}={}",
+                record["decision_key"].as_str().unwrap_or_default(),
+                record["outcome"].as_str().unwrap_or("none")
+            ));
+            for call in record["tool_lineage"].as_array().into_iter().flatten() {
+                if let Some(capability) = call["capability_id"].as_str() {
+                    case.capabilities.insert(capability.to_owned());
+                }
+                effects += call["mutation_refs"].as_array().map_or(0, Vec::len);
+            }
+        }
+        case.max_effects = case.max_effects.max(effects);
+        let calls = bundle["budget_ledger"]["used"]["tool_calls"].as_u64().unwrap_or(0);
+        case.max_tool_calls = case.max_tool_calls.max(calls);
+    }
+    Ok(cases)
 }
