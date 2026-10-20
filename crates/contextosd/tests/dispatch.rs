@@ -3381,6 +3381,21 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
         conflict.json::<Value>().await.unwrap()["error"]["code"],
         "memory_conflict"
     );
+
+    // A memory whose key a newer promotion holds is superseded and cannot be recalled.
+    store
+        .create(
+            &DocKey::new(TENANT, DocKind::MemoryRecord, format!("key:key:{content}")),
+            &json!({"record_id": "mem_newer"}),
+        )
+        .await
+        .unwrap();
+    let superseded = admit("run_mem_superseded", "mem_ok", content).await;
+    assert_eq!(superseded.status(), 422);
+    assert_eq!(
+        superseded.json::<Value>().await.unwrap()["error"]["code"],
+        "memory_superseded"
+    );
 }
 
 #[tokio::test]

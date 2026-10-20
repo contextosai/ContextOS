@@ -174,8 +174,10 @@ budgets, and the integrity of the evidence record.
   `model_profile` and `evaluator_suite` release refs, and decisions record them, but
   the runtime checks their presence and digest form, not that the model or evaluator
   exists; verify pins in your release process.
-- **Memory conflicts are checked among the memories a run recalls**, not against every
-  promoted value for the key; the memory-governance service owns supersession.
+- **Memory supersession covers memory governed by this runtime.** A recalled memory is
+  refused if a newer promotion or correction through `POST /v1/runs/{id}/memory` holds
+  its key; memory written to the store by other means is checked only against the other
+  memories the run recalls.
 
 - **Invented role in policy inputs.** When the user claims carry no `role`, the
   compiler evaluates policy as if it were `support_agent`, mirroring the spec's

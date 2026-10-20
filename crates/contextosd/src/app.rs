@@ -2081,6 +2081,22 @@ where
         else {
             return Err(refused(json!({"memory_ref": memory_ref, "reason": "no memory key"})));
         };
+        // A memory whose key a newer promotion or correction now holds is superseded.
+        let holder = gateway.memory_key_holder(tenant_id, &key).await.map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?;
+        if holder.is_some_and(|h| h != memory_ref) {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "memory_superseded",
+                "A newer memory holds this key; recall the current one.",
+            )
+            .with_detail(json!({"memory_ref": memory_ref, "memory_key": key})));
+        }
         if let Some(record) = record
             && let Some(previous) = values.insert(key.clone(), record["memory_ref"]["sha256"].clone())
             && previous != record["memory_ref"]["sha256"]

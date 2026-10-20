@@ -1600,6 +1600,12 @@ async fn memory_operations_are_governed_by_trusted_context() {
         .unwrap()
         .unwrap();
     assert_eq!(state["record"]["operation"], "promote");
+    // The promotion now holds its key (compared case-insensitively).
+    let key = record["memory_ref"]["artifact_id"].as_str().unwrap().to_uppercase();
+    assert_eq!(
+        h.gateway.memory_key_holder(TENANT, &key).await.unwrap().as_deref(),
+        record["record_id"].as_str()
+    );
 
     // A reader the trusted context does not allow cannot be granted by the caller.
     let mut widened = record.clone();

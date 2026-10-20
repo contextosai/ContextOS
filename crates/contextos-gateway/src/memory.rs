@@ -116,7 +116,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .map(|_| ()),
         };
         match written {
-            Ok(()) => Ok(decision),
+            Ok(()) => {
+                self.note_memory_key(admission, id, record).await?;
+                Ok(decision)
+            }
             Err(e) if e.is_conflict() => {
                 // The allowed decision above was not applied; say so in the trail.
                 self.audit
@@ -134,6 +137,45 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
     }
 
+    /// Records which memory currently holds a key (`memory_ref.artifact_id`, compared
+    /// case-insensitively): a promotion or correction takes it, a deletion releases it.
+    async fn note_memory_key(&self, admission: &RunAdmission, id: &str, record: &Value) -> Result<(), GatewayError> {
+        let Some(memory_key) = record["memory_ref"]["artifact_id"].as_str().map(str::to_lowercase) else {
+            return Ok(());
+        };
+        let key = memory_key_doc(&admission.tenant_id, &memory_key);
+        for _ in 0..8 {
+            let current = self.store.get(&key).await?;
+            let holder = current
+                .as_ref()
+                .and_then(|c| c.body["record_id"].as_str().map(str::to_owned));
+            let next = match record["operation"].as_str() {
+                Some("promote" | "correct") => json!({"record_id": id, "sha256": record["memory_ref"]["sha256"]}),
+                Some("delete") if holder.as_deref() == Some(id) => json!({"record_id": null}),
+                _ => return Ok(()),
+            };
+            let written = match &current {
+                None => self.store.create(&key, &next).await.map(|_| ()),
+                Some(c) => self.store.compare_and_swap(&key, c.revision, &next).await.map(|_| ()),
+            };
+            match written {
+                Ok(()) => return Ok(()),
+                Err(e) if e.is_conflict() => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+
+    /// The record currently holding a memory key, if any.
+    pub async fn memory_key_holder(&self, tenant_id: &str, memory_key: &str) -> Result<Option<String>, GatewayError> {
+        Ok(self
+            .store
+            .get(&memory_key_doc(tenant_id, &memory_key.to_lowercase()))
+            .await?
+            .and_then(|d| d.body["record_id"].as_str().map(str::to_owned)))
+    }
+
     /// The memory's current lifecycle state, if any allowed record exists.
     pub async fn memory_state(&self, tenant_id: &str, record_id: &str) -> Result<Option<Value>, GatewayError> {
         Ok(self
@@ -142,4 +184,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?
             .map(|r| r.body))
     }
+}
+
+fn memory_key_doc(tenant_id: &str, memory_key: &str) -> DocKey {
+    DocKey::new(tenant_id, DocKind::MemoryRecord, format!("key:{memory_key}"))
 }
