@@ -2327,7 +2327,7 @@
       "post": {
         "operationId": "settle_usage",
         "summary": "Settle a usage reservation",
-        "description": "Reported by a metering principal (`meter` scope, without admit or dispatch), the measured usage is charged and the rest released. Reported by the run's executor (`dispatch`, current generation), the whole reservation is charged: self-reported usage is not evidence.",
+        "description": "Reported by a metering principal (`meter` scope, without admit or dispatch), the measured usage is charged and the rest released. Reported by the run's executor (`dispatch`, current generation), the whole reservation is charged: self-reported usage is not evidence. Measured usage above the reservation is charged as audited overage up to the run's remaining capacity; the principal that admitted the run cannot meter it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"
@@ -2524,10 +2524,13 @@
       },
       "get": {
         "operationId": "latest_checkpoint",
-        "summary": "The run's latest checkpoint (for the executor that takes over)",
+        "summary": "The run's latest checkpoint (the current executor only, e.g. after taking the run over)",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
           }
         ],
         "responses": {

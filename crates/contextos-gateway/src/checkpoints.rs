@@ -23,6 +23,8 @@ pub const MAX_CHECKPOINT_BYTES: usize = 256 * 1024;
 pub enum CheckpointRefusal {
     #[error("the checkpoint state is too large or not plain JSON")]
     Invalid,
+    #[error("the run is past its deadline or its content was erased")]
+    Closed,
     #[error("the checkpoint changed since revision {expected}; current revision {current}")]
     RevisionConflict { expected: u64, current: u64 },
     #[error(transparent)]
@@ -47,6 +49,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         let key = key(admission);
         let current = self.store.get(&key).await.map_err(GatewayError::from)?;
+        // Erased content stays erased, and a run past its deadline writes nothing new.
+        let expired = contextos_contract::validation::compare_contract_times(&admission.deadline, &self.now())
+            == Some(std::cmp::Ordering::Less);
+        if expired || current.as_ref().is_some_and(|c| crate::erasure::is_erased(&c.body)) {
+            return Err(CheckpointRefusal::Closed);
+        }
         let current_revision = current.as_ref().and_then(|c| c.body["revision"].as_u64()).unwrap_or(0);
         if current_revision != expected_revision {
             return Err(CheckpointRefusal::RevisionConflict {

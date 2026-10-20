@@ -1334,6 +1334,11 @@ fn usage_error(refusal: UsageRefusal) -> ApiError {
             "This run has been revoked by an operator.",
         )
         .with_detail(json!([reason])),
+        UsageRefusal::Invalid => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "usage_invalid",
+            "The usage values are out of range.",
+        ),
         UsageRefusal::UnknownReservation => ApiError::new(
             StatusCode::NOT_FOUND,
             "reservation_not_found",
@@ -1416,6 +1421,13 @@ where
     let admission = load_admission(&state, &caller, &run_id).await?;
     if !metered {
         require_owner(gateway, &admission, &headers).await?;
+    } else if caller.principal_id == admission.admitted_by {
+        // The run's own admitter cannot verify its usage, whatever token it presents.
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "meter_not_independent",
+            "The principal that admitted the run cannot meter it.",
+        ));
     }
     let measured = metered.then_some((request.tokens, request.cost_cents));
     let settled = gateway
@@ -1470,6 +1482,11 @@ where
             "The checkpoint changed since the revision you read.",
         )
         .with_detail(json!({"current_revision": current}))),
+        Err(CheckpointRefusal::Closed) => Err(ApiError::new(
+            StatusCode::GONE,
+            "checkpoint_closed",
+            "The run is past its deadline or its content was erased.",
+        )),
         Err(CheckpointRefusal::Gateway(_)) => Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "store_unavailable",
@@ -1491,6 +1508,8 @@ where
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
+    // Only the run's current executor reads its working state.
+    require_owner(gateway, &admission, &headers).await?;
     let checkpoint = gateway
         .latest_checkpoint(&admission)
         .await

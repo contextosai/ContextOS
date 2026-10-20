@@ -42,6 +42,8 @@ pub struct DispatchSetup {
     pub gateway_principal_id: String,
     /// Loop guard limit (`[guards] identical_tool_calls`); `None` disables it.
     pub loop_limit: Option<u64>,
+    /// `[guards] model_call_min_tokens`.
+    pub model_call_floor: u64,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -69,6 +71,7 @@ where
         gateway.pin_capability(manifest)?;
     }
     gateway.set_loop_limit(setup.loop_limit);
+    gateway.set_model_call_floor(setup.model_call_floor);
     Ok(gateway)
 }
 
@@ -222,5 +225,6 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         trust_domain: identity.trust_domain.clone(),
         gateway_principal_id: identity.gateway_principal_id.clone(),
         loop_limit: Some(config.guards.identical_tool_calls).filter(|n| *n > 0),
+        model_call_floor: config.guards.model_call_min_tokens,
     }))
 }

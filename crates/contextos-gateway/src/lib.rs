@@ -195,6 +195,8 @@ pub struct Gateway<S, L> {
     /// Identical tool calls (same capability and arguments, new operation) a run may
     /// make before the loop guard refuses the next; `None` disables it.
     loop_limit: Option<u64>,
+    /// Tokens every model-call reservation covers at least.
+    model_call_floor: u64,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -305,6 +307,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             manifests: HashMap::new(),
             schemas: HashMap::new(),
             loop_limit: None,
+            model_call_floor: 0,
         }
     }
 
@@ -312,6 +315,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// refused with `loop_detected` (see [`loop_guard`]).
     pub fn set_loop_limit(&mut self, limit: Option<u64>) {
         self.loop_limit = limit;
+    }
+
+    /// Sets the tokens every model-call reservation covers at least (see
+    /// [`Gateway::reserve_usage`]).
+    pub fn set_model_call_floor(&mut self, tokens: u64) {
+        self.model_call_floor = tokens;
     }
 
     pub fn register_adapter(&mut self, adapter_id: impl Into<String>, adapter: Arc<dyn Adapter>) {
@@ -698,15 +707,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Loop guard: a new operation repeating an identical call too often is refused
         // with a structured reason for the planner (a retry of an operation is not new).
         let loops = loops?;
+        let loop_state = loops.as_ref().map(|l| &l.body);
         if let Some(limit) = self.loop_limit
             && existing_ledger.is_none()
-            && loop_guard::count(loops.as_ref().map(|l| &l.body), &call_signature) >= limit
+            && (loop_guard::count(loop_state, &call_signature) >= limit
+                || loop_guard::saturated(loop_state, &call_signature))
         {
+            let reason = if loop_guard::saturated(loop_state, &call_signature) {
+                "loop_guard_saturated"
+            } else {
+                "loop_detected"
+            };
             let entry = self
                 .audit
                 .append(
                     &admission.tenant_id,
-                    "loop_detected",
+                    reason,
                     json!({"run_id": admission.run_id, "operation_id": operation_id,
                         "capability_id": manifest.capability_id, "call_signature": call_signature, "limit": limit}),
                     &now,
@@ -716,8 +732,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             p.report.obligations.push("change_approach".into());
             return Ok(p.stop(
                 "blocked",
-                vec!["loop_detected".into()],
-                "This exact call has been repeated too many times in this run.",
+                vec![reason.into()],
+                "This call repeats too often, or the run has made too many kinds of call.",
             ));
         }
         let new_operation = existing_ledger.is_none();
@@ -1138,7 +1154,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         );
         let response = response.unwrap_or_else(|_| AdapterResponse::unknown());
         if let Err(error) = counted {
+            // A lost count weakens the guard; make it visible in the evidence.
             tracing::warn!(%error, "loop guard count not recorded");
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "loop_guard_count_lost",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
+                    &now,
+                )
+                .await?;
         }
 
         let input_required = response.output.get("result_type").and_then(Value::as_str) == Some("input_required");

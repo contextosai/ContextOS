@@ -410,10 +410,13 @@ POST /v1/runs/{run_id}/usage/settle    {"reservation_id": "usage:…", "tokens":
 ```
 
 A reservation that does not fit is refused (`budget_exhausted`); replans count against
-the run's replan allowance. Settlement depends on who reports: an LLM gateway or other
+the run's replan allowance. A model call reserves at least `[guards]
+model_call_min_tokens` (default 1,000), so no call is free. Settlement depends on who reports: an LLM gateway or other
 metering service holding the `meter` scope (and neither `admit` nor `dispatch`) settles
-the usage it measured and releases the rest, while the run's own executor settling is
-charged the whole reservation, because self-reported usage is not evidence. Pass the
+the usage it measured and releases the rest (usage above the reservation is charged as
+audited overage, up to the run's remaining capacity), while the run's own executor
+settling is charged the whole reservation, because self-reported usage is not evidence.
+The principal that admitted the run cannot meter it. Pass the
 reservation id to your model gateway (for example in a request header) so it can meter
 the call.
 
@@ -427,16 +430,19 @@ POST /v1/runs/{run_id}/checkpoint   {"expected_revision": 3, "state": {"step": 4
 GET  /v1/runs/{run_id}/checkpoint   # the executor that took over reads it
 ```
 
-Only the current executor writes (generation fencing), writes are optimistic on the
-revision (`checkpoint_conflict` names the current one), the state is at most 256 KiB,
-each save is audited by digest, and checkpoints are erased with the run.
+Only the current executor reads or writes (generation fencing), writes are optimistic on
+the revision (`checkpoint_conflict` names the current one), the state is at most 256
+KiB, each save is audited by digest, and checkpoints are erased with the run (an erased
+checkpoint, or a run past its deadline, takes no new one).
 
 ### Loop guard
 
 An agent stuck repeating one action is stopped: after `[guards] identical_tool_calls`
 (default 5; 0 disables) new operations with the same capability and arguments in a run,
 the next is refused with `loop_detected` and the obligation `change_approach`, before
-anything is claimed or sent. Retrying an existing operation (same operation key) is not
+anything is claimed or sent. A run tracks at most 1,024 kinds of call; past that, new
+kinds are refused (`loop_guard_saturated`) rather than left uncounted, and a count lost
+to contention is audited (`loop_guard_count_lost`). Retrying an existing operation (same operation key) is not
 a new call. The count is read with the other authorization facts and written while the
 provider works, so the guard adds no serial latency; identical calls racing in parallel
 can overshoot by their concurrency.

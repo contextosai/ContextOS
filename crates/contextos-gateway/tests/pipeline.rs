@@ -1727,3 +1727,25 @@ async fn never_started_runs_can_be_erased_but_live_ones_cannot() {
         Err(ErasureError::RunActive)
     ));
 }
+
+#[tokio::test]
+async fn an_erased_checkpoint_cannot_be_recreated() {
+    let h = harness("allow", Behavior::Confirm).await;
+    h.gateway
+        .save_checkpoint(&h.admission, 1, 0, json!({"note": "personal"}))
+        .await
+        .unwrap();
+    // Never started, so erasable; the tombstone then refuses any new checkpoint.
+    h.gateway
+        .erase_run(&h.admission, "ops", "subject request")
+        .await
+        .unwrap();
+    assert!(matches!(
+        h.gateway
+            .save_checkpoint(&h.admission, 1, 0, json!({"note": "again"}))
+            .await,
+        Err(CheckpointRefusal::Closed)
+    ));
+    let latest = h.gateway.latest_checkpoint(&h.admission).await.unwrap().unwrap();
+    assert!(is_erased(&latest));
+}

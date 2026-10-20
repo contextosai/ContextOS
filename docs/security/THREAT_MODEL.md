@@ -90,6 +90,18 @@ budgets, and the integrity of the evidence record.
   keys are refused in production mode. Each fix has a regression test. A tenant cap
   smaller than the replica count is exceeded by design (documented).
 
+- 2026-10-21: fifth review, of model and replan budgets, the loop guard and
+  orchestrator checkpoints. Fixed: an executor could reserve a model call for zero and
+  self-settle it for free, and a meter's measurement was capped at the executor's
+  reservation (model calls now reserve at least a configured floor, metered overage is
+  charged up to the remaining capacity and audited, and the run's admitter cannot meter
+  it); an erased checkpoint could be re-created, and written past the deadline; any
+  dispatch caller in the tenant could read another run's checkpoint (now only the
+  current executor); the loop guard stopped counting new signatures once its table was
+  full (it now refuses them, with a smaller table) and lost counts under contention
+  silently (more retries, and an audited loss); cost arithmetic now refuses overflow.
+  Each fix has a regression test.
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

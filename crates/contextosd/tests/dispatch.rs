@@ -2580,6 +2580,14 @@ async fn checkpoints_survive_failover_and_fence_the_old_executor() {
         409,
         "the old executor is stale"
     );
+    // Only the run's current executor reads its working state.
+    let snooped = first
+        .get(format!("{}/v1/runs/run_ckpt/checkpoint", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(snooped.status(), 409);
     let latest: Value = second
         .get(format!("{}/v1/runs/run_ckpt/checkpoint", w.base))
         .bearer_auth("acme-key")
@@ -2622,11 +2630,98 @@ async fn checkpoints_survive_failover_and_fence_the_old_executor() {
             .any(|e| e["document"] == "checkpoint"),
         "{erased}"
     );
-    let gone = second
+    // A finished run's working state is no longer readable by anyone.
+    let closed = second
         .get(format!("{}/v1/runs/run_ckpt/checkpoint", w.base))
         .bearer_auth("acme-key")
         .send()
         .await
         .unwrap();
-    assert_eq!(gone.status(), 410);
+    assert_eq!(closed.status(), 409);
+}
+
+#[tokio::test]
+async fn model_call_budgets_cannot_be_dodged() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_dodge", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let reserve = |tokens: u64| {
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_dodge/usage/reserve", w.base));
+        async move {
+            let r: Value = http
+                .post(url)
+                .bearer_auth("acme-key")
+                .json(&json!({"kind": "model_call", "tokens": tokens}))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            r["reservation_id"].as_str().unwrap().to_owned()
+        }
+    };
+    let settle = |key: &'static str, body: Value| {
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_dodge/usage/settle", w.base));
+        async move {
+            http.post(url)
+                .bearer_auth(key)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    // A zero reservation still covers the floor, so a self-settled call is never free.
+    let free = reserve(0).await;
+    assert_eq!(
+        settle("acme-key", json!({"reservation_id": free})).await["charged"]["tokens"],
+        1000
+    );
+    // A meter that measured more than was reserved charges the overage too.
+    let under = reserve(1000).await;
+    let metered = settle("meter-key", json!({"reservation_id": under, "tokens": 3000})).await;
+    assert_eq!(metered["charged"]["tokens"], 3000, "{metered}");
+    // Beyond the run's remaining capacity (10,000 - 4,000 used), the charge is capped and audited.
+    let last = reserve(1000).await;
+    let capped = settle("meter-key", json!({"reservation_id": last, "tokens": 50_000})).await;
+    assert_eq!(capped["charged"]["tokens"], 6000, "{capped}");
+    let audit: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=500", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let overages = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e.to_string().contains("usage_overage"))
+        .count();
+    assert_eq!(overages, 2);
+    // Absurd values are refused rather than wrapped.
+    let huge = http
+        .post(format!("{}/v1/runs/run_dodge/usage/reserve", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"kind": "model_call", "cost_cents": u64::MAX}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(huge.status(), 422);
 }

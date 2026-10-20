@@ -88,6 +88,14 @@ pub struct GuardsConfig {
     /// make before the next is refused with `loop_detected`; 0 disables the guard.
     #[serde(default = "default_identical_calls")]
     pub identical_tool_calls: u64,
+    /// Tokens every model-call reservation covers at least, so an executor cannot
+    /// reserve (and self-settle) a model call for nothing.
+    #[serde(default = "default_model_call_tokens")]
+    pub model_call_min_tokens: u64,
+}
+
+fn default_model_call_tokens() -> u64 {
+    1_000
 }
 
 fn default_identical_calls() -> u64 {
@@ -98,6 +106,7 @@ impl Default for GuardsConfig {
     fn default() -> Self {
         Self {
             identical_tool_calls: default_identical_calls(),
+            model_call_min_tokens: default_model_call_tokens(),
         }
     }
 }
