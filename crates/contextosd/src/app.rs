@@ -2037,6 +2037,8 @@ where
         };
     }
     let now = gateway.now();
+    // One run may not recall two promoted values for the same memory key.
+    let mut values: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
     for item in items {
         let memory_ref = item["memory_ref"].as_str().unwrap_or_default();
         let content = item["content"].as_str();
@@ -2068,6 +2070,18 @@ where
         });
         if !current {
             return Err(refused(json!({"memory_ref": memory_ref})));
+        }
+        if let Some(record) = record
+            && let Some(key) = record["memory_ref"]["artifact_id"].as_str()
+            && let Some(previous) = values.insert(key.to_owned(), record["memory_ref"]["sha256"].clone())
+            && previous != record["memory_ref"]["sha256"]
+        {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "memory_conflict",
+                "Recalled memory holds conflicting values for the same key; resolve them first.",
+            )
+            .with_detail(json!({"memory_key": key})));
         }
     }
     Ok(())

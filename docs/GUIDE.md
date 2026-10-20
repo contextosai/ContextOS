@@ -339,7 +339,9 @@ minimal, development-only implementation):
   item's `memory_ref` must name a record whose state is `promote` or `correct`, within
   its retention, whose `readers` include the run's user or agent (readership is
   rechecked at recall, not only at promotion), and whose `memory_ref.sha256` is the
-  digest of the recalled `content`;
+  digest of the recalled `content`; and two recalled memories may not hold different
+  values for the same key (`memory_ref.artifact_id`: `memory_conflict`), so
+  contradictory facts never reach one context;
   anything else is refused (`memory_unverified`). Without the service, production
   refuses recalled memory unless `[guards] trust_supplied_memory = true`.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized

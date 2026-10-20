@@ -3348,6 +3348,33 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
             "{run}"
         );
     }
+
+    // Two promoted values for one memory key cannot be recalled together.
+    let other = "customer:cus_77 prefers_communication_channel=sms";
+    for (id, text) in [("mem_pref_email", content), ("mem_pref_sms", other)] {
+        let mut record = promoted("promote", "2099-01-01T00:00:00Z", text);
+        record["record"]["memory_ref"]["artifact_id"] = json!("pref:cus_77:channel");
+        store
+            .create(&DocKey::new(TENANT, DocKind::MemoryRecord, id), &record)
+            .await
+            .unwrap();
+    }
+    let mut body = run_body("run_mem_conflict", 1200);
+    body["deps"]["promoted_memory"] = json!([
+        {"memory_ref": "mem_pref_email", "content": content, "freshness": "current", "source_refs": []},
+        {"memory_ref": "mem_pref_sms", "content": other, "freshness": "current", "source_refs": []}]);
+    let conflict = plain
+        .post(format!("{base}/v1/runs"))
+        .bearer_auth("acme-key")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), 422);
+    assert_eq!(
+        conflict.json::<Value>().await.unwrap()["error"]["code"],
+        "memory_conflict"
+    );
 }
 
 #[tokio::test]

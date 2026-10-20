@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- A run cannot recall two promoted memories holding different values for one key
+  (`memory_conflict`).
 - Production mode refuses delegations whose `output_schema_ref` is not a registered
   `[[result_schemas]]` entry.
 - `[guards] completion_requires_scores`: a run completes only when every effectful decision
