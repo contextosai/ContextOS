@@ -174,6 +174,16 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
+fn request_span<B>(request: &axum::http::Request<B>) -> tracing::Span {
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or("unmatched", axum::extract::MatchedPath::as_str);
+    let span = tracing::info_span!("http.request", method = %request.method(), route, otel.kind = "server");
+    crate::telemetry::link_parent(&span, request.headers());
+    span
+}
+
 async fn readyz<S: DocumentStore, L>(State(state): State<Arc<AppState<S, L>>>) -> Response {
     if !state.auth.ready() {
         return (StatusCode::SERVICE_UNAVAILABLE, "identity keys not loaded").into_response();
@@ -588,7 +598,7 @@ where
             StatusCode::GATEWAY_TIMEOUT,
             request_timeout,
         ))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_http::trace::TraceLayer::new_for_http().make_span_with(request_span))
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
         .with_state(state)
 }

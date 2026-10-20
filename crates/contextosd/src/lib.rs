@@ -6,6 +6,7 @@ pub mod config;
 pub mod metrics;
 pub mod oidc;
 pub mod runtime;
+pub mod telemetry;
 
 use std::collections::HashMap;
 use std::sync::Arc;

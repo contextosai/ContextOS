@@ -35,6 +35,18 @@ jsonwebtoken.workspace = true
 reqwest.workspace = true
 url.workspace = true
 async-trait.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry-http = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+
+[features]
+default = ["otlp"]
+# OTLP/HTTP trace export, enabled at runtime by OTEL_EXPORTER_OTLP_ENDPOINT.
+otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:opentelemetry-http", "dep:http", "dep:bytes"]
 
 [dev-dependencies]
 ring.workspace = true

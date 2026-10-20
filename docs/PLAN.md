@@ -89,7 +89,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 17 Observability, docs, quickstart | done — dispatch tracing spans, HTTP trace layer, runnable quickstart (verified end to end), usage/integration/operations guide |
 | 18a OIDC/JWT caller authentication | done — background JWKS refresh, rate-limited rotation, issuer-scoped tenants, asymmetric algorithms only, readiness gating |
 | 18b Helm chart, release automation | done — hardened chart (non-root, read-only FS, no SA token, PDB, NetworkPolicy, HPA, ServiceMonitor) validated in CI; tag releases build attested binaries, per-crate CycloneDX SBOMs and a keyless-signed image with provenance |
-| 18c OTLP trace export | next |
+| 18c OTLP trace export | done — OTLP/HTTP via the server's rustls client (no second TLS stack), W3C trace-context propagation, default `info` logging |
+| 19 Load testing against PostgreSQL, MCP `input_required`/tasks continuation, open-source readiness (license, CONTRIBUTING, governance) | next |
 
 ## Non-negotiables carried from the spec
 

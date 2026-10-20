@@ -106,6 +106,11 @@ HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
   adding the new public key to verifiers before switching writers.
 - **Declare only what you enforce:** `[support].controls` is a claim that your providers
   enforce those controls. Runs that need more are refused at admission.
+- **Traces:** set `OTEL_EXPORTER_OTLP_ENDPOINT` (and optionally `OTEL_SERVICE_NAME`,
+  `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_HEADERS`) to export spans over
+  OTLP/HTTP. A caller's W3C `traceparent` becomes the parent of the request span, so
+  each governed dispatch appears inside the agent's distributed trace. Build with
+  `--no-default-features` to leave the exporter out entirely.
 - **Metrics:** `contextos_http_requests_total`, `contextos_http_request_duration_ms`,
   `contextos_dispatch_outcomes_total{status}`. Logs are JSON with a `contextos.dispatch`
   span per tool call (run, operation, capability, digest, status, reasons).

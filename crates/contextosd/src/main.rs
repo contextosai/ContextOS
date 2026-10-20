@@ -8,7 +8,6 @@ use contextos_store::{MemoryLog, MemoryStore};
 use contextosd::config::StoreConfig;
 use contextosd::runtime::dispatch_setup_from_config;
 use contextosd::{Config, build_state, load_pack, router, signer_from_env};
-use tracing_subscriber::EnvFilter;
 
 fn fail(message: impl std::fmt::Display) -> ! {
     tracing::error!(%message, "startup failed");
@@ -18,10 +17,7 @@ fn fail(message: impl std::fmt::Display) -> ! {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let args: Vec<String> = std::env::args().collect();
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
@@ -82,4 +78,5 @@ async fn main() {
         })
         .await
         .unwrap_or_else(|e| fail(e));
+    telemetry.shutdown().await;
 }
