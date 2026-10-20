@@ -119,6 +119,16 @@ def main() -> None:
         scored = judge.score(run.run_id, record_id, "evaluator.refund_quality@3", policy=1.0, utility=0.9, safety=1.0)
         assert scored["score"]["scorecard"]["latency"] == decision["record"]["budget_usage"]["wall_clock_ms"]
 
+        # The reviewer files a correction; an operator closes it with evidence.
+        filed = judge.file_feedback(run.run_id, "correction", "policy", "Refund should have been escalated.",
+                                    decision_record_id=record_id, expected_outcome="escalate")
+        assert filed["replay_obligation"]["case"] == run.run_id
+        assert client.open_feedback()["open"] == 1
+        closed = Client(client.base_url, OPS_KEY).close_feedback(
+            filed["feedback_id"], "fixed", artifact_type="gate_report", artifact_id="gate_1", sha256="sha256:" + "c" * 64)
+        assert closed["status"] == "fixed"
+        assert client.open_feedback()["open"] == 0
+
         # Failover: a second executor takes over; the first is fenced.
         replacement = client.attach(run.run_id, run.trace_id, run.principal_chain).take_over()
         assert replacement.executor_generation == 4

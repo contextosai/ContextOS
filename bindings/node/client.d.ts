@@ -60,11 +60,37 @@ export declare class Client {
   attach(runId: string, traceId: string, principalChain: { kind: string; id: string }[]): Promise<Run>;
   /** Scores a recorded decision as an independent evaluator (token with only `evaluate`). */
   score(runId: string, recordId: string, scores: { evaluatorRef: string; policy: number; utility: number; safety: number }): Promise<{ score: Record<string, any>; audit_sequence: number }>;
+  /** Files an operator correction or override against a run (token with `evaluate`, independent of the run). */
+  fileFeedback(runId: string, feedback: { kind: "correction" | "override" | "approval_verdict"; targetSurface: FeedbackSurface; summary: string; decisionRecordId?: string; expectedOutcome?: string }): Promise<Feedback>;
+  /** The tenant's open feedback, oldest first. */
+  openFeedback(options?: { limit?: number }): Promise<{ open: number; feedback: Feedback[] }>;
+  /** Closes feedback with a reference to the evidence (token with `control`). */
+  closeFeedback(feedbackId: string, status: "fixed" | "still_failing" | "invalid" | "superseded", evidence: { artifactType: string; artifactId: string; sha256: string }): Promise<Feedback>;
   /** Kill switch (token with the `control` scope). */
   revoke(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
   restore(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
   revocations(): Promise<Revocations>;
   auditEntries(options?: { from?: number; page?: number }): AsyncGenerator<Record<string, Json>>;
+}
+
+export type FeedbackSurface = "run_context" | "pack" | "policy" | "tool" | "memory" | "skill" | "evaluator" | "unknown";
+
+export interface Feedback {
+  feedback_id: string;
+  run_id: string;
+  trace_id: string;
+  decision_record_id: string | null;
+  kind: string;
+  target_surface: FeedbackSurface;
+  summary: string;
+  expected_outcome: string | null;
+  reporter: string;
+  filed_at: string;
+  status: "open" | "fixed" | "still_failing" | "invalid" | "superseded";
+  replay_obligation: { case: string; replay_case: string };
+  closed_at?: string;
+  closed_by?: string;
+  evidence_ref?: { artifact_type: string; artifact_id: string; sha256: string };
 }
 
 export declare class Run {

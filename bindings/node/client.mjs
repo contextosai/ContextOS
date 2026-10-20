@@ -127,6 +127,32 @@ export class Client {
   }
 
   /**
+   * Files an operator correction or override against a run as an independent reviewer
+   * (`evaluate` scope); the run's replay case becomes its replay obligation.
+   */
+  fileFeedback(runId, { kind, targetSurface, summary, decisionRecordId, expectedOutcome }) {
+    const body = { kind, target_surface: targetSurface, summary };
+    if (decisionRecordId !== undefined) body.decision_record_id = decisionRecordId;
+    if (expectedOutcome !== undefined) body.expected_outcome = expectedOutcome;
+    return this.request("POST", `/v1/runs/${segment(runId)}/feedback`, { body });
+  }
+
+  /** The tenant's open feedback, oldest first: the replay corpus a change must pass. */
+  openFeedback({ limit = 500 } = {}) {
+    return this.request("GET", "/v1/feedback", { query: { limit } });
+  }
+
+  /**
+   * Closes feedback as `fixed`, `still_failing`, `invalid` or `superseded`, with a
+   * reference to the evidence (`control` scope).
+   */
+  closeFeedback(feedbackId, status, { artifactType, artifactId, sha256 }) {
+    return this.request("POST", `/v1/feedback/${segment(feedbackId)}/close`, {
+      body: { status, evidence_ref: { artifact_type: artifactType, artifact_id: artifactId, sha256 } },
+    });
+  }
+
+  /**
    * Kill switch (token with the `control` scope): revokes a `tenant`, `pack`, `agent`,
    * `adapter` or `capability` from the next dispatch and admission.
    */

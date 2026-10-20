@@ -98,6 +98,19 @@ try {
   const scored = await judge.score(run.runId, decision.record.record_id, scores);
   assert.equal(scored.score.scorecard.latency, decision.record.budget_usage.wall_clock_ms);
 
+  // The reviewer files a correction; an operator closes it with evidence.
+  const filed = await judge.fileFeedback(run.runId, {
+    kind: "correction", targetSurface: "policy", summary: "Refund should have been escalated.",
+    decisionRecordId: decision.record.record_id, expectedOutcome: "escalate",
+  });
+  assert.equal(filed.replay_obligation.case, run.runId);
+  assert.equal((await client.openFeedback()).open, 1);
+  const resolved = await new Client(client.baseUrl, { token: OPS_KEY }).closeFeedback(filed.feedback_id, "fixed", {
+    artifactType: "gate_report", artifactId: "gate_1", sha256: `sha256:${"c".repeat(64)}`,
+  });
+  assert.equal(resolved.status, "fixed");
+  assert.equal((await client.openFeedback()).open, 0);
+
   // A read-only research lane funded by the run.
   const agent = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
   const childId = `${run.runId}_lane`;

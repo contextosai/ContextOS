@@ -133,6 +133,9 @@ fn world_packs() -> HashMap<String, contextosd::app::LoadedPack> {
 }
 
 /// The fake fact services and MCP tool server, and the configuration pointing at them.
+/// Numbers each setup's capability manifest file.
+static SETUPS: AtomicUsize = AtomicUsize::new(0);
+
 async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>) {
     let authority = serve(
         Router::new().fallback(post(|axum::Json(r): axum::Json<Value>| async move {
@@ -200,7 +203,8 @@ async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>) {
 
     let dir = std::env::temp_dir().join(format!("contextosd-dispatch-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let manifest_path = dir.join(format!("issue_refund-{}.json", controls.len()));
+    // One file per setup: parallel tests must not rewrite a file another is reading.
+    let manifest_path = dir.join(format!("issue_refund-{}.json", SETUPS.fetch_add(1, Ordering::SeqCst)));
     std::fs::write(&manifest_path, json!({
         "capability_id": "adp_payments.issue_refund", "capability_version": "3", "adapter_id": "adp_payments",
         "protocol_tool": "issue_refund", "purpose_id": "support.refund", "desired_effect": "refund_created",

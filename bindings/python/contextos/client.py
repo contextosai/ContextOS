@@ -157,6 +157,29 @@ class Client:
         return self.request("POST", f"/v1/runs/{_quote(run_id)}/decisions/{_quote(record_id)}/scores",
                             {"evaluator_ref": evaluator_ref, "policy": policy, "utility": utility, "safety": safety})
 
+    def file_feedback(self, run_id: str, kind: str, target_surface: str, summary: str, *,
+                      decision_record_id: Optional[str] = None, expected_outcome: Optional[str] = None) -> dict:
+        """Files an operator correction or override against a run as an independent
+        reviewer (`evaluate` scope); the run's replay case becomes its replay obligation."""
+        body: Dict[str, Any] = {"kind": kind, "target_surface": target_surface, "summary": summary}
+        if decision_record_id is not None:
+            body["decision_record_id"] = decision_record_id
+        if expected_outcome is not None:
+            body["expected_outcome"] = expected_outcome
+        return self.request("POST", f"/v1/runs/{_quote(run_id)}/feedback", body)
+
+    def open_feedback(self, limit: int = 500) -> dict:
+        """The tenant's open feedback, oldest first: the replay corpus a change must pass."""
+        return self.request("GET", "/v1/feedback", query={"limit": limit})
+
+    def close_feedback(self, feedback_id: str, status: str, *, artifact_type: str, artifact_id: str,
+                       sha256: str) -> dict:
+        """Closes feedback as fixed, still_failing, invalid or superseded, with a reference
+        to the evidence (`control` scope)."""
+        return self.request("POST", f"/v1/feedback/{_quote(feedback_id)}/close", {
+            "status": status,
+            "evidence_ref": {"artifact_type": artifact_type, "artifact_id": artifact_id, "sha256": sha256}})
+
     def revoke(self, kind: str, target: str, reason: str) -> dict:
         """Kill switch (a client whose token has the `control` scope): revokes a `tenant`,
         `pack`, `agent`, `adapter` or `capability` from the next dispatch and admission."""
