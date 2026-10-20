@@ -922,7 +922,10 @@ fn to_policy_manifest(active: &[ActiveRule]) -> Vec<PolicyManifestEntry> {
         let pos = if let Some(pos) = manifest.iter().position(|e| e.bundle_id == a.bundle_id) {
             pos
         } else {
-            manifest.push(PolicyManifestEntry { bundle_id: a.bundle_id.clone(), rule_ids: Vec::new() });
+            manifest.push(PolicyManifestEntry {
+                bundle_id: a.bundle_id.clone(),
+                rule_ids: Vec::new(),
+            });
             manifest.len() - 1
         };
         let entry = &mut manifest[pos];

@@ -8,7 +8,7 @@ const here = import.meta.dirname;
 const spec = process.env.CONTEXTOS_SPEC ?? "/opt/contextosai";
 export default {
   root: here,
-  resolve: { alias: { "@ref": path.join(spec, "src/lib/contextos") } },
+  resolve: { alias: { "@ref": path.join(spec, "src/lib/contextos"), "@fixtures": path.join(spec, "tests/fixtures"), "@/": path.join(spec, "src") + "/" } },
   server: { fs: { allow: [spec, path.resolve(here, "../..")] } },
   test: { include: ["*.gen.ts"], environment: "node" },
 };

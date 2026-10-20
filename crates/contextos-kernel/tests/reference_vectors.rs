@@ -83,3 +83,47 @@ fn action_risk_evaluations_match_reference() {
         assert_eq!(actual, case["expected"], "{}", case["risk"]);
     }
 }
+
+#[test]
+fn standard_registry_matches_reference() {
+    let vectors = load("negotiation.json");
+    let ours = serde_json::to_value(&*contextos_kernel::STANDARD_PROFILE_REGISTRY).unwrap();
+    assert_eq!(
+        canonicalize(&ours).unwrap(),
+        canonicalize(&vectors["registry"]).unwrap()
+    );
+}
+
+#[test]
+fn negotiation_matches_reference() {
+    let vectors = load("negotiation.json");
+    let mut checked = 0;
+    for case in vectors["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        if case["expected"].get("throws").is_some() {
+            continue;
+        }
+        let input = &case["input"];
+        // A deleted top-level argument is JavaScript `undefined`, which a JSON API cannot receive.
+        if ["contract", "support", "registry", "features"]
+            .iter()
+            .any(|k| input.get(*k).is_none())
+        {
+            continue;
+        }
+        let actual = contextos_kernel::negotiate_execution_contract(
+            &input["contract"],
+            &input["support"],
+            &input["registry"],
+            &input["features"],
+        );
+        let actual = serde_json::to_value(actual).unwrap();
+        assert_eq!(
+            canonicalize(&actual).unwrap(),
+            canonicalize(&case["expected"]).unwrap(),
+            "{name}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 3_000, "{checked}");
+}
