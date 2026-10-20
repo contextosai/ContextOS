@@ -105,8 +105,8 @@ def main() -> None:
         assert run.checkpoint({"step": 1, "verdict": "accept"}, 0)["revision"] == 1
 
         # Model calls spend the run's budget; a self-reported settlement charges it all.
-        reservation = run.reserve_usage("model_call", tokens=300)
-        assert run.settle_usage(reservation)["charged"]["tokens"] == 300
+        reservation = run.reserve_usage("model_call", tokens=3000)
+        assert run.settle_usage(reservation)["charged"]["tokens"] == 3000
 
         # An independent evaluator scores the decision; the executor's key cannot.
         record_id = decision["record"]["record_id"]

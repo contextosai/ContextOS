@@ -262,7 +262,7 @@ class Run:
 
     def latest_checkpoint(self) -> dict:
         """The latest checkpoint (`state`, `revision`), e.g. after taking the run over."""
-        return self.client.request("GET", self._path("/checkpoint"))
+        return self.client.request("GET", self._path("/checkpoint"), generation=self.executor_generation)
 
     def reserve_usage(self, kind: str, *, tokens: int = 0, cost_cents: int = 0) -> str:
         """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""

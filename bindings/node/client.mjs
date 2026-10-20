@@ -227,7 +227,7 @@ export class Run {
 
   /** The latest checkpoint (`state`, `revision`), e.g. after taking the run over. */
   latestCheckpoint() {
-    return this.client.request("GET", this.#path("/checkpoint"));
+    return this.client.request("GET", this.#path("/checkpoint"), { generation: this.executorGeneration });
   }
 
   /** Reserves budget for a `model_call` or a `replan`; resolves to the reservation id. */
