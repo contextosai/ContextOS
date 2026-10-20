@@ -1269,6 +1269,9 @@
           },
           "501": {
             "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -1782,6 +1785,86 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
+    },
+    "/v1/runs/{run_id}/erase": {
+      "post": {
+        "operationId": "erase_run",
+        "summary": "Erase a finished run's personal content",
+        "description": "Overwrites the run's replay case and compiled context with tombstones (operator, time, reason, digest of the removed content), audited before the content goes. Only completed, failed or cancelled runs (`run_active` otherwise). Idempotent: `erased` lists what this call removed. Signed DecisionRecords and audit entries are not rewritten.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Erasure record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erasure"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "422": {
@@ -2523,6 +2606,47 @@
                 "at": {
                   "type": "string",
                   "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Erasure": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "operator",
+          "reason",
+          "erased"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "erased": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "document",
+                "content_digest"
+              ],
+              "properties": {
+                "document": {
+                  "enum": [
+                    "replay_case",
+                    "compiled_context"
+                  ]
+                },
+                "content_digest": {
+                  "type": "string"
                 }
               }
             }

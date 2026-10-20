@@ -10,6 +10,7 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
 //! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
 //! | `POST /v1/revocations/restore` | `control` | restore a revoked target |
@@ -57,8 +58,8 @@ use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
-    EffectOutcome, Gateway, Ownership, REVOCATION_KINDS, Resolution, RevocationError, RunAdmission, ScoreRefusal,
-    ScoreReport, admit_run,
+    EffectOutcome, ErasureError, Gateway, Ownership, REVOCATION_KINDS, Resolution, RevocationError, RunAdmission,
+    ScoreRefusal, ScoreReport, admit_run, is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1208,6 +1209,57 @@ where
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ErasureBody {
+    reason: String,
+}
+
+/// Erases a finished run's personal content (replay case and compiled context),
+/// leaving audited tombstones.
+async fn erase_run<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: ErasureBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid erasure: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    match gateway
+        .erase_run(&admission, &caller.principal_id, &request.reason)
+        .await
+    {
+        Ok(record) => Ok(axum::Json(record).into_response()),
+        Err(ErasureError::RunActive) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "run_active",
+            "Only a finished run can be erased.",
+        )),
+        Err(ErasureError::Invalid) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "A reason is required.",
+        )),
+        Err(ErasureError::Gateway(_)) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RevocationBody {
     kind: String,
     target: String,
@@ -1492,6 +1544,13 @@ where
                 "No replay case for this run.",
             )
         })?;
+    if is_erased(&case) {
+        return Err(ApiError::new(
+            StatusCode::GONE,
+            "replay_case_erased",
+            "This run's content was erased.",
+        ));
+    }
     Ok(axum::Json(case).into_response())
 }
 
@@ -1543,6 +1602,7 @@ where
             post(score_decision::<S, L>),
         )
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
+        .route("/v1/runs/{run_id}/erase", post(erase_run::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",

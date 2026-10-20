@@ -1695,3 +1695,93 @@ async fn operators_revoke_and_restore_targets() {
         .unwrap();
     assert_eq!(verified["verified"], true);
 }
+
+#[tokio::test]
+async fn finished_runs_can_be_erased() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_erase", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_erase/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_erase", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed");
+    let erase = |key: &'static str| {
+        let url = format!("{}/v1/runs/run_erase/erase", w.base);
+        let plain = plain.clone();
+        async move {
+            plain
+                .post(url)
+                .bearer_auth(key)
+                .json(&json!({"reason": "subject request 88"}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // A live run still decides against its context.
+    assert_eq!(erase("ops-key").await.status(), 409);
+    let done = http
+        .post(format!("{}/v1/runs/run_erase/complete", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(done.status(), 200, "{}", done.text().await.unwrap());
+    // Only operators erase.
+    assert_eq!(erase("acme-key").await.status(), 403);
+
+    let erased: Value = erase("ops-key").await.json().await.unwrap();
+    let documents: Vec<&str> = erased["erased"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["document"].as_str().unwrap())
+        .collect();
+    assert_eq!(documents, ["replay_case", "compiled_context"]);
+    assert!(
+        erased["erased"][0]["content_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+    let case = plain
+        .get(format!("{}/v1/runs/run_erase/replay-case", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(case.status(), 410);
+    // Idempotent: nothing left to erase.
+    let again: Value = erase("ops-key").await.json().await.unwrap();
+    assert_eq!(again["erased"], json!([]));
+
+    let verified: Value = plain
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true);
+}

@@ -421,7 +421,24 @@ with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
 
-## 8. Operate
+## 8. Erase personal content
+
+A run's user-provided content lives in its replay case (the original request) and its
+compiled context (task prompt and evidence blocks). Once the run is finished, an
+operator (`control` scope) erases both:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/runs/$RUN/erase" -H "Authorization: Bearer $OPS_TOKEN" \
+  -d '{"reason": "data subject request 88"}'
+```
+
+Each document becomes a tombstone recording the operator, time, reason and the digest
+of what was removed, audited before the content goes; the replay case then answers
+`410`, so erased runs drop out of release-gate corpora. Signed DecisionRecords and
+audit entries are not rewritten: keep personal data out of decision outputs and
+rationales and cite evidence by reference instead.
+
+## 9. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
