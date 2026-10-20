@@ -780,3 +780,115 @@ async fn runs_complete_and_cancel_over_http() {
     );
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn decisions_are_verified_gated_signed_and_exported() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    let post = |url: String, body: Value| {
+        let http = http.clone();
+        async move { http.post(url).bearer_auth("acme-key").json(&body).send().await.unwrap() }
+    };
+    assert_eq!(
+        post(format!("{}/v1/runs", w.base), run_body("run_decide", 1200))
+            .await
+            .status(),
+        201
+    );
+    let out: Value = post(
+        format!("{}/v1/runs/run_decide/tool-calls", w.base),
+        tool_call("run_decide", "tc_1", 120_000),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(out["result"]["status"], "completed", "{out}");
+    let operation_id = out["report"]["operation_id"].clone();
+
+    let decision = |tool_calls: Value| {
+        json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
+            "outcome": "refund_issued", "tool_calls": tool_calls,
+            "rationale": {"strategy": "policy_and_evidence"}})
+    };
+    let url = format!("{}/v1/runs/run_decide/decisions", w.base);
+    let forged = post(
+        url.clone(),
+        decision(json!([{"tool_call_id": "tc_x", "operation_id": "op_never_ran"}])),
+    )
+    .await;
+    assert_eq!(forged.status(), 422);
+    assert_eq!(
+        forged.json::<Value>().await.unwrap()["error"]["code"],
+        "lineage_unverified"
+    );
+
+    let recorded = post(
+        url,
+        decision(json!([{"tool_call_id": "tc_1", "operation_id": operation_id}])),
+    )
+    .await;
+    assert_eq!(recorded.status(), 201, "{}", recorded.text().await.unwrap());
+    let recorded: Value = recorded.json().await.unwrap();
+    let record = &recorded["record"];
+    assert_eq!(record["tool_lineage"][0]["tool_call_id"], "tc_1");
+    assert_eq!(
+        record["budget_usage"]["tool_calls"], 1,
+        "usage comes from the run's ledger"
+    );
+    assert!(
+        record["audit"]["record_hash"].is_string(),
+        "signed into the audit chain"
+    );
+    assert_eq!(
+        recorded["replay_packet"]["compiled_context_hash"],
+        record["context_snapshot_hash"]
+    );
+    assert!(recorded["replay_packet"]["tool_transcript_chain_hash"].is_string());
+
+    // Without the evidence its gate requires, the decision cannot be committed.
+    let mut ungated = run_body("run_ungated", 4200);
+    ungated["deps"]["evidence"] = json!([]);
+    assert_eq!(post(format!("{}/v1/runs", w.base), ungated).await.status(), 201);
+    let gated = post(format!("{}/v1/runs/run_ungated/decisions", w.base), decision(json!([]))).await;
+    assert_eq!(gated.status(), 409);
+    assert_eq!(
+        gated.json::<Value>().await.unwrap()["error"]["code"],
+        "evidence_gate_open"
+    );
+    let mut deferred = decision(json!([]));
+    deferred["status"] = json!("DEFERRED");
+    deferred.as_object_mut().unwrap().remove("outcome");
+    assert_eq!(
+        post(format!("{}/v1/runs/run_ungated/decisions", w.base), deferred)
+            .await
+            .status(),
+        201
+    );
+
+    let evidence: Value = http
+        .get(format!("{}/v1/runs/run_decide/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(evidence["run_state"]["status"], "running");
+    assert_eq!(evidence["decisions"][0]["record"]["record_id"], record["record_id"]);
+    assert_eq!(evidence["budget_ledger"]["used"]["tool_calls"], 1);
+
+    let page: Value = http
+        .get(format!("{}/v1/audit/entries?from=1&limit=3", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 3);
+    assert_eq!(page["entries"][0]["sequence"], 1);
+    assert_eq!(page["next"], 4);
+}

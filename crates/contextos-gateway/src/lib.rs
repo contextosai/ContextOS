@@ -21,6 +21,7 @@
 //! decide everything else.
 
 pub mod admission;
+mod decisions;
 mod delegation;
 mod input;
 mod lifecycle;
@@ -47,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};

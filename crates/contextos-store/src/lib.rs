@@ -37,6 +37,10 @@ pub enum DocKind {
     PendingInput,
     /// Settled reservations and receipts moved out of a budget ledger by compaction.
     BudgetArchive,
+    /// A run's compiled context, kept for decision assembly.
+    CompiledContext,
+    /// A run's DecisionRecords and replay packets.
+    DecisionLog,
 }
 
 impl DocKind {
@@ -52,6 +56,8 @@ impl DocKind {
             DocKind::RunAdmission => "run_admission",
             DocKind::PendingInput => "pending_input",
             DocKind::BudgetArchive => "budget_archive",
+            DocKind::CompiledContext => "compiled_context",
+            DocKind::DecisionLog => "decision_log",
         }
     }
 }

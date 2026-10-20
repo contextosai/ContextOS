@@ -99,6 +99,23 @@ sees it and reconciles it rather than repeating it. Adapters forward the generat
 `X-ContextOS-Executor-Generation` so providers that support target-side fencing can
 enforce it too.
 
+### Decisions, evidence and audit export
+
+Report a decision with `POST /v1/runs/{run_id}/decisions` (executor, fenced):
+`decision_key`, `decision_version`, `status` (`DECIDED`, `DEFERRED`, `REJECTED`,
+`ESCALATED`, `IN_FLIGHT`, `CLOSED`), optional `outcome`/`allowed_outcomes`/`outputs`/
+`rationale`, and the `tool_calls` it relied on (`tool_call_id` and `operation_id`).
+The gateway verifies each tool call against the run's operation ledgers
+(`lineage_unverified` otherwise), takes policy decisions from the pins made at
+admission and usage from the run's budget ledger, refuses `DECIDED`/`CLOSED` while the
+compiled context's evidence gate for that decision is open (`evidence_gate_open`),
+signs the record into the audit chain and returns it with a replay packet.
+
+`GET /v1/runs/{run_id}/evidence` returns the run's admission, lifecycle state, budget
+ledger with its compaction archives, and its decisions with replay packets.
+`GET /v1/audit/entries?from=&limit=` pages the tenant's signed chain out for SIEM
+ingestion; entries verify offline with the published keys.
+
 ### Completing and cancelling runs
 
 - `POST /v1/runs/{run_id}/complete` (executor, fenced) succeeds only when no effect is

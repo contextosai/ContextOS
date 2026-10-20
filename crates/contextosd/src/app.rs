@@ -9,6 +9,9 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out |
+//! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
+//! | `GET /v1/runs/{run_id}/evidence` | `audit:read` | the run's evidence bundle |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
 //! | `GET /v1/runs/{run_id}` | `dispatch` | lifecycle status and current executor generation |
@@ -38,14 +41,14 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use contextos_audit::{AuditWriter, KeyRing, verify_tenant_chain};
+use contextos_audit::{AuditWriter, DecisionError, KeyRing, verify_tenant_chain};
 use contextos_contract::ingress::parse_strict;
 use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
-    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, EffectOutcome, Gateway, Ownership,
-    Resolution, RunAdmission, admit_run,
+    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
+    EffectOutcome, Gateway, Ownership, Resolution, RunAdmission, admit_run,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -551,6 +554,13 @@ where
                 "This run has already been admitted.",
             )
         })?;
+    gateway.remember_compiled(&admission, &compiled).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    })?;
     let generation = match gateway.open_run(&admission).await {
         Ok(Ownership::Current(generation)) => generation,
         Ok(Ownership::Refused(reason)) => {
@@ -1006,6 +1016,130 @@ where
     Ok((status, axum::Json(outcome)).into_response())
 }
 
+/// Records a DecisionRecord for the run, verified against the run's own records.
+async fn record_decision<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let report: DecisionReport = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid decision report: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    require_owner(gateway, &admission, &headers).await?;
+    match gateway.record_decision(&admission, report).await {
+        Ok(recorded) => Ok((StatusCode::CREATED, axum::Json(recorded)).into_response()),
+        Err(refusal) => Err(match refusal {
+            DecisionRefusal::Decision(DecisionError::EvidenceGateOpen(key)) => ApiError::new(
+                StatusCode::CONFLICT,
+                "evidence_gate_open",
+                "The decision cannot be committed while its evidence gate is open.",
+            )
+            .with_detail(json!({"decision_key": key})),
+            DecisionRefusal::Decision(DecisionError::OutcomeNotAllowed(outcome)) => ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "outcome_not_allowed",
+                "The outcome is not an allowed outcome of the decision.",
+            )
+            .with_detail(json!({"outcome": outcome})),
+            DecisionRefusal::UnknownToolCall(id) => ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "lineage_unverified",
+                "A reported tool call is not a governed effect of this run.",
+            )
+            .with_detail(json!({"tool_call_id": id})),
+            DecisionRefusal::CompiledContextMissing | DecisionRefusal::TooManyDecisions => {
+                ApiError::new(StatusCode::CONFLICT, "decision_unavailable", refusal.to_string())
+            }
+            DecisionRefusal::Decision(other) => {
+                ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "decision_invalid", other.to_string())
+            }
+            DecisionRefusal::Gateway(_) => ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            ),
+        }),
+    }
+}
+
+/// The run's evidence bundle: admission, lifecycle, budget ledger with its archive
+/// chain, and DecisionRecords with replay packets.
+async fn run_evidence<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let evidence = gateway.run_evidence(&admission).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    })?;
+    Ok(axum::Json(evidence).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct EntriesQuery {
+    #[serde(default = "first_sequence")]
+    from: u64,
+    #[serde(default = "page_size")]
+    limit: usize,
+}
+
+fn first_sequence() -> u64 {
+    1
+}
+
+fn page_size() -> usize {
+    500
+}
+
+/// Pages the caller tenant's signed audit chain out (for SIEM export and offline
+/// verification with `verify_chain`).
+async fn audit_entries<S, L: AppendLog>(
+    State(state): State<Arc<AppState<S, L>>>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<EntriesQuery>,
+) -> ApiResult {
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let limit = query.limit.clamp(1, 1000);
+    let rows = state
+        .audit
+        .log()
+        .range(&caller.tenant_id, query.from.max(1), limit)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?;
+    let next = rows.last().map(|r| r.sequence + 1).filter(|_| rows.len() == limit);
+    let entries: Vec<Value> = rows.into_iter().map(|r| r.body).collect();
+    Ok(axum::Json(json!({"entries": entries, "next": next})).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -1035,11 +1169,14 @@ where
         .route("/v1/contracts/negotiate", post(negotiate::<S, L>))
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
+        .route("/v1/audit/entries", get(audit_entries::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
         .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
+        .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
+        .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",

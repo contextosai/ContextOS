@@ -24,6 +24,9 @@ First release candidate of the ContextOS runtime.
   claim the operation, dispatch, observe, settle and audit, failing closed throughout.
 - Reconciliation of unknown effects by provider query (MCP `tasks/get`) or evidenced
   operator assertion.
+- DecisionRecords over HTTP with lineage verified against the run's ledgers, the
+  evidence gate enforced, signing into the audit chain and replay packets; per-run
+  evidence bundles and paged audit export.
 - Run completion, failure and cancellation through the kernel lifecycle: completion
   requires resolved effects and settled children; cancellation fences the executor,
   cancels and settles children and acknowledges once dispatch has stopped.
