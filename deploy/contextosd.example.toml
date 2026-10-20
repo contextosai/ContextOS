@@ -1,0 +1,38 @@
+# contextosd example configuration. Secrets never live in this file: it names
+# environment variables, and API keys are configured as SHA-256 hashes only.
+
+# Context Pack JSON files loaded and validated at startup.
+packs = []
+
+[server]
+listen = "0.0.0.0:8080"
+max_body_bytes = 4194304
+request_timeout_ms = 15000
+mode = "production"
+
+[store]
+kind = "postgres"
+url_env = "CONTEXTOS_DATABASE_URL"
+max_connections = 32
+
+[audit]
+# 32-byte ed25519 seed, hex encoded, supplied by your secret manager / KMS.
+signing_seed_env = "CONTEXTOS_AUDIT_SEED"
+key_id = "audit-2026-10"
+
+[support]
+implementation_id = "contextos-rs"
+implementation_version = "0.1.0"
+# Declare only profiles and controls this deployment actually enforces through
+# its integrated providers. A declaration is a claim, not a grant.
+profiles = ["contextos.core"]
+controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
+
+# Generate a key, give it to the caller, configure only its hash:
+#   key=$(openssl rand -hex 32); printf 'sha256:%s\n' "$(printf %s "$key" | shasum -a 256 | cut -d' ' -f1)"
+[[api_keys]]
+key_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_orchestrator"
+scopes = ["compile", "admit", "dispatch", "audit:read"]
+

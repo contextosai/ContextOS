@@ -1,0 +1,38 @@
+[package]
+name = "contextosd"
+description = "ContextOS runtime server: compilation, admission, governed tool dispatch and audit over HTTP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "contextosd"
+path = "src/main.rs"
+
+[dependencies]
+contextos-contract.workspace = true
+contextos-kernel.workspace = true
+contextos-store.workspace = true
+contextos-audit.workspace = true
+contextos-gateway.workspace = true
+contextos-adapters.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal", "net"] }
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+toml.workspace = true
+hex.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+
+[lints]
+workspace = true
