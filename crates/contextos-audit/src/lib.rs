@@ -37,6 +37,10 @@ pub struct AuditWriter<L> {
     log: L,
     signer: AuditSigner,
     tenants: std::sync::Mutex<HashMap<String, Arc<TenantChain>>>,
+    /// Key ids this writer's key replaced (see [`AuditWriter::with_retired_kids`]).
+    retired: std::collections::HashSet<String>,
+    /// Tenants whose chain this writer has already recorded the rotation in.
+    rotation_noted: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 /// One tenant's chain in this process.
@@ -79,6 +83,9 @@ struct Pending {
     reply: tokio::sync::oneshot::Sender<Result<(Link, String), AuditError>>,
 }
 
+/// Kind of the entry recording a signing-key rotation (`{from_kid, to_kid}`).
+pub const ROTATION_KIND: &str = "signing_key_rotated";
+
 /// Entries one group commit writes at most.
 pub const MAX_BATCH: usize = 256;
 
@@ -91,7 +98,19 @@ impl<L: AppendLog> AuditWriter<L> {
             log,
             signer,
             tenants: std::sync::Mutex::default(),
+            retired: std::collections::HashSet::new(),
+            rotation_noted: std::sync::Mutex::default(),
         }
+    }
+
+    /// The key ids this writer's signing key replaced. When it first appends to a
+    /// tenant chain whose head one of them signed, it records the rotation there
+    /// (`signing_key_rotated`), once per tenant. Writers with unrelated keys (or old
+    /// replicas during a rolling rotation) record nothing, so entries do not flap.
+    #[must_use]
+    pub fn with_retired_kids(mut self, kids: impl IntoIterator<Item = String>) -> Self {
+        self.retired = kids.into_iter().collect();
+        self
     }
 
     fn slot(&self, tenant_id: &str) -> Arc<TenantChain> {
@@ -229,9 +248,23 @@ impl<L: AppendLog> AuditWriter<L> {
                 }
                 *head = Head::Unknown;
             }
+            // A head signed by another key means the signing key was rotated: the chain
+            // records the change (signed by the new key) before anything else it signs.
+            let mut rotated_from = None;
             if matches!(head, Head::Unknown) {
                 match self.read_head(tenant_id).await {
-                    Ok(stored) => *head = Head::Known(stored),
+                    Ok(stored) => {
+                        let noted = self
+                            .rotation_noted
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .contains(tenant_id);
+                        rotated_from = stored
+                            .as_ref()
+                            .map(|(_, kid)| kid.clone())
+                            .filter(|kid| !noted && kid != self.signer.kid() && self.retired.contains(kid));
+                        *head = Head::Known(stored.map(|(h, _)| h));
+                    }
                     Err(error) => {
                         failure = error;
                         break;
@@ -243,7 +276,48 @@ impl<L: AppendLog> AuditWriter<L> {
                 Head::Unknown => None,
             };
             let mut linked = Vec::with_capacity(batch.len());
-            let mut rows = Vec::with_capacity(batch.len());
+            let mut rows = Vec::with_capacity(batch.len() + 1);
+            if let Some(from) = rotated_from {
+                let payload = serde_json::json!({"from_kid": from, "to_kid": self.signer.kid()});
+                let emitted_at = match (&current, batch.first()) {
+                    (Some(h), Some(p))
+                        if compare_contract_times(&p.emitted_at, &h.emitted_at) == Some(std::cmp::Ordering::Less) =>
+                    {
+                        h.emitted_at.clone()
+                    }
+                    (_, Some(p)) => p.emitted_at.clone(),
+                    (Some(h), None) => h.emitted_at.clone(),
+                    (None, None) => String::new(),
+                };
+                let rotation = canonicalize(&payload)
+                    .map_err(|e| AuditError::from(ChainError::from(e)))
+                    .and_then(|text| {
+                        let digest = sha256_text(&text);
+                        let link = link(
+                            current.as_ref(),
+                            tenant_id,
+                            ROTATION_KIND,
+                            &digest,
+                            &emitted_at,
+                            &self.signer,
+                        )
+                        .map_err(AuditError::from)?;
+                        let row_text = entry_text(&link, tenant_id, ROTATION_KIND, &emitted_at, &digest, &text)?;
+                        Ok((link, row_text))
+                    });
+                if let Ok((link, text)) = rotation {
+                    current = Some(ChainHead {
+                        sequence: link.sequence,
+                        record_hash: link.record_hash.clone(),
+                        emitted_at: emitted_at.clone(),
+                    });
+                    rows.push(AppendRow {
+                        sequence: link.sequence,
+                        record_hash: link.record_hash,
+                        text,
+                    });
+                }
+            }
             for pending in &batch {
                 // Appenders read the clock before queueing; an entry never records a
                 // time before the entry it follows.
@@ -297,6 +371,12 @@ impl<L: AppendLog> AuditWriter<L> {
             *head = Head::Unknown;
             match self.log.append_batch(tenant_id, &rows).await {
                 Ok(()) => {
+                    if rows.len() > batch.len() {
+                        self.rotation_noted
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .insert(tenant_id.to_owned());
+                    }
                     *head = Head::Known(current);
                     for (pending, outcome) in batch.into_iter().zip(linked) {
                         let _ = pending.reply.send(outcome);
@@ -316,14 +396,15 @@ impl<L: AppendLog> AuditWriter<L> {
         }
     }
 
-    async fn read_head(&self, tenant_id: &str) -> Result<Option<ChainHead>, AuditError> {
+    /// The stored head and the key id that signed it.
+    async fn read_head(&self, tenant_id: &str) -> Result<Option<(ChainHead, String)>, AuditError> {
         match self.log.head(tenant_id).await? {
             Some(row) => {
                 let entry: AuditEntry = serde_json::from_value(row.body).map_err(|_| AuditError::Malformed)?;
                 if entry.tenant_id != tenant_id {
                     return Err(AuditError::Malformed);
                 }
-                Ok(Some(ChainHead::from(&entry)))
+                Ok(Some((ChainHead::from(&entry), entry.signature.kid)))
             }
             None => Ok(None),
         }

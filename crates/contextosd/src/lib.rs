@@ -76,7 +76,9 @@ where
         }
     }
     let _ = &*STANDARD_PROFILE_REGISTRY;
-    let audit = Arc::new(AuditWriter::new(log, signer));
+    let audit = Arc::new(
+        AuditWriter::new(log, signer).with_retired_kids(config.audit.retired_keys.iter().map(|k| k.kid.clone())),
+    );
     let (trust_domain, gateway_principal_id) = dispatch
         .as_ref()
         .map(|d| (d.trust_domain.clone(), d.gateway_principal_id.clone()))

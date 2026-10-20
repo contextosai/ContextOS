@@ -343,3 +343,33 @@ async fn append_all_keeps_entries_consecutive_and_in_order() {
         40 + 10 * 3
     );
 }
+
+#[tokio::test]
+async fn a_rolling_rotation_records_one_rotation_entry() {
+    use contextos_audit::{AuditSigner, AuditWriter, KeyRing, ROTATION_KIND, verify_tenant_chain};
+    let log = Arc::new(MemoryLog::new());
+    let (old_key, new_key) = (
+        AuditSigner::from_seed("k-old", [1; 32]),
+        AuditSigner::from_seed("k-new", [2; 32]),
+    );
+    let mut keys = KeyRing::new();
+    keys.insert_retired("k-old", old_key.verifying_key(), "2026-10-20T12:00:00Z");
+    keys.insert("k-new", new_key.verifying_key());
+    // During a rolling rotation, an old replica (k-old) and a new one (k-new, which
+    // knows k-old as retired) write the same tenant chain in turns.
+    let old = AuditWriter::new(log.clone(), old_key);
+    let new = AuditWriter::new(log.clone(), new_key).with_retired_kids(["k-old".to_owned()]);
+    for i in 0..4 {
+        let at = format!("2026-10-20T10:00:0{i}Z");
+        old.append("t", "note", json!({"by": "old", "i": i}), &at)
+            .await
+            .unwrap();
+        new.append("t", "note", json!({"by": "new", "i": i}), &at)
+            .await
+            .unwrap();
+    }
+    let rows = log.range("t", 1, 100).await.unwrap();
+    let rotations = rows.iter().filter(|r| r.body["kind"] == ROTATION_KIND).count();
+    assert_eq!(rotations, 1, "the rotation is recorded once, not on every switch");
+    verify_tenant_chain(log.as_ref(), "t", &keys).await.unwrap();
+}

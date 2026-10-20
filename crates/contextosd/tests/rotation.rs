@@ -98,7 +98,22 @@ async fn entries_signed_before_a_rotation_still_verify() {
         .json()
         .await
         .unwrap();
-    assert_eq!(verified, json!({"verified": true, "entries": 4}));
+    // Two entries by the old key, the rotation itself (signed by the new key), two more.
+    assert_eq!(verified, json!({"verified": true, "entries": 5}));
+    let page: Value = http
+        .get(format!("{base}/v1/audit/entries"))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rotation = &page["entries"][2];
+    assert_eq!(rotation["kind"], "signing_key_rotated");
+    assert_eq!(rotation["payload"], json!({"from_kid": "audit-a", "to_kid": "audit-b"}));
+    assert_eq!(rotation["signature"]["kid"], "audit-b");
+    assert_eq!(page["entries"][3]["signature"]["kid"], "audit-b");
     let keys: Value = http
         .get(format!("{base}/v1/audit/keys"))
         .send()
