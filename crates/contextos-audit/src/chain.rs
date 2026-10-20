@@ -259,6 +259,18 @@ impl KeyRing {
         self.keys.remove(kid);
     }
 
+    /// `(kid, base64url public key)` for every trusted key, sorted by key id, so they
+    /// can be published to independent verifiers.
+    pub fn public_keys(&self) -> Vec<(String, String)> {
+        let mut keys: Vec<(String, String)> = self
+            .keys
+            .iter()
+            .map(|(kid, key)| (kid.clone(), URL_SAFE_NO_PAD.encode(key.as_bytes())))
+            .collect();
+        keys.sort();
+        keys
+    }
+
     fn verify(&self, signature: &EntrySignature, message: &str) -> bool {
         let Some(key) = self.keys.get(&signature.kid) else {
             return false;

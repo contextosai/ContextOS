@@ -19,6 +19,7 @@
 //! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
 //! | `POST /v1/rollouts/clear` | `control` | return all of a baseline's new runs to it |
 //! | `POST /v1/conformance/assess` | `audit:read` | assess a conformance report for this deployment against configured trust anchors; audited |
+//! | `GET /v1/audit/keys` | – | the audit signing public keys, for independent verification (`ctx audit-verify`) |
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
 //! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
 //! | `POST /v1/revocations/restore` | `control` | restore a revoked target |
@@ -241,6 +242,18 @@ pub const OPENAPI: &str = include_str!("../../../openapi/contextosd.v1.json");
 
 async fn openapi() -> Response {
     ([(header::CONTENT_TYPE, "application/json")], OPENAPI).into_response()
+}
+
+/// The audit chain's public signing keys, so anyone can verify exported entries
+/// (`ctx audit-verify`) without trusting this server.
+async fn audit_keys<S, L>(State(state): State<Arc<AppState<S, L>>>) -> Response {
+    let keys: Vec<Value> = state
+        .audit_keys
+        .public_keys()
+        .into_iter()
+        .map(|(kid, key)| json!({"kid": kid, "alg": "ed25519", "public_key": key}))
+        .collect();
+    axum::Json(json!({"keys": keys})).into_response()
 }
 
 async fn healthz() -> &'static str {
@@ -2222,6 +2235,7 @@ where
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/audit/entries", get(audit_entries::<S, L>))
+        .route("/v1/audit/keys", get(audit_keys::<S, L>))
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
         .route("/v1/revocations/restore", post(restore::<S, L>))
         .route("/v1/conformance/assess", post(assess_conformance::<S, L>))

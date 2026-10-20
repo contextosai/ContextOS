@@ -62,6 +62,17 @@ enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Verify an exported audit chain offline against published keys: every entry's
+    /// payload digest, record hash and signature, and the chain's linkage from genesis.
+    AuditVerify {
+        /// The entries in order: a JSON array, or `{"entries": [...]}` pages concatenated
+        /// into one array.
+        #[arg(long)]
+        entries: PathBuf,
+        /// `{"keys": [{"kid", "alg", "public_key"}]}` as served by `GET /v1/audit/keys`.
+        #[arg(long)]
+        keys: PathBuf,
+    },
     /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
     /// into `ctx scorecard-gate` input, one case per run.
     Scorecards {
@@ -225,6 +236,32 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Ok(value)
             } else {
                 Err(Failure::Rejected(value))
+            }
+        }
+        Command::AuditVerify { entries, keys } => {
+            use base64::Engine as _;
+            use contextos_audit::{AuditEntry, KeyRing, verify_chain};
+            let loaded = read(&entries)?;
+            let list = loaded.get("entries").cloned().unwrap_or(loaded);
+            let chain: Vec<AuditEntry> = typed(list, "entries")?;
+            let mut ring = KeyRing::new();
+            for key in read(&keys)?["keys"].as_array().into_iter().flatten() {
+                let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(key["public_key"].as_str().unwrap_or_default())
+                    .ok()
+                    .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+                    .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
+                    .ok_or_else(|| Failure::Usage(format!("{}: invalid public key", keys.display())))?;
+                ring.insert(key["kid"].as_str().unwrap_or_default(), bytes);
+            }
+            match verify_chain(&chain, None, &ring) {
+                Ok(()) => Ok(json!({"verified": true, "entries": chain.len(),
+                    "tenant_id": chain.first().map(|e| e.tenant_id.clone()),
+                    "last_sequence": chain.last().map(|e| e.sequence),
+                    "last_record_hash": chain.last().map(|e| e.record_hash.clone())})),
+                Err(error) => Err(Failure::Rejected(
+                    json!({"verified": false, "error": error.to_string()}),
+                )),
             }
         }
         Command::Scorecards { evidence, case_map } => {

@@ -772,14 +772,19 @@ dependencies = [
 name = "ctx"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
+ "contextos-audit",
  "contextos-contract",
  "contextos-gateway",
  "contextos-kernel",
+ "contextos-store",
+ "ed25519-dalek",
  "hex",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "tokio",
 ]
 
 [[package]]

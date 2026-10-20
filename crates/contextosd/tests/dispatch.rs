@@ -2725,3 +2725,62 @@ async fn model_call_budgets_cannot_be_dodged() {
         .unwrap();
     assert_eq!(huge.status(), 422);
 }
+
+#[tokio::test]
+async fn exported_audit_verifies_against_published_keys() {
+    use base64::Engine as _;
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_audited", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let out: Value = executor_client(admitted["executor_generation"].as_u64().unwrap())
+        .post(format!("{}/v1/runs/run_audited/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_audited", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed");
+    // The keys are public; the entries are the tenant's.
+    let keys: Value = plain
+        .get(format!("{}/v1/audit/keys", w.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let page: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries: Vec<contextos_audit::AuditEntry> = serde_json::from_value(page["entries"].clone()).unwrap();
+    let mut ring = contextos_audit::KeyRing::new();
+    for key in keys["keys"].as_array().unwrap() {
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(key["public_key"].as_str().unwrap())
+            .unwrap();
+        ring.insert(
+            key["kid"].as_str().unwrap(),
+            ed25519_dalek::VerifyingKey::from_bytes(&bytes.try_into().unwrap()).unwrap(),
+        );
+    }
+    assert!(entries.len() >= 3);
+    contextos_audit::verify_chain(&entries, None, &ring).expect("the exported chain verifies without the server");
+}

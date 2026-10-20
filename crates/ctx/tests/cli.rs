@@ -244,3 +244,76 @@ fn scorecards_are_collected_from_evidence_and_feed_the_gate() {
     assert_eq!(code, 1, "{report}");
     assert_eq!(report["failures"][0]["kind"], "floor");
 }
+
+/// A real signed chain of `n` entries and the keys file `GET /v1/audit/keys` would serve.
+fn signed_chain(n: u64) -> (Vec<serde_json::Value>, serde_json::Value) {
+    use base64::Engine as _;
+    use contextos_store::AppendLog as _;
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    runtime.block_on(async {
+        let signer = contextos_audit::AuditSigner::from_seed("audit-test", [7; 32]);
+        let key = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signer.verifying_key().as_bytes());
+        let log = std::sync::Arc::new(contextos_store::MemoryLog::new());
+        let writer = contextos_audit::AuditWriter::new(log.clone(), signer);
+        for i in 0..n {
+            writer
+                .append(
+                    "tenant_a",
+                    "tool_call",
+                    serde_json::json!({"step": i}),
+                    &format!("2026-10-20T10:00:0{i}Z"),
+                )
+                .await
+                .unwrap();
+        }
+        let rows = log.range("tenant_a", 1, 100).await.unwrap();
+        (
+            rows.into_iter().map(|r| r.body).collect(),
+            serde_json::json!({"keys": [{"kid": "audit-test", "alg": "ed25519", "public_key": key}]}),
+        )
+    })
+}
+
+#[test]
+fn exported_audit_chains_verify_offline_and_tampering_is_caught() {
+    let (chain, keys) = signed_chain(5);
+    let k = write("audit_keys.json", &keys);
+    let verify = |name: &str, entries: serde_json::Value| {
+        ctx(&["audit-verify", "--entries", &write(name, &entries), "--keys", &k])
+    };
+    let (code, report) = verify("audit_ok.json", serde_json::json!({"entries": chain}));
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(
+        (report["entries"].as_u64(), report["last_sequence"].as_u64()),
+        (Some(5), Some(5))
+    );
+
+    let mut edited = chain.clone();
+    edited[2]["payload"]["step"] = serde_json::json!(99);
+    let (code, report) = verify("audit_edited.json", serde_json::json!(edited));
+    assert_eq!(code, 1);
+    assert!(report["error"].as_str().unwrap().contains("payload digest"), "{report}");
+
+    let mut deleted = chain.clone();
+    deleted.remove(2);
+    let (code, report) = verify("audit_deleted.json", serde_json::json!(deleted));
+    assert_eq!(code, 1, "{report}");
+
+    let mut reordered = chain.clone();
+    reordered.swap(1, 3);
+    assert_eq!(verify("audit_reordered.json", serde_json::json!(reordered)).0, 1);
+
+    let (_, other_keys) = {
+        let mut keys = keys.clone();
+        keys["keys"][0]["public_key"] = serde_json::json!("A".repeat(43));
+        ((), keys)
+    };
+    let untrusted = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("audit_ok2.json", &serde_json::json!(chain)),
+        "--keys",
+        &write("audit_wrong_keys.json", &other_keys),
+    ]);
+    assert_ne!(untrusted.0, 0, "a chain signed by an untrusted key does not verify");
+}

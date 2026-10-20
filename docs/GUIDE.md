@@ -550,7 +550,23 @@ by its observer (`evidence_signatures`); see `contextosd::attest` for the domain
 stale, synthetic or unverified evidence yields `insufficient_evidence`; every outcome is
 audited.
 
-## 11. Operate
+## 11. Verify the audit trail independently
+
+An auditor should not have to trust the system being audited. Export a tenant's chain
+(`GET /v1/audit/entries`, paged) and the public signing keys (`GET /v1/audit/keys`,
+unauthenticated), then verify offline:
+
+```sh
+ctx audit-verify --entries entries.json --keys keys.json
+# {"verified": true, "entries": 1532, "last_sequence": 1532, "last_record_hash": "sha256:…"}
+```
+
+Every entry's payload digest, record hash and Ed25519 signature are checked, and the
+chain's linkage from genesis: an edited, deleted, reordered or foreign-signed entry
+fails (exit 1). Pin the published keys out of band (they change only on rotation), and
+record `last_record_hash` so a later export can be checked to extend the same history.
+
+## 12. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

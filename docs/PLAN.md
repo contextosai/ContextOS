@@ -124,7 +124,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 46 Model and replan budgets | done — usage reserve/settle on the run's budget ledger, metering principals (`meter`) verify usage, self-reports charged in full, compaction, clients |
 | 47 Loop guard | done — per-run counts of identical calls (capability + canonical arguments) read in the authorization join and written alongside the provider call; `loop_detected` with `change_approach` |
 | 48 Orchestrator checkpoints | done — fenced, revisioned, audited checkpoints of orchestrator state for resume after failover; erased with the run; clients |
-| 49 Next | next |
+| 49 Independent audit verification | done — published audit keys, `ctx audit-verify` (digests, hashes, signatures, linkage from genesis) |
+| 50 Next | next |
 
 ## Non-negotiables carried from the spec
 

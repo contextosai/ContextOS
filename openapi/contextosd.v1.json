@@ -2575,6 +2575,53 @@
         ],
         "x-contextos-scope": "dispatch"
       }
+    },
+    "/v1/audit/keys": {
+      "get": {
+        "operationId": "audit_keys",
+        "summary": "The audit chain's public signing keys",
+        "description": "Ed25519 public keys (base64url) by key id, so anyone can verify exported entries offline with `ctx audit-verify` without trusting this server. Public, like a JWKS endpoint.",
+        "responses": {
+          "200": {
+            "description": "Keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "keys"
+                  ],
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "kid",
+                          "alg",
+                          "public_key"
+                        ],
+                        "properties": {
+                          "kid": {
+                            "type": "string"
+                          },
+                          "alg": {
+                            "const": "ed25519"
+                          },
+                          "public_key": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
     }
   },
   "components": {
