@@ -2620,7 +2620,8 @@
             }
           }
         },
-        "security": []
+        "security": [],
+        "x-contextos-scope": "public"
       }
     }
   },

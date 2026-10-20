@@ -62,3 +62,9 @@ CONTEXTOS_SPEC=/path/to/spec /path/to/spec/node_modules/.bin/vitest run \
 ## Reporting security issues
 
 Never in public issues. See [SECURITY.md](SECURITY.md).
+
+## Before every commit
+
+Run `scripts/check.sh`. It stops at the first failure and covers formatting, lint, every
+test suite, both HTTP clients end to end and both examples; server changes often break
+the clients and examples rather than the Rust tests.

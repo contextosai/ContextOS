@@ -303,11 +303,8 @@ fn exported_audit_chains_verify_offline_and_tampering_is_caught() {
     reordered.swap(1, 3);
     assert_eq!(verify("audit_reordered.json", serde_json::json!(reordered)).0, 1);
 
-    let (_, other_keys) = {
-        let mut keys = keys.clone();
-        keys["keys"][0]["public_key"] = serde_json::json!("A".repeat(43));
-        ((), keys)
-    };
+    let mut other_keys = keys.clone();
+    other_keys["keys"][0]["public_key"] = serde_json::json!("A".repeat(43));
     let untrusted = ctx(&[
         "audit-verify",
         "--entries",
