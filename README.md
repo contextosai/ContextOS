@@ -13,6 +13,26 @@ This repository implements the spec. The spec's TypeScript module is a conforman
 - **Exact bindings**: every effect is bound by an RFC 8785 digest of the complete proposal. Approvals, grants and observations bind to that digest, so any change to arguments, amount, evidence or policy voids them.
 - **Durable effects**: stable operation identity separate from transport attempts, unknown outcomes reconciled before any retry, executor-generation fencing, and conserved budgets that resume never resets.
 
+## What it governs
+
+- **Every effect**: authority chain, policy, constraints, exact approvals, data flow and
+  the execution boundary are checked for one bound action before anything is claimed;
+  MCP hosts can use it as a governed tool server (`/v1/runs/{id}/mcp`).
+- **Runs end to end**: admission against a negotiated execution contract, delegated
+  child runs with sub-budgets, executor failover with generation fencing, input
+  continuation, reconciliation of unknown outcomes, and governed memory.
+- **Evidence**: signed, hash-chained audit; DecisionRecords with verified lineage and
+  replay packets; scores from independent evaluators; conformance assessment against
+  signed attestations.
+- **Change**: release gates on replayed cases (`ctx gate`) and on scorecards
+  (`ctx scorecard-gate`), staged rollout of pack versions with shadow governance
+  diffs, and a kill switch for tenants, packs, principals, agents, adapters and
+  capabilities.
+- **Operation at scale**: cluster-wide tenant limits, overload shedding, OpenTelemetry
+  traces, Prometheus metrics, erasure and retention of personal content, PostgreSQL
+  storage, an OpenAPI 3.1 description ([openapi/](openapi/contextosd.v1.json)), and
+  Python and TypeScript clients.
+
 Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic semantics: [ADR-0002](docs/adr/0002-jsonlogic-semantics.md).
 
 ## Crates
@@ -25,8 +45,8 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 | `contextos-audit` | ed25519-signed hash-chained audit, DecisionRecords, replay packets |
 | `contextos-gateway` | Governed Tool Gateway pipeline and run admission |
 | `contextos-adapters` | MCP 2026-07-28 and HTTP adapters, remote fact providers |
-| `contextosd` | HTTP server: compile, admit, dispatch, audit, metrics |
-| `ctx` | Offline CLI |
+| `contextosd` | HTTP server: admission, dispatch, decisions, scoring, kill switch, rollouts, retention, conformance, audit, metrics |
+| `ctx` | Offline CLI: validate, compile, negotiate, review manifests, release and scorecard gates |
 | `contextos-embed`, `-py`, `-node`, `-wasm` | In-process bindings over one JSON facade |
 | `contextos-kernel` | Context Pack compiler, ActionRisk, profile negotiation, authority/approval/authorization, execution boundary, data flow, memory lifecycle, run lifecycle and resume, operation ledger, budget ledger, conformance assessment |
 

@@ -30,6 +30,16 @@ config: |
   profiles = ["contextos.core"]
   controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
 
+  # Tenant limits are shared across the live replicas (see docs/GUIDE.md).
+  # [limits]
+  # requests_per_second = 500.0
+  # burst = 1000.0
+  # max_concurrent_dispatch = 256
+
+  # Erase finished runs' personal content after this many days (off when unset).
+  # [retention]
+  # run_content_days = 30
+
 # Context Pack and capability manifest files (JSON strings or objects), mounted at /etc/contextos/packs/<name>
 # and /etc/contextos/capabilities/<name>.
 packs: {}
