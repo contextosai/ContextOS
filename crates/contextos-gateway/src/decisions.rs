@@ -336,6 +336,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Everything an auditor needs about one run.
+    /// The run's recorded decision entries (`{record, replay_packet, recorded_by}`).
+    pub(crate) async fn recorded_decisions(&self, admission: &RunAdmission) -> Result<Vec<Value>, GatewayError> {
+        let ids = self
+            .store
+            .get(&decisions_key(admission))
+            .await?
+            .map(|d| d.body["record_ids"].clone())
+            .unwrap_or(json!([]));
+        let mut entries = Vec::new();
+        for id in ids.as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let key = DocKey::new(
+                &admission.tenant_id,
+                DocKind::DecisionLog,
+                format!("{}/{id}", admission.run_id),
+            );
+            if let Some(entry) = self.store.get(&key).await? {
+                entries.push(entry.body);
+            }
+        }
+        Ok(entries)
+    }
+
     pub async fn run_evidence(&self, admission: &RunAdmission) -> Result<Value, GatewayError> {
         let get = |key: DocKey| async move { Ok::<_, GatewayError>(self.store.get(&key).await?.map(|r| r.body)) };
         let budget = get(DocKey::new(

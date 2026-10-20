@@ -231,6 +231,15 @@ pub struct AdapterConfig {
     pub token_env: Option<String>,
 }
 
+/// One registered result schema.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultSchemaConfig {
+    #[serde(rename = "ref")]
+    pub schema_ref: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -258,6 +267,10 @@ pub struct Config {
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
+    /// Schemas delegated runs' results must meet, by the `output_schema_ref` a
+    /// delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`.
+    #[serde(default)]
+    pub result_schemas: Vec<ResultSchemaConfig>,
     /// Reviewed capability manifest JSON files to pin at startup.
     #[serde(default)]
     pub capabilities: Vec<PathBuf>,

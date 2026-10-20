@@ -50,6 +50,9 @@ pub struct Lineage {
     /// Run links from this run up to the root's direct child: each names a run, its
     /// parent and the actor acting in it.
     pub links: Vec<RunLink>,
+    /// The schema the child's results must meet (`scope.output_schema_ref`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -232,6 +235,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             parent_run_id: parent.run_id.clone(),
             effect_policy,
             links,
+            output_schema_ref: envelope["scope"]["output_schema_ref"].as_str().map(str::to_owned),
         });
         let mut surfaced: Vec<&String> = child.surfaced_capabilities.iter().collect();
         surfaced.sort();
@@ -277,6 +281,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         {
             out.reason_codes.push("delegation_unbound".into());
             return Ok(out);
+        }
+        // An accepted child's results must meet the delegation's output schema, when
+        // this deployment has registered it; checked before anything settles.
+        if decision == CloseDecision::Accept
+            && let Some(schema) = child
+                .lineage
+                .as_ref()
+                .and_then(|l| l.output_schema_ref.as_ref())
+                .and_then(|r| self.result_schemas.get(r))
+        {
+            for entry in self.recorded_decisions(child).await? {
+                if schema.check(&entry["record"]["outputs"]).is_err() {
+                    out.reason_codes.push("child_output_invalid".into());
+                    return Ok(out);
+                }
+            }
         }
         let now = self.now();
         // Lock the child's remaining capacity inside its own ledger, atomically.

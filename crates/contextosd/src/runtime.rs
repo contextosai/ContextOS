@@ -44,6 +44,8 @@ pub struct DispatchSetup {
     pub loop_limit: Option<u64>,
     /// `[guards] model_call_min_tokens`.
     pub model_call_floor: u64,
+    /// Registered result schemas for delegations (`[[result_schemas]]`), by reference.
+    pub result_schemas: Vec<(String, serde_json::Value)>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -69,6 +71,11 @@ where
     }
     for manifest in setup.manifests {
         gateway.pin_capability(manifest)?;
+    }
+    for (schema_ref, schema) in &setup.result_schemas {
+        gateway
+            .register_result_schema(schema_ref, schema)
+            .map_err(|e| contextos_gateway::manifest::ManifestError::OutputSchema(schema_ref.clone(), e))?;
     }
     gateway.set_loop_limit(setup.loop_limit);
     gateway.set_model_call_floor(setup.model_call_floor);
@@ -208,6 +215,15 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         };
         adapters.push((adapter.id.clone(), built));
     }
+    let mut result_schemas = Vec::new();
+    for schema in &config.result_schemas {
+        let path = &schema.path;
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let value = contextos_contract::ingress::parse_strict(text.as_bytes(), 1 << 20)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        contextos_contract::schema::ArgumentSchema::compile(&value).map_err(|e| format!("{}: {e}", path.display()))?;
+        result_schemas.push((schema.schema_ref.clone(), value));
+    }
     let mut manifests = Vec::new();
     for path in &config.capabilities {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -226,5 +242,6 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         gateway_principal_id: identity.gateway_principal_id.clone(),
         loop_limit: Some(config.guards.identical_tool_calls).filter(|n| *n > 0),
         model_call_floor: config.guards.model_call_min_tokens,
+        result_schemas,
     }))
 }

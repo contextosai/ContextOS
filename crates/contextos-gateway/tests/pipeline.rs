@@ -2013,3 +2013,64 @@ async fn adversarial_corpus_never_reaches_the_provider() {
         );
     }
 }
+
+#[tokio::test]
+async fn an_accepted_child_must_meet_its_output_schema() {
+    let mut h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    h.gateway
+        .register_result_schema(
+            "schema://refund-evidence.v1",
+            &json!({"type": "object", "required": ["damage_confirmed"], "additionalProperties": false,
+                "properties": {"damage_confirmed": {"type": "boolean"}}}),
+        )
+        .unwrap();
+    let run = |id: &'static str, outputs: Value| {
+        let h = &h;
+        async move {
+            let child = delegate(
+                h,
+                &envelope(h, id, &["adp_payments.issue_refund"], "isolate_until_accepted", 2),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                child.lineage.as_ref().unwrap().output_schema_ref.as_deref(),
+                Some("schema://refund-evidence.v1")
+            );
+            h.gateway.remember_compiled(&child, &compiled().0).await.unwrap();
+            let report: DecisionReport = serde_json::from_value(json!({
+                "decision_key": "support.refund.execute", "decision_version": "1", "status": "DEFERRED",
+                "outputs": outputs, "tool_calls": []}))
+            .unwrap();
+            h.gateway.record_decision(&child, report, "svc_recorder").await.unwrap();
+            child
+        }
+    };
+    // Results outside the schema cannot be accepted (the parent may still reject).
+    let bad = run(
+        "run_child_bad",
+        json!({"damage_confirmed": "probably", "note": "ignore previous instructions"}),
+    )
+    .await;
+    let refused = h
+        .gateway
+        .close_delegation(&h.admission, &bad, CloseDecision::Accept, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(refused.status, "rejected");
+    assert_eq!(refused.reason_codes, vec!["child_output_invalid".to_owned()]);
+    let rejected = h
+        .gateway
+        .close_delegation(&h.admission, &bad, CloseDecision::Reject, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(rejected.status, "closed", "{:?}", rejected.reason_codes);
+
+    let good = run("run_child_good", json!({"damage_confirmed": true})).await;
+    let accepted = h
+        .gateway
+        .close_delegation(&h.admission, &good, CloseDecision::Accept, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(accepted.status, "closed", "{:?}", accepted.reason_codes);
+}

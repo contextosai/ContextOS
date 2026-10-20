@@ -246,6 +246,19 @@ settles the child's usage into the parent and releases the rest. A child with
 unresolved effects cannot close (`409`, `delegation_effects_unresolved`) until they are
 reconciled.
 
+Register the schemas delegations name in `scope.output_schema_ref`:
+
+```toml
+[[result_schemas]]
+ref = "schema://orders/refund-evidence.v1"
+path = "schemas/refund-evidence.v1.json"
+```
+
+A child whose envelope names a registered schema can then be accepted only if every
+decision it recorded has `outputs` conforming to it (`child_output_invalid`
+otherwise); the parent can still reject it. A schema that does not compile stops
+startup.
+
 ### Tools that ask for input
 
 An MCP tool may answer `input_required` instead of running. The result is `paused` with

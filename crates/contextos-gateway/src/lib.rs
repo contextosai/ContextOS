@@ -195,6 +195,8 @@ pub struct Gateway<S, L> {
     manifests: HashMap<String, CapabilityManifest>,
     schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
     output_schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
+    /// Schemas delegated runs' results must meet, by `output_schema_ref`.
+    result_schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
     /// Identical tool calls (same capability and arguments, new operation) a run may
     /// make before the loop guard refuses the next; `None` disables it.
     loop_limit: Option<u64>,
@@ -322,6 +324,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             manifests: HashMap::new(),
             schemas: HashMap::new(),
             output_schemas: HashMap::new(),
+            result_schemas: HashMap::new(),
             loop_limit: None,
             model_call_floor: 0,
         }
@@ -341,6 +344,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     pub fn register_adapter(&mut self, adapter_id: impl Into<String>, adapter: Arc<dyn Adapter>) {
         self.adapters.insert(adapter_id.into(), adapter);
+    }
+
+    /// Registers the schema a delegation's `output_schema_ref` names: an accepted child's
+    /// recorded decision outputs must conform to it.
+    pub fn register_result_schema(&mut self, schema_ref: &str, schema: &Value) -> Result<(), String> {
+        let compiled = contextos_contract::schema::ArgumentSchema::compile(schema)?;
+        self.result_schemas.insert(schema_ref.to_owned(), compiled);
+        Ok(())
     }
 
     /// Pins a reviewed capability manifest.
