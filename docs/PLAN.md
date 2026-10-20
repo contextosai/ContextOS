@@ -88,7 +88,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 16 Performance | done — kernel and gateway benchmarks; authorization 161→63 µs; dispatch 1.2→0.74 ms via per-operation ledgers; budget rollover is an open spec decision |
 | 17 Observability, docs, quickstart | done — dispatch tracing spans, HTTP trace layer, runnable quickstart (verified end to end), usage/integration/operations guide |
 | 18a OIDC/JWT caller authentication | done — background JWKS refresh, rate-limited rotation, issuer-scoped tenants, asymmetric algorithms only, readiness gating |
-| 18b OTLP export, Helm chart, release automation (signed binaries, SBOM) | next |
+| 18b Helm chart, release automation | done — hardened chart (non-root, read-only FS, no SA token, PDB, NetworkPolicy, HPA, ServiceMonitor) validated in CI; tag releases build attested binaries, per-crate CycloneDX SBOMs and a keyless-signed image with provenance |
+| 18c OTLP trace export | next |
 
 ## Non-negotiables carried from the spec
 

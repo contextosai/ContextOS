@@ -1,0 +1,24 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "contextosd.fullname" . }}
+  labels: {{- include "contextosd.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "contextosd.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress"{{ if .Values.networkPolicy.egressTo }}, "Egress"{{ end }}]
+  ingress:
+    - ports: [{ port: http, protocol: TCP }]
+      from:
+        {{- if .Values.networkPolicy.ingressFrom }}
+        {{- toYaml .Values.networkPolicy.ingressFrom | nindent 8 }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+  {{- if .Values.networkPolicy.egressTo }}
+  egress:
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    {{- toYaml .Values.networkPolicy.egressTo | nindent 4 }}
+  {{- end }}
+{{- end }}

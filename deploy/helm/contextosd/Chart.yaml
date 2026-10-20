@@ -1,0 +1,6 @@
+apiVersion: v2
+name: contextosd
+description: ContextOS runtime server - governed compilation, admission, tool dispatch and signed audit
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

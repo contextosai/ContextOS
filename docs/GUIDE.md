@@ -109,4 +109,6 @@ HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
 - **Metrics:** `contextos_http_requests_total`, `contextos_http_request_duration_ms`,
   `contextos_dispatch_outcomes_total{status}`. Logs are JSON with a `contextos.dispatch`
   span per tool call (run, operation, capability, digest, status, reasons).
-- **Image:** `Dockerfile` builds a distroless, non-root image.
+- **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
+  GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
+- **Kubernetes:** `deploy/helm/contextosd` (see its README).

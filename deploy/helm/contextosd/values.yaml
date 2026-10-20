@@ -1,0 +1,78 @@
+image:
+  repository: ghcr.io/contextosai/contextosd
+  tag: ""            # defaults to the chart appVersion
+  digest: ""         # set to pin by digest (recommended in production)
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+# contextosd.toml. Paths for packs and capabilities refer to the mounted files below.
+# Never put secrets here: the config names environment variables, which come from
+# `secretName`.
+config: |
+  packs = []
+  capabilities = []
+
+  [server]
+  listen = "0.0.0.0:8080"
+
+  [store]
+  kind = "postgres"
+  url_env = "CONTEXTOS_DATABASE_URL"
+
+  [audit]
+  signing_seed_env = "CONTEXTOS_AUDIT_SEED"
+  key_id = "audit-2026-01"
+
+  [support]
+  implementation_id = "contextos-rs"
+  implementation_version = "0.1.0"
+  profiles = ["contextos.core"]
+  controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
+
+# Context Pack and capability manifest files (JSON strings or objects), mounted at /etc/contextos/packs/<name>
+# and /etc/contextos/capabilities/<name>.
+packs: {}
+capabilities: {}
+
+# Existing Secret whose keys become environment variables (for example
+# CONTEXTOS_DATABASE_URL, CONTEXTOS_AUDIT_SEED, provider tokens). Manage it with your
+# secret store (External Secrets, Vault, Sealed Secrets); the chart never creates it.
+secretName: contextosd
+
+logLevel: info
+
+resources:
+  requests: { cpu: 500m, memory: 256Mi }
+  limits: { memory: 1Gi }
+
+service:
+  type: ClusterIP
+  port: 8080
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 70
+
+# Restrict ingress to the namespaces that call contextosd, and egress to the store,
+# identity provider, fact services and tool endpoints.
+networkPolicy:
+  enabled: true
+  ingressFrom: []    # NetworkPolicyPeer list; empty allows same-namespace pods only
+  egressTo: []       # NetworkPolicyEgressRule list, added to DNS egress; empty leaves egress unrestricted
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

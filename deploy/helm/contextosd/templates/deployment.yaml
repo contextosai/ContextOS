@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "contextosd.fullname" . }}
+  labels: {{- include "contextosd.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "contextosd.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 25% }
+  template:
+    metadata:
+      labels: {{- include "contextosd.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: contextosd
+          image: {{ include "contextosd.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/contextos/contextosd.toml"]
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: RUST_LOG, value: {{ .Values.logLevel | quote }} }
+          envFrom:
+            - secretRef: { name: {{ .Values.secretName | quote }} }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 6
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/contextos/contextosd.toml
+              subPath: contextosd.toml
+              readOnly: true
+            {{- range $name, $_ := .Values.packs }}
+            - name: config
+              mountPath: /etc/contextos/packs/{{ $name }}
+              subPath: pack--{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- range $name, $_ := .Values.capabilities }}
+            - name: config
+              mountPath: /etc/contextos/capabilities/{{ $name }}
+              subPath: capability--{{ $name }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "contextosd.fullname" . }} }
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}

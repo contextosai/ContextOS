@@ -73,3 +73,19 @@ jobs:
       - run: cargo test --release -p contextos-embed --test fuzz
         env:
           CONTEXTOS_FUZZ_CASES: "20000"
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint and validate the chart
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          helm lint deploy/helm/contextosd
+          helm template t deploy/helm/contextosd | ./kubeconform -strict -summary -skip ServiceMonitor
+          helm template t deploy/helm/contextosd --set autoscaling.enabled=true \
+            --set-json 'packs={"support.json":{"pack_meta":{}}}' \
+            --set-json 'networkPolicy.egressTo=[{"to":[{"ipBlock":{"cidr":"10.0.0.0/8"}}]}]' \
+            | ./kubeconform -strict -summary -skip ServiceMonitor
