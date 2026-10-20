@@ -122,7 +122,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 44 Conformance over HTTP | done — `POST /v1/conformance/assess` with server-supplied identity, support, registry, clock and per-tenant trust anchors; outcomes audited |
 | 45 Staged rollout | done — per-tenant baseline→candidate rollouts, sticky hash routing (children follow parents), shadow governance diffs off the request path, audited control-plane changes |
 | 46 Model and replan budgets | done — usage reserve/settle on the run's budget ledger, metering principals (`meter`) verify usage, self-reports charged in full, compaction, clients |
-| 47 Next | next |
+| 47 Loop guard | done — per-run counts of identical calls (capability + canonical arguments) read in the authorization join and written alongside the provider call; `loop_detected` with `change_approach` |
+| 48 Next | next |
 
 ## Non-negotiables carried from the spec
 

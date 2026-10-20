@@ -26,6 +26,7 @@ mod delegation;
 mod erasure;
 mod input;
 mod lifecycle;
+mod loop_guard;
 pub mod manifest;
 mod memory;
 mod ownership;
@@ -189,6 +190,9 @@ pub struct Gateway<S, L> {
     adapters: HashMap<String, Arc<dyn Adapter>>,
     manifests: HashMap<String, CapabilityManifest>,
     schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
+    /// Identical tool calls (same capability and arguments, new operation) a run may
+    /// make before the loop guard refuses the next; `None` disables it.
+    loop_limit: Option<u64>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -298,7 +302,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             adapters: HashMap::new(),
             manifests: HashMap::new(),
             schemas: HashMap::new(),
+            loop_limit: None,
         }
+    }
+
+    /// Enables the loop guard: after `limit` identical tool calls in a run, the next is
+    /// refused with `loop_detected` (see [`loop_guard`]).
+    pub fn set_loop_limit(&mut self, limit: Option<u64>) {
+        self.loop_limit = limit;
     }
 
     pub fn register_adapter(&mut self, adapter_id: impl Into<String>, adapter: Arc<dyn Adapter>) {
@@ -628,7 +639,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // the operation ledger read used by the duplicate fast path): fetch them at once.
         let operations_key = operation_ledger_key(admission, &operation_id);
         let revocations_key = revocations::revocations_key(&admission.tenant_id);
-        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary, revoked) = tokio::join!(
+        let call_signature = loop_guard::signature(&manifest.capability_id, &binding["arguments"]);
+        let loop_key = loop_guard::key(admission);
+        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary, revoked, loops) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
                 .constraints
@@ -637,6 +650,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.store.get(&operations_key),
             self.boundary_readiness(admission, &now),
             self.store.get(&revocations_key),
+            async {
+                match self.loop_limit {
+                    Some(_) => self.store.get(&loop_key).await,
+                    None => Ok(None),
+                }
+            },
         );
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
@@ -674,6 +693,32 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(p.stop("blocked", reasons, "The run's execution boundary is not active."));
         }
         let existing_ledger = existing_ledger?;
+        // Loop guard: a new operation repeating an identical call too often is refused
+        // with a structured reason for the planner (a retry of an operation is not new).
+        let loops = loops?;
+        if let Some(limit) = self.loop_limit
+            && existing_ledger.is_none()
+            && loop_guard::count(loops.as_ref().map(|l| &l.body), &call_signature) >= limit
+        {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "loop_detected",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "call_signature": call_signature, "limit": limit}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            p.report.obligations.push("change_approach".into());
+            return Ok(p.stop(
+                "blocked",
+                vec!["loop_detected".into()],
+                "This exact call has been repeated too many times in this run.",
+            ));
+        }
+        let new_operation = existing_ledger.is_none();
         let policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
             Err(e) => return Ok(p.stop("blocked", vec!["policy_unavailable".into()], &e.to_string())),
@@ -1075,12 +1120,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             input: adapter_input.map(|(input, _)| input),
             executor_generation: fence,
         };
-        let response = tokio::time::timeout(
-            Duration::from_millis(manifest.timeout_ms),
-            adapter.invoke(manifest, &call),
-        )
-        .await
-        .unwrap_or_else(|_| AdapterResponse::unknown());
+        // The loop guard's count is recorded while the provider works.
+        let (response, counted) = tokio::join!(
+            tokio::time::timeout(
+                Duration::from_millis(manifest.timeout_ms),
+                adapter.invoke(manifest, &call)
+            ),
+            async {
+                if self.loop_limit.is_some() && new_operation {
+                    loop_guard::note(self.store.as_ref(), &loop_key, &call_signature).await
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        let response = response.unwrap_or_else(|_| AdapterResponse::unknown());
+        if let Err(error) = counted {
+            tracing::warn!(%error, "loop guard count not recorded");
+        }
 
         let input_required = response.output.get("result_type").and_then(Value::as_str) == Some("input_required");
         if input_required {

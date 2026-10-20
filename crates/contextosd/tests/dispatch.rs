@@ -2448,3 +2448,61 @@ async fn many_model_calls_keep_the_budget_ledger_compact() {
     let used = evidence["budget_ledger"]["used"]["tokens"].as_u64().unwrap();
     assert_eq!(used, 1800, "20 metered calls of 90 tokens (opening {opening})");
 }
+
+#[tokio::test]
+async fn repeated_identical_calls_trip_the_loop_guard() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_looping", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let call = |key: &str, amount: u64| {
+        let mut body = tool_call("run_looping", &format!("tc_{key}"), amount);
+        body["idempotency_key"] = json!(key);
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_looping/tool-calls", w.base));
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    let before = w.provider_calls.load(Ordering::SeqCst);
+    for i in 0..5 {
+        assert_eq!(
+            call(&format!("loop_{i}"), 120_000).await["result"]["status"],
+            "completed"
+        );
+    }
+    // The sixth identical call under a new key is refused before it is claimed or sent.
+    let tripped = call("loop_5", 120_000).await;
+    assert_eq!(tripped["result"]["status"], "blocked", "{tripped}");
+    assert_eq!(tripped["report"]["reason_codes"], json!(["loop_detected"]));
+    assert!(
+        tripped["report"]["obligations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o == "change_approach")
+    );
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), before + 5);
+    // A retry of an existing operation is not a new call, and other arguments are not a loop.
+    // (Re-sending a completed operation is answered from its ledger as before.)
+    let retry = call("loop_4", 120_000).await;
+    assert_eq!(retry["report"]["reason_codes"], json!(["retry_unsafe"]), "{retry}");
+    let other = call("loop_other", 120_001).await;
+    assert_eq!(other["result"]["status"], "completed", "{other}");
+}

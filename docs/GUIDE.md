@@ -417,6 +417,16 @@ charged the whole reservation, because self-reported usage is not evidence. Pass
 reservation id to your model gateway (for example in a request header) so it can meter
 the call.
 
+### Loop guard
+
+An agent stuck repeating one action is stopped: after `[guards] identical_tool_calls`
+(default 5; 0 disables) new operations with the same capability and arguments in a run,
+the next is refused with `loop_detected` and the obligation `change_approach`, before
+anything is claimed or sent. Retrying an existing operation (same operation key) is not
+a new call. The count is read with the other authorization facts and written while the
+provider works, so the guard adds no serial latency; identical calls racing in parallel
+can overshoot by their concurrency.
+
 ## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric

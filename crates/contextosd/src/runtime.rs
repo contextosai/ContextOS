@@ -40,6 +40,8 @@ pub struct DispatchSetup {
     pub manifests: Vec<CapabilityManifest>,
     pub trust_domain: String,
     pub gateway_principal_id: String,
+    /// Loop guard limit (`[guards] identical_tool_calls`); `None` disables it.
+    pub loop_limit: Option<u64>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -66,6 +68,7 @@ where
     for manifest in setup.manifests {
         gateway.pin_capability(manifest)?;
     }
+    gateway.set_loop_limit(setup.loop_limit);
     Ok(gateway)
 }
 
@@ -218,5 +221,6 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         manifests,
         trust_domain: identity.trust_domain.clone(),
         gateway_principal_id: identity.gateway_principal_id.clone(),
+        loop_limit: Some(config.guards.identical_tool_calls).filter(|n| *n > 0),
     }))
 }

@@ -80,6 +80,9 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # max_concurrent_dispatch = 256
 # heartbeat_ms = 5000          # tenant limits are shared across live replicas
 
+# [guards]
+# identical_tool_calls = 5     # loop guard: refuse the next identical call in a run
+
 # [retention]
 # run_content_days = 30        # erase finished runs' personal content after 30 days
 # [[limits.tenants]]

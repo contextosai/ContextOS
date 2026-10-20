@@ -80,6 +80,28 @@ pub struct SupportConfig {
     pub profiles: Vec<String>,
 }
 
+/// Guards on agent behaviour.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuardsConfig {
+    /// Identical tool calls (same capability and arguments, new operation) a run may
+    /// make before the next is refused with `loop_detected`; 0 disables the guard.
+    #[serde(default = "default_identical_calls")]
+    pub identical_tool_calls: u64,
+}
+
+fn default_identical_calls() -> u64 {
+    5
+}
+
+impl Default for GuardsConfig {
+    fn default() -> Self {
+        Self {
+            identical_tool_calls: default_identical_calls(),
+        }
+    }
+}
+
 /// Principals whose conformance reports and control evidence this deployment trusts,
 /// with the Ed25519 keys their attestations are signed with (see [`crate::attest`]).
 /// Each principal names its tenant; an assessment uses those of the caller's tenant
@@ -171,6 +193,9 @@ pub struct Config {
     /// Overload protection (see [`crate::limits`]).
     #[serde(default)]
     pub limits: crate::limits::LimitsConfig,
+    /// Runtime guards on agent behaviour.
+    #[serde(default)]
+    pub guards: GuardsConfig,
     /// Trust anchors for conformance assessment (`POST /v1/conformance/assess`).
     #[serde(default)]
     pub conformance: ConformanceConfig,

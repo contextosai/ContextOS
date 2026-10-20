@@ -53,6 +53,8 @@ pub enum DocKind {
     Replicas,
     /// The tenant's staged rollouts of Context Pack versions.
     Rollouts,
+    /// A run's counts of identical tool calls (loop guard).
+    LoopGuard,
 }
 
 impl DocKind {
@@ -76,6 +78,7 @@ impl DocKind {
             DocKind::Revocations => "revocations",
             DocKind::Replicas => "replicas",
             DocKind::Rollouts => "rollouts",
+            DocKind::LoopGuard => "loop_guard",
         }
     }
 }
