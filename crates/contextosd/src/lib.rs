@@ -1,6 +1,7 @@
 //! `contextosd`: the ContextOS runtime server.
 
 pub mod app;
+pub mod attest;
 pub mod auth;
 pub mod config;
 pub mod limits;
@@ -122,5 +123,6 @@ where
         gateway_principal_id,
         limits,
         conformance: config.conformance.clone(),
+        shadow_slots: Arc::new(tokio::sync::Semaphore::new(4)),
     }))
 }

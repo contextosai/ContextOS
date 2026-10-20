@@ -1698,3 +1698,32 @@ async fn whoever_ran_or_recorded_a_decision_cannot_score_it() {
     assert_eq!(kept["score"]["evaluator"], "svc_judge");
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }
+
+#[tokio::test]
+async fn never_started_runs_can_be_erased_but_live_ones_cannot() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let (_, _, request, run_context) = compiled();
+    h.gateway
+        .remember_replay_case(
+            &h.admission,
+            &serde_json::to_value(&request).unwrap(),
+            &serde_json::to_value(&run_context).unwrap(),
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    // Admitted but never started (e.g. its start failed): its content can still go.
+    let erased = h
+        .gateway
+        .erase_run(&h.admission, "ops", "subject request")
+        .await
+        .unwrap();
+    assert_eq!(erased["erased"][0]["document"], "replay_case");
+
+    let live = harness("allow", Behavior::Confirm).await;
+    live.gateway.open_run(&live.admission).await.unwrap();
+    assert!(matches!(
+        live.gateway.erase_run(&live.admission, "ops", "subject request").await,
+        Err(ErasureError::RunActive)
+    ));
+}

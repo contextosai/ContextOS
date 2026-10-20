@@ -1696,7 +1696,7 @@
       "post": {
         "operationId": "revoke",
         "summary": "Revoke a tenant, pack, agent, adapter or capability",
-        "description": "Effective for the next dispatch and admission: effects of runs bound to a revoked tenant, pack or agent, and calls to a revoked adapter or capability, are blocked before anything is claimed (`revoked_<kind>`); new runs of a revoked tenant, pack or agent are refused. Audited before it takes effect; idempotent.",
+        "description": "Kinds: tenant, pack, principal (the authenticated caller and the runs it admitted), agent (the agent id a run declares), adapter, capability. Effective for the next dispatch and admission: effects of runs bound to a revoked tenant, pack or agent, and calls to a revoked adapter or capability, are blocked before anything is claimed (`revoked_<kind>`); new runs of a revoked tenant, pack or agent are refused. Audited before it takes effect; idempotent.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1894,7 +1894,7 @@
       "post": {
         "operationId": "assess_conformance",
         "summary": "Assess a conformance report for this deployment",
-        "description": "The caller supplies the report, its verification, the control evidence, the contract, features and the workflow scope. The deployment supplies its implementation identity, support declaration, the standard profile registry, the evaluation time and the trusted assessors and evidence observers configured for the caller's tenant (`conformance_not_configured` otherwise); the caller cannot supply any of these. Every outcome is audited.",
+        "description": "The caller supplies the report, its verification, the control evidence, the contract, features and the workflow scope. The deployment supplies its implementation identity, support declaration, the standard profile registry, the evaluation time and the trusted assessors and evidence observers configured for the caller's tenant (`conformance_not_configured` otherwise); the caller cannot supply any of these. Every attestation must carry an Ed25519 signature by the trusted principal it names, over a domain-separated digest; caller-asserted verification is refused (`attestation_unverified`). Every outcome is audited.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1908,7 +1908,10 @@
                   "report",
                   "report_verification",
                   "evidence_observations",
-                  "scope"
+                  "scope",
+                  "report_signature",
+                  "verification_signature",
+                  "evidence_signatures"
                 ],
                 "properties": {
                   "contract": {
@@ -1955,6 +1958,21 @@
                         }
                       }
                     }
+                  },
+                  "report_signature": {
+                    "type": "string",
+                    "description": "Base64 Ed25519 signature by the report's evaluator over the report, contract and features (see contextosd::attest)"
+                  },
+                  "verification_signature": {
+                    "type": "string",
+                    "description": "Base64 Ed25519 signature by the observer named in report_verification"
+                  },
+                  "evidence_signatures": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "One signature per evidence observation, by the observer it names"
                   }
                 }
               }
@@ -2890,6 +2908,7 @@
             "enum": [
               "tenant",
               "pack",
+              "principal",
               "agent",
               "adapter",
               "capability"
@@ -2978,7 +2997,8 @@
                 "document": {
                   "enum": [
                     "replay_case",
-                    "compiled_context"
+                    "compiled_context",
+                    "pending_input"
                   ]
                 },
                 "content_digest": {

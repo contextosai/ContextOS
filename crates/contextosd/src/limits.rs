@@ -15,8 +15,10 @@
 //! Tenant limits are **cluster-wide**: each replica enforces its share, the configured
 //! value divided by the number of live replicas sharing the store (see
 //! [`crate::membership`]). No request waits on the store; the split is exact when the
-//! load balancer spreads a tenant's traffic evenly and approximate otherwise. The
-//! global in-flight cap protects one process and stays per replica.
+//! load balancer spreads a tenant's traffic evenly and approximate otherwise. A share
+//! never drops below one, so a cap smaller than the replica count is exceeded (a cap of
+//! 1 across 3 replicas allows 3); serialize such work in the provider. The global
+//! in-flight cap protects one process and stays per replica.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -1,7 +1,9 @@
 //! Kill switch (the spec's rollout kill switch, implemented as graph revocation).
 //!
 //! An operator revokes a target for a tenant: the whole `tenant`, a `pack` (release
-//! tuple, by pack ref), an `agent`, an `adapter` or a `capability`. While revoked:
+//! tuple, by pack ref), an authenticated `principal` (the caller that admits runs, and
+//! every run it admitted), an `agent` (the agent id a run declares; to stop whoever
+//! runs it, revoke the principal), an `adapter` or a `capability`. While revoked:
 //!
 //! - admission refuses new runs of a revoked tenant, pack or agent;
 //! - dispatch refuses every effect of a run whose tenant, pack or agent is revoked,
@@ -21,7 +23,7 @@ use crate::{Gateway, GatewayError};
 /// Targets revoked per tenant at most.
 pub const MAX_REVOCATIONS: usize = 1024;
 
-pub const REVOCATION_KINDS: [&str; 5] = ["tenant", "pack", "agent", "adapter", "capability"];
+pub const REVOCATION_KINDS: [&str; 6] = ["tenant", "pack", "principal", "agent", "adapter", "capability"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum RevocationError {
@@ -47,11 +49,12 @@ pub(crate) fn matching(revocations: Option<&Value>, targets: &[(&str, &str)]) ->
     })
 }
 
-/// What a run is bound to, for revocation: tenant, pack and agent.
-pub(crate) fn run_targets(admission: &RunAdmission) -> [(&str, &str); 3] {
+/// What a run is bound to, for revocation: tenant, pack, admitting principal and agent.
+pub fn run_targets(admission: &RunAdmission) -> [(&str, &str); 4] {
     [
         ("tenant", admission.tenant_id.as_str()),
         ("pack", admission.pack_ref.as_str()),
+        ("principal", admission.admitted_by.as_str()),
         ("agent", admission.actor["principal_id"].as_str().unwrap_or_default()),
     ]
 }
@@ -66,18 +69,27 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .map_or_else(|| json!({"revoked": []}), |r| r.body))
     }
 
-    /// The reason code if a new run of this tenant, pack and agent is revoked.
+    /// The reason code if a new run of this tenant, pack, admitting principal and agent
+    /// is revoked, or if the parent of a delegated run is.
     pub async fn admission_revoked(
         &self,
         tenant_id: &str,
         pack_ref: &str,
+        principal: &str,
         agent_id: &str,
+        parent: Option<&RunAdmission>,
     ) -> Result<Option<String>, GatewayError> {
         let current = self.store.get(&revocations_key(tenant_id)).await?;
-        Ok(matching(
-            current.as_ref().map(|r| &r.body),
-            &[("tenant", tenant_id), ("pack", pack_ref), ("agent", agent_id)],
-        ))
+        let mut targets = vec![
+            ("tenant", tenant_id),
+            ("pack", pack_ref),
+            ("principal", principal),
+            ("agent", agent_id),
+        ];
+        if let Some(parent) = parent {
+            targets.extend(run_targets(parent));
+        }
+        Ok(matching(current.as_ref().map(|r| &r.body), &targets))
     }
 
     /// Revokes (`revoke = true`) or restores a target. Idempotent; audited either way.

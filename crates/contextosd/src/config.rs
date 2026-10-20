@@ -80,16 +80,17 @@ pub struct SupportConfig {
     pub profiles: Vec<String>,
 }
 
-/// Principals whose conformance reports and control evidence this deployment trusts.
-/// Each names its tenant; an assessment uses those of the caller's tenant only. The
-/// caller of an assessment never supplies these.
+/// Principals whose conformance reports and control evidence this deployment trusts,
+/// with the Ed25519 keys their attestations are signed with (see [`crate::attest`]).
+/// Each principal names its tenant; an assessment uses those of the caller's tenant
+/// only. The caller of an assessment never supplies these.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConformanceConfig {
     #[serde(default)]
-    pub trusted_assessors: Vec<serde_json::Value>,
+    pub trusted_assessors: Vec<crate::attest::TrustedSigner>,
     #[serde(default)]
-    pub trusted_evidence_observers: Vec<serde_json::Value>,
+    pub trusted_evidence_observers: Vec<crate::attest::TrustedSigner>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -239,6 +240,24 @@ impl Config {
                 )));
             }
         }
+        // The example keys are published; a production deployment must not accept them.
+        if self.server.mode == Mode::Production {
+            const PUBLISHED: [&str; 3] = [
+                "dev-key-0123456789abcdef0123456789abcdef",
+                "dev-judge-0123456789abcdef0123456789abcd",
+                "dev-ops-0123456789abcdef0123456789abcdef",
+            ];
+            if let Some(key) = self.api_keys.iter().find(|k| {
+                PUBLISHED
+                    .iter()
+                    .any(|raw| crate::auth::hash_api_key(raw) == k.key_sha256)
+            }) {
+                return Err(ConfigError::Invalid(format!(
+                    "api key for {} is a published example key; generate your own with `ctx hash-key`",
+                    key.principal_id
+                )));
+            }
+        }
         // Separation of duties holds per principal, not per key: an evaluator's
         // principal may not also run or admit agents through another key.
         let runs = |p: &str| {
@@ -288,5 +307,13 @@ mod tests {
         );
         let error = Config::parse(&second_key).unwrap_err().to_string();
         assert!(error.contains("cannot both evaluate"), "{error}");
+        // Published example keys are refused in production (the example file is).
+        let published = EXAMPLE.replace(
+            &format!("sha256:{}", "0".repeat(64)),
+            &crate::auth::hash_api_key("dev-key-0123456789abcdef0123456789abcdef"),
+        );
+        assert_ne!(published, EXAMPLE);
+        let error = Config::parse(&published).unwrap_err().to_string();
+        assert!(error.contains("published example key"), "{error}");
     }
 }

@@ -1987,3 +1987,184 @@ async fn rollouts_route_runs_and_shadow_the_rest() {
     assert_eq!(cleared.status(), 200);
     assert_eq!(admit("run_after_clear".into()).await["pack_ref"], baseline);
 }
+
+fn child_of(parent: &Value, parent_id: &str, child_id: &str, pack: &str) -> Value {
+    let mut child = run_body(child_id, 1200);
+    child["pack_ref"] = json!(pack);
+    let agent = child["run_context"]["agent"]["agent_id"].clone();
+    child["delegation"] = json!({
+        "envelope_version": "contextos.agent_delegation.v1", "delegation_id": format!("dlg_{child_id}"), "parent_run_id": parent_id,
+        "child_run_id": child_id, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
+        "issuer": agent, "subject": agent, "principal_chain": [{"kind": "agent", "id": agent}],
+        "scope": {"allowed_intents": [child["request"]["input"]["intent"]], "allowed_capabilities": ["adp_payments.issue_refund"],
+            "data_classification_ceiling": "CONFIDENTIAL", "output_schema_ref": "schema://x"},
+        "sub_budget": {"total_tokens": 10, "bucket_tokens": {}, "max_tool_calls": 1, "max_replan_attempts": 0, "wall_clock_ms": 1000, "max_cost_cents": 1},
+        "effect_policy": "read_only", "issued_at": "2020-01-01T00:00:00Z", "expires_at": "2098-01-01T00:00:00Z",
+        "parent_claim_hash": parent["compiled_context_hash"],
+    });
+    child
+}
+
+#[tokio::test]
+async fn revoked_runs_cannot_delegate_and_principals_can_be_revoked() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let ops = |path: &'static str, kind: &'static str, target: &'static str| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/revocations{path}", w.base));
+        async move {
+            let r = plain
+                .post(url)
+                .bearer_auth("ops-key")
+                .json(&json!({"kind": kind, "target": target, "reason": "incident"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 200);
+        }
+    };
+    let parent: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_lane_parent", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let owner = executor_client(parent["executor_generation"].as_u64().unwrap());
+
+    // A lane runs on its parent's pack.
+    let moved = owner
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child_of(
+            &parent,
+            "run_lane_parent",
+            "run_lane_a",
+            "ctxpack.support@5.3.0",
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(moved.status(), 422);
+    assert_eq!(
+        moved.json::<Value>().await.unwrap()["error"]["code"],
+        "delegation_pack_mismatch"
+    );
+
+    // A run on a revoked pack cannot keep working through a child.
+    ops("", "pack", "ctxpack.support@5.2.0").await;
+    let child = owner
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&child_of(
+            &parent,
+            "run_lane_parent",
+            "run_lane_b",
+            "ctxpack.support@5.2.0",
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(child.status(), 403);
+    assert_eq!(
+        child.json::<Value>().await.unwrap()["error"]["detail"],
+        json!(["revoked_pack"])
+    );
+    ops("/restore", "pack", "ctxpack.support@5.2.0").await;
+
+    // Revoking the authenticated principal stops it, whatever agent id it declares:
+    // its new runs and the runs it already admitted.
+    ops("", "principal", "svc_orchestrator").await;
+    let mut renamed = run_body("run_renamed_agent", 1200);
+    renamed["run_context"]["agent"]["agent_id"] = json!("agt_other_name");
+    let refused = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&renamed)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["detail"],
+        json!(["revoked_principal"])
+    );
+    let blocked: Value = owner
+        .post(format!("{}/v1/runs/run_lane_parent/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_lane_parent", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(blocked["report"]["reason_codes"], json!(["revoked_principal"]));
+}
+
+#[tokio::test]
+async fn erasure_covers_pending_input_requests() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_asked", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let asked: Value = http
+        .post(format!("{}/v1/runs/run_asked/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_asked", "tc_1", 555))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(asked["result"]["status"], "paused", "{asked}");
+    let cancelled = plain
+        .post(format!("{}/v1/runs/run_asked/cancel", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status(), 200, "{}", cancelled.text().await.unwrap());
+    let status: Value = http
+        .get(format!("{}/v1/runs/run_asked", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let erased = plain
+        .post(format!("{}/v1/runs/run_asked/erase", w.base))
+        .bearer_auth("ops-key")
+        .json(&json!({"reason": "subject request"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(erased.status(), 200, "run status {status}");
+    let erased: Value = erased.json().await.unwrap();
+    let documents: Vec<&str> = erased["erased"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["document"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        documents,
+        ["replay_case", "compiled_context", "pending_input"],
+        "{erased}"
+    );
+}

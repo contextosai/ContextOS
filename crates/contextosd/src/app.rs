@@ -98,6 +98,8 @@ pub struct AppState<S, L> {
     pub limits: Arc<crate::limits::Limiter>,
     /// Conformance trust anchors.
     pub conformance: crate::config::ConformanceConfig,
+    /// Concurrent shadow diffs at most; beyond it a diff is skipped, never queued.
+    pub shadow_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -499,6 +501,18 @@ where
     let (selected, rollout) = crate::rollout::route(rollouts.as_ref(), requested, &caller.tenant_id, routing_id);
     let rollout = rollout.cloned();
     let selected = selected.to_owned();
+    // A delegated lane runs on its parent's pack: a child cannot move to another pack
+    // (for example one that is not revoked, or not yet rolled out).
+    if let Some(parent) = parent.as_ref().filter(|p| !p.pack_ref.is_empty())
+        && selected != parent.pack_ref
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "delegation_pack_mismatch",
+            "A delegated run must use its parent's Context Pack.",
+        )
+        .with_detail(json!({"parent_pack_ref": parent.pack_ref})));
+    }
     let pack = state
         .packs
         .get(&selected)
@@ -544,12 +558,15 @@ where
                 ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "compile_invalid", message)
             }
         })?;
-    // Kill switch: no new runs of a revoked tenant, pack or agent.
+    // Kill switch: no new runs of a revoked tenant, pack, principal or agent, and no
+    // delegation from a run that is itself revoked.
     match gateway
         .admission_revoked(
             &caller.tenant_id,
             &compiled.context_ledger.pack_ref,
+            &caller.principal_id,
             &run_context.agent.agent_id,
+            parent.as_ref(),
         )
         .await
     {
@@ -1263,6 +1280,12 @@ struct AssessmentBody {
     report_verification: Value,
     evidence_observations: Value,
     scope: AssessmentScope,
+    /// The report's evaluator's signature over the report, contract and features.
+    report_signature: Value,
+    /// The named observer's signature over `report_verification`.
+    verification_signature: Value,
+    /// One signature per evidence observation, by the observer it names.
+    evidence_signatures: Vec<Value>,
 }
 
 /// The tenant's staged rollouts.
@@ -1419,9 +1442,20 @@ where
     else {
         return;
     };
+    // Bounded: shadow work never competes with request handling for more than a few
+    // blocking threads, and is dropped (not queued) when they are busy.
+    let Ok(slot) = state.shadow_slots.clone().try_acquire_owned() else {
+        tracing::debug!("shadow diff skipped: all slots busy");
+        return;
+    };
     let (state, rollout, run_id) = (state.clone(), rollout.clone(), run_id.to_owned());
     tokio::spawn(async move {
-        let Ok(report) = evaluate_release_gate(&baseline, &candidate, &[case], &Acknowledgements::default()) else {
+        let compared = tokio::task::spawn_blocking(move || {
+            let _slot = slot;
+            evaluate_release_gate(&baseline, &candidate, &[case], &Acknowledgements::default())
+        })
+        .await;
+        let Ok(Ok(report)) = compared else {
             return;
         };
         let tenant = state
@@ -1449,6 +1483,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    use crate::attest::{OBSERVATION_DOMAIN, REPORT_DOMAIN, TrustedSigner, VERIFICATION_DOMAIN, verify};
     let caller = authorize(&state, &headers, Some("audit:read"))?;
     let body: AssessmentBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
         ApiError::new(
@@ -1457,10 +1492,10 @@ where
             format!("Invalid assessment: {e}"),
         )
     })?;
-    let tenant_only = |principals: &[Value]| -> Vec<Value> {
-        principals
+    let tenant_only = |signers: &[TrustedSigner]| -> Vec<TrustedSigner> {
+        signers
             .iter()
-            .filter(|p| p["tenant_id"] == caller.tenant_id.as_str())
+            .filter(|s| s.principal["tenant_id"] == caller.tenant_id.as_str())
             .cloned()
             .collect()
     };
@@ -1473,6 +1508,53 @@ where
             "No trusted assessors or evidence observers are configured for this tenant.",
         ));
     }
+    // Every attestation must be signed by the trusted principal it names; nothing the
+    // caller asserts about verification is taken on its word.
+    let attested_report = json!({"report": body.report, "contract": body.contract, "features": body.features});
+    let observations = body.evidence_observations.as_array().map_or(&[][..], Vec::as_slice);
+    let mut unverified = Vec::new();
+    if !verify(
+        &assessors,
+        &body.report["evaluator"],
+        REPORT_DOMAIN,
+        &attested_report,
+        &body.report_signature,
+    ) {
+        unverified.push("report".to_owned());
+    }
+    if !verify(
+        &observers,
+        &body.report_verification["observer"],
+        VERIFICATION_DOMAIN,
+        &body.report_verification,
+        &body.verification_signature,
+    ) {
+        unverified.push("report_verification".to_owned());
+    }
+    if observations.len() != body.evidence_signatures.len() {
+        unverified.push("evidence_signatures".to_owned());
+    }
+    for (i, (observation, signature)) in observations.iter().zip(&body.evidence_signatures).enumerate() {
+        if !verify(
+            &observers,
+            &observation["observer"],
+            OBSERVATION_DOMAIN,
+            observation,
+            signature,
+        ) {
+            unverified.push(format!("evidence_observations/{i}"));
+        }
+    }
+    if !unverified.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "attestation_unverified",
+            "An attestation is not signed by the trusted principal it names.",
+        )
+        .with_detail(json!(unverified)));
+    }
+    let assessors: Vec<Value> = assessors.into_iter().map(|s| s.principal).collect();
+    let observers: Vec<Value> = observers.into_iter().map(|s| s.principal).collect();
     let now = state.gateway.as_ref().map_or_else(
         || {
             let micros = std::time::SystemTime::now()

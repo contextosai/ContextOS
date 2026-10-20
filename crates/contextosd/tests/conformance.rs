@@ -6,6 +6,7 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine as _;
 use contextos_audit::AuditSigner;
 use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::validation::format_unix_micros;
@@ -105,8 +106,19 @@ async fn start() -> (String, Value) {
     .unwrap();
     config.support.profiles = names(&support["supported_profiles"], "profile_id");
     config.support.controls = names(&support["supported_controls"], "control_id");
-    config.conformance.trusted_assessors = case["trusted_assessors"].as_array().unwrap().clone();
-    config.conformance.trusted_evidence_observers = case["trusted_evidence_observers"].as_array().unwrap().clone();
+    let signers = |principals: &Value| -> Vec<contextosd::attest::TrustedSigner> {
+        principals
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| contextosd::attest::TrustedSigner {
+                principal: p.clone(),
+                public_key: base64::engine::general_purpose::STANDARD.encode(signing_key().verifying_key().as_bytes()),
+            })
+            .collect()
+    };
+    config.conformance.trusted_assessors = signers(&case["trusted_assessors"]);
+    config.conformance.trusted_evidence_observers = signers(&case["trusted_evidence_observers"]);
     let state = build_state(
         &config,
         Arc::new(MemoryStore::new()),
@@ -126,12 +138,31 @@ async fn start() -> (String, Value) {
     (base, case)
 }
 
+/// The vector's assessor and observer (one principal) hold this key.
+fn signing_key() -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&[9; 32])
+}
+
+fn sign(domain: &str, attested: &Value) -> Value {
+    use ed25519_dalek::Signer as _;
+    let signature = signing_key().sign(contextosd::attest::message(domain, attested).as_bytes());
+    json!(base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()))
+}
+
+/// The caller's part of an assessment, with every attestation signed.
 fn caller_part(input: &Value) -> Value {
+    use contextosd::attest::{OBSERVATION_DOMAIN, REPORT_DOMAIN, VERIFICATION_DOMAIN};
     let scope = &input["scope"];
+    let attested_report =
+        json!({"report": input["report"], "contract": input["contract"], "features": input["features"]});
     json!({"contract": input["contract"], "features": input["features"], "report": input["report"],
         "report_verification": input["report_verification"], "evidence_observations": input["evidence_observations"],
         "scope": {"workflow_id": scope["workflow_id"], "release_refs": scope["release_refs"],
-            "environment_ref": scope["environment_ref"], "required_utility_case_ids": scope["required_utility_case_ids"]}})
+            "environment_ref": scope["environment_ref"], "required_utility_case_ids": scope["required_utility_case_ids"]},
+        "report_signature": sign(REPORT_DOMAIN, &attested_report),
+        "verification_signature": sign(VERIFICATION_DOMAIN, &input["report_verification"]),
+        "evidence_signatures": input["evidence_observations"].as_array().unwrap().iter()
+            .map(|o| sign(OBSERVATION_DOMAIN, o)).collect::<Vec<_>>()})
 }
 
 #[tokio::test]
@@ -153,10 +184,32 @@ async fn reports_are_assessed_against_the_deployments_trust_anchors() {
     let mut forged = caller_part(&input);
     forged["trusted_assessors"] = input["trusted_assessors"].clone();
     assert_eq!(assess("acme-key", forged).await.status(), 422);
-    // A report changed after verification no longer matches its verified digest.
-    let mut tampered = caller_part(&input);
-    tampered["report"]["limitations"] = json!(["added later"]);
-    let tampered: Value = assess("acme-key", tampered).await.json().await.unwrap();
+    // Caller-asserted verification is not accepted: attestations must be signed.
+    let mut unsigned = caller_part(&input);
+    unsigned["verification_signature"] = json!("AAAA");
+    let refused = assess("acme-key", unsigned).await;
+    assert_eq!(refused.status(), 422);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["detail"],
+        json!(["report_verification"])
+    );
+    // The report's signature binds the contract: a weaker contract cannot be swapped in.
+    let mut swapped = caller_part(&input);
+    swapped["contract"]["profiles"] = json!([]);
+    let refused = assess("acme-key", swapped).await;
+    let status = refused.status();
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(status, 422, "{refused}");
+    assert_eq!(refused["error"]["detail"], json!(["report"]));
+    // A report changed after verification (re-signed by the assessor, but no longer the
+    // verified digest) does not pass.
+    let mut tampered_input = input.clone();
+    tampered_input["report"]["limitations"] = json!(["added later"]);
+    let tampered: Value = assess("acme-key", caller_part(&tampered_input))
+        .await
+        .json()
+        .await
+        .unwrap();
     assert_ne!(tampered["outcome"], "passed", "{tampered}");
     // Another tenant has no trust anchors here.
     let other = assess("other-key", caller_part(&input)).await;

@@ -76,6 +76,20 @@ budgets, and the integrity of the evidence record.
   failure after a score was signed left no not-applied entry; duplicate replay-case
   names let one acknowledgement cover several cases. Each fix has a regression test.
 
+- 2026-10-20: fourth review, of the kill switch, cluster limits, erasure and
+  retention, conformance assessment and staged rollout. Fixed: conformance accepted
+  caller-asserted verification (attestations now need Ed25519 signatures by the
+  configured principals, and the report signature binds the contract and features);
+  agent revocation keyed on the caller-named agent id (a `principal` kind now revokes
+  the authenticated identity and its runs); a run on a revoked pack could delegate a
+  child onto another pack (children must use the parent's pack and are refused while the
+  parent is revoked); pending input requests survived erasure and never-started or
+  expired runs could not be erased; shadow diffs were unbounded CPU work (now a few
+  blocking slots, dropped when busy); a heartbeat dated in the future inflated the
+  replica count; the PostgreSQL age scan could not use its index; published example
+  keys are refused in production mode. Each fix has a regression test. A tenant cap
+  smaller than the replica count is exceeded by design (documented).
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

@@ -12,6 +12,8 @@ name = "contextosd"
 path = "src/main.rs"
 
 [dependencies]
+ed25519-dalek.workspace = true
+base64.workspace = true
 contextos-contract = { workspace = true, features = ["schema"] }
 contextos-kernel.workspace = true
 contextos-store.workspace = true
@@ -55,7 +57,6 @@ otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", 
 jsonschema.workspace = true
 flate2.workspace = true
 ring.workspace = true
-base64.workspace = true
 
 [lints]
 workspace = true

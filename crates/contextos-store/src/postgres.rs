@@ -184,12 +184,15 @@ impl DocumentStore for PostgresStore {
         // Tombstones start with this canonical prefix (64 hex digits of digest).
         let tombstone = format!(r#"{{"content\_digest":"sha256:{}","erased":true,%"#, "_".repeat(64));
         let rows = sqlx::query(
-            "SELECT created_us, tenant_id, id FROM ( \
-               SELECT (extract(epoch FROM created_at) * 1000000)::bigint AS created_us, tenant_id, id, body \
-               FROM contextos_documents \
-               WHERE kind = $1 AND created_at < to_timestamp($2::double precision / 1000000)) d \
-             WHERE (created_us, tenant_id, id) > ($3, $4, $5) AND body NOT LIKE $6 \
-             ORDER BY created_us, tenant_id, id LIMIT $7",
+            // The cursor compares created_at itself (exact integer microseconds), so
+            // the (kind, created_at, tenant_id, id) index serves every page.
+            "SELECT (extract(epoch FROM created_at) * 1000000)::bigint, tenant_id, id \
+             FROM contextos_documents \
+             WHERE kind = $1 \
+               AND created_at < timestamptz 'epoch' + $2 * interval '1 microsecond' \
+               AND (created_at, tenant_id, id) > (timestamptz 'epoch' + $3 * interval '1 microsecond', $4, $5) \
+               AND body NOT LIKE $6 \
+             ORDER BY created_at, tenant_id, id LIMIT $7",
         )
         .bind(kind.as_str())
         .bind(micros(before_us))

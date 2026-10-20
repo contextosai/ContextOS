@@ -425,8 +425,11 @@ configuration are refused at startup.
 ## 7. Kill switch
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
-a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), an `agent`, an `adapter` or a
-`capability`:
+a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), a `principal` (an
+authenticated caller: its new runs and the runs it admitted), an `agent` (the agent id
+a run declares; to stop whoever runs it, revoke the principal), an `adapter` or a
+`capability`. A delegated run must use its parent's pack and cannot be admitted while
+its parent is revoked:
 
 ```sh
 curl -X POST "$CONTEXTOS/v1/revocations" -H "Authorization: Bearer $OPS_TOKEN" \
@@ -443,9 +446,10 @@ The check runs alongside the other authorization reads, so it adds no serial lat
 
 ## 8. Erase personal content
 
-A run's user-provided content lives in its replay case (the original request) and its
-compiled context (task prompt and evidence blocks). Once the run is finished, an
-operator (`control` scope) erases both:
+A run's user-provided content lives in its replay case (the original request), its
+compiled context (task prompt and evidence blocks) and any pending tool input requests.
+Once the run is finished, past its deadline, or never started, an operator (`control`
+scope) erases them:
 
 ```sh
 curl -X POST "$CONTEXTOS/v1/runs/$RUN/erase" -H "Authorization: Bearer $OPS_TOKEN" \
@@ -481,14 +485,19 @@ anchors, each naming its tenant:
 
 ```toml
 [conformance]
-trusted_assessors = [{ principal_id = "assessor_ci", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }]
-trusted_evidence_observers = [{ principal_id = "control_monitor", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }]
+trusted_assessors = [{ principal = { principal_id = "assessor_ci", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }, public_key = "<base64 Ed25519>" }]
+trusted_evidence_observers = [{ principal = { principal_id = "control_monitor", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }, public_key = "<base64 Ed25519>" }]
 ```
 
 `POST /v1/conformance/assess` (`audit:read`) takes the report, its verification, the
 control evidence, the contract, features and the workflow scope. The deployment supplies
 its own implementation identity, support declaration, profile registry, clock and the
-trust anchors for the caller's tenant, so a caller cannot certify itself. Missing,
+trust anchors for the caller's tenant, so a caller cannot certify itself. Every
+attestation is signed (Ed25519, base64) by the principal it names over
+`sha256_canonical({"domain": <domain>, "attested": <object>})`: the report together with
+the contract and features by its evaluator (`report_signature`), the report
+verification by its observer (`verification_signature`), and each evidence observation
+by its observer (`evidence_signatures`); see `contextosd::attest` for the domains. Missing,
 stale, synthetic or unverified evidence yields `insufficient_evidence`; every outcome is
 audited.
 

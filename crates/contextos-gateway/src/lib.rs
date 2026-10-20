@@ -68,7 +68,7 @@ pub use ports::{
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
-pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError};
+pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 
 /// Receipts at which the run's budget ledger is compacted before the next
@@ -1088,6 +1088,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 response.output.get("result").unwrap_or(&Value::Null),
                 &now,
             );
+            self.note_pending_input(admission, &pending_key.id).await?;
             match self.store.get(&pending_key).await? {
                 None => match self.store.create(&pending_key, &record).await {
                     Ok(_) => {}

@@ -63,7 +63,12 @@ pub async fn heartbeat<S: DocumentStore>(
             .as_ref()
             .and_then(|c| c.body["replicas"].as_object().cloned())
             .unwrap_or_default();
-        live.retain(|_, seen| seen.as_u64().is_some_and(|seen| now.saturating_sub(seen) <= ttl));
+        // Live: seen within the time-to-live, and not dated beyond it into the future (a
+        // fast clock that then stopped would otherwise count, and lead, long after).
+        live.retain(|_, seen| {
+            seen.as_u64()
+                .is_some_and(|seen| now.saturating_sub(seen) <= ttl && seen.saturating_sub(now) <= ttl)
+        });
         live.insert(replica.to_owned(), json!(now));
         let members = Members {
             count: live.len(),
@@ -138,6 +143,13 @@ mod tests {
         // b stops; after the time-to-live only a remains.
         assert_eq!(
             heartbeat(&store, "a", 18_000, ttl).await.unwrap(),
+            Members { count: 1, leader: true }
+        );
+        // A replica with a fast clock writes a heartbeat dated far ahead; an honest
+        // replica neither counts it nor lets it lead (its id sorts first).
+        assert_eq!(heartbeat(&store, "0-fast", 1_000_000, ttl).await.unwrap().count, 1);
+        assert_eq!(
+            heartbeat(&store, "a", 18_500, ttl).await.unwrap(),
             Members { count: 1, leader: true }
         );
         // b comes back.
