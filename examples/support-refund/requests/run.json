@@ -1,0 +1,167 @@
+{
+  "pack_ref": "ctxpack.support@5.2.0",
+  "request": {
+    "request_id": "req_9f3a12",
+    "session_id": "sess_42f1",
+    "tenant_id": "tenant_acme_prod",
+    "user": {
+      "user_id": "usr_771",
+      "role": "support_agent"
+    },
+    "agent": {
+      "agent_id": "agt_support",
+      "workload_identity": "spiffe://contextos/agents/support",
+      "role": "support_ops"
+    },
+    "context_pack_refs": [
+      "ctxpack.support@5.2.0"
+    ],
+    "input": {
+      "intent": "support.refund",
+      "message": "Refund order ord_881 for INR 1200.",
+      "channel": "app_chat",
+      "locale": "en-IN",
+      "context": {
+        "identity_verified": true,
+        "refund_amount": 1200,
+        "order_id": "ord_881"
+      }
+    },
+    "mode": "stream",
+    "runtime": {
+      "plan_timeout_ms": 15000,
+      "max_tool_calls": 8,
+      "max_cost_cents": 25
+    },
+    "trace": {
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "span_id": "00f067aa0ba902b7",
+      "trace_flags": "01"
+    }
+  },
+  "run_context": {
+    "run_id": "run_demo_1",
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "session_id": "sess_42f1",
+    "tenant_id": "tenant_acme_prod",
+    "user": {
+      "user_id": "usr_771",
+      "role": "support_agent"
+    },
+    "agent": {
+      "agent_id": "agt_support",
+      "workload_identity": "spiffe://contextos/agents/support",
+      "role": "support_ops"
+    },
+    "intent": "support.refund",
+    "locale": "en-IN",
+    "safety_mode": "destructive",
+    "run_budget": {
+      "total_tokens": 12000,
+      "bucket_tokens": {
+        "business": 1500,
+        "policy": 1800,
+        "tool": 1500,
+        "evidence": 400,
+        "memory": 1500,
+        "session": 2200
+      },
+      "max_tool_calls": 8,
+      "max_replan_attempts": 2,
+      "wall_clock_ms": 30000,
+      "max_cost_cents": 25,
+      "tokens_used": 0,
+      "tool_calls_used": 0,
+      "latency_ms_used": 0,
+      "cost_cents_used": 0
+    }
+  },
+  "deps": {
+    "evidence": [
+      {
+        "evidence_ref": "kg:order:ord_881#snapshot_kg_2026_05_03_T0930",
+        "source_id": "kg.orders",
+        "content": "order ord_881 exists in snapshot_kg_2026_05_03_T0930",
+        "integrity": "verified",
+        "freshness": "current",
+        "satisfies": [
+          "order_lookup"
+        ]
+      },
+      {
+        "evidence_ref": "kg:customer:cus_77#tier=gold,joined=2021",
+        "source_id": "kg.customers",
+        "content": "customer cus_77 has tier=gold and joined=2021",
+        "integrity": "verified",
+        "freshness": "current",
+        "satisfies": []
+      },
+      {
+        "evidence_ref": "kg:policy:returns#clause_4.2_refund_window_30d",
+        "source_id": "policy.returns",
+        "content": "returns clause 4.2 sets refund_window_days=30",
+        "integrity": "verified",
+        "freshness": "current",
+        "satisfies": [
+          "policy.eval"
+        ]
+      },
+      {
+        "evidence_ref": "kg:payment:txn_prior_5512#status=settled,amount=4200",
+        "source_id": "kg.payments",
+        "content": "payment txn_prior_5512 has status=settled and amount=4200",
+        "integrity": "verified",
+        "freshness": "current",
+        "satisfies": []
+      },
+      {
+        "evidence_ref": "kg:fraud:cus_77#risk_score=0.04,signals=none",
+        "source_id": "kg.fraud",
+        "content": "customer cus_77 has risk_score=0.04 and signals=none",
+        "integrity": "verified",
+        "freshness": "current",
+        "satisfies": []
+      }
+    ],
+    "promoted_memory": [
+      {
+        "memory_ref": "memory:customer:cus_77:preferred_communication_channel",
+        "content": "customer:cus_77 prefers_communication_channel=email",
+        "source_refs": [
+          "decision:dr_customer_preference_77"
+        ],
+        "freshness": "current"
+      }
+    ]
+  },
+  "contract": {
+    "envelope_version": "contextos.execution_contract.v1",
+    "contract_id": "contract_demo_1",
+    "run_id": "run_demo_1",
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "tenant_id": "tenant_acme_prod",
+    "profiles": [
+      {
+        "profile_id": "contextos.core",
+        "profile_version": "1"
+      }
+    ],
+    "required_controls": [],
+    "optional_controls": [],
+    "release_refs": [
+      {
+        "artifact_type": "release",
+        "artifact_id": "contextosd",
+        "version": "0.1.0",
+        "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  "deadline": "2099-01-01T00:00:00Z",
+  "limits": {
+    "tokens": 10000,
+    "tool_calls": 8,
+    "replans": 2,
+    "cost_cents": 25.0
+  }
+}

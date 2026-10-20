@@ -266,7 +266,47 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// Governs one tool call end to end. Errors are infrastructure failures (store,
     /// audit); every governance outcome is a normal `DispatchOutcome`.
+    #[tracing::instrument(
+        name = "contextos.dispatch",
+        skip_all,
+        fields(
+            tenant_id = %admission.tenant_id,
+            run_id = %admission.run_id,
+            trace_id = %admission.trace_id,
+            capability_id = envelope["capability_id"].as_str().unwrap_or_default(),
+            tool_call_id = envelope["tool_call_id"].as_str().unwrap_or_default(),
+            operation_id = tracing::field::Empty,
+            action_digest = tracing::field::Empty,
+            status = tracing::field::Empty,
+            reason_codes = tracing::field::Empty,
+        )
+    )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
+        let outcome = self.dispatch_inner(admission, envelope).await;
+        let span = tracing::Span::current();
+        match &outcome {
+            Ok(outcome) => {
+                let report = &outcome.report;
+                if let Some(id) = &report.operation_id {
+                    span.record("operation_id", id.as_str());
+                }
+                if let Some(digest) = &report.action_digest {
+                    span.record("action_digest", digest.as_str());
+                }
+                span.record("status", report.status.as_str());
+                span.record("reason_codes", report.reason_codes.join(",").as_str());
+                tracing::info!(status = %report.status, "governed dispatch");
+            }
+            Err(error) => tracing::error!(%error, "governed dispatch failed"),
+        }
+        outcome
+    }
+
+    async fn dispatch_inner(
+        &self,
+        admission: &RunAdmission,
+        envelope: &Value,
+    ) -> Result<DispatchOutcome, GatewayError> {
         let mut p = Pipeline {
             admission,
             envelope,

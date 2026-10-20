@@ -30,6 +30,13 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 | `contextos-embed`, `-py`, `-node`, `-wasm` | In-process bindings over one JSON facade |
 | `contextos-kernel` | Context Pack compiler, ActionRisk, profile negotiation, authority/approval/authorization, execution boundary, data flow, memory lifecycle, run lifecycle and resume, operation ledger, budget ledger, conformance assessment |
 
+## Start
+
+- Run the quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
+- Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
+- Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
+- Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+
 ## Verify
 
 ```sh

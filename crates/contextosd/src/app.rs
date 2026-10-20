@@ -585,6 +585,7 @@ where
             StatusCode::GATEWAY_TIMEOUT,
             request_timeout,
         ))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
         .with_state(state)
 }

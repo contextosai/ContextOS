@@ -1,0 +1,50 @@
+{
+  "capability_id": "adp_payments.issue_refund",
+  "capability_version": "3",
+  "adapter_id": "adp_payments",
+  "protocol_tool": "issue_refund",
+  "purpose_id": "support.refund",
+  "desired_effect": "refund_created",
+  "action_risk": {
+    "effect": "external_state",
+    "authority": "service",
+    "reversibility": "compensatable",
+    "interaction": "api",
+    "data_scope": "CONFIDENTIAL"
+  },
+  "approval_mode": "destructive",
+  "resource_pointers": [
+    "/order_id"
+  ],
+  "destination_pointers": [
+    "/customer_id"
+  ],
+  "amount": {
+    "minor_units_pointer": "/amount_minor",
+    "currency": "INR"
+  },
+  "recovery": {
+    "strategy": "manual_reconcile",
+    "max_attempts": 1,
+    "retry_delays_seconds": []
+  },
+  "timeout_ms": 2000,
+  "reservation": {
+    "tokens": 0,
+    "tool_calls": 1,
+    "replans": 0,
+    "cost_units": 100
+  },
+  "adapter_ref": {
+    "artifact_type": "adapter",
+    "artifact_id": "payments",
+    "version": "3",
+    "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "capability_ref": {
+    "artifact_type": "capability",
+    "artifact_id": "issue_refund",
+    "version": "3",
+    "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "envelope_version": "contextos.tool_call.v1",
+  "tool_call_id": "tc_demo_1",
+  "run_id": "run_demo_1",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "capability_id": "adp_payments.issue_refund",
+  "args": {
+    "order_id": "ord_881",
+    "customer_id": "cus_77",
+    "amount_minor": 120000
+  },
+  "principal_chain": [
+    {
+      "kind": "agent",
+      "id": "agt_support"
+    }
+  ],
+  "approval_mode_requested": "destructive",
+  "approval_mode_effective": "destructive",
+  "approval_mode_highest": "destructive",
+  "evidence_refs": [
+    "kg:order:ord_881#snapshot_kg_2026_05_03_T0930"
+  ],
+  "idempotency_key": "refund:ord_881"
+}

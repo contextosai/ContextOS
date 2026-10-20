@@ -2,8 +2,8 @@
 //! MCP provider, all over real HTTP.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
@@ -72,12 +72,9 @@ fn constraint_facts(request: &Value) -> Value {
 struct World {
     base: String,
     provider_calls: Arc<AtomicUsize>,
-    policy_refs: Arc<Mutex<Value>>,
 }
 
 async fn world(controls: &[&str]) -> World {
-    let policy_refs: Arc<Mutex<Value>> = Arc::new(Mutex::new(json!([])));
-    let refs = policy_refs.clone();
     let authority = serve(
         Router::new().fallback(post(|axum::Json(r): axum::Json<Value>| async move {
             axum::Json(authority_facts(&r))
@@ -85,12 +82,11 @@ async fn world(controls: &[&str]) -> World {
     )
     .await;
     let constraints = serve(Router::new().fallback(post(move |axum::Json(r): axum::Json<Value>| {
-        let refs = refs.clone();
         async move {
             // A real control plane attests against the pinned policy bundle refs.
             let mut facts = constraint_facts(&r);
             for o in facts["observations"].as_array_mut().unwrap() {
-                o["policy_refs"] = refs.lock().unwrap().clone();
+                o["policy_refs"] = r["run"]["policy_refs"].clone();
             }
             axum::Json(facts)
         }
@@ -201,7 +197,6 @@ async fn world(controls: &[&str]) -> World {
     World {
         base: serve(router(state, Duration::from_secs(10))).await,
         provider_calls,
-        policy_refs,
     }
 }
 
@@ -273,7 +268,6 @@ async fn admitted_run_dispatches_governed_effects() {
         "derived from the pinned capability"
     );
     assert_eq!(admitted["features"]["sensitive_data"], true);
-    *w.policy_refs.lock().unwrap() = admitted["policy_refs"].clone();
 
     let again = http
         .post(format!("{}/v1/runs", w.base))
@@ -332,17 +326,14 @@ async fn admitted_run_dispatches_governed_effects() {
 async fn high_value_refund_pauses_for_approval() {
     let w = world(&ALL_CONTROLS).await;
     let http = reqwest::Client::new();
-    let admitted: Value = http
+    let admitted = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
         .json(&run_body("run_big", 4200))
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
         .unwrap();
-    *w.policy_refs.lock().unwrap() = admitted["policy_refs"].clone();
+    assert_eq!(admitted.status(), 201);
     let out: Value = http
         .post(format!("{}/v1/runs/run_big/tool-calls", w.base))
         .bearer_auth("acme-key")

@@ -1,0 +1,44 @@
+# Quickstart configuration: in-memory store, development mode (loopback HTTP allowed).
+packs = ["examples/support-refund/pack.json"]
+capabilities = ["examples/support-refund/capabilities/issue_refund.json"]
+
+[server]
+listen = "127.0.0.1:8080"
+mode = "development"
+
+[store]
+kind = "memory"
+
+[audit]
+signing_seed_env = "CONTEXTOS_AUDIT_SEED"
+key_id = "dev-audit"
+
+[support]
+implementation_id = "contextos-rs"
+implementation_version = "0.1.0"
+profiles = ["contextos.core"]
+controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated",
+            "effects.reconciled", "approval.bound", "network.mediated", "data.flow_policy"]
+
+[identity]
+trust_domain = "contextos.dev"
+gateway_principal_id = "contextosd"
+
+[providers.authority]
+url = "http://127.0.0.1:7701"
+[providers.constraints]
+url = "http://127.0.0.1:7702"
+[providers.approvals]
+url = "http://127.0.0.1:7703"
+
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"
+endpoint = "http://127.0.0.1:7704/mcp"
+
+# Key "dev-key-0123456789abcdef0123456789abcdef"
+[[api_keys]]
+key_sha256 = "sha256:REPLACED_BY_RUN_SH"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_quickstart"
+scopes = ["compile", "admit", "dispatch", "audit:read"]

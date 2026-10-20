@@ -1,0 +1,345 @@
+{
+  "contract_meta": {
+    "contract_name": "ctxpack.support",
+    "contract_version": "2.0.0",
+    "issuer": "tenant_acme_prod",
+    "created_at": "2026-04-15T10:00:00Z",
+    "compatibility": {
+      "requires": {
+        "runtime": ">=2.0.0",
+        "ontology": ">=4.2.0"
+      }
+    }
+  },
+  "pack_meta": {
+    "pack_id": "ctxpack.support",
+    "pack_version": "5.2.0",
+    "tenant": {
+      "tenant_id": "tenant_acme_prod",
+      "name": "Acme Support"
+    },
+    "environment_defaults": {
+      "language": "en",
+      "timezone": "Asia/Kolkata",
+      "currency": "INR",
+      "region": "ap-south-1"
+    },
+    "ttl_seconds": 86400,
+    "data_classification": "INTERNAL"
+  },
+  "intelligence_refs": {
+    "ontology": {
+      "namespace": "ont.support",
+      "version": "4.2.0",
+      "entity_types": [
+        "Customer",
+        "Order"
+      ],
+      "relationship_types": [
+        "order_belongs_to_customer"
+      ]
+    },
+    "knowledge_graph": {
+      "snapshot_pin_rule": "alias:prod"
+    },
+    "identity_layer": {
+      "ceid_namespaces": [
+        "customer",
+        "order"
+      ]
+    }
+  },
+  "business_context": {
+    "summary": {
+      "what_we_do": "Post-purchase customer support.",
+      "who_we_serve": [
+        "consumers"
+      ],
+      "differentiators": [
+        "fast resolution"
+      ]
+    },
+    "non_negotiables": [
+      "never charge a customer without consent"
+    ]
+  },
+  "policy_layer": {
+    "policy_bundles": [
+      {
+        "bundle_id": "POLICY_RETURNS_V4",
+        "priority": 10,
+        "policy_dsl": {
+          "language": "jsonlogic",
+          "rules": [
+            {
+              "rule_id": "R_REFUND_REQUIRES_IDV",
+              "applies_to": {
+                "intent": "support.refund"
+              },
+              "if": {
+                "==": [
+                  {
+                    "var": "request.context.identity_verified"
+                  },
+                  true
+                ]
+              },
+              "then": {
+                "allow": true,
+                "requires": [
+                  "order_lookup"
+                ]
+              },
+              "else": {
+                "allow": false,
+                "reason": "Identity not verified; refund path blocked."
+              },
+              "rationale": "Refunds require verified identity."
+            },
+            {
+              "rule_id": "R_HIGH_VALUE_REQUIRES_APPROVAL",
+              "applies_to": {
+                "intent": "support.refund"
+              },
+              "if": {
+                "and": [
+                  {
+                    "==": [
+                      {
+                        "var": "user.role"
+                      },
+                      "support_agent"
+                    ]
+                  },
+                  {
+                    ">": [
+                      {
+                        "var": "request.context.refund_amount"
+                      },
+                      3000
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "allow": true,
+                "approval_mode": "destructive",
+                "requires_approval_gate": "GATE_FINANCE_APPROVAL"
+              },
+              "decision_binding": "support.refund.execute",
+              "rationale": "High-value refunds require finance approval."
+            }
+          ]
+        }
+      }
+    ],
+    "guardrails": {
+      "must_refuse": [
+        "refund_without_identity"
+      ],
+      "must_escalate": [
+        "fraud_signal_high"
+      ],
+      "redaction_rules": [
+        "pan",
+        "credit_card"
+      ]
+    },
+    "approval_gates": [
+      {
+        "gate_id": "GATE_FINANCE_APPROVAL",
+        "when": {
+          ">": [
+            {
+              "var": "request.context.refund_amount"
+            },
+            3000
+          ]
+        },
+        "required_approver_role": "finance_lead",
+        "ttl_seconds": 7200
+      }
+    ],
+    "action_risk_policy": {
+      "allowed_effects": [
+        "none",
+        "local_state",
+        "external_state"
+      ],
+      "allowed_authorities": [
+        "agent",
+        "service",
+        "user_delegated",
+        "human_approved"
+      ],
+      "allowed_reversibility": [
+        "read_only",
+        "reversible",
+        "compensatable",
+        "irreversible"
+      ],
+      "allowed_interactions": [
+        "api",
+        "browser",
+        "computer",
+        "agent_to_agent",
+        "human_handoff"
+      ],
+      "data_scope_ceiling": "CONFIDENTIAL"
+    }
+  },
+  "tooling_layer": {
+    "adapter_registry": [
+      {
+        "adapter_id": "adp_orders",
+        "type": "OPENAPI",
+        "endpoint_ref": "internal://orders",
+        "capabilities": [
+          "lookup"
+        ],
+        "approval_mode": "read_only",
+        "capability_risks": {
+          "lookup": {
+            "effect": "none",
+            "authority": "service",
+            "reversibility": "read_only",
+            "interaction": "api",
+            "data_scope": "CONFIDENTIAL"
+          }
+        }
+      },
+      {
+        "adapter_id": "adp_policy",
+        "type": "INTERNAL",
+        "endpoint_ref": "internal://policy",
+        "capabilities": [
+          "eval"
+        ],
+        "approval_mode": "read_only",
+        "capability_risks": {
+          "eval": {
+            "effect": "none",
+            "authority": "service",
+            "reversibility": "read_only",
+            "interaction": "api",
+            "data_scope": "INTERNAL"
+          }
+        }
+      },
+      {
+        "adapter_id": "adp_payments",
+        "type": "OPENAPI",
+        "endpoint_ref": "internal://payments",
+        "capabilities": [
+          "issue_refund"
+        ],
+        "approval_mode": "destructive",
+        "capability_risks": {
+          "issue_refund": {
+            "effect": "external_state",
+            "authority": "human_approved",
+            "reversibility": "compensatable",
+            "interaction": "api",
+            "data_scope": "CONFIDENTIAL",
+            "decision_ttl_seconds": 300
+          }
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "permission_id": "p1",
+        "adapter_id": "adp_orders",
+        "capability": "lookup",
+        "allow": true
+      },
+      {
+        "permission_id": "p2",
+        "adapter_id": "adp_policy",
+        "capability": "eval",
+        "allow": true
+      },
+      {
+        "permission_id": "p3",
+        "adapter_id": "adp_payments",
+        "capability": "issue_refund",
+        "allow": true,
+        "arg_constraints": {
+          "amount_inr": {
+            "min": 1,
+            "max": 50000
+          },
+          "idempotency_key": {
+            "required": true
+          }
+        }
+      }
+    ]
+  },
+  "decision_layer": {
+    "decision_specs": [
+      {
+        "decision_key": "support.refund.execute",
+        "version": "1.0.0",
+        "owner_role": "support_ops",
+        "required_evidence": [
+          "order_lookup",
+          "policy.eval",
+          "identity_verified"
+        ],
+        "allowed_outcomes": [
+          "approved",
+          "denied",
+          "escalated"
+        ],
+        "approval_mode": "destructive",
+        "decision_right": "execute"
+      }
+    ]
+  },
+  "memory_layer": {
+    "memory_policy": {
+      "tier_ttls": {
+        "working": "1h",
+        "episodic": "24h",
+        "semantic": "365d",
+        "durable": "1825d"
+      },
+      "write_classes_allowed": [
+        "preference",
+        "decision_outcome",
+        "correction"
+      ],
+      "consent_gating": {
+        "pii_write_back_allowed": false
+      }
+    },
+    "promotion_thresholds": {
+      "auto_promote_confidence": 0.95
+    }
+  },
+  "evaluation_layer": {
+    "eval_targets": [
+      {
+        "intent": "support.refund",
+        "policy": 1,
+        "utility": 0.9,
+        "latency_p99_ms": 3000,
+        "safety": 1,
+        "economics_cents_per_decision": 1.5
+      }
+    ]
+  },
+  "tone_and_comms": {
+    "voice_attributes": [
+      "clear",
+      "neutral"
+    ],
+    "do": [
+      "cite policy"
+    ],
+    "dont": [
+      "promise outcomes"
+    ]
+  }
+}

@@ -69,7 +69,7 @@ impl RemoteFacts {
 
 fn run_summary(admission: &RunAdmission) -> Value {
     json!({"tenant_id": admission.tenant_id, "run_id": admission.run_id, "contract_id": admission.contract_id,
-        "trace_id": admission.trace_id, "actor": admission.actor})
+        "trace_id": admission.trace_id, "actor": admission.actor, "policy_refs": admission.policy_refs})
 }
 
 /// Mandate/identity broker.
