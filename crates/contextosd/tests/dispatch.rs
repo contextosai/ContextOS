@@ -3258,6 +3258,7 @@ async fn decisions_record_the_pinned_model_and_evaluators() {
     let refs = body["contract"]["release_refs"].as_array_mut().unwrap();
     refs.push(artifact("model_profile", "claude-opus-5-5.support"));
     refs.push(artifact("evaluator_suite", "support.refund.judges"));
+    refs.push(artifact("model_profile", "claude-sonnet-5-5.support"));
     let admitted = admit(body).await;
     assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
     let admitted: Value = admitted.json().await.unwrap();
@@ -3277,6 +3278,41 @@ async fn decisions_record_the_pinned_model_and_evaluators() {
     let lineage = &recorded["record"]["lineage"];
     assert_eq!(lineage["model_profile"], "claude-opus-5-5.support@1", "{recorded}");
     assert_eq!(lineage["evaluator_suite"], "support.refund.judges@1");
+
+    // A decision made by the pinned fallback names it; an unpinned model is refused.
+    let decide = |model: &'static str, key: &'static str| {
+        let (url, client) = (
+            format!("{base}/v1/runs/run_pinned/decisions"),
+            executor_client(admitted["executor_generation"].as_u64().unwrap()),
+        );
+        async move {
+            client
+                .post(url)
+                .bearer_auth("acme-key")
+                .json(
+                    &json!({"decision_key": key, "decision_version": "1", "status": "DECIDED",
+                    "outcome": "refund_denied", "tool_calls": [], "model_profile": model}),
+                )
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let fallback: Value = decide("claude-sonnet-5-5.support@1", "support.refund.execute")
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        fallback["record"]["lineage"]["model_profile"], "claude-sonnet-5-5.support@1",
+        "{fallback}"
+    );
+    let unpinned = decide("some-other-model@1", "support.refund.execute").await;
+    assert_eq!(unpinned.status(), 422);
+    assert_eq!(
+        unpinned.json::<Value>().await.unwrap()["error"]["code"],
+        "model_not_pinned"
+    );
 }
 
 #[tokio::test]

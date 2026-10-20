@@ -3509,6 +3509,11 @@
             "maxLength": 256,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$",
             "description": "The model router's decision that chose the model (recorded in lineage)."
+          },
+          "model_profile": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Which pinned model_profile release ref (id@version) produced this decision, e.g. a pinned fallback; defaults to the first pinned."
           }
         }
       },

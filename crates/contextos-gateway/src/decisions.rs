@@ -64,6 +64,11 @@ pub struct DecisionReport {
     /// `model_profile` so a routed or fallen-back model is traceable.
     #[serde(default)]
     pub routing_decision_id: Option<String>,
+    /// Which of the run's pinned `model_profile` release refs produced this decision
+    /// (`id@version`), when several are pinned (a primary and its fallbacks). Must be
+    /// pinned; defaults to the first.
+    #[serde(default)]
+    pub model_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +96,8 @@ pub enum DecisionRefusal {
     TooManyDecisions,
     #[error("the decision report is too large")]
     TooLarge,
+    #[error("model profile {0} is not pinned for this run")]
+    ModelNotPinned(String),
     #[error(transparent)]
     Gateway(#[from] GatewayError),
 }
@@ -277,7 +284,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 policy_versions: Some(compiled.context_ledger.policy_bundles.clone()),
                 decision_spec: None,
                 kg_snapshot: None,
-                model_profile: pinned_release(admission, "model_profile"),
+                model_profile: match &report.model_profile {
+                    Some(used) => {
+                        if !pinned_releases(admission, "model_profile").any(|p| &p == used) {
+                            return Err(DecisionRefusal::ModelNotPinned(used.clone()));
+                        }
+                        Some(used.clone())
+                    }
+                    None => pinned_release(admission, "model_profile"),
+                },
                 evaluator_suite: pinned_release(admission, "evaluator_suite"),
                 routing_decision_id: report.routing_decision_id.clone(),
             },
@@ -455,4 +470,13 @@ fn pinned_release(admission: &RunAdmission, artifact_type: &str) -> Option<Strin
         .iter()
         .find(|r| r["artifact_type"] == artifact_type)
         .and_then(|r| Some(format!("{}@{}", r["artifact_id"].as_str()?, r["version"].as_str()?)))
+}
+
+/// All of the run's pinned release references of one artifact type, as `id@version`.
+fn pinned_releases<'a>(admission: &'a RunAdmission, artifact_type: &'a str) -> impl Iterator<Item = String> + 'a {
+    admission
+        .release_refs
+        .iter()
+        .filter(move |r| r["artifact_type"] == artifact_type)
+        .filter_map(|r| Some(format!("{}@{}", r["artifact_id"].as_str()?, r["version"].as_str()?)))
 }

@@ -1279,6 +1279,11 @@ where
                 "A reported tool call is not a governed effect of this run.",
             )
             .with_detail(json!({"tool_call_id": id})),
+            DecisionRefusal::ModelNotPinned(_) => ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "model_not_pinned",
+                refusal.to_string(),
+            ),
             DecisionRefusal::TooLarge => ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "decision_too_large",
