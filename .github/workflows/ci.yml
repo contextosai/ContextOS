@@ -8,6 +8,18 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: contextos
+          POSTGRES_PASSWORD: contextos
+          POSTGRES_DB: contextos_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U contextos" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CONTEXTOS_TEST_DATABASE_URL: postgres://contextos:contextos@localhost:5432/contextos_test
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.1

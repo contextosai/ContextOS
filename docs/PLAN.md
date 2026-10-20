@@ -76,7 +76,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 6 Execution boundary, data flow, memory lifecycle | done — 1 700 vectors + Node path / WHATWG origin corpora |
 | 7 Run lifecycle, resume, operation ledger, budget ledger | done — 1 900 vectors |
 | 8 Conformance assessment | done — 320 vectors |
-| 9 Stores with CAS + fencing | next |
+| 9 Stores with CAS + fencing | done — memory + PostgreSQL; contention tests (budget conservation, single in-flight claim) |
+| 10 Audit chain, signed DecisionRecords, replay packets | next |
 
 ## Non-negotiables carried from the spec
 
