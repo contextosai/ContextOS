@@ -70,6 +70,11 @@ where
 {
     let mut keys = KeyRing::new();
     keys.insert(signer.kid(), signer.verifying_key());
+    for retired in &config.audit.retired_keys {
+        if let Some(key) = retired.verifying_key() {
+            keys.insert(&retired.kid, key);
+        }
+    }
     let _ = &*STANDARD_PROFILE_REGISTRY;
     let audit = Arc::new(AuditWriter::new(log, signer));
     let (trust_domain, gateway_principal_id) = dispatch

@@ -21,6 +21,8 @@ max_connections = 32
 # 32-byte ed25519 seed, hex encoded, supplied by your secret manager / KMS.
 signing_seed_env = "CONTEXTOS_AUDIT_SEED"
 key_id = "audit-2026-10"
+# After a rotation, keep the previous key so entries it signed still verify:
+# retired_keys = [{ kid = "audit-2026-04", public_key = "<base64url, from GET /v1/audit/keys>" }]
 
 [support]
 implementation_id = "contextos-rs"

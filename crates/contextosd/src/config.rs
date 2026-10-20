@@ -57,6 +57,30 @@ pub struct AuditConfig {
     /// Environment variable holding the 32-byte ed25519 seed as hex.
     pub signing_seed_env: String,
     pub key_id: String,
+    /// Public keys of retired signing keys. Entries they signed stay verifiable after a
+    /// rotation: verifiers trust them, and `GET /v1/audit/keys` publishes them, but
+    /// nothing signs with them.
+    #[serde(default)]
+    pub retired_keys: Vec<RetiredKey>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredKey {
+    pub kid: String,
+    /// Base64url (unpadded) of the 32-byte Ed25519 public key, as `GET /v1/audit/keys`
+    /// published it.
+    pub public_key: String,
+}
+
+impl RetiredKey {
+    pub fn verifying_key(&self) -> Option<ed25519_dalek::VerifyingKey> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&self.public_key)
+            .ok()?;
+        ed25519_dalek::VerifyingKey::from_bytes(&bytes.try_into().ok()?).ok()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -308,6 +332,14 @@ impl Config {
                 "principal {} cannot both evaluate or meter and admit or dispatch",
                 key.principal_id
             )));
+        }
+        for retired in &self.audit.retired_keys {
+            if retired.kid.is_empty() || retired.kid == self.audit.key_id || retired.verifying_key().is_none() {
+                return Err(ConfigError::Invalid(format!(
+                    "retired audit key {:?} needs its own kid and a valid Ed25519 public key",
+                    retired.kid
+                )));
+            }
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
         self.retention.check().map_err(ConfigError::Invalid)?;

@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Audit key rotation: `[audit] retired_keys` keeps entries signed with a previous key
+  verifiable and published. `ctx audit-verify --continues` verifies only new entries
+  from a trusted head.
 - Independent audit verification: `GET /v1/audit/keys` publishes the signing keys and
   `ctx audit-verify` checks an exported chain offline.
 - Orchestrator checkpoints (`/v1/runs/{id}/checkpoint`): fenced, optimistic on

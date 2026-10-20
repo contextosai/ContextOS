@@ -580,8 +580,11 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
   deletes are also blocked by trigger).
-- **Keys:** the audit signing seed comes from your KMS/HSM via environment. Rotate by
-  adding the new public key to verifiers before switching writers.
+- **Keys:** the audit signing seed comes from your KMS/HSM via environment. To rotate,
+  give the servers a new seed and `key_id`, and list the old key under
+  `[audit] retired_keys = [{ kid = "…", public_key = "…" }]` (the value `GET
+  /v1/audit/keys` published), so entries it signed keep verifying and stay published;
+  give independent verifiers the new key before switching writers.
 - **Overload protection:** `[limits]` caps concurrent requests per instance
   (`max_in_flight`, default 4096; beyond it, `503` with `Retry-After`), request rate
   per tenant (`requests_per_second` / `burst`, default 500 / 1000; `429` with
