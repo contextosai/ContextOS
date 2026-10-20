@@ -65,6 +65,10 @@ jobs:
         run: |
           cargo build --release -p contextosd
           PYTHONPATH=bindings/python python bindings/python/tests/test_client.py
+      - name: Examples (quickstart and governed agent loop)
+        run: |
+          ./examples/support-refund/run.sh
+          ./examples/agent-loop/run.sh
       - name: Node HTTP client against contextosd
         run: |
           node bindings/node/test_client.mjs

@@ -1,6 +1,6 @@
 # Quickstart configuration: in-memory store, development mode (loopback HTTP allowed).
 packs = ["examples/support-refund/pack.json"]
-capabilities = ["examples/support-refund/capabilities/issue_refund.json"]
+capabilities = ["examples/support-refund/capabilities/issue_refund.json", "examples/support-refund/capabilities/lookup_order.json"]
 
 [server]
 listen = "127.0.0.1:8080"
@@ -33,6 +33,11 @@ url = "http://127.0.0.1:7703"
 
 [[adapters]]
 id = "adp_payments"
+kind = "mcp"
+endpoint = "http://127.0.0.1:7704/mcp"
+
+[[adapters]]
+id = "adp_orders"
 kind = "mcp"
 endpoint = "http://127.0.0.1:7704/mcp"
 

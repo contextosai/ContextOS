@@ -222,6 +222,20 @@ class Run:
             body["outcome"] = outcome
         return self._post("/decisions", body)
 
+    def delegate(self, child_admission: dict, envelope: dict) -> "Run":
+        """Admits a child run in a narrowed lane (``AgentDelegationEnvelope``). Its
+        budget is reserved from this run; this run must hold the current generation."""
+        body = dict(child_admission, delegation=envelope)
+        admitted = self.client.request("POST", "/v1/runs", body, generation=self.executor_generation)
+        context = child_admission.get("run_context", {})
+        return Run(self.client, admitted["run_id"], context.get("trace_id", self.trace_id), admitted["executor_generation"],
+                   self.principal_chain, admitted)
+
+    def close_child(self, child: "Run", decision: str = "accept") -> dict:
+        """Closes a delegated child, settling its spend into this run."""
+        return self.client.request("POST", f"/v1/runs/{_quote(child.run_id)}/close", {"decision": decision},
+                                   generation=self.executor_generation)
+
     def status(self) -> dict:
         return self.client.request("GET", self._path())
 

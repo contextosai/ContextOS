@@ -7,7 +7,7 @@ laptop with no dependencies beyond Python 3:
   :7701 authority   - an identity/mandate broker that grants exactly what is asked
   :7702 constraints - a control plane that attests every required control
   :7703 approvals   - an approval service with no approvals on file
-  :7704 payments    - an MCP (2026-07-28, stateless) server with one tool, issue_refund
+  :7704 tools       - an MCP (2026-07-28, stateless) server with issue_refund and lookup_order
 
 The gateway still verifies every fact it receives (currency, binding, scope, digests),
 but these services vouch for anything. A real authority broker verifies the caller's
@@ -43,26 +43,40 @@ def artifact(kind, aid):
 def authority(req):
     run, binding = req["run"], req["binding"]
     tenant = run["tenant_id"]
-    grant = {
-        "grant_id": "dev_grant", "grant_revision": "1", "issuer": principal("dev_broker", tenant), "subject": run["actor"],
-        "audience": "contextosd", "not_before": WINDOW["observed_at"], "expires_at": WINDOW["valid_until"],
-        "delegation_depth_remaining": 1, "verification_ref": artifact("authority_grant", "dev_grant"),
-        "scope": {"root_run_id": run["run_id"], "purpose_ids": [binding["purpose_id"]], "capability_ids": [binding["capability_id"]],
-                  "resource_ids": binding["resource_ids"], "destination_ids": binding["destination_ids"],
-                  "classification_labels": ["CONFIDENTIAL"], "argument_constraints": [],
-                  **({"amount_ceiling": {"minor_units": 10_000_000, "currency": binding["amount"]["currency"]}} if "amount" in binding else {})},
-    }
+    root_run_id = run.get("root_run_id", run["run_id"])
+    scope = {"root_run_id": root_run_id, "purpose_ids": [binding["purpose_id"]], "capability_ids": [binding["capability_id"]],
+             "resource_ids": binding["resource_ids"], "destination_ids": binding["destination_ids"],
+             "classification_labels": ["CONFIDENTIAL"], "argument_constraints": [],
+             **({"amount_ceiling": {"minor_units": 10_000_000, "currency": binding["amount"]["currency"]}} if "amount" in binding else {})}
+
+    def grant(grant_id, issuer, depth, parent=None):
+        g = {"grant_id": grant_id, "grant_revision": "1", "issuer": issuer, "subject": run["actor"], "audience": "contextosd",
+             "not_before": WINDOW["observed_at"], "expires_at": WINDOW["valid_until"], "delegation_depth_remaining": depth,
+             "verification_ref": artifact("authority_grant", grant_id), "scope": scope}
+        if parent:
+            g["parent_grant_ref"] = {"grant_id": parent, "grant_revision": "1"}
+        return g
+
+    if run.get("parent_run_id"):
+        # A delegated run: the mandate's root grant, narrowed to the child's agent.
+        # (In this example parent and child act as the same agent.)
+        grants = [grant("dev_child_grant", run["actor"], 1, parent="dev_grant"), grant("dev_grant", principal("dev_broker", tenant), 2)]
+    else:
+        grants = [grant("dev_grant", principal("dev_broker", tenant), 1)]
     observer = principal("dev_control_plane", tenant)
+    gateway = {"principal_id": "contextosd", "principal_type": "workload", "trust_domain": TD, "tenant_id": tenant}
     return {
-        "authenticated": {"principal": run["actor"], "audience": "contextosd", "root_run_id": run["run_id"], "run_id": run["run_id"],
-                          "mandate_kind": "workload", "trusted_issuers": [principal("dev_broker", tenant)], "trusted_observers": [observer],
+        "authenticated": {"principal": run["actor"], "audience": "contextosd", "root_run_id": root_run_id, "run_id": run["run_id"],
+                          "mandate_kind": "workload", "trusted_issuers": [principal("dev_broker", tenant)],
+                          # The gateway attests run links for delegated runs.
+                          "trusted_observers": [observer, gateway],
                           "verification_status": "verified", "verification_ref": artifact("authentication", "dev"), **WINDOW},
-        "leaf_grant_ref": {"grant_id": "dev_grant", "grant_revision": "1"},
-        "grants": [grant],
-        "observations": [{"grant_id": "dev_grant", "grant_revision": "1",
-                          "grant_digest": digest({"domain": "contextos.authority_grant.v1", "grant": grant}),
-                          "verification_ref": grant["verification_ref"], "verification_status": "verified",
-                          "revocation_status": "active", "observer": observer, **WINDOW}],
+        "leaf_grant_ref": {"grant_id": grants[0]["grant_id"], "grant_revision": "1"},
+        "grants": grants,
+        "observations": [{"grant_id": g["grant_id"], "grant_revision": "1",
+                          "grant_digest": digest({"domain": "contextos.authority_grant.v1", "grant": g}),
+                          "verification_ref": g["verification_ref"], "verification_status": "verified",
+                          "revocation_status": "active", "observer": observer, **WINDOW} for g in grants],
         "run_links": [],
     }
 
@@ -80,7 +94,13 @@ def approvals(req):
 
 
 def payments(req):
+    tool = req["params"]["name"]
     args = req["params"]["arguments"]
+    if tool == "lookup_order":
+        print(f"[orders] lookup {args['order_id']}")
+        order = {"order_id": args["order_id"], "status": "delivered_damaged", "amount_minor": 120000, "currency": "INR",
+                 "customer_id": "cus_77", "refundable": True}
+        return {"jsonrpc": "2.0", "id": req["id"], "result": {"structuredContent": order}}
     print(f"[payments] refund {args['amount_minor']} for {args['order_id']} (operation {req['params']['_meta']['io.contextos/operationId']})")
     return {"jsonrpc": "2.0", "id": req["id"], "result": {"structuredContent": {"refund_id": "rf_" + args["order_id"]}}}
 

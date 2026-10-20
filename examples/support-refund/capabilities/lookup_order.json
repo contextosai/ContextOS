@@ -1,0 +1,19 @@
+{
+  "capability_id": "adp_orders.lookup",
+  "capability_version": "1",
+  "adapter_id": "adp_orders",
+  "protocol_tool": "lookup_order",
+  "purpose_id": "support.refund",
+  "desired_effect": "order_facts_read",
+  "description": "Look up an order's status, amount and refund eligibility.",
+  "action_risk": {"effect": "none", "authority": "service", "reversibility": "read_only", "interaction": "api", "data_scope": "CONFIDENTIAL"},
+  "approval_mode": "read_only",
+  "resource_pointers": ["/order_id"],
+  "destination_pointers": [],
+  "recovery": {"strategy": "no_retry", "max_attempts": 1, "retry_delays_seconds": []},
+  "timeout_ms": 2000,
+  "reservation": {"tokens": 0, "tool_calls": 1, "replans": 0, "cost_units": 0},
+  "input_schema": {"type": "object", "additionalProperties": false, "required": ["order_id"], "properties": {"order_id": {"type": "string"}}},
+  "adapter_ref": {"artifact_type": "adapter", "artifact_id": "orders", "version": "1", "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+  "capability_ref": {"artifact_type": "capability", "artifact_id": "lookup_order", "version": "1", "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}
+}

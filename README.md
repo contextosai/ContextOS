@@ -33,6 +33,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 ## Start
 
 - Run the quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
+- A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
 - Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
