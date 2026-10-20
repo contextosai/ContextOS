@@ -46,6 +46,8 @@ pub struct DispatchSetup {
     pub model_call_floor: u64,
     /// Registered result schemas for delegations (`[[result_schemas]]`), by reference.
     pub result_schemas: Vec<(String, serde_json::Value)>,
+    /// `[guards] completion_requires_scores` as (policy, safety) floors.
+    pub completion_floor: Option<(f64, f64)>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -79,6 +81,7 @@ where
     }
     gateway.set_loop_limit(setup.loop_limit);
     gateway.set_model_call_floor(setup.model_call_floor);
+    gateway.set_completion_floor(setup.completion_floor);
     Ok(gateway)
 }
 
@@ -251,5 +254,9 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         loop_limit: Some(config.guards.identical_tool_calls).filter(|n| *n > 0),
         model_call_floor: config.guards.model_call_min_tokens,
         result_schemas,
+        completion_floor: config
+            .guards
+            .completion_requires_scores
+            .map(|f| (f.policy_floor, f.safety_floor)),
     }))
 }

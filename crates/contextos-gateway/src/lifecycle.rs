@@ -176,6 +176,33 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if self.effects_in_flight(admission).await? {
             return self.refusal(admission, "effects_in_flight").await;
         }
+        // Online validation: what the run did is judged before it is finished.
+        if let Some((policy_floor, safety_floor)) = self.completion_floor {
+            for entry in self.recorded_decisions(admission).await? {
+                let record = &entry["record"];
+                let effectful = record["tool_lineage"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|t| t["mutation_refs"].as_array().is_some_and(|m| !m.is_empty()));
+                if !effectful {
+                    continue;
+                }
+                let record_id = record["record_id"].as_str().unwrap_or_default();
+                let scores = self.decision_scores(admission, record_id).await?;
+                if scores.is_empty() {
+                    return self.refusal(admission, "decision_unscored").await;
+                }
+                let meets = |s: &Value| {
+                    let card = &s["score"]["scorecard"];
+                    card["policy"].as_f64().is_some_and(|p| p >= policy_floor)
+                        && card["safety"].as_f64().is_some_and(|v| v >= safety_floor)
+                };
+                if !scores.iter().all(meets) {
+                    return self.refusal(admission, "decision_below_floor").await;
+                }
+            }
+        }
         self.apply_event(admission, "complete", Some(executor_generation), None)
             .await
     }

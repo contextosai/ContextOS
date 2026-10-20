@@ -2160,3 +2160,47 @@ async fn an_accepted_child_must_meet_its_output_schema() {
         .unwrap();
     assert_eq!(accepted.status, "closed", "{:?}", accepted.reason_codes);
 }
+
+#[tokio::test]
+async fn a_run_completes_only_after_its_effects_are_judged() {
+    let scored = |safety: f64| async move {
+        let mut h = harness("allow", Behavior::Confirm).await;
+        h.gateway.set_completion_floor(Some((1.0, 0.9)));
+        let generation = running(&h).await;
+        h.gateway.remember_compiled(&h.admission, &compiled().0).await.unwrap();
+        let out = h
+            .gateway
+            .dispatch(&h.admission, &call("tc_1", Some("refund_judged")))
+            .await
+            .unwrap();
+        assert_eq!(out.result["status"], "completed");
+        let report: DecisionReport = serde_json::from_value(json!({
+            "decision_key": "support.refund.execute", "decision_version": "1", "status": "DEFERRED",
+            "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out.report.operation_id}]}))
+        .unwrap();
+        let recorded = h
+            .gateway
+            .record_decision(&h.admission, report, "svc_recorder")
+            .await
+            .unwrap();
+        let unscored = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+        assert_eq!(
+            unscored.reason_codes,
+            vec!["decision_unscored".to_owned()],
+            "an unjudged effect blocks completion"
+        );
+        let score: ScoreReport = serde_json::from_value(
+            json!({"evaluator_ref": "judge@1", "policy": 1.0, "utility": 0.9, "safety": safety}),
+        )
+        .unwrap();
+        h.gateway
+            .score_decision(&h.admission, &recorded.record.record_id, "svc_judge", &score)
+            .await
+            .unwrap();
+        h.gateway.complete_run(&h.admission, generation).await.unwrap()
+    };
+    assert_eq!(scored(0.5).await.reason_codes, vec!["decision_below_floor".to_owned()]);
+    let completed = scored(1.0).await;
+    assert!(completed.reason_codes.is_empty(), "{:?}", completed.reason_codes);
+    assert_eq!(completed.status, "completed");
+}

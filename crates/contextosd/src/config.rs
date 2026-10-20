@@ -145,6 +145,18 @@ pub struct GuardsConfig {
     /// reviewed shape (read-only tools too: their results carry most injected content).
     #[serde(default)]
     pub require_tool_schemas: bool,
+    /// Online validation: a run may complete only when every decision that applied an
+    /// effect holds an independent score whose `policy` and `safety` meet these floors.
+    #[serde(default)]
+    pub completion_requires_scores: Option<ScoreFloors>,
+}
+
+/// Score floors for [`GuardsConfig::completion_requires_scores`], each in 0..=1.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoreFloors {
+    pub policy_floor: f64,
+    pub safety_floor: f64,
 }
 
 fn default_model_call_tokens() -> u64 {
@@ -164,6 +176,7 @@ impl Default for GuardsConfig {
             require_user_role: None,
             trust_supplied_memory: false,
             require_tool_schemas: false,
+            completion_requires_scores: None,
         }
     }
 }
@@ -337,6 +350,15 @@ impl Config {
     }
 
     fn check(&self) -> Result<(), ConfigError> {
+        if let Some(floors) = self.guards.completion_requires_scores
+            && ![floors.policy_floor, floors.safety_floor]
+                .iter()
+                .all(|f| (0.0..=1.0).contains(f))
+        {
+            return Err(ConfigError::Invalid(
+                "[guards] completion_requires_scores floors must be between 0 and 1".into(),
+            ));
+        }
         for key in &self.api_keys {
             let hex = key.key_sha256.strip_prefix("sha256:").unwrap_or_default();
             if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {

@@ -594,6 +594,21 @@ operator records the outcome, `handled` or `dismissed`, with a reason:
 grants nothing: if the human decides the action should go ahead, it is retried and
 goes through policy and approvals like any other call.
 
+### Require scores before a run completes
+
+Scores are evidence after the fact unless something waits for them. With
+
+```toml
+[guards]
+completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }
+```
+
+a run cannot complete while any decision that applied an effect has no independent
+score (`decision_unscored`) or has a score whose `policy` or `safety` is below its
+floor (`decision_below_floor`); every score counts, so one dissenting evaluator holds
+the run. The executor waits for its evaluators, or the run is failed or cancelled
+instead.
+
 ## 8. Kill switch
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
@@ -714,6 +729,7 @@ Also turn on:
 ```toml
 [guards]
 require_tool_schemas = true      # every capability has input and output schemas
+completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }   # judged before done
 
 [[result_schemas]]               # what delegated runs' results must meet
 # ref = "schema://…"

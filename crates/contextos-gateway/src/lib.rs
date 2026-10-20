@@ -202,6 +202,9 @@ pub struct Gateway<S, L> {
     loop_limit: Option<u64>,
     /// Tokens every model-call reservation covers at least.
     model_call_floor: u64,
+    /// Scores every effectful decision needs from an independent evaluator before the
+    /// run may complete (`policy`, `safety` floors); `None` requires none.
+    completion_floor: Option<(f64, f64)>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -327,6 +330,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             result_schemas: HashMap::new(),
             loop_limit: None,
             model_call_floor: 0,
+            completion_floor: None,
         }
     }
 
@@ -340,6 +344,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// [`Gateway::reserve_usage`]).
     pub fn set_model_call_floor(&mut self, tokens: u64) {
         self.model_call_floor = tokens;
+    }
+
+    /// Requires every decision that applied an effect to hold an independent score with
+    /// `policy` and `safety` at or above these floors before the run completes.
+    pub fn set_completion_floor(&mut self, floor: Option<(f64, f64)>) {
+        self.completion_floor = floor;
     }
 
     pub fn register_adapter(&mut self, adapter_id: impl Into<String>, adapter: Arc<dyn Adapter>) {
