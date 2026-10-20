@@ -8,7 +8,7 @@ use std::sync::Arc;
 use contextos_kernel::budget_ledger::reserve_child_budget;
 use contextos_kernel::operation_ledger::claim_operation;
 use contextos_store::{
-    AppendLog, Commit, DocKey, DocKind, DocumentStore, LogRow, MemoryLog, MemoryStore, StoreError, transact,
+    AppendLog, AppendRow, Commit, DocKey, DocKind, DocumentStore, LogRow, MemoryLog, MemoryStore, StoreError, transact,
 };
 use serde_json::{Value, json};
 
@@ -129,10 +129,13 @@ async fn concurrent_claims_admit_one<S: DocumentStore + 'static>(store: Arc<S>, 
 }
 
 async fn append_log_semantics<L: AppendLog>(log: &L, tenant: &str) {
-    let row = |sequence: u64| LogRow {
-        sequence,
-        record_hash: format!("sha256:{sequence:064x}"),
-        body: json!({"s": sequence}),
+    let row = |sequence: u64| {
+        AppendRow::encode(&LogRow {
+            sequence,
+            record_hash: format!("sha256:{sequence:064x}"),
+            body: json!({"s": sequence}),
+        })
+        .unwrap()
     };
     assert_eq!(log.head(tenant).await.unwrap(), None);
     assert!(
@@ -148,7 +151,8 @@ async fn append_log_semantics<L: AppendLog>(log: &L, tenant: &str) {
     assert!(log.append(tenant, &row(4)).await.unwrap_err().is_conflict(), "gap");
     assert_eq!(log.head(tenant).await.unwrap().unwrap().sequence, 2);
     let rows = log.range(tenant, 2, 10).await.unwrap();
-    assert_eq!(rows, vec![row(2)]);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].sequence, &rows[0].body), (2, &json!({"s": 2})));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]

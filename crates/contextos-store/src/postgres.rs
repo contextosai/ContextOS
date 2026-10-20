@@ -177,29 +177,46 @@ impl crate::AppendLog for PostgresStore {
         row.map(|r| log_row(&r)).transpose()
     }
 
-    async fn append(&self, tenant_id: &str, entry: &crate::LogRow) -> Result<(), StoreError> {
-        let (text, _) = encode(&entry.body)?;
-        let sequence = i64::try_from(entry.sequence).map_err(|_| StoreError::Integrity)?;
-        // The previous sequence must exist (or this is the genesis row), and the
-        // primary key rejects a concurrent writer for the same sequence.
+    async fn append_batch(&self, tenant_id: &str, batch: &[crate::AppendRow]) -> Result<(), StoreError> {
+        let Some(first) = batch.first() else {
+            return Ok(());
+        };
+        if batch.windows(2).any(|w| w[1].sequence != w[0].sequence + 1) {
+            return Err(StoreError::Integrity);
+        }
+        let sequences = batch
+            .iter()
+            .map(|r| i64::try_from(r.sequence).map_err(|_| StoreError::Integrity))
+            .collect::<Result<Vec<_>, _>>()?;
+        let hashes: Vec<&str> = batch.iter().map(|r| r.record_hash.as_str()).collect();
+        let texts: Vec<&str> = batch.iter().map(|r| r.text.as_str()).collect();
+        // One statement: the batch must start right after the current head, and the
+        // primary key rejects a concurrent writer for any of its sequences, which
+        // aborts the whole statement.
         let inserted = sqlx::query(
             "INSERT INTO contextos_audit_log (tenant_id, sequence, record_hash, body) \
-             SELECT $1, $2, $3, $4 WHERE $2 = COALESCE((SELECT max(sequence) FROM contextos_audit_log WHERE tenant_id = $1), 0) + 1 \
-             ON CONFLICT (tenant_id, sequence) DO NOTHING RETURNING sequence",
+             SELECT $1, r.sequence, r.record_hash, r.body FROM unnest($2::bigint[], $3::text[], $4::text[]) \
+               AS r(sequence, record_hash, body) \
+             WHERE $5 = COALESCE((SELECT max(sequence) FROM contextos_audit_log WHERE tenant_id = $1), 0) + 1",
         )
         .bind(tenant_id)
-        .bind(sequence)
-        .bind(&entry.record_hash)
-        .bind(&text)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| backend(&e))?;
+        .bind(&sequences)
+        .bind(&hashes)
+        .bind(&texts)
+        .bind(sequences[0])
+        .execute(&self.pool)
+        .await;
         match inserted {
-            Some(_) => Ok(()),
-            None => Err(StoreError::Conflict {
-                expected: Some(entry.sequence.saturating_sub(1)),
+            Ok(done) if done.rows_affected() == batch.len() as u64 => Ok(()),
+            Ok(_) => Err(StoreError::Conflict {
+                expected: Some(first.sequence.saturating_sub(1)),
                 actual: crate::AppendLog::head(self, tenant_id).await?.map(|h| h.sequence),
             }),
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => Err(StoreError::Conflict {
+                expected: Some(first.sequence.saturating_sub(1)),
+                actual: None,
+            }),
+            Err(e) => Err(backend(&e)),
         }
     }
 

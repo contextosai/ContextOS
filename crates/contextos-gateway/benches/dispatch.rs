@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use contextos_audit::{AuditSigner, AuditWriter, KeyRing};
+use contextos_audit::{AuditSigner, AuditWriter};
 use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::execution::WorkflowFeatureSet;
 use contextos_contract::types::{CompiledContext, ContextPack, InvokeRequest, RunContext};
 use contextos_gateway::*;
 use contextos_kernel::{CompileDeps, ContextPackCompiler, STANDARD_PROFILE_REGISTRY};
-use contextos_store::{DocKey, DocKind, DocumentStore, MemoryLog, MemoryStore};
+use contextos_store::{AppendLog, DocumentStore, MemoryLog, MemoryStore};
 use criterion::{Criterion, criterion_group, criterion_main};
 use serde_json::{Value, json};
 
@@ -246,53 +246,52 @@ fn manifest() -> CapabilityManifest {
     .unwrap()
 }
 
-struct Harness {
-    gateway: Gateway<MemoryStore, MemoryLog>,
-    admission: RunAdmission,
-    store: Arc<MemoryStore>,
-    audit: Arc<AuditWriter<MemoryLog>>,
-    adapter: Arc<Payments>,
-    approvals: Arc<Approvals>,
+struct Setup<S, L> {
+    gateway: Arc<Gateway<S, L>>,
+    store: Arc<S>,
 }
 
-async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
-    let store = Arc::new(MemoryStore::new());
-    let audit = Arc::new(AuditWriter::new(
-        MemoryLog::new(),
-        AuditSigner::from_seed("gw-1", [3; 32]),
-    ));
-    let approvals = Arc::new(Approvals::default());
+fn setup<S: DocumentStore + 'static, L: AppendLog + 'static>(store: Arc<S>, log: L) -> Setup<S, L> {
+    let audit = Arc::new(AuditWriter::new(log, AuditSigner::from_seed("gw-1", [3; 32])));
     let ports = Ports {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SeqIds::default()),
         authority: Arc::new(Authority),
-        policy: if verdict == "pinned" {
-            Arc::new(PinnedPolicy)
-        } else {
-            Arc::new(Policy(verdict))
-        },
+        policy: Arc::new(Policy("allow")),
         constraints: Arc::new(Constraints),
-        approvals: approvals.clone(),
+        approvals: Arc::new(Approvals::default()),
         idempotency: None,
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),
-        behavior,
+        behavior: Behavior::Confirm,
     });
-    let mut gateway = Gateway::new(store.clone(), audit.clone(), ports);
-    gateway.register_adapter("adp_payments", adapter.clone());
+    let mut gateway = Gateway::new(store.clone(), audit, ports);
+    gateway.register_adapter("adp_payments", adapter);
     gateway.pin_capability(manifest()).unwrap();
+    Setup {
+        gateway: Arc::new(gateway),
+        store,
+    }
+}
+
+static RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Admits a fresh run (unique id, so a persistent store can be reused).
+async fn admit<S: DocumentStore + 'static>(store: &S) -> RunAdmission {
+    let run_id = format!("run_{}_{}", std::process::id(), RUNS.fetch_add(1, Ordering::Relaxed));
     let registry = &*STANDARD_PROFILE_REGISTRY;
-    let contract = json!({"envelope_version": "contextos.execution_contract.v1", "contract_id": "contract_1",
-        "run_id": "run_1", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
+    let contract = json!({"envelope_version": "contextos.execution_contract.v1", "contract_id": format!("contract_{run_id}"),
+        "run_id": run_id, "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
         "profiles": [{"profile_id": "contextos.core", "profile_version": "1"}], "required_controls": [],
         "optional_controls": [], "release_refs": [artifact("release", "runtime@0.1.0")]});
     let support = json!({"implementation_id": "contextos-rs", "implementation_version": "0.1.0",
         "supported_profiles": registry.profiles.iter().map(|p| &p.profile).collect::<Vec<_>>(),
         "supported_controls": registry.controls.iter().map(|c| &c.control).collect::<Vec<_>>()});
-    let (compiled, compiler, request, run_context) = compiled();
-    let admission = admit_run(
-        store.as_ref(),
+    let (compiled, compiler, request, mut run_context) = compiled();
+    run_context.run_id.clone_from(&run_id);
+    admit_run(
+        store,
         AdmissionRequest {
             contract: &contract,
             support: &support,
@@ -318,19 +317,11 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
         },
     )
     .await
-    .unwrap();
-    Harness {
-        gateway,
-        admission,
-        store,
-        audit,
-        adapter,
-        approvals,
-    }
+    .unwrap()
 }
 
-fn call(id: &str, idempotency_key: Option<&str>) -> Value {
-    json!({"envelope_version": "contextos.tool_call.v1", "tool_call_id": id, "run_id": "run_1",
+fn call(run_id: &str, id: &str, idempotency_key: &str) -> Value {
+    json!({"envelope_version": "contextos.tool_call.v1", "tool_call_id": id, "run_id": run_id,
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "capability_id": "adp_payments.issue_refund",
         "args": {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 420_000},
         "principal_chain": [{"kind": "agent", "id": "agt_support"}],
@@ -338,14 +329,54 @@ fn call(id: &str, idempotency_key: Option<&str>) -> Value {
         "evidence_refs": ["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"], "idempotency_key": idempotency_key})
 }
 
-async fn ledger(h: &Harness, kind: DocKind, id: &str) -> Value {
-    h.store.get(&DocKey::new(TENANT, kind, id)).await.unwrap().unwrap().body
+/// Sequential effects within fresh runs: per-effect latency.
+async fn sequential<S: DocumentStore + 'static, L: AppendLog + 'static>(s: &Setup<S, L>, iterations: u64) -> Duration {
+    let mut total = Duration::ZERO;
+    let mut done = 0;
+    while done < iterations {
+        let admission = admit(s.store.as_ref()).await;
+        let batch = (iterations - done).min(50);
+        for i in 0..batch {
+            let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"));
+            let started = Instant::now();
+            let out = s.gateway.dispatch(&admission, &envelope).await.unwrap();
+            total += started.elapsed();
+            assert_eq!(out.result["status"], "completed");
+        }
+        done += batch;
+    }
+    total
 }
 
-fn keys() -> KeyRing {
-    let mut ring = KeyRing::new();
-    ring.insert("gw-1", AuditSigner::from_seed("gw-1", [3; 32]).verifying_key());
-    ring
+/// `RUNS_IN_PARALLEL` runs of one tenant, `EFFECTS_PER_RUN` effects each, dispatching
+/// at once through one gateway, store and audit writer. Reported time per effect is
+/// wall time / effects, so its inverse is single-tenant throughput.
+const RUNS_IN_PARALLEL: u64 = 32;
+const EFFECTS_PER_RUN: u64 = 50;
+
+async fn concurrent<S: DocumentStore + 'static, L: AppendLog + 'static>(s: &Setup<S, L>, iterations: u64) -> Duration {
+    let mut admissions = Vec::new();
+    for _ in 0..RUNS_IN_PARALLEL {
+        admissions.push(admit(s.store.as_ref()).await);
+    }
+    let started = Instant::now();
+    let mut tasks = Vec::new();
+    for admission in admissions {
+        let gateway = s.gateway.clone();
+        tasks.push(tokio::spawn(async move {
+            for i in 0..EFFECTS_PER_RUN {
+                let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"));
+                let out = gateway.dispatch(&admission, &envelope).await.unwrap();
+                assert_eq!(out.result["status"], "completed");
+            }
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+    let effects = EFFECTS_PER_RUN * RUNS_IN_PARALLEL;
+    // Scale to the requested iteration count.
+    started.elapsed().mul_f64(iterations as f64 / effects as f64)
 }
 
 fn bench(c: &mut Criterion) {
@@ -353,26 +384,38 @@ fn bench(c: &mut Criterion) {
         .enable_all()
         .build()
         .unwrap();
+    let memory = setup(Arc::new(MemoryStore::new()), MemoryLog::new());
     c.bench_function("gateway_dispatch_completed", |b| {
-        b.to_async(&runtime).iter_custom(|iterations| async move {
-            let mut total = Duration::ZERO;
-            let mut done = 0;
-            while done < iterations {
-                let h = harness("allow", Behavior::Confirm).await;
-                let batch = (iterations - done).min(50);
-                for i in 0..batch {
-                    let envelope = call(&format!("tc_{i}"), Some(&format!("op_{i}")));
-                    let started = Instant::now();
-                    let out = h.gateway.dispatch(&h.admission, &envelope).await.unwrap();
-                    total += started.elapsed();
-                    assert_eq!(out.result["status"], "completed");
-                }
-                done += batch;
-            }
-            total
-        })
+        b.to_async(&runtime).iter_custom(|n| sequential(&memory, n))
     });
+    c.bench_function("gateway_dispatch_concurrent_32_runs", |b| {
+        b.to_async(&runtime).iter_custom(|n| concurrent(&memory, n))
+    });
+
+    // PostgreSQL: set CONTEXTOS_BENCH_DATABASE_URL to a disposable database.
+    if let Ok(url) = std::env::var("CONTEXTOS_BENCH_DATABASE_URL") {
+        let store = runtime.block_on(async {
+            let store = contextos_store::postgres::PostgresStore::connect(&url, 64)
+                .await
+                .unwrap();
+            store.migrate().await.unwrap();
+            store
+        });
+        let postgres = setup(Arc::new(store.clone()), store);
+        let mut group = c.benchmark_group("postgres");
+        group.sample_size(20);
+        group.bench_function("gateway_dispatch_completed", |b| {
+            b.to_async(&runtime).iter_custom(|n| sequential(&postgres, n))
+        });
+        group.bench_function("gateway_dispatch_concurrent_32_runs", |b| {
+            b.to_async(&runtime).iter_custom(|n| concurrent(&postgres, n))
+        });
+        group.finish();
+    }
 }
+
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 criterion_group!(dispatch, bench);
 criterion_main!(dispatch);

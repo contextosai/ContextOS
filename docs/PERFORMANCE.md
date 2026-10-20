@@ -27,21 +27,34 @@ equals UTF-16 order.
 
 ## Gateway (governed dispatch, in-memory store, signed audit, instant fake providers)
 
-| Measure | Latency |
+| Measure | Result |
 |---|---|
-| Full dispatch, average over the first 50 effects of a run | ~0.74 ms |
+| One run, sequential effects (average over 50 effects) | ~0.66 ms per effect |
+| 32 runs of one tenant in parallel, 50 effects each | ~138 µs per effect (~7,200 effects/s) |
 
-History: 1.2 ms → 0.74 ms by moving from one run-wide operation ledger to one ledger
-document per operation (the kernel evaluates the single-operation projection; attempt
-ids are fresh and provider keys derive from the operation id, so no cross-operation
-check is lost). Operation cost no longer grows with the run, and parallel operations
-in a run no longer contend.
+Every effect appends three signed entries to its tenant's hash chain, so a tenant's
+chain is the one serial point in the pipeline. The audit writer uses **group commit**:
+appenders encode and hash their payloads in parallel, queue them, and whichever
+appender holds the chain links the whole queue and writes it in one atomic batch.
+Before group commit, single-tenant throughput was flat at ~1,500–2,000 effects/s no
+matter how many runs were active: the cost was not the 12 µs of linking and signing
+but waking the next waiter for every entry. With group commit, throughput scales with
+parallelism and the process is CPU-bound (~6.7 cores busy at 32 runs). Tenants never
+share a chain, so throughput across tenants scales with cores and replicas.
 
-Remaining profile per effect: the shared run budget ledger (reserve + settle, kernel
-re-validation of up to 128 receipts, canonical encoding) is the largest component;
-then authorization (~63 µs plus fact gathering) and three signed audit appends
-(~25 µs each). With PostgreSQL, round trips to the store dominate: one dispatch makes
-about nine store operations.
+History: 1.2 ms → 0.74 ms per sequential effect from one ledger document per
+operation; → ~0.66 ms with mimalloc (the server's default allocator). Single-tenant
+parallel throughput ~1,900 → ~7,200 effects/s from group commit.
+
+With PostgreSQL, a batch is one `INSERT … SELECT unnest(…)` round trip, so per-tenant
+audit throughput is bounded by batch size over round-trip time rather than by entries
+over round-trip time. Run the PostgreSQL benchmarks with
+`CONTEXTOS_BENCH_DATABASE_URL=postgres://… cargo bench -p contextos-gateway --bench dispatch -- postgres`
+(CI runs them on every push).
+
+Remaining per-effect CPU: canonical encoding and hashing of ledgers and audit
+payloads, and kernel re-validation of the run's budget ledger, whose cost grows with
+the receipts it holds.
 
 ## Known limits
 

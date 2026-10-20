@@ -9,6 +9,10 @@ use contextosd::config::StoreConfig;
 use contextosd::runtime::dispatch_setup_from_config;
 use contextosd::{Config, build_state, load_pack, router, signer_from_env};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn fail(message: impl std::fmt::Display) -> ! {
     tracing::error!(%message, "startup failed");
     eprintln!("contextosd: {message}");

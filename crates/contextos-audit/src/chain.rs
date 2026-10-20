@@ -108,6 +108,24 @@ fn invalid(index: usize, reason: &'static str) -> ChainError {
     ChainError::Invalid { index, reason }
 }
 
+/// The parts of a chain head the next entry links to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainHead {
+    pub sequence: u64,
+    pub record_hash: String,
+    pub emitted_at: String,
+}
+
+impl From<&AuditEntry> for ChainHead {
+    fn from(entry: &AuditEntry) -> Self {
+        Self {
+            sequence: entry.sequence,
+            record_hash: entry.record_hash.clone(),
+            emitted_at: entry.emitted_at.clone(),
+        }
+    }
+}
+
 /// Builds the next entry on top of `head` (or the genesis entry when `head` is None).
 /// `emitted_at` comes from the runtime's trusted clock; it must not precede the head.
 pub fn next_entry(
@@ -118,42 +136,108 @@ pub fn next_entry(
     emitted_at: &str,
     signer: &AuditSigner,
 ) -> Result<AuditEntry, ChainError> {
+    if head.is_some_and(|h| h.tenant_id != tenant_id) {
+        return Err(invalid(0, "head belongs to another tenant"));
+    }
+    let payload_digest = sha256_canonical(&payload)?;
+    link_entry(
+        head.map(ChainHead::from).as_ref(),
+        tenant_id,
+        kind,
+        payload,
+        payload_digest,
+        emitted_at,
+        signer,
+    )
+}
+
+/// The chain linkage and signature of the next entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub sequence: u64,
+    pub prev_hash: Option<String>,
+    pub record_hash: String,
+    pub signature: EntrySignature,
+}
+
+/// Links and signs the next entry for a payload with a known canonical digest. This
+/// is all of an append that has to happen in a chain's serial section.
+pub fn link(
+    head: Option<&ChainHead>,
+    tenant_id: &str,
+    kind: &str,
+    payload_digest: &str,
+    emitted_at: &str,
+    signer: &AuditSigner,
+) -> Result<Link, ChainError> {
     if !is_contract_timestamp(emitted_at) {
         return Err(invalid(0, "emitted_at is not a contract timestamp"));
     }
-    if let Some(head) = head {
-        if head.tenant_id != tenant_id {
-            return Err(invalid(0, "head belongs to another tenant"));
-        }
-        if compare_contract_times(emitted_at, &head.emitted_at) == Some(std::cmp::Ordering::Less) {
-            return Err(invalid(0, "emitted_at precedes the chain head"));
-        }
+    if head.is_some_and(|h| compare_contract_times(emitted_at, &h.emitted_at) == Some(std::cmp::Ordering::Less)) {
+        return Err(invalid(0, "emitted_at precedes the chain head"));
     }
     let sequence = head.map_or(1, |h| h.sequence + 1);
     let prev_hash = head.map(|h| h.record_hash.clone());
-    let payload_digest = sha256_canonical(&payload)?;
-    let hash = record_hash(&Spine {
+    let record_hash = record_hash(&Spine {
         entry_version: ENTRY_VERSION,
         tenant_id,
         sequence,
         prev_hash: prev_hash.as_deref(),
         kind,
         emitted_at,
-        payload_digest: &payload_digest,
+        payload_digest,
     })?;
-    let signature = signer.sign(&hash);
-    Ok(AuditEntry {
-        entry_version: ENTRY_VERSION.into(),
-        tenant_id: tenant_id.into(),
+    let signature = signer.sign(&record_hash);
+    Ok(Link {
         sequence,
         prev_hash,
+        record_hash,
+        signature,
+    })
+}
+
+/// Assembles an entry from its linkage.
+pub fn assemble_entry(
+    link: Link,
+    tenant_id: &str,
+    kind: &str,
+    emitted_at: &str,
+    payload: Value,
+    payload_digest: String,
+) -> AuditEntry {
+    AuditEntry {
+        entry_version: ENTRY_VERSION.into(),
+        tenant_id: tenant_id.into(),
+        sequence: link.sequence,
+        prev_hash: link.prev_hash,
         kind: kind.into(),
         emitted_at: emitted_at.into(),
         payload_digest,
         payload,
-        record_hash: hash,
-        signature,
-    })
+        record_hash: link.record_hash,
+        signature: link.signature,
+    }
+}
+
+/// As [`next_entry`] for a payload whose canonical digest is already known.
+pub fn link_entry(
+    head: Option<&ChainHead>,
+    tenant_id: &str,
+    kind: &str,
+    payload: Value,
+    payload_digest: String,
+    emitted_at: &str,
+    signer: &AuditSigner,
+) -> Result<AuditEntry, ChainError> {
+    let link = link(head, tenant_id, kind, &payload_digest, emitted_at, signer)?;
+    Ok(assemble_entry(
+        link,
+        tenant_id,
+        kind,
+        emitted_at,
+        payload,
+        payload_digest,
+    ))
 }
 
 /// Public keys accepted for verification, by key id.

@@ -1,16 +1,17 @@
 //! In-process store for embedded use and tests. Linearizable per key.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
 
-use crate::{DocKey, DocumentStore, Encoded, StoreError, Versioned, encode};
+use crate::{DocKey, DocumentStore, Encoded, StoreError, Versioned};
 
 /// A stored document: revision, parsed body and the digest of its canonical form.
-/// The in-process store keeps the parsed body, so reads cost one clone and no
-/// re-parsing; bodies are only ever written through canonical encoding.
-type StoredDoc = (u64, Value, String);
+/// The in-process store keeps the parsed body, so reads need no re-parsing; bodies
+/// are only ever written through canonical encoding. The lock covers a pointer copy
+/// only: the deep clone a reader needs happens after it is released.
+type StoredDoc = (u64, Arc<Value>, String);
 
 #[derive(Debug, Default)]
 pub struct MemoryStore {
@@ -29,11 +30,14 @@ impl MemoryStore {
 
 impl DocumentStore for MemoryStore {
     async fn get(&self, key: &DocKey) -> Result<Option<Versioned>, StoreError> {
-        let docs = self.docs.read().map_err(|_| Self::poisoned())?;
-        Ok(docs.get(key).map(|(revision, body, digest)| Versioned {
-            revision: *revision,
-            body: body.clone(),
-            digest: digest.clone(),
+        let found = {
+            let docs = self.docs.read().map_err(|_| Self::poisoned())?;
+            docs.get(key).cloned()
+        };
+        Ok(found.map(|(revision, body, digest)| Versioned {
+            revision,
+            body: Value::clone(&body),
+            digest,
         }))
     }
 
@@ -48,7 +52,7 @@ impl DocumentStore for MemoryStore {
                 actual: Some(*revision),
             });
         }
-        docs.insert(key.clone(), (1, canonical.clone(), digest.clone()));
+        docs.insert(key.clone(), (1, Arc::new(canonical.clone()), digest.clone()));
         Ok(Versioned {
             revision: 1,
             body: canonical,
@@ -81,6 +85,7 @@ impl DocumentStore for MemoryStore {
         body: Value,
         encoded: Encoded,
     ) -> Result<u64, StoreError> {
+        let body = Arc::new(body);
         let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
         let Some(entry) = docs.get_mut(key) else {
             return Err(StoreError::NotFound);
@@ -92,7 +97,10 @@ impl DocumentStore for MemoryStore {
             });
         }
         let revision = entry.0 + 1;
-        *entry = (revision, body, encoded.digest);
+        let replaced = std::mem::replace(entry, (revision, body, encoded.digest));
+        drop(docs);
+        // The replaced body is freed outside the lock.
+        drop(replaced);
         Ok(revision)
     }
 }
@@ -121,18 +129,27 @@ impl crate::AppendLog for MemoryLog {
             .transpose()
     }
 
-    async fn append(&self, tenant_id: &str, entry: &crate::LogRow) -> Result<(), StoreError> {
-        let (text, _) = encode(&entry.body)?;
+    async fn append_batch(&self, tenant_id: &str, batch: &[crate::AppendRow]) -> Result<(), StoreError> {
+        let Some(first) = batch.first() else {
+            return Ok(());
+        };
+        if batch.windows(2).any(|w| w[1].sequence != w[0].sequence + 1) {
+            return Err(StoreError::Integrity);
+        }
+        let stored: Vec<StoredRow> = batch
+            .iter()
+            .map(|r| (r.sequence, r.record_hash.clone(), r.text.clone()))
+            .collect();
         let mut rows = self.rows.write().map_err(|_| MemoryStore::poisoned())?;
         let chain = rows.entry(tenant_id.to_owned()).or_default();
         let head = chain.last().map(|(sequence, _, _)| *sequence);
-        if entry.sequence != head.map_or(1, |h| h + 1) {
+        if first.sequence != head.map_or(1, |h| h + 1) {
             return Err(StoreError::Conflict {
-                expected: Some(entry.sequence.saturating_sub(1)),
+                expected: Some(first.sequence.saturating_sub(1)),
                 actual: head,
             });
         }
-        chain.push((entry.sequence, entry.record_hash.clone(), text));
+        chain.extend(stored);
         Ok(())
     }
 

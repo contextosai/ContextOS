@@ -258,3 +258,40 @@ async fn open_evidence_gate_blocks_commit_and_records_are_chained() {
     );
     assert_eq!(packet.expected.status, "ESCALATED");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn group_commit_never_forks_across_writers() {
+    use std::sync::Arc;
+    let log = Arc::new(contextos_store::MemoryLog::new());
+    // Two writers over one log behave like two replicas over one database.
+    let writers = [
+        Arc::new(AuditWriter::new(log.clone(), AuditSigner::from_seed("w1", [1; 32]))),
+        Arc::new(AuditWriter::new(log.clone(), AuditSigner::from_seed("w2", [2; 32]))),
+    ];
+    let mut tasks = Vec::new();
+    for i in 0..400_u32 {
+        let writer = writers[(i % 2) as usize].clone();
+        tasks.push(tokio::spawn(async move {
+            // Timestamps arrive out of order; the chain still never goes backwards.
+            let at = format!("2026-10-20T10:00:{:02}Z", 59 - (i % 60));
+            writer
+                .append("tenant_a", "event", serde_json::json!({"i": i}), &at)
+                .await
+                .unwrap()
+        }));
+    }
+    let mut sequences = Vec::new();
+    for task in tasks {
+        sequences.push(task.await.unwrap().sequence);
+    }
+    sequences.sort_unstable();
+    assert_eq!(
+        sequences,
+        (1..=400).collect::<Vec<u64>>(),
+        "every append got its own place"
+    );
+    let mut keys = KeyRing::new();
+    keys.insert("w1", AuditSigner::from_seed("w1", [1; 32]).verifying_key());
+    keys.insert("w2", AuditSigner::from_seed("w2", [2; 32]).verifying_key());
+    assert_eq!(verify_tenant_chain(&log, "tenant_a", &keys).await.unwrap(), 400);
+}

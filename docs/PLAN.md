@@ -92,7 +92,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 18c OTLP trace export | done — OTLP/HTTP via the server's rustls client (no second TLS stack), W3C trace-context propagation, default `info` logging |
 | 19a Effect reconciliation | done — MCP task handles kept as attempt references, `tasks/get` provider queries, evidenced operator assertions under a `reconcile` scope, kernel-recorded facts, budget settlement, audit |
 | 19b MCP `input_required` continuation | done — definitive not-applied attempt, persisted single-use requests, re-authorized continuation bound to the same action digest, schema-checked answers, secret-field refusal, audited by digest |
-| 20 PostgreSQL load test in CI, open-source readiness (license decision pending, CONTRIBUTING, governance, issue templates) | next |
+| 20a Throughput | done — parallel benchmark found per-tenant audit appends serialized on lock handoffs (~1.9k effects/s flat); group commit with atomic batched log appends → ~7.2k effects/s single-tenant, CPU-bound; PostgreSQL benchmarks in CI; mimalloc |
+| 20b Open-source readiness (license decision pending, CONTRIBUTING, governance, issue templates) | next |
 
 ## Non-negotiables carried from the spec
 

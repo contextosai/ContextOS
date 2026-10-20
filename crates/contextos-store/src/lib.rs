@@ -227,6 +227,27 @@ where
     })
 }
 
+/// A shared log (several writers in one process, as separate replicas would share a
+/// database).
+impl<T: AppendLog> AppendLog for std::sync::Arc<T> {
+    fn head(&self, tenant_id: &str) -> impl Future<Output = Result<Option<LogRow>, StoreError>> + Send {
+        T::head(self, tenant_id)
+    }
+
+    fn append_batch(&self, tenant_id: &str, rows: &[AppendRow]) -> impl Future<Output = Result<(), StoreError>> + Send {
+        T::append_batch(self, tenant_id, rows)
+    }
+
+    fn range(
+        &self,
+        tenant_id: &str,
+        from: u64,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<LogRow>, StoreError>> + Send {
+        T::range(self, tenant_id, from, limit)
+    }
+}
+
 /// One row of a per-tenant append-only log.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogRow {
@@ -235,13 +256,40 @@ pub struct LogRow {
     pub body: Value,
 }
 
+/// A row to append, already in canonical JSON. Writers encode once (outside any
+/// serial section they hold); logs store the text as given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppendRow {
+    pub sequence: u64,
+    pub record_hash: String,
+    /// RFC 8785 text of the row body.
+    pub text: String,
+}
+
+impl AppendRow {
+    /// Encodes a [`LogRow`].
+    pub fn encode(row: &LogRow) -> Result<Self, StoreError> {
+        Ok(Self {
+            sequence: row.sequence,
+            record_hash: row.record_hash.clone(),
+            text: encode(&row.body)?.0,
+        })
+    }
+}
+
 /// Append-only, per-tenant hash-chained log storage. `append` succeeds only for the
 /// next sequence after the current head, so concurrent writers cannot fork the chain;
 /// the loser gets `Conflict` and must rebuild its entry on the new head.
 pub trait AppendLog: Send + Sync {
     fn head(&self, tenant_id: &str) -> impl Future<Output = Result<Option<LogRow>, StoreError>> + Send;
 
-    fn append(&self, tenant_id: &str, row: &LogRow) -> impl Future<Output = Result<(), StoreError>> + Send;
+    fn append(&self, tenant_id: &str, row: &AppendRow) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.append_batch(tenant_id, std::slice::from_ref(row))
+    }
+
+    /// Appends consecutive rows atomically: all land, or none do. The first row must
+    /// follow the current head; otherwise `Conflict`.
+    fn append_batch(&self, tenant_id: &str, rows: &[AppendRow]) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Rows with `sequence >= from`, ascending, at most `limit`.
     fn range(
