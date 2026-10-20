@@ -268,10 +268,10 @@ impl Config {
         if let Some(key) = self
             .api_keys
             .iter()
-            .find(|k| k.scopes.iter().any(|s| s == "evaluate") && runs(&k.principal_id))
+            .find(|k| k.scopes.iter().any(|s| s == "evaluate" || s == "meter") && runs(&k.principal_id))
         {
             return Err(ConfigError::Invalid(format!(
-                "principal {} cannot both evaluate and admit or dispatch",
+                "principal {} cannot both evaluate or meter and admit or dispatch",
                 key.principal_id
             )));
         }

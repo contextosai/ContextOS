@@ -224,12 +224,18 @@ async fn world_n(controls: &[&str], replicas: usize) -> World {
         tenant_id = "{TENANT}"
         principal_id = "svc_oncall"
         scopes = ["control"]
+        [[api_keys]]
+        key_sha256 = "{meter}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_llm_gateway"
+        scopes = ["meter"]
         "#,
         manifest = manifest_path.display(),
         key = hash_api_key("acme-key"),
         evaluator = hash_api_key("judge-key"),
         agent_judge = hash_api_key("agent-judge-key"),
-        operator = hash_api_key("ops-key")
+        operator = hash_api_key("ops-key"),
+        meter = hash_api_key("meter-key")
     ))
     .unwrap();
     let vectors: Value = serde_json::from_str(
@@ -2296,4 +2302,149 @@ async fn load_across_replicas() {
         effects,
         "exactly one provider call per effect"
     );
+}
+
+#[tokio::test]
+async fn model_calls_and_replans_spend_the_run_budget() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_budgeted", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let reserve = |body: Value| {
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_budgeted/usage/reserve", w.base));
+        async move { http.post(url).bearer_auth("acme-key").json(&body).send().await.unwrap() }
+    };
+    let settle = |key: &'static str, body: Value| {
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_budgeted/usage/settle", w.base));
+        async move { http.post(url).bearer_auth(key).json(&body).send().await.unwrap() }
+    };
+    let id = |r: Value| r["reservation_id"].as_str().unwrap().to_owned();
+
+    // Self-reported usage is not evidence: the whole reservation is charged.
+    let first = id(reserve(json!({"kind": "model_call", "tokens": 4000, "cost_cents": 1}))
+        .await
+        .json()
+        .await
+        .unwrap());
+    let charged: Value = settle("acme-key", json!({"reservation_id": first, "tokens": 10}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (charged["charged"]["tokens"].as_u64(), charged["verified"].as_bool()),
+        (Some(4000), Some(false)),
+        "{charged}"
+    );
+    // Usage measured by a metering principal settles to what was measured.
+    let second = id(reserve(json!({"kind": "model_call", "tokens": 4000, "cost_cents": 1}))
+        .await
+        .json()
+        .await
+        .unwrap());
+    let metered: Value = settle("meter-key", json!({"reservation_id": second, "tokens": 500}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (metered["charged"]["tokens"].as_u64(), metered["verified"].as_bool()),
+        (Some(500), Some(true)),
+        "{metered}"
+    );
+    // 4,500 of 10,000 tokens are spent: 6,000 more does not fit.
+    let over = reserve(json!({"kind": "model_call", "tokens": 6000})).await;
+    assert_eq!(over.status(), 409);
+    assert_eq!(over.json::<Value>().await.unwrap()["error"]["code"], "budget_exhausted");
+    // Two replans are allowed; the third is refused.
+    for _ in 0..2 {
+        assert_eq!(reserve(json!({"kind": "replan"})).await.status(), 201);
+    }
+    assert_eq!(reserve(json!({"kind": "replan"})).await.status(), 409);
+    // Only usage reservations settle here.
+    assert_eq!(
+        settle("meter-key", json!({"reservation_id": "reservation:attempt_1"}))
+            .await
+            .status(),
+        404
+    );
+
+    let evidence: Value = plain
+        .get(format!("{}/v1/runs/run_budgeted/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let ledger = &evidence["budget_ledger"];
+    assert_eq!(ledger["used"]["tokens"], 4500, "{ledger}");
+    assert_eq!(
+        ledger["reserved"]["replans"], 2,
+        "open replan reservations stay reserved"
+    );
+}
+
+#[tokio::test]
+async fn many_model_calls_keep_the_budget_ledger_compact() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_chatty", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    for _ in 0..20 {
+        let reserved: Value = http
+            .post(format!("{}/v1/runs/run_chatty/usage/reserve", w.base))
+            .bearer_auth("acme-key")
+            .json(&json!({"kind": "model_call", "tokens": 100}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let settled = plain
+            .post(format!("{}/v1/runs/run_chatty/usage/settle", w.base))
+            .bearer_auth("meter-key")
+            .json(&json!({"reservation_id": reserved["reservation_id"], "tokens": 90}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(settled.status(), 200);
+    }
+    let evidence: Value = plain
+        .get(format!("{}/v1/runs/run_chatty/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !evidence["budget_archives"].as_array().unwrap().is_empty(),
+        "40 mutations were compacted"
+    );
+    assert!(evidence["budget_ledger"]["mutations"].as_array().unwrap().len() < 32);
+    let opening = evidence["budget_ledger"]["opening_usage"]["tokens"].as_u64().unwrap();
+    let used = evidence["budget_ledger"]["used"]["tokens"].as_u64().unwrap();
+    assert_eq!(used, 1800, "20 metered calls of 90 tokens (opening {opening})");
 }

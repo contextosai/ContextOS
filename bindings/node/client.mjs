@@ -220,6 +220,19 @@ export class Run {
     });
   }
 
+  /** Reserves budget for a `model_call` or a `replan`; resolves to the reservation id. */
+  async reserveUsage(kind, { tokens = 0, costCents = 0 } = {}) {
+    return (await this.#post("/usage/reserve", { kind, tokens, cost_cents: costCents })).reservation_id;
+  }
+
+  /**
+   * Settles a reservation as the executor: the whole reservation is charged. Pass the
+   * id to your metering gateway instead to settle measured usage.
+   */
+  settleUsage(reservationId) {
+    return this.#post("/usage/settle", { reservation_id: reservationId });
+  }
+
   status() {
     return this.client.request("GET", this.#path());
   }

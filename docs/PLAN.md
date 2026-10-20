@@ -121,7 +121,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 43 Retention | done — `DocumentStore::expiring` (age scan excluding tombstones, cursor-paged; PG index), leader-elected sweeper erasing finished runs after `run_content_days` |
 | 44 Conformance over HTTP | done — `POST /v1/conformance/assess` with server-supplied identity, support, registry, clock and per-tenant trust anchors; outcomes audited |
 | 45 Staged rollout | done — per-tenant baseline→candidate rollouts, sticky hash routing (children follow parents), shadow governance diffs off the request path, audited control-plane changes |
-| 46 Next | next |
+| 46 Model and replan budgets | done — usage reserve/settle on the run's budget ledger, metering principals (`meter`) verify usage, self-reports charged in full, compaction, clients |
+| 47 Next | next |
 
 ## Non-negotiables carried from the spec
 

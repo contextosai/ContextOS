@@ -2219,6 +2219,219 @@
         ],
         "x-contextos-scope": "control"
       }
+    },
+    "/v1/runs/{run_id}/usage/reserve": {
+      "post": {
+        "operationId": "reserve_usage",
+        "summary": "Reserve budget for a model call or a replan",
+        "description": "Reserves from the run's budget ledger (the same pool as tool calls) under the run's deadline, fencing and kill switch; refused (`budget_exhausted`) when it does not fit. A replan reserves one of the run's replan allowance.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "model_call",
+                      "replan"
+                    ]
+                  },
+                  "tokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cost_cents": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reservation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reservation_id"
+                  ],
+                  "properties": {
+                    "reservation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/usage/settle": {
+      "post": {
+        "operationId": "settle_usage",
+        "summary": "Settle a usage reservation",
+        "description": "Reported by a metering principal (`meter` scope, without admit or dispatch), the measured usage is charged and the rest released. Reported by the run's executor (`dispatch`, current generation), the whole reservation is charged: self-reported usage is not evidence.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reservation_id"
+                ],
+                "properties": {
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cost_cents": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reservation_id",
+                    "charged",
+                    "verified"
+                  ],
+                  "properties": {
+                    "reservation_id": {
+                      "type": "string"
+                    },
+                    "charged": {
+                      "type": "object"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "meter"
+            ]
+          },
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "meter|dispatch"
+      }
     }
   },
   "components": {
@@ -2226,7 +2439,7 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only), control (operators: kill switch)."
+        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only), control (operators: kill switch, rollouts, erasure), meter (usage metering, e.g. an LLM gateway)."
       }
     },
     "parameters": {

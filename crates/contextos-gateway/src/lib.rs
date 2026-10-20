@@ -33,6 +33,7 @@ pub mod ports;
 mod reconcile;
 mod revocations;
 mod scores;
+mod usage;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -70,6 +71,7 @@ pub use ports::{
 pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
+pub use usage::{UsageKind, UsageRefusal};
 
 /// Receipts at which the run's budget ledger is compacted before the next
 /// reservation (ADR-0003). Keeps the ledger, and its per-effect validation cost, small,

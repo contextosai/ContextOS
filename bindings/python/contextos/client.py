@@ -256,6 +256,15 @@ class Run:
         return self.client.request("POST", f"/v1/runs/{_quote(child.run_id)}/close", {"decision": decision},
                                    generation=self.executor_generation)
 
+    def reserve_usage(self, kind: str, *, tokens: int = 0, cost_cents: int = 0) -> str:
+        """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""
+        return self._post("/usage/reserve", {"kind": kind, "tokens": tokens, "cost_cents": cost_cents})["reservation_id"]
+
+    def settle_usage(self, reservation_id: str) -> dict:
+        """Settles a reservation as the executor: the whole reservation is charged. Pass
+        the reservation id to your metering gateway instead to settle measured usage."""
+        return self._post("/usage/settle", {"reservation_id": reservation_id})
+
     def status(self) -> dict:
         return self.client.request("GET", self._path())
 

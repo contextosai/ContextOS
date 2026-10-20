@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Budgeted model calls and replans (`/v1/runs/{id}/usage/reserve|settle`): the same
+  ledger as tool calls; metered usage (new `meter` scope) settles to what was
+  measured, self-reported usage is charged in full.
 - Staged rollout of pack versions (`/v1/rollouts`, `control` scope): sticky
   percentage routing from baseline to candidate, shadow governance diffs audited on
   live traffic, clear to roll back.

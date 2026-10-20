@@ -101,6 +101,10 @@ def main() -> None:
                                        tool_calls=[{"tool_call_id": "tc_1", "operation_id": call["idempotency_key"]}])
         assert decision["record"]["tool_lineage"][0]["tool_call_id"] == "tc_1"
 
+        # Model calls spend the run's budget; a self-reported settlement charges it all.
+        reservation = run.reserve_usage("model_call", tokens=300)
+        assert run.settle_usage(reservation)["charged"]["tokens"] == 300
+
         # An independent evaluator scores the decision; the executor's key cannot.
         record_id = decision["record"]["record_id"]
         try:

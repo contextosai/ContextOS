@@ -398,7 +398,26 @@ latency or cost rise beyond the limits, when a baseline case has no candidate
 scorecards or a measured dimension is no longer measured, and when fewer cases pair
 than `min_cases`. Floors have no defaults: they are the release owner's decision.
 
-## 6. Score decisions independently
+## 6. Budget model calls and replans
+
+Tool calls are not the only spend. Before each model call or replan, the orchestrator
+reserves from the run's budget, the same ledger tool calls use, so parallel lanes
+cannot overrun it and resume cannot reset it:
+
+```sh
+POST /v1/runs/{run_id}/usage/reserve   {"kind": "model_call", "tokens": 4000, "cost_cents": 2}
+POST /v1/runs/{run_id}/usage/settle    {"reservation_id": "usage:…", "tokens": 1830}
+```
+
+A reservation that does not fit is refused (`budget_exhausted`); replans count against
+the run's replan allowance. Settlement depends on who reports: an LLM gateway or other
+metering service holding the `meter` scope (and neither `admit` nor `dispatch`) settles
+the usage it measured and releases the rest, while the run's own executor settling is
+charged the whole reservation, because self-reported usage is not evidence. Pass the
+reservation id to your model gateway (for example in a request header) so it can meter
+the call.
+
+## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
 service, an LLM judge, a human review queue) its own API key or OIDC client with only
@@ -422,7 +441,7 @@ Each evaluator scores a decision once. Scores are signed into the audit chain an
 appear beside their decision in the evidence bundle. Unknown scope names in API-key
 configuration are refused at startup.
 
-## 7. Kill switch
+## 8. Kill switch
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
 a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), a `principal` (an
@@ -444,7 +463,7 @@ with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
 
-## 8. Erase personal content
+## 9. Erase personal content
 
 A run's user-provided content lives in its replay case (the original request), its
 compiled context (task prompt and evidence blocks) and any pending tool input requests.
@@ -477,7 +496,7 @@ per sweep, and erases each finished run exactly as `POST /v1/runs/{id}/erase` wo
 with `contextos.retention` as the operator. Runs still in progress are revisited on a
 later sweep, never erased under their executor.
 
-## 9. Assess conformance
+## 10. Assess conformance
 
 Conformance applies to one exact workflow, implementation, release and environment, and
 needs current runtime evidence verified by observers you trust. Configure those trust
@@ -501,7 +520,7 @@ by its observer (`evidence_signatures`); see `contextosd::attest` for the domain
 stale, synthetic or unverified evidence yields `insufficient_evidence`; every outcome is
 audited.
 
-## 10. Operate
+## 11. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

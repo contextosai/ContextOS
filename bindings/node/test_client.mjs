@@ -83,6 +83,10 @@ try {
   });
   assert.equal(decision.record.tool_lineage[0].tool_call_id, "tc_1");
 
+  // Model calls spend the run's budget; a self-reported settlement charges it all.
+  const reservation = await run.reserveUsage("model_call", { tokens: 300 });
+  assert.equal((await run.settleUsage(reservation)).charged.tokens, 300);
+
   // An independent evaluator scores the decision; the executor's key cannot.
   const scores = { evaluatorRef: "evaluator.refund_quality@3", policy: 1, utility: 0.9, safety: 1 };
   await assert.rejects(client.score(run.runId, decision.record.record_id, scores), (error) =>

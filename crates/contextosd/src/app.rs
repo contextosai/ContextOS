@@ -10,6 +10,8 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
+//! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
 //! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
@@ -63,7 +65,7 @@ use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
     EffectOutcome, ErasureError, Gateway, Ownership, REVOCATION_KINDS, Resolution, RevocationError, RunAdmission,
-    ScoreRefusal, ScoreReport, admit_run, is_erased,
+    ScoreRefusal, ScoreReport, UsageKind, UsageRefusal, admit_run, is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1288,6 +1290,138 @@ struct AssessmentBody {
     evidence_signatures: Vec<Value>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum UsageKindBody {
+    ModelCall,
+    Replan,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReserveUsage {
+    kind: UsageKindBody,
+    #[serde(default)]
+    tokens: u64,
+    #[serde(default)]
+    cost_cents: u64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettleUsage {
+    reservation_id: String,
+    #[serde(default)]
+    tokens: u64,
+    #[serde(default)]
+    cost_cents: u64,
+}
+
+fn usage_error(refusal: UsageRefusal) -> ApiError {
+    match refusal {
+        UsageRefusal::Budget(reasons) => ApiError::new(
+            StatusCode::CONFLICT,
+            "budget_exhausted",
+            "The run's budget cannot fit this.",
+        )
+        .with_detail(json!(reasons)),
+        UsageRefusal::Revoked(reason) => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "revoked",
+            "This run has been revoked by an operator.",
+        )
+        .with_detail(json!([reason])),
+        UsageRefusal::UnknownReservation => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "reservation_not_found",
+            "No open usage reservation with this id in this run.",
+        ),
+        UsageRefusal::Gateway(_) => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        ),
+    }
+}
+
+/// Reserves budget for a model call or a replan (the run's current executor).
+async fn reserve_usage<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: ReserveUsage = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid reservation: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    require_owner(gateway, &admission, &headers).await?;
+    let kind = match request.kind {
+        UsageKindBody::ModelCall => UsageKind::ModelCall,
+        UsageKindBody::Replan => UsageKind::Replan,
+    };
+    let reservation_id = gateway
+        .reserve_usage(&admission, kind, request.tokens, request.cost_cents)
+        .await
+        .map_err(usage_error)?;
+    Ok((
+        StatusCode::CREATED,
+        axum::Json(json!({"reservation_id": reservation_id})),
+    )
+        .into_response())
+}
+
+/// Settles a usage reservation: verified when reported by a metering principal,
+/// otherwise the whole reservation is charged.
+async fn settle_usage<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, None)?;
+    let metered = caller.has("meter") && !caller.has("dispatch") && !caller.has("admit");
+    if !metered && !caller.has("dispatch") {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "scope_missing",
+            "This requires the meter or dispatch scope.",
+        ));
+    }
+    let gateway = dispatch_gateway(&state)?;
+    let request: SettleUsage = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid settlement: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    if !metered {
+        require_owner(gateway, &admission, &headers).await?;
+    }
+    let measured = metered.then_some((request.tokens, request.cost_cents));
+    let settled = gateway
+        .settle_usage(&admission, &request.reservation_id, measured, &caller.principal_id)
+        .await
+        .map_err(usage_error)?;
+    Ok(axum::Json(settled).into_response())
+}
+
 /// The tenant's staged rollouts.
 async fn list_rollouts<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
 where
@@ -1994,6 +2128,8 @@ where
         )
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/erase", post(erase_run::<S, L>))
+        .route("/v1/runs/{run_id}/usage/reserve", post(reserve_usage::<S, L>))
+        .route("/v1/runs/{run_id}/usage/settle", post(settle_usage::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",
