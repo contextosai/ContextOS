@@ -177,6 +177,17 @@ pub fn is_within_contract_interval(time: &str, start: &str, end: &str) -> bool {
     )
 }
 
+/// Whole milliseconds from `start` to `end` (sub-millisecond digits truncated);
+/// `None` if either is invalid or `end` is before `start`.
+pub fn elapsed_millis(start: &str, end: &str) -> Option<u64> {
+    let millis = |t: &ContractTime<'_>| {
+        let digits: String = t.fraction.chars().chain("000".chars()).take(3).collect();
+        i128::from(t.whole_seconds()) * 1000 + digits.parse::<i128>().unwrap_or(0)
+    };
+    let (s, e) = (ContractTime::parse(start)?, ContractTime::parse(end)?);
+    u64::try_from(millis(&e) - millis(&s)).ok()
+}
+
 /// True when `0 <= time - observed <= maximum_seconds`, computed exactly over whole
 /// seconds plus arbitrary-precision fractional digits.
 pub fn age_within_limit(time: &str, observed: &str, maximum_seconds: u64) -> bool {
@@ -223,6 +234,23 @@ pub fn add_contract_seconds(time: &str, seconds: u64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn elapsed_millis_is_exact_and_ordered() {
+        assert_eq!(
+            super::elapsed_millis("2026-10-20T10:00:00Z", "2026-10-20T10:00:01.5Z"),
+            Some(1500)
+        );
+        assert_eq!(
+            super::elapsed_millis("2026-10-20T23:59:59.999Z", "2026-10-21T00:00:00.0019Z"),
+            Some(2)
+        );
+        assert_eq!(
+            super::elapsed_millis("2026-10-20T10:00:01Z", "2026-10-20T10:00:00Z"),
+            None
+        );
+        assert_eq!(super::elapsed_millis("not a time", "2026-10-20T10:00:00Z"), None);
+    }
+
     use super::*;
 
     #[test]

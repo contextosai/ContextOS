@@ -49,6 +49,10 @@ pub struct RunAdmission {
     /// Present for delegated child runs.
     #[serde(default)]
     pub lineage: Option<crate::delegation::Lineage>,
+    /// When the run was admitted, by the gateway's clock; the start of its wall clock.
+    /// Empty for admissions recorded before it was kept (wall clock unknown).
+    #[serde(default)]
+    pub admitted_at: String,
 }
 
 /// Inputs to admission. `features` must be derived by trusted admission from the
@@ -68,6 +72,8 @@ pub struct AdmissionRequest<'a> {
     pub actor: Value,
     pub gateway_observer: Value,
     pub deadline: String,
+    /// Admission time by the gateway's clock.
+    pub admitted_at: String,
     pub executor_generation: u64,
     pub limits: BudgetLimits,
 }
@@ -244,6 +250,7 @@ pub async fn admit_run<S: DocumentStore>(
         gateway_observer: request.gateway_observer,
         compiled_context_hash: request.compiled.context_ledger.compiled_context_hash.clone(),
         lineage: None,
+        admitted_at: request.admitted_at,
         tenant_id,
         run_id,
     })

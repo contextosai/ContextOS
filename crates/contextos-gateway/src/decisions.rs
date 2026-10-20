@@ -228,13 +228,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .map_err(GatewayError::from)?
             .map_or(Value::Null, |r| r.body["used"].clone());
         #[allow(clippy::cast_precision_loss)]
-        let budget_usage = BudgetUsage {
+        let mut budget_usage = BudgetUsage {
             tokens: budget["tokens"].as_u64().unwrap_or(0),
             tool_calls: budget["tool_calls"].as_u64().unwrap_or(0),
             cost_usd_cents: budget["cost_units"].as_u64().unwrap_or(0) as f64 / 100.0,
             wall_clock_ms: 0,
         };
         let now = self.now();
+        budget_usage.wall_clock_ms =
+            contextos_contract::validation::elapsed_millis(&admission.admitted_at, &now).unwrap_or(0);
         let record_id = self.ports.ids.new_id("decision");
         let record = assemble_decision(DecisionDraft {
             record_id: record_id.clone(),

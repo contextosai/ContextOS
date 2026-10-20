@@ -415,6 +415,7 @@ async fn harness_ports(
             actor: principal("agt_support"),
             gateway_observer: principal("gateway"),
             deadline: "2026-10-20T11:00:00Z".into(),
+            admitted_at: "2026-10-20T10:00:00Z".into(),
             executor_generation: 1,
             limits: BudgetLimits {
                 tokens: 10_000,
@@ -882,6 +883,7 @@ async fn delegate(h: &Harness, envelope: &Value) -> Result<RunAdmission, Admissi
                 actor: principal("agt_research"),
                 gateway_observer: principal("gateway"),
                 deadline: String::new(),
+                admitted_at: "2026-10-20T10:00:00Z".into(),
                 executor_generation: 1,
                 limits: BudgetLimits {
                     tokens: 0,

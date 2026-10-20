@@ -528,6 +528,7 @@ where
         actor: principal(&run_context.agent.agent_id, "agent"),
         gateway_observer: principal(&state.gateway_principal_id, "workload"),
         deadline: deadline.to_owned(),
+        admitted_at: gateway.now(),
         executor_generation: 1,
         limits,
     };

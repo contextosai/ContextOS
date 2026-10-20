@@ -364,8 +364,10 @@ the `evaluate` scope, and have it post to
 
 A caller that also holds `admit` or `dispatch`, or whose principal is the run's own
 agent, is refused (`evaluator_not_independent`). Policy, utility and safety are the
-evaluator's, in `[0, 1]`; cost is measured by the runtime from the signed decision,
-and latency is left out until wall-clock usage is measured (unknown is never zero).
+evaluator's, in `[0, 1]`; the runtime measures cost from the signed decision and
+latency (milliseconds from admission to the decision, also the decision's
+`budget_usage.wall_clock_ms`). Runs admitted before admission times were kept have no
+latency: unknown is never reported as zero.
 Each evaluator scores a decision once. Scores are signed into the audit chain and
 appear beside their decision in the evidence bundle. Unknown scope names in API-key
 configuration are refused at startup.

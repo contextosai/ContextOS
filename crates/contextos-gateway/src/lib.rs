@@ -321,7 +321,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         &self.audit
     }
 
-    fn now(&self) -> String {
+    /// The current time by the gateway's clock port.
+    pub fn now(&self) -> String {
         self.ports.clock.now()
     }
 

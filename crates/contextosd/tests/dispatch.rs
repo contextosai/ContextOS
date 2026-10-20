@@ -1517,9 +1517,11 @@ async fn independent_evaluators_score_decisions() {
         scored["score"]["scorecard"]["cost"],
         recorded["record"]["budget_usage"]["cost_usd_cents"]
     );
-    assert!(
-        scored["score"]["scorecard"].get("latency").is_none(),
-        "unmeasured latency is not invented"
+    // Latency is measured from admission to the decision, as is the decision's wall clock.
+    assert!(scored["score"]["scorecard"]["latency"].is_u64(), "{scored}");
+    assert_eq!(
+        scored["score"]["scorecard"]["latency"],
+        recorded["record"]["budget_usage"]["wall_clock_ms"]
     );
     // One score per evaluator per decision.
     assert_eq!(post("judge-key", score).await.status(), 409);

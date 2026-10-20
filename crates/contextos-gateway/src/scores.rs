@@ -4,8 +4,9 @@
 //! from the run's executor, reports the judged dimensions (policy, utility, safety,
 //! each in `[0, 1]`) for one recorded decision and names the pinned evaluator that
 //! produced them. The gateway adds what it measured itself: the cost from the signed
-//! decision's budget usage. Latency is left out while the run's wall-clock usage is
-//! not measured: missing usage is unknown, never zero.
+//! decision's budget usage, and the latency in milliseconds from the run's admission
+//! to the decision. Latency is left out for runs admitted before admission times were
+//! kept: missing usage is unknown, never zero.
 //!
 //! Every score is signed into the audit chain bound to the run, trace and record, and
 //! kept beside the decision for the evidence bundle. An evaluator scores a decision
@@ -92,6 +93,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let mut scorecard = json!({"policy": report.policy, "utility": report.utility, "safety": report.safety});
         if let Some(cost) = record["budget_usage"]["cost_usd_cents"].as_f64() {
             scorecard["cost"] = json!(cost);
+        }
+        // Latency (ms) from admission to the decision, when the admission time is known.
+        let decided_at = record["timestamp"].as_str().unwrap_or_default();
+        if let Some(latency) = contextos_contract::validation::elapsed_millis(&admission.admitted_at, decided_at) {
+            scorecard["latency"] = json!(latency);
         }
         let now = self.now();
         let score = json!({
