@@ -138,6 +138,11 @@ budgets, and the integrity of the evidence record.
 
 ## Residual risks and deployment obligations
 
+- **Invented role in policy inputs.** When the user claims carry no `role`, the
+  compiler evaluates policy as if it were `support_agent`, mirroring the spec's
+  reference compiler (parity vectors). A pack rule granting to that role would treat
+  callers that omit their role as holding it. Send `user.role` in verified claims;
+  [spec proposal 0002](../proposals/spec-0002-no-default-role.md) removes the default.
 - **Fact providers are trusted after verification.** The kernel checks currency, binding
   and scope of observations; it cannot detect a dishonest provider. Operate identity,
   control-plane and approval services with their own hardening and audit.
