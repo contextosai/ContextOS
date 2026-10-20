@@ -2,8 +2,8 @@
 //!
 //! A run's user-provided content lives in the replay case (the original request,
 //! including the user's message and context), the compiled context (the task prompt
-//! and evidence blocks) and any pending tool input requests (what a tool asked the
-//! user; indexed per run when recorded). Erasure overwrites both with a tombstone that
+//! and evidence blocks), the orchestrator's checkpoint, and any pending tool input
+//! requests (what a tool asked the user; indexed per run when recorded). Erasure overwrites both with a tombstone that
 //! records who erased them, when, why, and the digest of what was removed, so the
 //! erasure itself is provable and the content can never be re-created under the same
 //! key. A run can be erased once it is finished (completed, failed or cancelled), past
@@ -82,7 +82,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .filter_map(Value::as_str)
             .map(|id| DocKey::new(&admission.tenant_id, DocKind::PendingInput, id))
             .collect();
-        let documents = [DocKind::ReplayCase, DocKind::CompiledContext]
+        let documents = [DocKind::ReplayCase, DocKind::CompiledContext, DocKind::Checkpoint]
             .into_iter()
             .map(|kind| DocKey::new(&admission.tenant_id, kind, &admission.run_id))
             .chain(inputs);

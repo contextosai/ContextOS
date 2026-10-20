@@ -2506,3 +2506,127 @@ async fn repeated_identical_calls_trip_the_loop_guard() {
     let other = call("loop_other", 120_001).await;
     assert_eq!(other["result"]["status"], "completed", "{other}");
 }
+
+#[tokio::test]
+async fn checkpoints_survive_failover_and_fence_the_old_executor() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_ckpt", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let first = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let save = |http: reqwest::Client, expected: u64, state: Value| {
+        let url = format!("{}/v1/runs/run_ckpt/checkpoint", w.base);
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&json!({"expected_revision": expected, "state": state}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let plan = json!({"plan": ["lookup", "refund", "decide"], "step": 1, "verdict": "accept"});
+    let saved = save(first.clone(), 0, plan.clone()).await;
+    assert_eq!(saved.status(), 201);
+    assert_eq!(saved.json::<Value>().await.unwrap()["revision"], 1);
+    // Optimistic: a writer that read an older revision does not overwrite.
+    let stale = save(first.clone(), 0, json!({"step": 99})).await;
+    assert_eq!(stale.status(), 409);
+    assert_eq!(
+        stale.json::<Value>().await.unwrap()["error"]["detail"]["current_revision"],
+        1
+    );
+    let plan2 = json!({"plan": ["lookup", "refund", "decide"], "step": 2, "verdict": "accept"});
+    assert_eq!(save(first.clone(), 1, plan2.clone()).await.status(), 201);
+    // Oversized state is refused.
+    assert_eq!(
+        save(first.clone(), 2, json!({"blob": "x".repeat(300 * 1024)}))
+            .await
+            .status(),
+        413
+    );
+
+    // A new executor takes over and resumes from the latest checkpoint; the old one is fenced.
+    let status: Value = plain
+        .get(format!("{}/v1/runs/run_ckpt", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let taken: Value = plain
+        .post(format!("{}/v1/runs/run_ckpt/takeover", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"expected_generation": status["executor_generation"]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let second = executor_client(taken["executor_generation"].as_u64().unwrap());
+    assert_eq!(
+        save(first.clone(), 2, json!({"step": 3})).await.status(),
+        409,
+        "the old executor is stale"
+    );
+    let latest: Value = second
+        .get(format!("{}/v1/runs/run_ckpt/checkpoint", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!((latest["revision"].as_u64(), &latest["state"]), (Some(2), &plan2));
+    assert_eq!(latest["executor_generation"], admitted["executor_generation"]);
+
+    // Checkpoints are audited by digest and erased with the run.
+    assert_eq!(
+        second
+            .post(format!("{}/v1/runs/run_ckpt/complete", w.base))
+            .bearer_auth("acme-key")
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    let erased: Value = plain
+        .post(format!("{}/v1/runs/run_ckpt/erase", w.base))
+        .bearer_auth("ops-key")
+        .json(&json!({"reason": "subject request"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        erased["erased"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["document"] == "checkpoint"),
+        "{erased}"
+    );
+    let gone = second
+        .get(format!("{}/v1/runs/run_ckpt/checkpoint", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), 410);
+}

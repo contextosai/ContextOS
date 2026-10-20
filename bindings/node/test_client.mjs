@@ -83,6 +83,9 @@ try {
   });
   assert.equal(decision.record.tool_lineage[0].tool_call_id, "tc_1");
 
+  // The orchestrator checkpoints its state after each verdict.
+  assert.equal((await run.checkpoint({ step: 1, verdict: "accept" }, 0)).revision, 1);
+
   // Model calls spend the run's budget; a self-reported settlement charges it all.
   const reservation = await run.reserveUsage("model_call", { tokens: 300 });
   assert.equal((await run.settleUsage(reservation)).charged.tokens, 300);
@@ -134,6 +137,7 @@ try {
     (error) => error instanceof ToolBlocked && error.reasonCodes[0] === "revoked_capability");
   assert.deepEqual((await ops.restore("capability", "adp_payments.issue_refund", "resolved")).revoked, []);
 
+  assert.deepEqual((await replacement.latestCheckpoint()).state, { step: 1, verdict: "accept" });
   assert.equal((await replacement.complete()).status, "completed");
   const sequences = [];
   for await (const entry of client.auditEntries({ page: 2 })) sequences.push(entry.sequence);

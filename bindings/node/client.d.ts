@@ -80,6 +80,8 @@ export declare class Run {
   recordDecision(decisionKey: string, status: DecisionStatus, options?: { decisionVersion?: string; outcome?: string; toolCalls?: { tool_call_id: string; operation_id: string }[]; [field: string]: unknown }): Promise<{ record: any; replay_packet: any }>;
   delegate(childAdmission: Record<string, any>, envelope: Record<string, any>): Promise<Run>;
   closeChild(child: Run, decision?: "accept" | "reject"): Promise<{ status: string; usage: Record<string, number> | null; reason_codes: string[] }>;
+  checkpoint(state: Json, expectedRevision: number): Promise<{ run_id: string; revision: number; digest: string; executor_generation: number; saved_at: string }>;
+  latestCheckpoint(): Promise<{ revision: number; digest: string; state: Json; executor_generation: number; saved_at: string }>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
   settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
   status(): Promise<{ run_id: string; status: string; executor_generation: number }>;

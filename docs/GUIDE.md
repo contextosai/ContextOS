@@ -417,6 +417,20 @@ charged the whole reservation, because self-reported usage is not evidence. Pass
 reservation id to your model gateway (for example in a request header) so it can meter
 the call.
 
+### Checkpoint the orchestrator
+
+Save the orchestrator's own state (plan, step pointer, last verdict) after every Critic
+verdict, so a run resumes where it was after failover:
+
+```sh
+POST /v1/runs/{run_id}/checkpoint   {"expected_revision": 3, "state": {"step": 4, "verdict": "accept"}}
+GET  /v1/runs/{run_id}/checkpoint   # the executor that took over reads it
+```
+
+Only the current executor writes (generation fencing), writes are optimistic on the
+revision (`checkpoint_conflict` names the current one), the state is at most 256 KiB,
+each save is audited by digest, and checkpoints are erased with the run.
+
 ### Loop guard
 
 An agent stuck repeating one action is stopped: after `[guards] identical_tool_calls`

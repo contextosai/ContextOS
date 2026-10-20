@@ -2432,6 +2432,146 @@
         ],
         "x-contextos-scope": "meter|dispatch"
       }
+    },
+    "/v1/runs/{run_id}/checkpoint": {
+      "post": {
+        "operationId": "save_checkpoint",
+        "summary": "Save the orchestrator's checkpoint",
+        "description": "Only the run's current executor may write. Optimistic: `expected_revision` must equal the stored revision (0 for the first), otherwise `checkpoint_conflict` reports the current one. Content-addressed and audited by digest; erased with the run.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_revision",
+                  "state"
+                ],
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "state": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      },
+      "get": {
+        "operationId": "latest_checkpoint",
+        "summary": "The run's latest checkpoint (for the executor that takes over)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Checkpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
     }
   },
   "components": {
@@ -3211,6 +3351,7 @@
                   "enum": [
                     "replay_case",
                     "compiled_context",
+                    "checkpoint",
                     "pending_input"
                   ]
                 },
@@ -3334,6 +3475,53 @@
             }
           }
         }
+      },
+      "CheckpointRecord": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "revision",
+          "digest",
+          "executor_generation",
+          "saved_at"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "digest": {
+            "type": "string"
+          },
+          "executor_generation": {
+            "type": "integer"
+          },
+          "saved_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Checkpoint": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CheckpointRecord"
+          },
+          {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "description": "The orchestrator's own state (plan, step pointer, last verdict), at most 256 KiB canonical"
+              }
+            }
+          }
+        ]
       }
     }
   }

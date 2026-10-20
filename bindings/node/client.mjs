@@ -220,6 +220,16 @@ export class Run {
     });
   }
 
+  /** Saves the orchestrator's state as the next checkpoint revision. */
+  checkpoint(state, expectedRevision) {
+    return this.#post("/checkpoint", { expected_revision: expectedRevision, state });
+  }
+
+  /** The latest checkpoint (`state`, `revision`), e.g. after taking the run over. */
+  latestCheckpoint() {
+    return this.client.request("GET", this.#path("/checkpoint"));
+  }
+
   /** Reserves budget for a `model_call` or a `replan`; resolves to the reservation id. */
   async reserveUsage(kind, { tokens = 0, costCents = 0 } = {}) {
     return (await this.#post("/usage/reserve", { kind, tokens, cost_cents: costCents })).reservation_id;

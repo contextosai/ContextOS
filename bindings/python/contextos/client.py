@@ -256,6 +256,14 @@ class Run:
         return self.client.request("POST", f"/v1/runs/{_quote(child.run_id)}/close", {"decision": decision},
                                    generation=self.executor_generation)
 
+    def checkpoint(self, state: Any, expected_revision: int) -> dict:
+        """Saves the orchestrator's state as the next checkpoint revision."""
+        return self._post("/checkpoint", {"expected_revision": expected_revision, "state": state})
+
+    def latest_checkpoint(self) -> dict:
+        """The latest checkpoint (`state`, `revision`), e.g. after taking the run over."""
+        return self.client.request("GET", self._path("/checkpoint"))
+
     def reserve_usage(self, kind: str, *, tokens: int = 0, cost_cents: int = 0) -> str:
         """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""
         return self._post("/usage/reserve", {"kind": kind, "tokens": tokens, "cost_cents": cost_cents})["reservation_id"]

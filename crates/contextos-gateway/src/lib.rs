@@ -21,6 +21,7 @@
 //! decide everything else.
 
 pub mod admission;
+mod checkpoints;
 mod decisions;
 mod delegation;
 mod erasure;
@@ -57,6 +58,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use erasure::{ErasureError, is_erased};

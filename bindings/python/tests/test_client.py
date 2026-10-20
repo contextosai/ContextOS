@@ -101,6 +101,9 @@ def main() -> None:
                                        tool_calls=[{"tool_call_id": "tc_1", "operation_id": call["idempotency_key"]}])
         assert decision["record"]["tool_lineage"][0]["tool_call_id"] == "tc_1"
 
+        # The orchestrator checkpoints its state after each verdict.
+        assert run.checkpoint({"step": 1, "verdict": "accept"}, 0)["revision"] == 1
+
         # Model calls spend the run's budget; a self-reported settlement charges it all.
         reservation = run.reserve_usage("model_call", tokens=300)
         assert run.settle_usage(reservation)["charged"]["tokens"] == 300
@@ -136,6 +139,7 @@ def main() -> None:
             assert blocked.reason_codes == ["revoked_capability"], blocked.reason_codes
         assert ops.restore("capability", "adp_payments.issue_refund", "resolved")["revoked"] == []
 
+        assert replacement.latest_checkpoint()["state"] == {"step": 1, "verdict": "accept"}
         assert replacement.complete()["status"] == "completed"
         evidence = replacement.evidence()
         assert evidence["run_state"]["status"] == "completed"

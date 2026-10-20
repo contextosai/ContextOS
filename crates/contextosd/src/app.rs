@@ -10,6 +10,8 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `POST /v1/runs/{run_id}/checkpoint` | `dispatch` | save the orchestrator's checkpoint (current executor; optimistic on revision) |
+//! | `GET /v1/runs/{run_id}/checkpoint` | `dispatch` | the latest checkpoint, for the executor that takes over |
 //! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
@@ -63,9 +65,10 @@ use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
-    AdmissionError, AdmissionRequest, BudgetLimits, CloseDecision, Continuation, DecisionRefusal, DecisionReport,
-    EffectOutcome, ErasureError, Gateway, Ownership, REVOCATION_KINDS, Resolution, RevocationError, RunAdmission,
-    ScoreRefusal, ScoreReport, UsageKind, UsageRefusal, admit_run, is_erased,
+    AdmissionError, AdmissionRequest, BudgetLimits, CheckpointRefusal, CloseDecision, Continuation, DecisionRefusal,
+    DecisionReport, EffectOutcome, ErasureError, Gateway, MAX_CHECKPOINT_BYTES, Ownership, REVOCATION_KINDS,
+    Resolution, RevocationError, RunAdmission, ScoreRefusal, ScoreReport, UsageKind, UsageRefusal, admit_run,
+    is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1422,6 +1425,99 @@ where
     Ok(axum::Json(settled).into_response())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CheckpointBody {
+    expected_revision: u64,
+    state: Value,
+}
+
+/// Saves the orchestrator's checkpoint (the run's current executor only).
+async fn save_checkpoint<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: CheckpointBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid checkpoint: {e}"),
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let generation = require_owner(gateway, &admission, &headers).await?;
+    match gateway
+        .save_checkpoint(&admission, generation, request.expected_revision, request.state)
+        .await
+    {
+        Ok(record) => Ok((StatusCode::CREATED, axum::Json(record)).into_response()),
+        Err(CheckpointRefusal::Invalid) => Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "checkpoint_too_large",
+            format!("A checkpoint's state is at most {MAX_CHECKPOINT_BYTES} bytes of plain JSON."),
+        )),
+        Err(CheckpointRefusal::RevisionConflict { current, .. }) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "checkpoint_conflict",
+            "The checkpoint changed since the revision you read.",
+        )
+        .with_detail(json!({"current_revision": current}))),
+        Err(CheckpointRefusal::Gateway(_)) => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )),
+    }
+}
+
+/// The run's latest orchestrator checkpoint.
+async fn latest_checkpoint<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let checkpoint = gateway
+        .latest_checkpoint(&admission)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "checkpoint_not_found",
+                "This run has no checkpoint.",
+            )
+        })?;
+    if is_erased(&checkpoint) {
+        return Err(ApiError::new(
+            StatusCode::GONE,
+            "checkpoint_erased",
+            "This run's content was erased.",
+        ));
+    }
+    Ok(axum::Json(checkpoint).into_response())
+}
+
 /// The tenant's staged rollouts.
 async fn list_rollouts<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
 where
@@ -2129,6 +2225,10 @@ where
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/erase", post(erase_run::<S, L>))
         .route("/v1/runs/{run_id}/usage/reserve", post(reserve_usage::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/checkpoint",
+            get(latest_checkpoint::<S, L>).post(save_checkpoint::<S, L>),
+        )
         .route("/v1/runs/{run_id}/usage/settle", post(settle_usage::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
