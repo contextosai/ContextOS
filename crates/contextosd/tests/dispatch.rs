@@ -289,15 +289,17 @@ const ALL_CONTROLS: [&str; 9] = [
     "data.flow_policy",
 ];
 
+/// The compiler vectors, parsed once (the load test builds thousands of bodies).
+fn compiler_vectors() -> &'static Value {
+    static VECTORS: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+        let path = format!("{}/../../conformance/vectors/compiler.json", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    });
+    &VECTORS
+}
+
 fn run_body(run_id: &str, amount: u64) -> Value {
-    let vectors: Value = serde_json::from_str(
-        &std::fs::read_to_string(format!(
-            "{}/../../conformance/vectors/compiler.json",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap(),
-    )
-    .unwrap();
+    let vectors = compiler_vectors();
     let case = vectors["cases"]
         .as_array()
         .unwrap()

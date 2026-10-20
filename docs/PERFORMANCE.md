@@ -23,8 +23,7 @@ CONTEXTOS_LOAD_REPLICAS=3 CONTEXTOS_LOAD_AGENTS=64 CONTEXTOS_LOAD_RUNS=40 \
 
 | Setup (one laptop, everything in one process) | Result |
 |---|---|
-| 1 replica, 64 agents | ~1,070 runs/s (admission + effect), ~2,130 requests/s, p50 28 ms, p99 65 ms |
-| 3 replicas, 64 agents | ~1,150 runs/s, ~2,300 requests/s, p50 23 ms, p99 105 ms; admission p50 17 ms |
+| 3 replicas, 64 agents | ~2,300 runs/s (admission + effect), ~4,700 requests/s, p50 10 ms, p99 52 ms; admission p50 5.6 ms |
 
 The test asserts what matters at scale: every effect reaches the provider exactly
 once, and one tenant's audit chain written by every replica verifies end to end. The
@@ -32,6 +31,12 @@ throughput figures are a floor, not capacity: the load generator, the fake provi
 (which compute real authority facts) and every replica share one machine's cores, so
 adding replicas here adds no CPU. Admission (compile, negotiate, pin policy, open
 ledgers, keep the replay case) is the heavier request.
+
+Profiling this test first showed the load generator itself dominating: each request
+body was built by re-reading and re-parsing a 1.3 MB vector file. Parsing it once
+doubled measured throughput (~1,150 → ~2,300 runs/s) without any server change. The
+remaining profile is spread across idle waits, socket I/O, allocation, and canonical
+JSON encoding and hashing for signed audit entries, with no single dominant hot spot.
 
 ## Kernel (pure, in-process)
 
