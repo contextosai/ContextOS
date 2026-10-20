@@ -291,6 +291,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         }
                         Some(used.clone())
                     }
+                    // With a fallback pinned, the decision must say which model it was.
+                    None if pinned_releases(admission, "model_profile").count() > 1 => {
+                        return Err(DecisionRefusal::ModelNotPinned("unnamed (several are pinned)".into()));
+                    }
                     None => pinned_release(admission, "model_profile"),
                 },
                 evaluator_suite: pinned_release(admission, "evaluator_suite"),

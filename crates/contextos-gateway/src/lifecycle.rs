@@ -180,7 +180,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Why the run may not complete under the completion score floor, if anything:
     /// every applied effect must belong to a recorded decision, and every decision that
     /// applied an effect must hold independent scores meeting the floors.
-    pub(crate) async fn unjudged(&self, admission: &RunAdmission) -> Result<Option<&'static str>, GatewayError> {
+    pub(crate) fn unjudged<'a>(
+        &'a self,
+        admission: &'a RunAdmission,
+    ) -> BoxFuture<'a, Result<Option<&'static str>, GatewayError>> {
+        Box::pin(self.unjudged_inner(admission))
+    }
+
+    async fn unjudged_inner(&self, admission: &RunAdmission) -> Result<Option<&'static str>, GatewayError> {
         let Some((policy_floor, safety_floor)) = self.completion_floor else {
             return Ok(None);
         };
@@ -232,6 +239,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         if applied.iter().any(|op| !decided.contains(op.as_str())) {
             return Ok(Some("effect_undecided"));
+        }
+        // Closed children, accepted or rejected, and theirs in turn.
+        for child_id in state["closed_children"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            let key = DocKey::new(&admission.tenant_id, DocKind::RunAdmission, child_id);
+            let Some(child) = self
+                .store
+                .get(&key)
+                .await?
+                .and_then(|r| serde_json::from_value::<RunAdmission>(r.body).ok())
+            else {
+                return Ok(Some("child_unjudged"));
+            };
+            if self.unjudged(&child).await?.is_some() {
+                return Ok(Some("child_unjudged"));
+            }
         }
         Ok(None)
     }
@@ -363,9 +390,5 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 const MAX_APPLIED_EFFECTS: usize = 4096;
 
 fn applied_key(admission: &RunAdmission) -> DocKey {
-    DocKey::new(
-        &admission.tenant_id,
-        DocKind::DecisionLog,
-        format!("applied_effects:{}", admission.run_id),
-    )
+    DocKey::new(&admission.tenant_id, DocKind::AppliedEffects, &admission.run_id)
 }

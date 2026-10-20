@@ -168,6 +168,18 @@ budgets, and the integrity of the evidence record.
   production opt-outs were silent (now logged at startup); the clients accepted `.` and
   `..` as ids (refused). Each fix has a regression test.
 
+- 2026-10-21: tenth review, of model attribution, memory supersession and the
+  completion gate's effect tracking. Fixed: the memory key index ignored owner and
+  namespace and folded case, so one namespace could take over another's key (keys are
+  now exact and scoped, in their own document kind); concurrent promotions could leave
+  an older value holding a key and contention gave up silently (a key is taken only by
+  a newer claim, before the record is written, and failing to take it fails the
+  operation); deleting the current value revived the one it replaced (a deletion leaves
+  a tombstone); index documents shared id space with caller-chosen ids (own document
+  kinds); a rejected child's effects escaped the parent's completion gate (closed
+  children are judged with the parent); a decision could omit its model while a
+  fallback was pinned (it must name one). Each fix has a regression test.
+
 ## Residual risks and deployment obligations
 
 - **Release pins are not verified against a registry.** Production requires
@@ -176,8 +188,10 @@ budgets, and the integrity of the evidence record.
   exists; verify pins in your release process.
 - **Memory supersession covers memory governed by this runtime.** A recalled memory is
   refused if a newer promotion or correction through `POST /v1/runs/{id}/memory` holds
-  its key; memory written to the store by other means is checked only against the other
-  memories the run recalls.
+  its key, or the key was deleted; memory promoted before this index existed, or written
+  to the store by other means, is checked only against the other memories the run
+  recalls. Effects applied while the completion gate was off are not tracked if it is
+  turned on later.
 
 - **Invented role in policy inputs.** When the user claims carry no `role`, the
   compiler evaluates policy as if it were `support_agent`, mirroring the spec's

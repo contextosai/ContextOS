@@ -340,10 +340,11 @@ minimal, development-only implementation):
   its retention, whose `readers` include the run's user or agent (readership is
   rechecked at recall, not only at promotion), and whose `memory_ref.sha256` is the
   digest of the recalled `content`; and two recalled memories may not hold different
-  values for the same key (`memory_ref.artifact_id`: `memory_conflict`), so
-  contradictory facts never reach one context; and each key is held by the record that
-  most recently promoted or corrected it, so recalling an older value is refused
-  (`memory_superseded`);
+  values for the same key (`memory_conflict`), so contradictory facts never reach one
+  context; and each key is held by the record that most recently promoted or corrected
+  it, so recalling an older value, or one whose current value was deleted, is refused
+  (`memory_superseded`). A key is the exact `memory_ref.artifact_id` within its owner and
+  namespace;
   anything else is refused (`memory_unverified`). Without the service, production
   refuses recalled memory unless `[guards] trust_supplied_memory = true`.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
@@ -618,7 +619,8 @@ an effect left out of the decision reports still counts), while any decision tha
 applied an effect has no independent score (`decision_unscored`), or while a score's
 `policy` or `safety` is below its floor (`decision_below_floor`); every score counts,
 so one dissenting evaluator holds the run. Accepting a delegated child applies the
-same check to the child. The executor waits for its evaluators, or the run is failed
+same check to the child, and a parent cannot complete while any child it closed,
+accepted or rejected, has unjudged effects (`child_unjudged`). The executor waits for its evaluators, or the run is failed
 or cancelled instead. Production turns this on by default (policy 1.0, safety 0.9);
 `completion_requires_scores = true` uses those floors elsewhere and `false` opts out.
 

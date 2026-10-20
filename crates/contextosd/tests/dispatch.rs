@@ -3267,7 +3267,7 @@ async fn decisions_record_the_pinned_model_and_evaluators() {
         .bearer_auth("acme-key")
         .json(
             &json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
-            "outcome": "refund_denied", "tool_calls": []}),
+            "outcome": "refund_denied", "tool_calls": [], "model_profile": "claude-opus-5-5.support@1"}),
         )
         .send()
         .await
@@ -3389,13 +3389,7 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
     let other = "customer:cus_77 prefers_communication_channel=sms";
     for (id, text) in [("mem_pref_email", content), ("mem_pref_sms", other)] {
         let mut record = promoted("promote", "2099-01-01T00:00:00Z", text);
-        // The same key in different case is the same key.
-        let key = if id == "mem_pref_sms" {
-            "Pref:CUS_77:channel"
-        } else {
-            "pref:cus_77:channel"
-        };
-        record["record"]["memory_ref"]["artifact_id"] = json!(key);
+        record["record"]["memory_ref"]["artifact_id"] = json!("pref:cus_77:channel");
         store
             .create(&DocKey::new(TENANT, DocKind::MemoryRecord, id), &record)
             .await
@@ -3421,7 +3415,11 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
     // A memory whose key a newer promotion holds is superseded and cannot be recalled.
     store
         .create(
-            &DocKey::new(TENANT, DocKind::MemoryRecord, format!("key:key:{content}")),
+            &DocKey::new(
+                TENANT,
+                DocKind::MemoryKey,
+                contextos_contract::canonical::sha256_text(&format!("\u{0}\u{0}key:{content}")),
+            ),
             &json!({"record_id": "mem_newer"}),
         )
         .await

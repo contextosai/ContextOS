@@ -59,6 +59,10 @@ pub enum DocKind {
     Feedback,
     /// Policy escalations awaiting a human, and the tenant's open index.
     Escalation,
+    /// Which memory record currently holds a memory key (by owner and namespace).
+    MemoryKey,
+    /// A run's applied effects, for the completion score gate.
+    AppliedEffects,
 }
 
 impl DocKind {
@@ -85,6 +89,8 @@ impl DocKind {
             DocKind::LoopGuard => "loop_guard",
             DocKind::Feedback => "feedback",
             DocKind::Escalation => "escalation",
+            DocKind::MemoryKey => "memory_key",
+            DocKind::AppliedEffects => "applied_effects",
         }
     }
 }

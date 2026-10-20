@@ -448,9 +448,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     async fn forget_child(&self, parent: &RunAdmission, child_run_id: &str) -> Result<(), GatewayError> {
+        let judged = self.completion_floor.is_some();
         self.edit_run_state(parent, |state| {
             if let Some(children) = state["child_run_ids"].as_array_mut() {
                 children.retain(|c| c != child_run_id);
+            }
+            // A closed child's effects still count toward the parent's completion gate,
+            // whether it was accepted or rejected.
+            if judged {
+                if !state["closed_children"].is_array() {
+                    state["closed_children"] = json!([]);
+                }
+                if let Some(closed) = state["closed_children"].as_array_mut()
+                    && !closed.iter().any(|c| c == child_run_id)
+                {
+                    closed.push(json!(child_run_id));
+                }
             }
         })
         .await

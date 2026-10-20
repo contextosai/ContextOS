@@ -1600,11 +1600,18 @@ async fn memory_operations_are_governed_by_trusted_context() {
         .unwrap()
         .unwrap();
     assert_eq!(state["record"]["operation"], "promote");
-    // The promotion now holds its key (compared case-insensitively).
-    let key = record["memory_ref"]["artifact_id"].as_str().unwrap().to_uppercase();
+    // The promotion now holds its key, exactly (another spelling is another key).
+    let id = record["record_id"].as_str().unwrap();
     assert_eq!(
-        h.gateway.memory_key_holder(TENANT, &key).await.unwrap().as_deref(),
-        record["record_id"].as_str()
+        h.gateway.memory_key_current(TENANT, &record, id).await.unwrap(),
+        Some(true)
+    );
+    let mut respelled = record.clone();
+    respelled["memory_ref"]["artifact_id"] =
+        json!(record["memory_ref"]["artifact_id"].as_str().unwrap().to_uppercase());
+    assert_eq!(
+        h.gateway.memory_key_current(TENANT, &respelled, id).await.unwrap(),
+        None
     );
 
     // A reader the trusted context does not allow cannot be granted by the caller.
@@ -2248,6 +2255,7 @@ async fn unreported_effects_and_accepted_children_are_judged_too() {
     // A delegated child's effects are judged before the parent accepts it.
     let mut h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
     h.gateway.set_completion_floor(Some((1.0, 0.9)));
+    let generation = running(&h).await;
     let child = delegate(
         &h,
         &envelope(
@@ -2279,6 +2287,16 @@ async fn unreported_effects_and_accepted_children_are_judged_too() {
         .unwrap();
     assert_eq!(refused.status, "rejected");
     assert_eq!(refused.reason_codes, vec!["decision_unscored".to_owned()]);
+
+    // Rejecting the child does not make its effects disappear: the parent is held.
+    let rejected = h
+        .gateway
+        .close_delegation(&h.admission, &child, CloseDecision::Reject, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(rejected.status, "closed", "{:?}", rejected.reason_codes);
+    let held = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+    assert_eq!(held.reason_codes, vec!["child_unjudged".to_owned()]);
 }
 
 #[tokio::test]

@@ -52,6 +52,9 @@ First release candidate of the ContextOS runtime.
   `[[result_schemas]]` entry.
 - Recalled memory superseded by a newer promotion or correction of its key is refused
   (`memory_superseded`).
+- Tenth security review fixes: memory keys scoped by owner and namespace, taken only by
+  newer claims, tombstoned on deletion; rejected children's effects hold the parent;
+  decisions must name their model when a fallback is pinned.
 - Model fallback is traceable: a decision names which pinned `model_profile` produced it
   (a pinned fallback), and an unpinned model is refused.
 - Decisions record the model router's `routing_decision_id` in their lineage.
