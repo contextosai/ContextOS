@@ -43,6 +43,8 @@ pub enum DocKind {
     DecisionLog,
     /// A memory's current governed lifecycle state.
     MemoryRecord,
+    /// The inputs a run was admitted with, for release-gate replay.
+    ReplayCase,
 }
 
 impl DocKind {
@@ -61,6 +63,7 @@ impl DocKind {
             DocKind::CompiledContext => "compiled_context",
             DocKind::DecisionLog => "decision_log",
             DocKind::MemoryRecord => "memory_record",
+            DocKind::ReplayCase => "replay_case",
         }
     }
 }

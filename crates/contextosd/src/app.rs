@@ -11,6 +11,7 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out |
 //! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
+//! | `GET /v1/runs/{run_id}/replay-case` | `audit:read` | the run's admission inputs as a release-gate case (`ctx gate`) |
 //! | `GET /v1/runs/{run_id}/evidence` | `audit:read` | the run's evidence bundle |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
@@ -567,6 +568,16 @@ where
                 StatusCode::CONFLICT,
                 "run_exists",
                 "This run has already been admitted.",
+            )
+        })?;
+    gateway
+        .remember_replay_case(&admission, &input["request"], &input["run_context"], &input["deps"])
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
             )
         })?;
     gateway.remember_compiled(&admission, &compiled).await.map_err(|_| {
@@ -1262,6 +1273,39 @@ where
     Ok(axum::Json(found).into_response())
 }
 
+/// The inputs the run was admitted with, as a release-gate replay case (`ctx gate`).
+async fn replay_case<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let case = gateway
+        .replay_case(&admission)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "replay_case_not_found",
+                "No replay case for this run.",
+            )
+        })?;
+    Ok(axum::Json(case).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -1302,6 +1346,7 @@ where
         .route("/v1/runs/{run_id}/mcp", post(mcp_endpoint::<S, L>))
         .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
         .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))
+        .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",

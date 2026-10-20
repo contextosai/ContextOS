@@ -62,6 +62,21 @@ enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Release gate: compare a candidate Context Pack with the baseline on replay
+    /// cases; fails on unacknowledged widenings of capabilities, policy or evidence
+    /// gates, and on cases the candidate cannot compile.
+    Gate {
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+        /// JSON array of `{name, request, run_context, deps}` (see `GET /v1/runs/{id}/replay-case`).
+        #[arg(long)]
+        cases: PathBuf,
+        /// Operator acknowledgements: `{capabilities, policy_loosening, evidence_gates}`.
+        #[arg(long)]
+        acknowledge: Option<PathBuf>,
+    },
 }
 
 enum Failure {
@@ -164,6 +179,29 @@ fn run(command: Command) -> Result<Value, Failure> {
                 .validate()
                 .map_err(|e| Failure::Rejected(json!({"error": e.to_string()})))?;
             Ok(json!({"valid": true, "capability_id": manifest.capability_id}))
+        }
+        Command::Gate {
+            baseline,
+            candidate,
+            cases,
+            acknowledge,
+        } => {
+            use contextos_kernel::release_gate::{Acknowledgements, ReplayCase, evaluate_release_gate};
+            let baseline: contextos_contract::types::ContextPack = typed(read(&baseline)?, "baseline")?;
+            let candidate: contextos_contract::types::ContextPack = typed(read(&candidate)?, "candidate")?;
+            let cases: Vec<ReplayCase> = typed(read(&cases)?, "cases")?;
+            let acknowledged: Acknowledgements = match acknowledge {
+                Some(path) => typed(read(&path)?, "acknowledgements")?,
+                None => Acknowledgements::default(),
+            };
+            let report = evaluate_release_gate(&baseline, &candidate, &cases, &acknowledged)
+                .map_err(|e| Failure::Rejected(json!({"error": e})))?;
+            let value = serde_json::to_value(&report).unwrap_or(Value::Null);
+            if report.verdict == "pass" {
+                Ok(value)
+            } else {
+                Err(Failure::Rejected(value))
+            }
         }
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
         Command::HashKey => {

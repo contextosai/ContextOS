@@ -125,3 +125,42 @@ fn hash_key_reads_stdin() {
         "sha256:3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9"
     );
 }
+
+#[test]
+fn release_gate_fails_unacknowledged_widenings() {
+    let v = vectors();
+    let case = v["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "grid:support.refund:true:4200:support_agent")
+        .unwrap();
+    let baseline = case["pack"].clone();
+    let mut candidate = baseline.clone();
+    candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] =
+        serde_json::json!({"allow": true});
+    let cases = serde_json::json!([{"name": "high_value", "request": case["request"], "run_context": case["run_context"], "deps": case["deps"]}]);
+    let (b, c, k) = (
+        write("gate_baseline.json", &baseline),
+        write("gate_candidate.json", &candidate),
+        write("gate_cases.json", &cases),
+    );
+    let (code, report) = ctx(&["gate", "--baseline", &b, "--candidate", &c, "--cases", &k]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(report["verdict"], "fail");
+    let ack = write("gate_ack.json", &serde_json::json!({"policy_loosening": true}));
+    let (code, report) = ctx(&[
+        "gate",
+        "--baseline",
+        &b,
+        "--candidate",
+        &c,
+        "--cases",
+        &k,
+        "--acknowledge",
+        &ack,
+    ]);
+    assert_eq!(code, 0, "{report}");
+    let (code, _) = ctx(&["gate", "--baseline", &b, "--candidate", &b, "--cases", &k]);
+    assert_eq!(code, 0, "an unchanged pack passes");
+}

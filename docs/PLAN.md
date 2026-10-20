@@ -111,7 +111,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 33 Active boundary | done — BoundaryProvider port; kernel readiness at start/resume and per dispatch; start no longer reports an unchecked boundary as ready when a controller exists |
 | 34 Memory lifecycle | done — MemoryPolicyProvider port, kernel validate_memory_lifecycle, audited decisions, memory state, HTTP routes. Every kernel capability is now reachable through the server |
 | 35 Agent loop example | done — plan, read-only delegated research lane, critic, governed effect, verified decision, completion and evidence over the Python client; runs in CI |
-| 36 Next | next |
+| 36 Release gate | done — kernel `release_gate` (capability, policy, evidence-gate widenings; compile regressions), `ctx gate`, replay-case export from runs |
+| 37 Next | next |
 
 ## Non-negotiables carried from the spec
 

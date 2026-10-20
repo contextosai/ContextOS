@@ -1175,3 +1175,59 @@ async fn memory_operations_need_a_memory_policy_service() {
         .unwrap();
     assert_eq!(missing.status(), 404, "nothing was stored");
 }
+
+#[tokio::test]
+async fn admitted_runs_export_replay_cases() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    let body = run_body("run_replay", 1200);
+    assert_eq!(
+        http.post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    let case: Value = http
+        .get(format!("{}/v1/runs/run_replay/replay-case", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(case["name"], "run_replay");
+    assert_eq!(case["request"], body["request"]);
+    assert_eq!(case["run_context"], body["run_context"]);
+    // The case replays: the kernel compiles it to the same context the run was admitted with.
+    let cases = vec![serde_json::from_value::<contextos_kernel::release_gate::ReplayCase>(case).unwrap()];
+    let pack: contextos_contract::types::ContextPack = serde_json::from_value(
+        serde_json::from_str::<Value>(
+            &std::fs::read_to_string(format!(
+                "{}/../../conformance/vectors/compiler.json",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap(),
+        )
+        .unwrap()["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "grid:support.refund:true:4200:support_agent")
+            .unwrap()["pack"]
+            .clone(),
+    )
+    .unwrap();
+    let report = contextos_kernel::release_gate::evaluate_release_gate(
+        &pack,
+        &pack,
+        &cases,
+        &contextos_kernel::release_gate::Acknowledgements::default(),
+    )
+    .unwrap();
+    assert_eq!(report.verdict, "pass");
+}

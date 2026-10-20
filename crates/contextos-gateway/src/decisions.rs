@@ -113,6 +113,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
     }
 
+    /// Keeps the inputs the run was admitted with as a release-gate replay case.
+    pub async fn remember_replay_case(
+        &self,
+        admission: &RunAdmission,
+        request: &Value,
+        run_context: &Value,
+        deps: &Value,
+    ) -> Result<(), GatewayError> {
+        let key = DocKey::new(&admission.tenant_id, DocKind::ReplayCase, &admission.run_id);
+        let case = json!({"name": admission.run_id, "request": request, "run_context": run_context,
+            "deps": if deps.is_null() { json!({}) } else { deps.clone() }});
+        match self.store.create(&key, &case).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.is_conflict() => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// The run's replay case, for `ctx gate`.
+    pub async fn replay_case(&self, admission: &RunAdmission) -> Result<Option<Value>, GatewayError> {
+        let key = DocKey::new(&admission.tenant_id, DocKind::ReplayCase, &admission.run_id);
+        Ok(self.store.get(&key).await?.map(|r| r.body))
+    }
+
     /// Verifies, assembles, signs and stores a decision of the run.
     pub async fn record_decision(
         &self,

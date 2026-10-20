@@ -320,7 +320,26 @@ Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); 
 discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
 HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
 
-## 5. Operate
+## 5. Gate Context Pack releases
+
+A pack or policy change is a change to what agents may do, so gate it on replayed
+cases before release. Every admitted run's inputs are kept and exported with
+`GET /v1/runs/{run_id}/replay-case`; collect a corpus (a JSON array of those cases),
+then:
+
+```sh
+ctx gate --baseline pack-v5.json --candidate pack-v6.json --cases cases.json \
+         [--acknowledge acknowledgements.json]
+```
+
+Each case is compiled under both packs. The gate **fails** (exit 1) on any
+unacknowledged widening (a capability newly surfaced, the most restrictive policy
+verdict loosening from deny to approval to allow, an evidence gate newly allowing
+commit) and on any case the candidate cannot compile. Narrowings are reported but pass.
+Acknowledgements (`{"capabilities": [...], "policy_loosening": true,
+"evidence_gates": [...]}`) belong to the release owner, never to the candidate pack.
+
+## 6. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

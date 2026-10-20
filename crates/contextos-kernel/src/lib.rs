@@ -17,6 +17,7 @@ pub mod negotiation;
 pub mod operation_ledger;
 pub mod pathspec;
 pub mod profiles;
+pub mod release_gate;
 pub mod run_state;
 mod support;
 
