@@ -37,6 +37,7 @@ missing_errors_doc = "allow"
 must_use_candidate = "allow"
 doc_markdown = "allow"
 too_many_lines = "allow"
+match_same_arms = "allow"
 # Kernel `expect`s only assert invariants established by prior shape validation.
 missing_panics_doc = "allow"
 # Contract semantics require exact IEEE-754 comparison (JavaScript parity), never an epsilon.
