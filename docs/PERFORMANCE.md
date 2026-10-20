@@ -23,7 +23,7 @@ CONTEXTOS_LOAD_REPLICAS=3 CONTEXTOS_LOAD_AGENTS=64 CONTEXTOS_LOAD_RUNS=40 \
 
 | Setup (one laptop, everything in one process) | Result |
 |---|---|
-| 3 replicas, 64 agents | ~2,300 runs/s (admission + effect), ~4,700 requests/s, p50 10 ms, p99 52 ms; admission p50 5.6 ms |
+| 3 replicas, 64 agents | ~2,600 runs/s (admission + effect), ~5,200 requests/s, p50 9–10 ms, p99 47 ms; admission p50 5.1–5.3 ms (2026-10-21, after the envelope, schema, escalation, metrics and memory-verification checks; ~2,300 before them, within run-to-run variance) |
 | PostgreSQL (local socket), 1 replica, 64 agents | ~1,750 runs/s, ~3,500 requests/s, p50 17 ms, p99 51 ms; admission p50 14 ms |
 | PostgreSQL (local socket), 3 replicas, 64 agents | ~1,530 runs/s, ~3,060 requests/s, p50 16 ms, p99 71 ms |
 
