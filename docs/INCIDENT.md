@@ -86,6 +86,11 @@ refused, and the run cannot complete until it is reconciled. Query the provider
 `{"source": "provider"}`) or, with provider evidence, assert it as an operator (see the guide's *Reconciling unknown
 effects*). Never re-run an effect to find out whether it happened.
 
+### Escalations
+
+Policy escalations are listed at `GET /v1/escalations`; a growing list is a signal in
+itself. Resolve each with what was done (`POST /v1/escalations/{id}/resolve`).
+
 ## Evidence
 
 - **Audit chain**: page it out with `GET /v1/audit/entries?from=1&limit=1000` (follow
