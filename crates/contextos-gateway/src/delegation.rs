@@ -99,6 +99,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     ) -> Result<RunAdmission, AdmissionError> {
         let reject = |reason: &str| AdmissionError::Delegation(vec![reason.to_owned()]);
         let now = self.now();
+        let parent_state = self
+            .run_state(parent)
+            .await
+            .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
+        if parent_state.as_ref().is_some_and(|s| s["status"] != "running") {
+            return Err(reject("parent_not_running"));
+        }
         if validate(&SchemaTarget::document(SchemaDoc::AgentDelegation), envelope).is_err() {
             return Err(reject("delegation_invalid"));
         }
@@ -231,6 +238,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await
             .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
+        let child_run_id = child.run_id.clone();
+        self.edit_run_state(parent, move |state| {
+            if let Some(children) = state["child_run_ids"].as_array_mut()
+                && !children.iter().any(|c| c == child_run_id.as_str())
+            {
+                children.push(json!(child_run_id));
+            }
+        })
+        .await
+        .map_err(|e| AdmissionError::Delegation(vec![e.to_string()]))?;
         Ok(child)
     }
 
@@ -303,14 +320,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let usage = final_ledger.body["used"].clone();
         let parent_budget = DocKey::new(&parent.tenant_id, DocKind::BudgetLedger, &parent.budget_ledger_id);
         let reservation = delegation_reservation_id(&child.run_id);
+        // Settled already: settled in the live ledger, or archived by compaction, which
+        // only ever archives settled reservations.
         let settled = self.store.get(&parent_budget).await?.is_some_and(|l| {
-            l.body["reservations"]
+            !l.body["reservations"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .any(|r| r["reservation_id"] == reservation.as_str() && r["status"] == "settled")
+                .any(|r| r["reservation_id"] == reservation.as_str() && r["status"] != "settled")
         });
         if settled {
+            self.forget_child(parent, &child.run_id).await?;
             "closed".clone_into(&mut out.status);
             out.usage = Some(usage);
             return Ok(out);
@@ -331,9 +351,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         out.audit_sequences.push(entry.sequence);
+        self.forget_child(parent, &child.run_id).await?;
         "closed".clone_into(&mut out.status);
         out.usage = Some(usage);
         Ok(out)
+    }
+
+    async fn forget_child(&self, parent: &RunAdmission, child_run_id: &str) -> Result<(), GatewayError> {
+        self.edit_run_state(parent, |state| {
+            if let Some(children) = state["child_run_ids"].as_array_mut() {
+                children.retain(|c| c != child_run_id);
+            }
+        })
+        .await
     }
 
     /// Settles the child reservation in the parent's ledger at `usage` (terminal).

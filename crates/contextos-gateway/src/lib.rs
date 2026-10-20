@@ -23,6 +23,7 @@
 pub mod admission;
 mod delegation;
 mod input;
+mod lifecycle;
 pub mod manifest;
 mod ownership;
 pub mod ports;
@@ -48,6 +49,7 @@ use serde_json::{Map, Value, json};
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
+pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
 pub use ownership::Ownership;
 pub use ports::{
@@ -386,6 +388,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         {
             return Ok(p.stop("rejected", vec![reason.into()], "The executor does not own this run."));
         }
+        if fence.is_none()
+            && let Some(state) = self.run_state(admission).await?
+            && state["status"] != "running"
+        {
+            return Ok(p.stop("rejected", vec!["run_not_running".into()], "The run is not running."));
+        }
 
         // 1. Surface.
         if validate(
@@ -704,6 +712,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
 
+        if self.unresolved_effects(admission).await? >= MAX_UNRESOLVED_EFFECTS {
+            p.report.obligations.push("reconcile_effect_before_retry".into());
+            return Ok(p.stop(
+                "paused",
+                vec!["too_many_unresolved_effects".into()],
+                "Too many effects of this run are unresolved; reconcile them first.",
+            ));
+        }
+
         // 4. Reserve.
         let attempt_id = self.ports.ids.new_id("attempt");
         p.report.attempt_id = Some(attempt_id.clone());
@@ -903,6 +920,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         .await?;
         if let Commit::Written { obligations, .. } | Commit::Unchanged { obligations } = commit {
             p.report.obligations.extend(obligations);
+        }
+        if let Some(op) = self
+            .store
+            .get(&operations_key)
+            .await?
+            .and_then(|r| r.body["operations"][0].get("outcome").cloned())
+            && matches!(op.as_str(), Some("unknown" | "partial"))
+        {
+            self.note_effect(admission, &operation_id, op.as_str().unwrap_or("unknown"))
+                .await?;
         }
         let entry = self
             .audit

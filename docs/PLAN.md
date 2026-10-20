@@ -98,7 +98,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 22 Overload protection; spec proposal | done — load shedding, per-tenant rate and dispatch-concurrency limits; `docs/proposals/spec-0001` drafted for the spec maintainers |
 | 23 Delegation (subagent lanes) | done — envelope binding and narrowing, parent-funded sub-budgets, attested run links, capacity-locking close, HTTP API |
 | 24 Executor failover | done — kernel run lifecycle per run, generation-fenced effectful API (re-checked before claim), takeover via suspend/resume, generation forwarded to providers |
-| 25 Run completion/cancellation lifecycle (cancel children, dispatch-stop acknowledgement), checkpoint export | next |
+| 25 Run lifecycle | done — complete/fail/cancel via kernel transitions; outstanding effects and children tracked; recursive cancellation with dispatch-stop acknowledgement from the budget ledger |
+| 26 Checkpoint export and replay packets over HTTP; fold lifecycle reads into dispatch's existing reads | next |
 
 ## Non-negotiables carried from the spec
 

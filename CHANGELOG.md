@@ -24,6 +24,9 @@ First release candidate of the ContextOS runtime.
   claim the operation, dispatch, observe, settle and audit, failing closed throughout.
 - Reconciliation of unknown effects by provider query (MCP `tasks/get`) or evidenced
   operator assertion.
+- Run completion, failure and cancellation through the kernel lifecycle: completion
+  requires resolved effects and settled children; cancellation fences the executor,
+  cancels and settles children and acknowledges once dispatch has stopped.
 - Executor ownership and failover: runs start through the kernel lifecycle, effectful
   requests present the executor generation, and takeover fences the previous executor.
 - Delegated child runs: narrowed tool surface, sub-budgets reserved from the parent,

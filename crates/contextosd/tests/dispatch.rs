@@ -718,3 +718,65 @@ async fn a_new_executor_takes_over_and_the_old_one_is_fenced() {
         .unwrap();
     assert_eq!(missing.status(), 428, "effectful requests must carry a generation");
 }
+
+#[tokio::test]
+async fn runs_complete_and_cancel_over_http() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    for run in ["run_done", "run_stop"] {
+        let admitted = http
+            .post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&run_body(run, 1200))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(admitted.status(), 201);
+    }
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_done/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_done", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed");
+    let done = http
+        .post(format!("{}/v1/runs/run_done/complete", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(done.status(), 200);
+    let done: Value = done.json().await.unwrap();
+    assert_eq!(done["status"], "completed");
+
+    let cancelled: Value = reqwest::Client::new()
+        .post(format!("{}/v1/runs/run_stop/cancel", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cancelled["status"], "cancelled", "{cancelled}");
+    let after: Value = http
+        .post(format!("{}/v1/runs/run_stop/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_stop", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        after["result"]["status"], "rejected",
+        "a cancelled run's executor is fenced: {after}"
+    );
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+}

@@ -99,6 +99,20 @@ sees it and reconciles it rather than repeating it. Adapters forward the generat
 `X-ContextOS-Executor-Generation` so providers that support target-side fencing can
 enforce it too.
 
+### Completing and cancelling runs
+
+- `POST /v1/runs/{run_id}/complete` (executor, fenced) succeeds only when no effect is
+  unknown or partial, every delegated child is closed and nothing is in flight;
+  otherwise `409` with `required_effect_unsatisfied`, `children_unsettled` or
+  `effects_in_flight`.
+- `POST /v1/runs/{run_id}/fail` (executor, fenced) marks the run failed.
+- `POST /v1/runs/{run_id}/cancel` (scope `admit`, no generation needed) fences the
+  executor, cancels and closes every child (settling its spend into the parent), and
+  acknowledges once dispatch has stopped. If an effect is still in flight the run stays
+  `cancel_requested` with `retry_cancel_after_dispatch_settles`; call it again.
+
+A run with 128 unresolved effects pauses new dispatch until some are reconciled.
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an

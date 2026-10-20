@@ -61,6 +61,10 @@ Remaining per-effect CPU: canonical encoding and hashing of audit payloads and l
 authorization, and re-validation of the (now bounded) budget ledger. The kernel
 deliberately re-validates every ledger it is given rather than trusting stored state.
 
+Each dispatch also reads the run's lifecycle state and records unknown outcomes for
+completion checks. In memory this is unmeasurable; on PostgreSQL these are extra round
+trips that a future change can fold into the reads dispatch already makes.
+
 ## Known limits
 
 - A single budget ledger holds at most 128 mutation receipts (spec bound). The gateway

@@ -1025,3 +1025,116 @@ fn compiled_evidence() -> Vec<Value> {
         .unwrap()
         .clone()
 }
+
+async fn running(h: &Harness) -> u64 {
+    match h.gateway.open_run(&h.admission).await.unwrap() {
+        Ownership::Current(generation) => generation,
+        other @ Ownership::Refused(_) => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn runs_complete_only_when_every_effect_is_resolved() {
+    let h = harness("allow", Behavior::Hang).await;
+    let generation = running(&h).await;
+    let out = h
+        .gateway
+        .dispatch_as(&h.admission, &call("tc_1", Some("refund_ord_881")), generation)
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "paused");
+    let op_id = out.report.operation_id.clone().unwrap();
+
+    let refused = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+    assert_eq!(
+        refused.reason_codes,
+        vec!["required_effect_unsatisfied".to_owned()],
+        "an unknown effect blocks completion"
+    );
+
+    let resolved = h
+        .gateway
+        .reconcile(
+            &h.admission,
+            &op_id,
+            Resolution::Assert {
+                outcome: EffectOutcome::Confirmed,
+                evidence_ref: artifact("provider_ledger_extract", "refund-ord-881"),
+                principal_id: "ops_alice".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.status, "resolved");
+    let stale = h.gateway.complete_run(&h.admission, generation - 1).await.unwrap();
+    assert_eq!(stale.reason_codes, vec!["executor_stale".to_owned()]);
+    let done = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+    assert_eq!(done.status, "completed", "{:?}", done.reason_codes);
+
+    let after = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_2", Some("op_after")))
+        .await
+        .unwrap();
+    assert_eq!(after.report.reason_codes, vec!["run_not_running".to_owned()]);
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn cancelling_a_parent_stops_and_settles_its_children() {
+    let h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    let generation = running(&h).await;
+    let child = delegate(
+        &h,
+        &envelope(
+            &h,
+            "run_child",
+            &["adp_payments.issue_refund"],
+            "isolate_until_accepted",
+            3,
+        ),
+    )
+    .await
+    .unwrap();
+    let child_generation = match h.gateway.open_run(&child).await.unwrap() {
+        Ownership::Current(g) => g,
+        other @ Ownership::Refused(_) => panic!("{other:?}"),
+    };
+    // The store holds admissions so cancellation can find children.
+    h.store
+        .create(
+            &DocKey::new(TENANT, DocKind::RunAdmission, "run_child"),
+            &serde_json::to_value(&child).unwrap(),
+        )
+        .await
+        .unwrap();
+    let out = h
+        .gateway
+        .dispatch_as(&child, &child_call("run_child", "tc_1"), child_generation)
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed");
+    let parent_state = h.gateway.run_state(&h.admission).await.unwrap().unwrap();
+    assert_eq!(parent_state["child_run_ids"], json!(["run_child"]));
+    let refused = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+    assert_eq!(refused.reason_codes, vec!["children_unsettled".to_owned()]);
+
+    let cancelled = h.gateway.cancel_run(&h.admission, "ops_alice").await.unwrap();
+    assert_eq!(cancelled.status, "cancelled", "{cancelled:?}");
+    let child_state = h.gateway.run_state(&child).await.unwrap().unwrap();
+    assert_eq!(child_state["status"], "cancelled");
+    let parent_budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(
+        parent_budget["used"]["tool_calls"], 1,
+        "the child's spend is settled into the parent"
+    );
+    assert_eq!(parent_budget["reserved"]["tool_calls"], 0);
+    let late = h
+        .gateway
+        .dispatch_as(&child, &child_call("run_child", "tc_2"), child_generation)
+        .await
+        .unwrap();
+    assert_eq!(late.result["status"], "rejected");
+    let again = h.gateway.cancel_run(&h.admission, "ops_alice").await.unwrap();
+    assert_eq!(again.status, "cancelled", "cancelling is idempotent in effect");
+}

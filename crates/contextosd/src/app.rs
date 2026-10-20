@@ -13,12 +13,15 @@
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
 //! | `GET /v1/runs/{run_id}` | `dispatch` | lifecycle status and current executor generation |
 //! | `POST /v1/runs/{run_id}/takeover` | `dispatch` | move the run to a new executor; the old generation goes stale |
+//! | `POST /v1/runs/{run_id}/complete` | `dispatch` | complete the run (no unresolved effect, open child or work in flight) |
+//! | `POST /v1/runs/{run_id}/fail` | `dispatch` | mark the run failed |
+//! | `POST /v1/runs/{run_id}/cancel` | `admit` | cancel the run and its children; stops dispatch, settles children |
 //! | `POST /v1/runs/{run_id}/close` | `admit` | close a delegated child (`accept`/`reject`) and settle its usage into the parent |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
 //!
-//! Effectful routes (tool calls, input, reconcile, close) require the
+//! Effectful routes (tool calls, input, reconcile, close, complete, fail) require the
 //! `ContextOS-Executor-Generation` header returned by admission or takeover.
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
@@ -959,6 +962,50 @@ where
     .into_response())
 }
 
+/// `complete`, `fail` (fenced by the executor generation) or `cancel` (administrative).
+async fn lifecycle<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, action)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let scope = if action == "cancel" { "admit" } else { "dispatch" };
+    let caller = authorize(&state, &headers, Some(scope))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let unavailable = |_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    let outcome = match action.as_str() {
+        "complete" => gateway
+            .complete_run(&admission, executor_generation(&headers)?)
+            .await
+            .map_err(unavailable)?,
+        "fail" => gateway
+            .fail_run(&admission, executor_generation(&headers)?)
+            .await
+            .map_err(unavailable)?,
+        "cancel" => gateway
+            .cancel_run(&admission, &caller.principal_id)
+            .await
+            .map_err(unavailable)?,
+        _ => return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "No such run action.")),
+    };
+    let status = if outcome.reason_codes.is_empty() {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    Ok((status, axum::Json(outcome)).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -993,6 +1040,7 @@ where
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
         .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
+        .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",
             post(provide_input::<S, L>),

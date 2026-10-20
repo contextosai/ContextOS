@@ -290,6 +290,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         }
+        if let Some(outcome) = &out.outcome {
+            self.note_effect(admission, operation_id, outcome).await?;
+        }
         "resolved".clone_into(&mut out.status);
         Ok(out)
     }
