@@ -142,6 +142,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         operation_id: &str,
         outcome: &str,
     ) -> Result<(), GatewayError> {
+        if matches!(outcome, "confirmed" | "partial") {
+            self.note_applied_effect(admission, operation_id).await?;
+        }
         let unresolved = matches!(outcome, "unknown" | "partial");
         self.edit_run_state(admission, |state| {
             let effects = state["outstanding_effects"].as_array_mut();
@@ -152,6 +155,85 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         })
         .await
+    }
+
+    /// Records an applied effect for the completion gate (only when it is on).
+    pub(crate) async fn note_applied_effect(
+        &self,
+        admission: &RunAdmission,
+        operation_id: &str,
+    ) -> Result<(), GatewayError> {
+        if self.completion_floor.is_none() {
+            return Ok(());
+        }
+        if !self
+            .note_in_index(applied_key(admission), operation_id, MAX_APPLIED_EFFECTS)
+            .await?
+        {
+            // Fail closed: completion refuses while effects went untracked.
+            self.edit_run_state(admission, |state| state["applied_effects_overflow"] = json!(true))
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Why the run may not complete under the completion score floor, if anything:
+    /// every applied effect must belong to a recorded decision, and every decision that
+    /// applied an effect must hold independent scores meeting the floors.
+    pub(crate) async fn unjudged(&self, admission: &RunAdmission) -> Result<Option<&'static str>, GatewayError> {
+        let Some((policy_floor, safety_floor)) = self.completion_floor else {
+            return Ok(None);
+        };
+        let state = self.run_state(admission).await?.unwrap_or(Value::Null);
+        if state["applied_effects_overflow"] == true {
+            return Ok(Some("effects_untracked"));
+        }
+        let applied: Vec<String> = self
+            .store
+            .get(&applied_key(admission))
+            .await?
+            .and_then(|d| d.body["keys"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        let (entries, complete) = self.recorded_decisions_strict(admission).await?;
+        if !complete {
+            return Ok(Some("decision_unscored"));
+        }
+        let mut decided = std::collections::HashSet::new();
+        for entry in &entries {
+            let record = &entry["record"];
+            let mutations: Vec<&str> = record["tool_lineage"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|t| t["mutation_refs"].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .collect();
+            if mutations.is_empty() {
+                continue;
+            }
+            decided.extend(mutations);
+            let scores = self
+                .decision_scores(admission, record["record_id"].as_str().unwrap_or_default())
+                .await?;
+            if scores.is_empty() {
+                return Ok(Some("decision_unscored"));
+            }
+            let meets = |s: &Value| {
+                let card = &s["score"]["scorecard"];
+                card["policy"].as_f64().is_some_and(|p| p >= policy_floor)
+                    && card["safety"].as_f64().is_some_and(|v| v >= safety_floor)
+            };
+            if !scores.iter().all(meets) {
+                return Ok(Some("decision_below_floor"));
+            }
+        }
+        if applied.iter().any(|op| !decided.contains(op.as_str())) {
+            return Ok(Some("effect_undecided"));
+        }
+        Ok(None)
     }
 
     /// Effects between reservation and settlement (open run-scoped reservations).
@@ -177,31 +259,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return self.refusal(admission, "effects_in_flight").await;
         }
         // Online validation: what the run did is judged before it is finished.
-        if let Some((policy_floor, safety_floor)) = self.completion_floor {
-            for entry in self.recorded_decisions(admission).await? {
-                let record = &entry["record"];
-                let effectful = record["tool_lineage"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|t| t["mutation_refs"].as_array().is_some_and(|m| !m.is_empty()));
-                if !effectful {
-                    continue;
-                }
-                let record_id = record["record_id"].as_str().unwrap_or_default();
-                let scores = self.decision_scores(admission, record_id).await?;
-                if scores.is_empty() {
-                    return self.refusal(admission, "decision_unscored").await;
-                }
-                let meets = |s: &Value| {
-                    let card = &s["score"]["scorecard"];
-                    card["policy"].as_f64().is_some_and(|p| p >= policy_floor)
-                        && card["safety"].as_f64().is_some_and(|v| v >= safety_floor)
-                };
-                if !scores.iter().all(meets) {
-                    return self.refusal(admission, "decision_below_floor").await;
-                }
-            }
+        if let Some(reason) = self.unjudged(admission).await? {
+            return self.refusal(admission, reason).await;
         }
         self.apply_event(admission, "complete", Some(executor_generation), None)
             .await
@@ -298,4 +357,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             executor_generation: state["executor_generation"].as_u64(),
         })
     }
+}
+
+/// Applied effects tracked per run for the completion gate at most.
+const MAX_APPLIED_EFFECTS: usize = 4096;
+
+fn applied_key(admission: &RunAdmission) -> DocKey {
+    DocKey::new(
+        &admission.tenant_id,
+        DocKind::DecisionLog,
+        format!("applied_effects:{}", admission.run_id),
+    )
 }

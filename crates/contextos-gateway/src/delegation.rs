@@ -314,6 +314,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             out.reason_codes.push("child_output_invalid".into());
             return Ok(out);
         }
+        // Accepting completes the child: its effects are judged like any run's.
+        if decision == CloseDecision::Accept
+            && let Some(reason) = self.unjudged(child).await?
+        {
+            out.reason_codes.push(reason.into());
+            return Ok(out);
+        }
         let now = self.now();
         // Lock the child's remaining capacity inside its own ledger, atomically.
         let child_budget = DocKey::new(&child.tenant_id, DocKind::BudgetLedger, &child.budget_ledger_id);
@@ -359,6 +366,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if decision == CloseDecision::Accept && !self.child_results_conform(child).await? {
             // The capacity stays locked: the parent can still reject the child.
             out.reason_codes.push("child_output_invalid".into());
+            return Ok(out);
+        }
+        if decision == CloseDecision::Accept
+            && let Some(reason) = self.unjudged(child).await?
+        {
+            out.reason_codes.push(reason.into());
             return Ok(out);
         }
         let Some(final_ledger) = self.store.get(&child_budget).await? else {

@@ -147,9 +147,25 @@ pub struct GuardsConfig {
     pub require_tool_schemas: bool,
     /// Online validation: a run may complete only when every decision that applied an
     /// effect holds an independent score whose `policy` and `safety` meet these floors.
+    /// Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses
+    /// those floors, `false` opts out explicitly, a table sets them.
     #[serde(default)]
-    pub completion_requires_scores: Option<ScoreFloors>,
+    pub completion_requires_scores: Option<CompletionScores>,
 }
+
+/// `[guards] completion_requires_scores`: on or off, or explicit floors.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(untagged)]
+pub enum CompletionScores {
+    Enabled(bool),
+    Floors(ScoreFloors),
+}
+
+/// The floors `completion_requires_scores = true` and production use.
+pub const DEFAULT_SCORE_FLOORS: ScoreFloors = ScoreFloors {
+    policy_floor: 1.0,
+    safety_floor: 0.9,
+};
 
 /// Score floors for [`GuardsConfig::completion_requires_scores`], each in 0..=1.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -331,6 +347,16 @@ impl Config {
         })
     }
 
+    /// `[guards] completion_requires_scores`, with the mode's default when unset.
+    pub fn completion_score_floors(&self) -> Option<ScoreFloors> {
+        match self.guards.completion_requires_scores {
+            Some(CompletionScores::Floors(floors)) => Some(floors),
+            Some(CompletionScores::Enabled(true)) => Some(DEFAULT_SCORE_FLOORS),
+            Some(CompletionScores::Enabled(false)) => None,
+            None => (self.server.mode == Mode::Production).then_some(DEFAULT_SCORE_FLOORS),
+        }
+    }
+
     /// `[guards] require_user_role`, with the mode's default when unset.
     pub fn require_user_role(&self) -> bool {
         self.guards
@@ -350,7 +376,7 @@ impl Config {
     }
 
     fn check(&self) -> Result<(), ConfigError> {
-        if let Some(floors) = self.guards.completion_requires_scores
+        if let Some(CompletionScores::Floors(floors)) = self.guards.completion_requires_scores
             && ![floors.policy_floor, floors.safety_floor]
                 .iter()
                 .all(|f| (0.0..=1.0).contains(f))

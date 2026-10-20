@@ -3292,7 +3292,7 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
     let content = "customer:cus_77 prefers_communication_channel=email";
     let promoted = |operation: &str, until: &str, text: &str| {
         json!({"record": {"operation": operation, "retention_expires_at": until, "readers": ["usr_771"],
-            "memory_ref": {"sha256": contextos_contract::canonical::sha256_text(text)}}})
+            "memory_ref": {"artifact_id": format!("key:{text}"), "sha256": contextos_contract::canonical::sha256_text(text)}}})
     };
     for (id, record) in [
         ("mem_ok", promoted("promote", "2099-01-01T00:00:00Z", content)),
@@ -3353,7 +3353,13 @@ async fn recalled_memory_must_be_promoted_current_and_unchanged() {
     let other = "customer:cus_77 prefers_communication_channel=sms";
     for (id, text) in [("mem_pref_email", content), ("mem_pref_sms", other)] {
         let mut record = promoted("promote", "2099-01-01T00:00:00Z", text);
-        record["record"]["memory_ref"]["artifact_id"] = json!("pref:cus_77:channel");
+        // The same key in different case is the same key.
+        let key = if id == "mem_pref_sms" {
+            "Pref:CUS_77:channel"
+        } else {
+            "pref:cus_77:channel"
+        };
+        record["record"]["memory_ref"]["artifact_id"] = json!(key);
         store
             .create(&DocKey::new(TENANT, DocKind::MemoryRecord, id), &record)
             .await
@@ -3403,9 +3409,32 @@ async fn production_requires_pins_and_a_stated_role() {
     config.server.mode = contextosd::config::Mode::Production;
     assert_eq!(config.required_release_refs(), ["model_profile", "evaluator_suite"]);
     assert!(config.require_user_role());
+    let floors = config
+        .completion_score_floors()
+        .expect("judged before completion in production");
+    assert_eq!((floors.policy_floor, floors.safety_floor), (1.0, 0.9));
     config.guards.required_release_refs = Some(vec![]);
     config.guards.require_user_role = Some(false);
+    config.guards.completion_requires_scores = Some(contextosd::config::CompletionScores::Enabled(false));
     assert!(config.required_release_refs().is_empty() && !config.require_user_role());
+    assert!(config.completion_score_floors().is_none(), "opted out explicitly");
+
+    // `true`, `false` and explicit floors all parse.
+    let parsed = |guards: &str| {
+        Config::parse(&format!(
+            "[server]\nlisten = \"127.0.0.1:0\"\n[store]\nkind = \"memory\"\n[audit]\nsigning_seed_env = \"X\"\nkey_id = \"k\"\n\
+             [support]\nimplementation_id = \"x\"\nimplementation_version = \"1\"\nprofiles = []\ncontrols = []\n[guards]\n{guards}\n"
+        ))
+        .unwrap()
+        .completion_score_floors()
+        .map(|f| (f.policy_floor, f.safety_floor))
+    };
+    assert_eq!(parsed("completion_requires_scores = true"), Some((1.0, 0.9)));
+    assert_eq!(parsed("completion_requires_scores = false"), None);
+    assert_eq!(
+        parsed("completion_requires_scores = { policy_floor = 0.8, safety_floor = 0.7 }"),
+        Some((0.8, 0.7))
+    );
 
     // Admission refuses a run whose user claims state no role.
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
@@ -3427,6 +3456,16 @@ async fn production_requires_pins_and_a_stated_role() {
         refused.json::<Value>().await.unwrap()["error"]["code"],
         "user_role_missing"
     );
+    let mut invisible = run_body("run_invisible_role", 1200);
+    invisible["run_context"]["user"]["role"] = json!("\u{200B}");
+    let refused = plain
+        .post(format!("{base}/v1/runs"))
+        .bearer_auth("acme-key")
+        .json(&invisible)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 422, "an invisible character is not a role");
     let admitted = plain
         .post(format!("{base}/v1/runs"))
         .bearer_auth("acme-key")

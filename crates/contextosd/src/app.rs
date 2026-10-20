@@ -487,9 +487,12 @@ where
     )
     .await?;
     if state.require_user_role
+        // A role is a visible identifier (invisible or whitespace characters are not one).
         && run_context_value["user"]["role"]
             .as_str()
-            .is_none_or(|r| r.trim().is_empty())
+            .is_none_or(|r| {
+                r.is_empty() || !r.chars().all(|c| c.is_ascii_alphanumeric() || "_.:-".contains(c))
+            })
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2071,9 +2074,15 @@ where
         if !current {
             return Err(refused(json!({"memory_ref": memory_ref})));
         }
+        // Keyed case-insensitively; a memory without a key cannot be checked, so it is refused.
+        let Some(key) = record
+            .and_then(|r| r["memory_ref"]["artifact_id"].as_str())
+            .map(str::to_lowercase)
+        else {
+            return Err(refused(json!({"memory_ref": memory_ref, "reason": "no memory key"})));
+        };
         if let Some(record) = record
-            && let Some(key) = record["memory_ref"]["artifact_id"].as_str()
-            && let Some(previous) = values.insert(key.to_owned(), record["memory_ref"]["sha256"].clone())
+            && let Some(previous) = values.insert(key.clone(), record["memory_ref"]["sha256"].clone())
             && previous != record["memory_ref"]["sha256"]
         {
             return Err(ApiError::new(

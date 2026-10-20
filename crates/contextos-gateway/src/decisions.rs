@@ -336,6 +336,34 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Everything an auditor needs about one run.
+    /// The run's recorded decision entries, and whether every indexed decision was found
+    /// (a reserved slot whose entry is missing makes the set incomplete).
+    pub(crate) async fn recorded_decisions_strict(
+        &self,
+        admission: &RunAdmission,
+    ) -> Result<(Vec<Value>, bool), GatewayError> {
+        let ids = self
+            .store
+            .get(&decisions_key(admission))
+            .await?
+            .map(|d| d.body["record_ids"].clone())
+            .unwrap_or(json!([]));
+        let mut entries = Vec::new();
+        let mut complete = true;
+        for id in ids.as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let key = DocKey::new(
+                &admission.tenant_id,
+                DocKind::DecisionLog,
+                format!("{}/{id}", admission.run_id),
+            );
+            match self.store.get(&key).await? {
+                Some(entry) => entries.push(entry.body),
+                None => complete = false,
+            }
+        }
+        Ok((entries, complete))
+    }
+
     /// The run's recorded decision entries (`{record, replay_packet, recorded_by}`).
     pub(crate) async fn recorded_decisions(&self, admission: &RunAdmission) -> Result<Vec<Value>, GatewayError> {
         let ids = self

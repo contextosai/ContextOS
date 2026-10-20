@@ -52,7 +52,10 @@ function outcome(response) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const segment = (value) => encodeURIComponent(value);
+const segment = (value) => {
+  if (value === "" || value === "." || value === "..") throw new TypeError(`invalid path segment ${JSON.stringify(value)}`);
+  return encodeURIComponent(value);
+};
 
 export class Client {
   #token;

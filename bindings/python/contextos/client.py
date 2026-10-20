@@ -372,4 +372,6 @@ def _retry_after(header: Optional[str], attempt: int) -> float:
 
 
 def _quote(segment: str) -> str:
+    if segment in ("", ".", ".."):
+        raise ValueError(f"invalid path segment {segment!r}")
     return urllib.parse.quote(segment, safe="")

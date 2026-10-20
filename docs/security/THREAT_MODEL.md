@@ -156,7 +156,26 @@ budgets, and the integrity of the evidence record.
   capped per run). `require_tool_schemas` now covers read-only tools. Each fix has a
   regression test.
 
+- 2026-10-21: ninth review, of production defaults, the completion score gate,
+  production result schemas and memory conflicts. Fixed: the completion gate judged
+  only decisions the agent recorded, so a run could apply an effect, report no decision
+  for it and complete (the runtime now tracks every applied effect and refuses
+  `effect_undecided`), and accepting a delegated child completed it without the gate
+  (the child is judged first); a decision whose entry was missing was skipped (now
+  counted as unscored); a memory without a key escaped the conflict check and keys
+  differing only in case did not match (refused, and compared case-insensitively); a
+  zero-width character passed as a user role (a role must be a visible identifier);
+  production opt-outs were silent (now logged at startup); the clients accepted `.` and
+  `..` as ids (refused). Each fix has a regression test.
+
 ## Residual risks and deployment obligations
+
+- **Release pins are not verified against a registry.** Production requires
+  `model_profile` and `evaluator_suite` release refs, and decisions record them, but
+  the runtime checks their presence and digest form, not that the model or evaluator
+  exists; verify pins in your release process.
+- **Memory conflicts are checked among the memories a run recalls**, not against every
+  promoted value for the key; the memory-governance service owns supersession.
 
 - **Invented role in policy inputs.** When the user claims carry no `role`, the
   compiler evaluates policy as if it were `support_agent`, mirroring the spec's

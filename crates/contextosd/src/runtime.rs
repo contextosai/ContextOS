@@ -258,8 +258,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         model_call_floor: config.guards.model_call_min_tokens,
         result_schemas,
         completion_floor: config
-            .guards
-            .completion_requires_scores
+            .completion_score_floors()
             .map(|f| (f.policy_floor, f.safety_floor)),
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
     }))

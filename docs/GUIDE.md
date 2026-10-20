@@ -606,11 +606,15 @@ Scores are evidence after the fact unless something waits for them. With
 completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }
 ```
 
-a run cannot complete while any decision that applied an effect has no independent
-score (`decision_unscored`) or has a score whose `policy` or `safety` is below its
-floor (`decision_below_floor`); every score counts, so one dissenting evaluator holds
-the run. The executor waits for its evaluators, or the run is failed or cancelled
-instead.
+a run cannot complete while an effect it applied is not part of any recorded
+decision (`effect_undecided`: the runtime tracks every confirmed or partial effect, so
+an effect left out of the decision reports still counts), while any decision that
+applied an effect has no independent score (`decision_unscored`), or while a score's
+`policy` or `safety` is below its floor (`decision_below_floor`); every score counts,
+so one dissenting evaluator holds the run. Accepting a delegated child applies the
+same check to the child. The executor waits for its evaluators, or the run is failed
+or cancelled instead. Production turns this on by default (policy 1.0, safety 0.9);
+`completion_requires_scores = true` uses those floors elsewhere and `false` opts out.
 
 ## 8. Kill switch
 
@@ -726,14 +730,15 @@ development keys, HTTPS endpoints and KMS, scope separation, runs that pin
 `model_profile` and `evaluator_suite` in `release_refs` (`[guards]
 required_release_refs`, default in production), user claims that state a `role`
 (`[guards] require_user_role`, default in production; `user_role_missing`), and
-delegations whose result schema is registered (`[[result_schemas]]`). Opt out of
+delegations whose result schema is registered (`[[result_schemas]]`), and runs whose
+effects are independently scored before they complete
+(`[guards] completion_requires_scores`). Opt out of
 either only explicitly (`required_release_refs = []`, `require_user_role = false`).
 Also turn on:
 
 ```toml
 [guards]
 require_tool_schemas = true      # every capability has input and output schemas
-completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }   # judged before done
 
 [[result_schemas]]               # what delegated runs' results must meet
 # ref = "schema://…"

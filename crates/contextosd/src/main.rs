@@ -37,6 +37,18 @@ async fn main() {
         packs.insert(pack_ref, pack);
     }
     let dispatch = dispatch_setup_from_config(&config).unwrap_or_else(|e| fail(e));
+    if config.server.mode == contextosd::config::Mode::Production {
+        let guards = &config.guards;
+        if guards.required_release_refs.as_ref().is_some_and(Vec::is_empty) {
+            tracing::warn!("production: required_release_refs = [] opts out of model and evaluator pins");
+        }
+        if guards.require_user_role == Some(false) {
+            tracing::warn!("production: require_user_role = false lets policy evaluate the compiler's default role");
+        }
+        if config.completion_score_floors().is_none() {
+            tracing::warn!("production: completion_requires_scores = false lets runs complete with unjudged effects");
+        }
+    }
     let timeout = Duration::from_millis(config.server.request_timeout_ms);
     let app = match &config.store {
         StoreConfig::Memory => {

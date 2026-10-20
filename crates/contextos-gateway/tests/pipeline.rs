@@ -2223,3 +2223,54 @@ async fn production_delegations_need_a_registered_result_schema() {
         .unwrap();
     assert!(delegate(&h, &env).await.is_ok(), "named and registered");
 }
+
+#[tokio::test]
+async fn unreported_effects_and_accepted_children_are_judged_too() {
+    // An effect no decision accounts for holds the run.
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_completion_floor(Some((1.0, 0.9)));
+    let generation = running(&h).await;
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_silent")))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed");
+    let refused = h.gateway.complete_run(&h.admission, generation).await.unwrap();
+    assert_eq!(refused.reason_codes, vec!["effect_undecided".to_owned()]);
+
+    // A delegated child's effects are judged before the parent accepts it.
+    let mut h = harness_with_limits("allow", Behavior::Confirm, 20, 100.0).await;
+    h.gateway.set_completion_floor(Some((1.0, 0.9)));
+    let child = delegate(
+        &h,
+        &envelope(
+            &h,
+            "run_child_judged",
+            &["adp_payments.issue_refund"],
+            "isolate_until_accepted",
+            2,
+        ),
+    )
+    .await
+    .unwrap();
+    h.gateway.remember_compiled(&child, &compiled().0).await.unwrap();
+    let out = h
+        .gateway
+        .dispatch(&child, &child_call("run_child_judged", "tc_1"))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes);
+    let report: DecisionReport = serde_json::from_value(json!({
+        "decision_key": "support.refund.execute", "decision_version": "1", "status": "DEFERRED",
+        "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out.report.operation_id}]}))
+    .unwrap();
+    h.gateway.record_decision(&child, report, "svc_recorder").await.unwrap();
+    let refused = h
+        .gateway
+        .close_delegation(&h.admission, &child, CloseDecision::Accept, "agt_support")
+        .await
+        .unwrap();
+    assert_eq!(refused.status, "rejected");
+    assert_eq!(refused.reason_codes, vec!["decision_unscored".to_owned()]);
+}

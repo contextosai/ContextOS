@@ -1335,6 +1335,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Unresolved outcomes are tracked for completion checks; the response says which.
         if response.outcome == EffectOutcome::Partial {
             self.note_effect(admission, &operation_id, "partial").await?;
+        } else if response.outcome == EffectOutcome::Confirmed && response.definitive {
+            self.note_applied_effect(admission, &operation_id).await?;
         } else if !(response.definitive && response.outcome != EffectOutcome::Unknown) {
             self.note_effect(admission, &operation_id, "unknown").await?;
         }
