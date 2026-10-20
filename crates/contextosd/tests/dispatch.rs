@@ -3231,7 +3231,7 @@ async fn erasing_a_run_redacts_its_feedback_text() {
 #[tokio::test]
 async fn decisions_record_the_pinned_model_and_evaluators() {
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
-    config.guards.required_release_refs = vec!["model_profile".into(), "evaluator_suite".into()];
+    config.guards.required_release_refs = Some(vec!["model_profile".into(), "evaluator_suite".into()]);
     let state = replica_state(&config, Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
     let base = serve(router(state, Duration::from_secs(10))).await;
     let plain = reqwest::Client::new();
@@ -3364,4 +3364,48 @@ async fn startup_can_require_schemas_on_effectful_tools() {
     manifest["output_schema"] = json!({"type": "object", "properties": {"refund_id": {"type": "string"}}});
     std::fs::write(path, manifest.to_string()).unwrap();
     assert!(dispatch_setup_from_config(&config).is_ok());
+}
+
+#[tokio::test]
+async fn production_requires_pins_and_a_stated_role() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    // Development defaults: neither required.
+    assert!(config.required_release_refs().is_empty());
+    assert!(!config.require_user_role());
+    // Production defaults: both, unless opted out explicitly.
+    config.server.mode = contextosd::config::Mode::Production;
+    assert_eq!(config.required_release_refs(), ["model_profile", "evaluator_suite"]);
+    assert!(config.require_user_role());
+    config.guards.required_release_refs = Some(vec![]);
+    config.guards.require_user_role = Some(false);
+    assert!(config.required_release_refs().is_empty() && !config.require_user_role());
+
+    // Admission refuses a run whose user claims state no role.
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    config.guards.require_user_role = Some(true);
+    let state = replica_state(&config, Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
+    let base = serve(router(state, Duration::from_secs(10))).await;
+    let plain = reqwest::Client::new();
+    let mut roleless = run_body("run_roleless", 1200);
+    roleless["run_context"]["user"].as_object_mut().unwrap().remove("role");
+    let refused = plain
+        .post(format!("{base}/v1/runs"))
+        .bearer_auth("acme-key")
+        .json(&roleless)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 422);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["code"],
+        "user_role_missing"
+    );
+    let admitted = plain
+        .post(format!("{base}/v1/runs"))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_with_role", 1200))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
 }

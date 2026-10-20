@@ -96,7 +96,8 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 
 # [guards]
 # identical_tool_calls = 5     # loop guard: refuse the next identical call in a run
-# required_release_refs = ["model_profile", "evaluator_suite"]   # runs must pin them
+# required_release_refs = ["model_profile", "evaluator_suite"]   # the production default; [] opts out
+# require_user_role = true      # the production default: runs must state user.role
 # require_tool_schemas = true   # effectful capabilities need input and output schemas
 # trust_supplied_memory = false  # without [providers.memory], admit caller-supplied memory?
 

@@ -126,9 +126,15 @@ pub struct GuardsConfig {
     pub model_call_min_tokens: u64,
     /// Release artifact types every run's execution contract must pin in
     /// `release_refs` (e.g. `["model_profile", "evaluator_suite"]`), so each decision
-    /// records which model and evaluators produced it; empty by default.
+    /// records which model and evaluators produced it. Unset: `model_profile` and
+    /// `evaluator_suite` in production, none in development; `[]` opts out explicitly.
     #[serde(default)]
-    pub required_release_refs: Vec<String>,
+    pub required_release_refs: Option<Vec<String>>,
+    /// Refuse runs whose user claims carry no `role`, so policy never evaluates a role
+    /// nobody asserted (the reference compiler defaults it; see the threat model).
+    /// Unset: on in production, off in development.
+    #[serde(default)]
+    pub require_user_role: Option<bool>,
     /// Admit recalled memory (`deps.promoted_memory`) that no memory-governance service
     /// can verify. Without `[providers.memory]`, production refuses such memory unless
     /// this is set; with it, every item is verified against promoted state regardless.
@@ -154,7 +160,8 @@ impl Default for GuardsConfig {
         Self {
             identical_tool_calls: default_identical_calls(),
             model_call_min_tokens: default_model_call_tokens(),
-            required_release_refs: Vec::new(),
+            required_release_refs: None,
+            require_user_role: None,
             trust_supplied_memory: false,
             require_tool_schemas: false,
         }
@@ -300,6 +307,24 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// `[guards] required_release_refs`, with the mode's default when unset.
+    pub fn required_release_refs(&self) -> Vec<String> {
+        self.guards.required_release_refs.clone().unwrap_or_else(|| {
+            if self.server.mode == Mode::Production {
+                vec!["model_profile".into(), "evaluator_suite".into()]
+            } else {
+                Vec::new()
+            }
+        })
+    }
+
+    /// `[guards] require_user_role`, with the mode's default when unset.
+    pub fn require_user_role(&self) -> bool {
+        self.guards
+            .require_user_role
+            .unwrap_or(self.server.mode == Mode::Production)
+    }
+
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|e| ConfigError::Read(path.to_owned(), e))?;
         Self::parse(&text)

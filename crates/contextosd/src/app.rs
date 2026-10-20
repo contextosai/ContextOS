@@ -111,8 +111,10 @@ pub struct AppState<S, L> {
     pub conformance: crate::config::ConformanceConfig,
     /// Concurrent shadow diffs at most; beyond it a diff is skipped, never queued.
     pub shadow_slots: Arc<tokio::sync::Semaphore>,
-    /// `[guards] required_release_refs`.
+    /// `[guards] required_release_refs` (resolved for the mode).
     pub required_release_refs: Vec<String>,
+    /// `[guards] require_user_role` (resolved for the mode).
+    pub require_user_role: bool,
     /// Whether recalled memory without a memory-governance service is admitted.
     pub trust_supplied_memory: bool,
 }
@@ -484,6 +486,17 @@ where
         &input["deps"]["promoted_memory"],
     )
     .await?;
+    if state.require_user_role
+        && run_context_value["user"]["role"]
+            .as_str()
+            .is_none_or(|r| r.trim().is_empty())
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "user_role_missing",
+            "The run's user claims must state a role.",
+        ));
+    }
     // The deployment may require the executing model profile (and evaluators) to be
     // pinned, so every decision records what produced it.
     let pinned = input["contract"]["release_refs"].as_array();

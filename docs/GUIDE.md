@@ -703,13 +703,21 @@ tenant), so a rewritten or truncated history cannot pass as a continuation.
 For incidents (containment with the kill switch, evidence, recovery, postmortems), see
 [INCIDENT.md](INCIDENT.md).
 
-**Production checklist.** Beyond what production mode enforces on its own (no
-published development keys, HTTPS endpoints and KMS, scope separation), turn on:
+**Production checklist.** Production mode enforces on its own: no published
+development keys, HTTPS endpoints and KMS, scope separation, runs that pin
+`model_profile` and `evaluator_suite` in `release_refs` (`[guards]
+required_release_refs`, default in production) and user claims that state a `role`
+(`[guards] require_user_role`, default in production; `user_role_missing`). Opt out of
+either only explicitly (`required_release_refs = []`, `require_user_role = false`).
+Also turn on:
 
 ```toml
 [guards]
-required_release_refs = ["model_profile", "evaluator_suite"]   # decisions name what produced them
 require_tool_schemas = true      # every capability has input and output schemas
+
+[[result_schemas]]               # what delegated runs' results must meet
+# ref = "schema://…"
+# path = "…"
 
 [retention]
 run_content_days = 30            # personal content does not outlive its purpose
@@ -721,8 +729,7 @@ run_content_days = 30            # personal content does not outlive its purpose
 # …
 ```
 
-and send `user.role` in every run's verified claims (see the threat model's residual
-risks).
+Production refuses runs without `user.role` (see the threat model's residual risks).
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

@@ -144,7 +144,8 @@ where
         limits,
         conformance: config.conformance.clone(),
         shadow_slots: Arc::new(tokio::sync::Semaphore::new(4)),
-        required_release_refs: config.guards.required_release_refs.clone(),
+        required_release_refs: config.required_release_refs(),
+        require_user_role: config.require_user_role(),
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
     }))
 }
