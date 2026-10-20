@@ -124,6 +124,18 @@ budgets, and the integrity of the evidence record.
   digest is recorded, not checked against a stored artifact, so closing is an
   operator's attributable, audited assertion. Each fix has a regression test.
 
+- 2026-10-21: adversarial corpus (`adversarial_corpus_never_reaches_the_provider`):
+  nine attacks a compromised or injected executor could make (cross-run and
+  cross-trace envelopes, an unpinned capability, forged approval fields, an approval
+  mode downgrade, an impersonated principal chain, unadmitted evidence, a changed
+  recipient, an inflated amount), each run under a permissive and an approval-requiring
+  policy, must never reach the provider and must be refused for its own reason. Writing
+  it found two claims the gateway accepted silently though they decided nothing: a
+  principal chain not ending with the run's agent, and an approval mode below the
+  capability's declared ceiling. Both are now refused (`principal_chain_mismatch`,
+  `approval_mode_mismatch`). The test authority now pins its grant's recipients, as a
+  real broker does, instead of echoing the call's.
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

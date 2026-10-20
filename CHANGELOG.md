@@ -46,6 +46,9 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Tool calls whose principal chain does not end with the run's agent, or which misstate
+  the capability's approval mode, are refused (`principal_chain_mismatch`,
+  `approval_mode_mismatch`); an adversarial corpus of nine attacks runs in CI.
 - Metrics by capability, refusal reason, pack and decision status (bounded labels); spans
   for compile, admission, delegation, decisions, scores, memory and erasure.
   `contextos_dispatch_outcomes_total` gains a `capability` label.

@@ -533,6 +533,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "Capability was not surfaced for this run.",
             ));
         }
+        // The envelope's claims must agree with what the runtime knows. Neither decides
+        // anything (authority comes from the admitted actor, approval from policy), but a
+        // call that misstates who acts or the capability's ceiling is refused, not
+        // carried into records.
+        let acting = envelope["principal_chain"].as_array().and_then(|c| c.last());
+        if !acting.is_some_and(|a| a["kind"] == "agent" && a["id"] == admission.actor["principal_id"]) {
+            return Ok(p.stop(
+                "rejected",
+                vec!["principal_chain_mismatch".into()],
+                "The principal chain does not end with the run's agent.",
+            ));
+        }
+        let mode =
+            |key: &str| serde_json::from_value::<contextos_contract::types::ApprovalMode>(envelope[key].clone()).ok();
+        let (highest, effective) = (mode("approval_mode_highest"), mode("approval_mode_effective"));
+        if highest != Some(manifest.approval_mode) || effective.is_none_or(|e| Some(e) > highest) {
+            return Ok(p.stop(
+                "rejected",
+                vec!["approval_mode_mismatch".into()],
+                "The call misstates the capability's approval mode.",
+            ));
+        }
         let Some(adapter) = self.adapters.get(&manifest.adapter_id).cloned() else {
             return Ok(p.stop(
                 "rejected",

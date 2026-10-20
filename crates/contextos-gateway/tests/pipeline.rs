@@ -62,7 +62,8 @@ impl AuthorityProvider for Authority {
         let mut scope = json!({
             "root_run_id": root_run_id, "purpose_ids": [binding["purpose_id"]],
             "capability_ids": [binding["capability_id"]], "resource_ids": binding["resource_ids"],
-            "destination_ids": binding["destination_ids"], "classification_labels": ["CONFIDENTIAL"],
+            // A real broker's grant names the recipients; it does not echo the call's.
+            "destination_ids": ["cus_77", "ord_881"], "classification_labels": ["CONFIDENTIAL"],
             "argument_constraints": [{"pointer": "/amount_minor", "kind": "max_integer", "maximum": 500_000}],
         });
         if binding.get("amount").is_some() {
@@ -913,6 +914,8 @@ async fn delegate(h: &Harness, envelope: &Value) -> Result<RunAdmission, Admissi
 fn child_call(run_id: &str, id: &str) -> Value {
     let mut c = call(id, Some(&format!("{run_id}:{id}")));
     c["run_id"] = json!(run_id);
+    // The parent agent delegated to the child, which acts.
+    c["principal_chain"] = json!([{"kind": "agent", "id": "agt_support"}, {"kind": "agent", "id": "agt_research"}]);
     c
 }
 
@@ -1902,4 +1905,63 @@ async fn escalation_and_policy_obligations_reach_the_orchestrator() {
         .unwrap();
     assert_eq!(out.result["status"], "completed");
     assert!(out.report.obligations.contains(&"audit".to_owned()), "{:?}", out.report);
+}
+
+/// Adversarial corpus: each attack is a tool call an injected or compromised executor
+/// could make. None may reach the provider; each must be refused for its own reason.
+#[tokio::test]
+async fn adversarial_corpus_never_reaches_the_provider() {
+    type Attack = (&'static str, &'static str, fn(&mut Value));
+    let attacks: [Attack; 9] = [
+        ("cross_run_envelope", "envelope_invalid", |c| {
+            c["run_id"] = json!("run_other");
+        }),
+        ("cross_trace_envelope", "envelope_invalid", |c| {
+            c["trace_id"] = json!("00000000000000000000000000000000");
+        }),
+        ("unpinned_capability", "capability_not_pinned", |c| {
+            c["capability_id"] = json!("adp_payments.wire_transfer");
+        }),
+        ("forged_approval_fields", "envelope_invalid", |c| {
+            c["approval_status"] = json!("approved");
+            c["approval_request_id"] = json!("approval_request:forged");
+        }),
+        ("approval_mode_downgrade", "approval_mode_mismatch", |c| {
+            c["approval_mode_requested"] = json!("read_only");
+            c["approval_mode_effective"] = json!("read_only");
+            c["approval_mode_highest"] = json!("read_only");
+        }),
+        ("principal_impersonation", "principal_chain_mismatch", |c| {
+            c["principal_chain"] = json!([{"kind": "user", "id": "usr_admin"}]);
+        }),
+        ("unadmitted_evidence", "evidence_not_admitted", |c| {
+            c["evidence_refs"] = json!(["kg:order:ord_999#forged"]);
+        }),
+        ("exfiltration_destination", "scope_mismatch", |c| {
+            c["args"]["customer_id"] = json!("cus_attacker");
+        }),
+        ("inflated_amount", "scope_mismatch", |c| {
+            c["args"]["amount_minor"] = json!(99_999_999);
+        }),
+    ];
+    for (verdict, (name, expected, attack)) in ["allow", "require_approval"]
+        .into_iter()
+        .flat_map(|v| attacks.map(|a| (v, a)))
+    {
+        let h = harness(verdict, Behavior::Confirm).await;
+        let mut call = call("tc_attack", Some("attack_op"));
+        attack(&mut call);
+        let out = h.gateway.dispatch(&h.admission, &call).await.unwrap();
+        assert_eq!(
+            h.adapter.calls.load(Ordering::SeqCst),
+            0,
+            "{verdict}/{name} reached the provider"
+        );
+        assert_ne!(out.result["status"], "completed", "{verdict}/{name}");
+        assert!(
+            out.report.reason_codes.contains(&expected.to_owned()),
+            "{verdict}/{name}: {:?}",
+            out.report.reason_codes
+        );
+    }
 }
