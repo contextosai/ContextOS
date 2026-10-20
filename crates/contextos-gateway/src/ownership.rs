@@ -33,6 +33,20 @@ pub enum Ownership {
     Refused(&'static str),
 }
 
+/// Fences `generation` against an already-read run state.
+pub(crate) fn ownership_in(state: Option<&Value>, generation: u64) -> Ownership {
+    let Some(state) = state else {
+        return Ownership::Refused("run_not_started");
+    };
+    if state["executor_generation"].as_u64() != Some(generation) {
+        return Ownership::Refused("executor_stale");
+    }
+    if state["status"] != "running" {
+        return Ownership::Refused("run_not_running");
+    }
+    Ownership::Current(generation)
+}
+
 pub(crate) fn run_state_key(admission: &RunAdmission) -> DocKey {
     DocKey::new(&admission.tenant_id, DocKind::RunState, &admission.run_id)
 }
@@ -71,16 +85,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// Fences `generation` against the run's current executor generation.
     pub async fn check_owner(&self, admission: &RunAdmission, generation: u64) -> Result<Ownership, GatewayError> {
-        let Some(state) = self.run_state(admission).await? else {
-            return Ok(Ownership::Refused("run_not_started"));
-        };
-        if state["executor_generation"].as_u64() != Some(generation) {
-            return Ok(Ownership::Refused("executor_stale"));
-        }
-        if state["status"] != "running" {
-            return Ok(Ownership::Refused("run_not_running"));
-        }
-        Ok(Ownership::Current(generation))
+        Ok(ownership_in(self.run_state(admission).await?.as_ref(), generation))
     }
 
     /// Moves the run to a new executor: `suspend` then `resume`, each fenced by

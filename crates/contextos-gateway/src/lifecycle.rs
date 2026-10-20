@@ -154,15 +154,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         .await
     }
 
-    /// Unresolved effects listed for the run.
-    pub(crate) async fn unresolved_effects(&self, admission: &RunAdmission) -> Result<usize, GatewayError> {
-        Ok(self
-            .run_state(admission)
-            .await?
-            .and_then(|s| s["outstanding_effects"].as_array().map(Vec::len))
-            .unwrap_or(0))
-    }
-
     /// Effects between reservation and settlement (open run-scoped reservations).
     async fn effects_in_flight(&self, admission: &RunAdmission) -> Result<bool, GatewayError> {
         let key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);

@@ -43,7 +43,7 @@ use contextos_kernel::authorization::{digest_action_binding, evaluate_authorizat
 use contextos_kernel::budget_compaction::compact_budget_ledger;
 use contextos_kernel::budget_ledger::{reserve_budget, settle_budget, settlement_intent_digest};
 use contextos_kernel::operation_ledger::{claim_operation, record_effect_observation};
-use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact};
+use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact, transact_state};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -385,17 +385,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         };
 
         // 0. Fence: only the run's current executor may start work.
+        // One read of the run state serves ownership, status and the unresolved count.
+        let run_state = self.run_state(admission).await?;
         if let Some(generation) = fence
-            && let Ownership::Refused(reason) = self.check_owner(admission, generation).await?
+            && let Ownership::Refused(reason) = ownership::ownership_in(run_state.as_ref(), generation)
         {
             return Ok(p.stop("rejected", vec![reason.into()], "The executor does not own this run."));
         }
-        if fence.is_none()
-            && let Some(state) = self.run_state(admission).await?
-            && state["status"] != "running"
-        {
+        if run_state.as_ref().is_some_and(|s| s["status"] != "running") {
             return Ok(p.stop("rejected", vec!["run_not_running".into()], "The run is not running."));
         }
+        let unresolved = run_state
+            .as_ref()
+            .and_then(|s| s["outstanding_effects"].as_array().map(Vec::len))
+            .unwrap_or(0);
 
         // 1. Surface.
         if validate(
@@ -683,7 +686,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // be claimed again, so turn the duplicate away before it contends on the budget
         // ledger. The claim below remains the authoritative, atomic check.
         let operations_key = operation_ledger_key(admission, &operation_id);
-        if let Some(read) = self.store.get(&operations_key).await? {
+        let existing_ledger = self.store.get(&operations_key).await?;
+        let ledger_exists = existing_ledger.is_some();
+        if let Some(read) = existing_ledger {
             let existing = read.body["operations"]
                 .as_array()
                 .into_iter()
@@ -714,7 +719,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
 
-        if self.unresolved_effects(admission).await? >= MAX_UNRESOLVED_EFFECTS {
+        if unresolved >= MAX_UNRESOLVED_EFFECTS {
             p.report.obligations.push("reconcile_effect_before_retry".into());
             return Ok(p.stop(
                 "paused",
@@ -728,7 +733,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         p.report.attempt_id = Some(attempt_id.clone());
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
         let reservation_id = format!("reservation:{attempt_id}");
-        self.compact_budget_if_due(admission, &budget_key, &now).await?;
         let cost_unit = json!({"currency": "USD", "units_per_cent": 100});
         let reserve_request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
@@ -738,14 +742,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "deadline": admission.deadline, "expected_revision": 0,
             "executor_generation": admission.executor_generation, "evaluation_time": now,
         });
-        let commit = transact(self.store.as_ref(), &budget_key, |ledger| {
-            let mut request = reserve_request.clone();
-            request["expected_revision"] = ledger["revision"].clone();
-            reserve_budget(ledger, &request)
-        })
+        let (commit, reserved) = transact_state(
+            self.store.as_ref(),
+            &budget_key,
+            |ledger| {
+                let mut request = reserve_request.clone();
+                request["expected_revision"] = ledger["revision"].clone();
+                reserve_budget(ledger, &request)
+            },
+            |ledger| ledger["mutations"].as_array().map_or(0, Vec::len) >= BUDGET_COMPACT_AT,
+        )
         .await?;
         if let Commit::Rejected { reason_codes } = commit {
             return Ok(p.stop("blocked", reason_codes, "Budget could not be reserved."));
+        }
+        // Compact from the state just written instead of reading it back.
+        if let Some((revision, ledger)) = reserved {
+            self.compact_budget_if_due(admission, &budget_key, revision, &ledger, &now)
+                .await?;
         }
 
         // Re-check ownership immediately before the claim: the linearization point
@@ -786,7 +800,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "dispatch_state": "claimed", "last_observation_ref": null},
             "evaluation_time": now, "provider_observation": proof,
         });
-        if self.store.get(&operations_key).await?.is_none() {
+        if !ledger_exists {
             match self
                 .store
                 .create(
@@ -923,15 +937,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Commit::Written { obligations, .. } | Commit::Unchanged { obligations } = commit {
             p.report.obligations.extend(obligations);
         }
-        if let Some(op) = self
-            .store
-            .get(&operations_key)
-            .await?
-            .and_then(|r| r.body["operations"][0].get("outcome").cloned())
-            && matches!(op.as_str(), Some("unknown" | "partial"))
-        {
-            self.note_effect(admission, &operation_id, op.as_str().unwrap_or("unknown"))
-                .await?;
+        // Unresolved outcomes are tracked for completion checks; the response says which.
+        if response.outcome == EffectOutcome::Partial {
+            self.note_effect(admission, &operation_id, "partial").await?;
+        } else if !(response.definitive && response.outcome != EffectOutcome::Unknown) {
+            self.note_effect(admission, &operation_id, "unknown").await?;
         }
         let entry = self
             .audit
@@ -1011,19 +1021,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         &self,
         admission: &RunAdmission,
         budget_key: &DocKey,
+        stored_revision: u64,
+        ledger: &Value,
         now: &str,
     ) -> Result<(), GatewayError> {
-        let Some(read) = self.store.get(budget_key).await? else {
-            return Ok(());
-        };
-        if read.body["mutations"].as_array().map_or(0, Vec::len) < BUDGET_COMPACT_AT {
+        if ledger["mutations"].as_array().map_or(0, Vec::len) < BUDGET_COMPACT_AT {
             return Ok(());
         }
-        let archive_id = format!("{}:archive:{}", admission.budget_ledger_id, read.body["revision"]);
+        let archive_id = format!("{}:archive:{}", admission.budget_ledger_id, ledger["revision"]);
         let Ok(compaction) = compact_budget_ledger(
-            &read.body,
+            ledger,
             &archive_id,
-            &read.body["revision"],
+            &ledger["revision"],
             &json!(admission.executor_generation),
         ) else {
             return Ok(());
@@ -1036,7 +1045,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         match self
             .store
-            .compare_and_swap(budget_key, read.revision, &compaction.ledger)
+            .compare_and_swap(budget_key, stored_revision, &compaction.ledger)
             .await
         {
             Ok(_) => {

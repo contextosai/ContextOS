@@ -29,8 +29,8 @@ equals UTF-16 order.
 
 | Measure | Result |
 |---|---|
-| One run, sequential effects (average over 50 effects) | ~0.37 ms per effect |
-| 32 runs of one tenant in parallel, 50 effects each | ~96 µs per effect (~10,400 effects/s) |
+| One run, sequential effects (average over 50 effects) | ~0.36 ms per effect |
+| 32 runs of one tenant in parallel, 50 effects each | ~94 µs per effect (~10,600 effects/s) |
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:
@@ -61,9 +61,13 @@ Remaining per-effect CPU: canonical encoding and hashing of audit payloads and l
 authorization, and re-validation of the (now bounded) budget ledger. The kernel
 deliberately re-validates every ledger it is given rather than trusting stored state.
 
-Each dispatch also reads the run's lifecycle state and records unknown outcomes for
-completion checks. In memory this is unmeasurable; on PostgreSQL these are extra round
-trips that a future change can fold into the reads dispatch already makes.
+Store reads per dispatch are kept to what correctness needs: one run-state read serves
+ownership, status and the unresolved-effect count; compaction works from the state
+the reservation just wrote (copied only when compaction is due); the duplicate
+fast path's operation-ledger read also decides whether the ledger must be created;
+and unresolved outcomes are recorded from the adapter response rather than re-read.
+The ownership re-check immediately before the claim is deliberate (it is the fencing
+linearization point). On PostgreSQL every removed read is a round trip.
 
 ## Known limits
 

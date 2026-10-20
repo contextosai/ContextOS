@@ -212,6 +212,54 @@ pub const MAX_CAS_ATTEMPTS: u32 = 64;
 /// `decide` is the pure kernel transition over the current body. Re-deciding on
 /// fresh state is always safe because the kernel re-validates every precondition;
 /// a decision is never replayed against state it was not computed from.
+/// As [`transact`], also returning the document's revision and state after the
+/// transition when `keep` wants it, so callers that need it do not read it back (and
+/// callers that rarely need it do not pay for a copy). `None` when the transition was
+/// rejected or `keep` declined.
+pub async fn transact_state<S, F, K>(
+    store: &S,
+    key: &DocKey,
+    mut decide: F,
+    keep: K,
+) -> Result<(Commit, Option<(u64, Value)>), StoreError>
+where
+    S: DocumentStore,
+    F: FnMut(&Value) -> TransitionResult + Send,
+    K: Fn(&Value) -> bool + Send,
+{
+    for attempt in 0..MAX_CAS_ATTEMPTS {
+        if attempt > 0 {
+            let micros = 50_u64 << attempt.min(7);
+            tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
+        }
+        let read = store.get(key).await?.ok_or(StoreError::NotFound)?;
+        let result = decide(&read.body);
+        if !result.is_accepted() {
+            let reason_codes = result.reason_codes.unwrap_or_default();
+            return Ok((Commit::Rejected { reason_codes }, None));
+        }
+        let obligations = result.obligations.unwrap_or_default();
+        let encoded = Encoded::of(&result.state)?;
+        if encoded.digest == read.digest {
+            let kept = keep(&read.body).then_some((read.revision, read.body));
+            return Ok((Commit::Unchanged { obligations }, kept));
+        }
+        let state = keep(&result.state).then(|| result.state.clone());
+        match store
+            .compare_and_swap_encoded(key, read.revision, result.state, encoded)
+            .await
+        {
+            Ok(revision) => return Ok((Commit::Written { revision, obligations }, state.map(|s| (revision, s)))),
+            Err(error) if error.is_conflict() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(StoreError::Conflict {
+        expected: None,
+        actual: None,
+    })
+}
+
 pub async fn transact<S, F>(store: &S, key: &DocKey, mut decide: F) -> Result<Commit, StoreError>
 where
     S: DocumentStore,

@@ -102,7 +102,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 26 Decisions and evidence | done — verified DecisionRecords with evidence-gate enforcement, replay packets, run evidence bundles, paged audit export |
 | 27a Python HTTP client | done — stdlib-only client, typed outcomes, generation fencing, `governed_tool`, end-to-end test in CI |
 | 27b TypeScript client | done — fetch-based, typed (`client.d.ts` checked with tsc), same flow tested end to end in CI |
-| 28 Fold lifecycle reads into dispatch (PostgreSQL round trips); checkpoint export across deployments | next |
+| 28a Dispatch store reads | done — four reads per effect removed (one run-state read, compaction from the reserve's own state, reused fast-path read, outcome from the response) |
+| 28b Checkpoint export across deployments; PostgreSQL validation (needs Docker or CI access) | next |
 
 ## Non-negotiables carried from the spec
 
