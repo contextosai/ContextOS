@@ -16,7 +16,7 @@ doctest = false
 
 [dependencies]
 contextos-embed = { workspace = true, features = ["schema"] }
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py39"] }
 
 [build-dependencies]
 pyo3-build-config = "0.23"
