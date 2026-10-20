@@ -11,8 +11,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
 use contextos_gateway::{
-    ApprovalProvider, AuthorityFacts, AuthorityProvider, CapabilityManifest, ConstraintProvider, DataFlowProvider,
-    IdempotencyProvider, PortError, RunAdmission,
+    ApprovalProvider, AuthorityFacts, AuthorityProvider, BoundaryProvider, CapabilityManifest, ConstraintProvider,
+    DataFlowProvider, IdempotencyProvider, PortError, RunAdmission,
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -188,6 +188,21 @@ impl DataFlowProvider for RemoteDataFlow {
             return Err(PortError::new("data_flow", "malformed facts"));
         }
         Ok(Some((facts["request"].clone(), facts["policy"].clone())))
+    }
+}
+
+/// Execution-boundary controller: returns `{"requirement", "observation"}` for a run.
+#[derive(Debug, Clone)]
+pub struct RemoteBoundary(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl BoundaryProvider for RemoteBoundary {
+    async fn boundary(&self, admission: &RunAdmission) -> Result<(Value, Value), PortError> {
+        let facts = self.0.call("boundary", &json!({"run": run_summary(admission)})).await?;
+        if !facts["requirement"].is_object() || !facts["observation"].is_object() {
+            return Err(PortError::new("boundary", "malformed facts"));
+        }
+        Ok((facts["requirement"].clone(), facts["observation"].clone()))
     }
 }
 

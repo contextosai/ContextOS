@@ -108,6 +108,16 @@ pub struct Ports {
     /// Data-governance facts. When present, every capability that sends data to a
     /// destination must pass the kernel's data-flow evaluation.
     pub data_flow: Option<Arc<dyn DataFlowProvider>>,
+    /// Execution-boundary controller. When present, run start, resume and every
+    /// dispatch require the kernel to find the run's boundary active now.
+    pub boundary: Option<Arc<dyn BoundaryProvider>>,
+}
+
+/// The run's `BoundaryRequirement` and the controller's current verified
+/// `BoundaryObservation` for it.
+#[async_trait::async_trait]
+pub trait BoundaryProvider: Send + Sync {
+    async fn boundary(&self, admission: &RunAdmission) -> Result<(Value, Value), PortError>;
 }
 
 /// The facts a data-governance service supplies for one authorized action: a
@@ -604,14 +614,29 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Policy, constraint and approval facts are independent of each other (and of
         // the operation ledger read used by the duplicate fast path): fetch them at once.
         let operations_key = operation_ledger_key(admission, &operation_id);
-        let (policy_outcomes, constraint_observations, approval_material, existing_ledger) = tokio::join!(
+        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
                 .constraints
                 .observations(admission, &admission.required_controls, &action_digest),
             self.ports.approvals.approval(admission, &action_digest),
             self.store.get(&operations_key),
+            self.boundary_readiness(admission, &now),
         );
+        if let Some(Err(reasons)) = boundary {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "boundary_refusal",
+                    json!({"run_id": admission.run_id,
+                    "operation_id": operation_id, "reason_codes": reasons}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            return Ok(p.stop("blocked", reasons, "The run's execution boundary is not active."));
+        }
         let existing_ledger = existing_ledger?;
         let policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
@@ -1225,6 +1250,34 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .append(&admission.tenant_id, "effect_observation", observation, &observed_at)
             .await?;
         Ok(())
+    }
+
+    /// `None` without a boundary controller; otherwise the kernel's verdict on the
+    /// run's boundary now (`Err` carries the reason codes).
+    pub(crate) async fn boundary_readiness(
+        &self,
+        admission: &RunAdmission,
+        now: &str,
+    ) -> Option<Result<(), Vec<String>>> {
+        let provider = self.ports.boundary.as_ref()?;
+        let Ok((required, observed)) = provider.boundary(admission).await else {
+            return Some(Err(vec!["boundary_unavailable".into()]));
+        };
+        let bound = |v: &Value| {
+            v["contract_id"] == admission.contract_id.as_str()
+                && v["run_id"] == admission.run_id.as_str()
+                && v["tenant_id"] == admission.tenant_id.as_str()
+        };
+        if !bound(&required) || !bound(&observed) {
+            return Some(Err(vec!["boundary_binding_mismatch".into()]));
+        }
+        let verdict =
+            contextos_kernel::execution_boundary::evaluate_boundary_readiness(&required, &observed, &json!(now));
+        Some(if verdict.allowed {
+            Ok(())
+        } else {
+            Err(verdict.reason_codes)
+        })
     }
 
     async fn release_reservation(

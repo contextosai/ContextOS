@@ -335,7 +335,7 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
 }
 
 async fn harness_with_limits(verdict: &'static str, behavior: Behavior, tool_calls: u64, cost_cents: f64) -> Harness {
-    harness_full(verdict, behavior, tool_calls, cost_cents, None).await
+    harness_full(verdict, behavior, tool_calls, cost_cents, None, None).await
 }
 
 async fn harness_full(
@@ -344,6 +344,7 @@ async fn harness_full(
     tool_calls: u64,
     cost_cents: f64,
     data_flow: Option<Arc<dyn DataFlowProvider>>,
+    boundary: Option<Arc<dyn BoundaryProvider>>,
 ) -> Harness {
     let store = Arc::new(MemoryStore::new());
     let authority = Arc::new(Authority::default());
@@ -365,6 +366,7 @@ async fn harness_full(
         approvals: approvals.clone(),
         idempotency: None,
         data_flow,
+        boundary,
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),
@@ -1333,7 +1335,15 @@ async fn data_sent_to_a_destination_must_pass_the_flow_policy() {
         ),
     ];
     for (tamper, expected) in cases {
-        let h = harness_full("allow", Behavior::Confirm, 8, 25.0, Some(Arc::new(Flows { tamper }))).await;
+        let h = harness_full(
+            "allow",
+            Behavior::Confirm,
+            8,
+            25.0,
+            Some(Arc::new(Flows { tamper })),
+            None,
+        )
+        .await;
         let out = h
             .gateway
             .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
@@ -1348,4 +1358,115 @@ async fn data_sent_to_a_destination_must_pass_the_flow_policy() {
             Err(reason) => assert_eq!(out.report.reason_codes, vec![reason.to_owned()]),
         }
     }
+}
+
+/// A boundary controller built from the `broker` conformance case, rebased onto the
+/// run and clock. `tamper` edits the observation it reports.
+struct Boundary {
+    tamper: fn(&mut Value),
+    /// Applies `tamper` only once set (to fail the boundary after the run started).
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl Boundary {
+    fn new(tamper: fn(&mut Value), armed: bool) -> Arc<Self> {
+        Arc::new(Self {
+            tamper,
+            armed: std::sync::atomic::AtomicBool::new(armed),
+        })
+    }
+}
+
+#[async_trait]
+impl BoundaryProvider for Boundary {
+    async fn boundary(&self, admission: &RunAdmission) -> Result<(Value, Value), PortError> {
+        let path = format!(
+            "{}/../../conformance/vectors/boundary.json.gz",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut text = String::new();
+        std::io::Read::read_to_string(
+            &mut flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()),
+            &mut text,
+        )
+        .unwrap();
+        for (from, to) in [
+            ("2026-10-16T07:59:59Z", "2026-10-20T09:59:59Z"),
+            ("2026-10-16T08:05:00Z", "2026-10-20T10:05:00Z"),
+            ("contract_reference", &admission.contract_id),
+            ("run_contract", &admission.run_id),
+        ] {
+            text = text.replace(from, to);
+        }
+        let vectors: Value = serde_json::from_str(&text).unwrap();
+        let case = vectors["boundary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "broker")
+            .unwrap()["input"]
+            .clone();
+        let mut observation = case["observation"].clone();
+        if self.armed.load(Ordering::SeqCst) {
+            (self.tamper)(&mut observation);
+        }
+        Ok((case["requirement"].clone(), observation))
+    }
+}
+
+#[tokio::test]
+async fn an_inactive_boundary_blocks_start_and_dispatch() {
+    let failed: fn(&mut Value) =
+        |o| o["failed_controls"] = json!([{"control_id": "isolation.required", "control_version": "1"}]);
+
+    // Ready at start, then the boundary fails mid-run: dispatch is blocked.
+    let boundary = Boundary::new(failed, false);
+    let h = harness_full("allow", Behavior::Confirm, 8, 25.0, None, Some(boundary.clone())).await;
+    let generation = running(&h).await;
+    let out = h
+        .gateway
+        .dispatch_as(&h.admission, &call("tc_1", Some("op_1")), generation)
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes);
+    boundary.armed.store(true, Ordering::SeqCst);
+    let out = h
+        .gateway
+        .dispatch_as(&h.admission, &call("tc_2", Some("op_2")), generation)
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "blocked", "{:?}", out.report.reason_codes);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+
+    // Down from the start: the run cannot start.
+    let down = harness_full(
+        "allow",
+        Behavior::Confirm,
+        8,
+        25.0,
+        None,
+        Some(Boundary::new(failed, true)),
+    )
+    .await;
+    assert_eq!(
+        down.gateway.open_run(&down.admission).await.unwrap(),
+        Ownership::Refused("run_not_running")
+    );
+
+    // Facts about another run are refused.
+    let misbound = harness_full(
+        "allow",
+        Behavior::Confirm,
+        8,
+        25.0,
+        None,
+        Some(Boundary::new(|o| o["run_id"] = json!("run_other"), true)),
+    )
+    .await;
+    let out = misbound
+        .gateway
+        .dispatch(&misbound.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(out.report.reason_codes, vec!["boundary_binding_mismatch".to_owned()]);
 }

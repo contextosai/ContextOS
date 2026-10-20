@@ -116,6 +116,10 @@ pub struct ProvidersConfig {
     /// kernel's data-flow policy evaluation.
     #[serde(default)]
     pub data_flow: Option<RemoteProvider>,
+    /// Execution-boundary controller; when set, run start, resume and every dispatch
+    /// require the kernel to find the run's boundary active.
+    #[serde(default)]
+    pub boundary: Option<RemoteProvider>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

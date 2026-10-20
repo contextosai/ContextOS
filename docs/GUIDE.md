@@ -290,6 +290,14 @@ minimal, development-only implementation):
   mediation, data-flow policy…) is active for this action digest and pinned policy.
 - **Approval service** — opens requests bound to the action digest and returns verified
   decisions and approver entitlements.
+- **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
+  run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
+  ceilings, required controls) and a current verified `BoundaryObservation`. With it,
+  run start, resume and every dispatch require the kernel's
+  `evaluate_boundary_readiness` to find the boundary active now; a boundary that fails
+  mid-run blocks the next effect. Without it, boundary controls (`isolation.required`,
+  `network.mediated`, `credentials.brokered`) are proven per action by the control
+  plane's attestations.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
   action that sends data to a destination, returns the `DataFlowRequest` (source
   artifacts and their verified classifications, processor and residency observations,

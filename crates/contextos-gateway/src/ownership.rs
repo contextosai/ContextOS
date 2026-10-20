@@ -109,6 +109,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         for kind in kinds {
             let now = self.now();
             let budget_ready = self.budget_has_capacity(admission).await?;
+            // With a boundary controller the boundary is evaluated now. Without one, the
+            // run's boundary controls (isolation, mediated network, brokered credentials)
+            // are proven per action instead: dispatch requires the constraint provider's
+            // attestation of every required control for each action digest.
+            let boundary_ready = match self.boundary_readiness(admission, &now).await {
+                Some(Err(_)) => "blocked",
+                Some(Ok(())) | None => "ready",
+            };
             let event_id = self.ports.ids.new_id("run_event");
             let mut refused = None;
             let commit = transact(self.store.as_ref(), &key, |state| {
@@ -128,11 +136,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         "run_id": admission.run_id, "tenant_id": admission.tenant_id, "executor_generation": generation,
                         "observer": admission.gateway_observer, "verification_status": "verified",
                         "evidence_ref": {"artifact_type": "run_preconditions", "artifact_id": event_id, "version": "1",
-                            "sha256": sha256_canonical(&json!([admission.run_id, generation, budget_ready])).unwrap_or_default()},
+                            "sha256": sha256_canonical(&json!([admission.run_id, generation, budget_ready, boundary_ready])).unwrap_or_default()},
                         "observed_at": now,
                         "valid_until": add_contract_seconds(&now, OBSERVATION_VALIDITY_SECONDS).unwrap_or_else(|| now.clone()),
                         "admission_ref": state["admission_ref"],
-                        "checks": {"admission": "ready", "authority": "ready", "boundary": "ready",
+                        "checks": {"admission": "ready", "authority": "ready", "boundary": boundary_ready,
                             "budget": if budget_ready { "ready" } else { "blocked" }},
                     })
                 });

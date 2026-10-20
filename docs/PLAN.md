@@ -108,7 +108,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 30 MCP gateway mode | done — per-run MCP server (tools/list of surfaced capabilities, governed tools/call, input_required passthrough, retry-safe operation identity); manifest input schemas enforced |
 | 31 Security review | done — six findings fixed with regression tests (see the threat model's review log) |
 | 32 Data permissions in dispatch | done — DataFlowProvider port, binding checks, kernel evaluate_data_flow, audited decisions, remote provider and config |
-| 33 Next: remaining gaps (memory lifecycle service, boundary readiness at admission) | next |
+| 33 Active boundary | done — BoundaryProvider port; kernel readiness at start/resume and per dispatch; start no longer reports an unchecked boundary as ready when a controller exists |
+| 34 Next: memory lifecycle service | next |
 
 ## Non-negotiables carried from the spec
 
