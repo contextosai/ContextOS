@@ -120,6 +120,9 @@ pub struct ProvidersConfig {
     /// require the kernel to find the run's boundary active.
     #[serde(default)]
     pub boundary: Option<RemoteProvider>,
+    /// Memory-governance service; enables governed memory lifecycle operations.
+    #[serde(default)]
+    pub memory: Option<RemoteProvider>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -263,6 +263,7 @@ fn setup<S: DocumentStore + 'static, L: AppendLog + 'static>(store: Arc<S>, log:
         idempotency: None,
         data_flow: None,
         boundary: None,
+        memory: None,
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),

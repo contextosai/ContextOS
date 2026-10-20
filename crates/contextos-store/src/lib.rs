@@ -41,6 +41,8 @@ pub enum DocKind {
     CompiledContext,
     /// A run's DecisionRecords and replay packets.
     DecisionLog,
+    /// A memory's current governed lifecycle state.
+    MemoryRecord,
 }
 
 impl DocKind {
@@ -58,6 +60,7 @@ impl DocKind {
             DocKind::BudgetArchive => "budget_archive",
             DocKind::CompiledContext => "compiled_context",
             DocKind::DecisionLog => "decision_log",
+            DocKind::MemoryRecord => "memory_record",
         }
     }
 }

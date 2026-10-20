@@ -1142,3 +1142,36 @@ async fn oversized_decisions_are_refused_before_signing() {
     assert_eq!(refused.status(), 413);
     assert_eq!(entries(http.clone()).await, before, "nothing was signed");
 }
+
+#[tokio::test]
+async fn memory_operations_need_a_memory_policy_service() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    assert_eq!(
+        http.post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&run_body("run_mem", 1200))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    let refused = http
+        .post(format!("{}/v1/runs/run_mem/memory", w.base))
+        .bearer_auth("acme-key")
+        .json(&json!({"record": {"record_id": "m1", "contract_id": "contract_run_mem", "run_id": "run_mem", "tenant_id": TENANT}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 422);
+    let decision: Value = refused.json().await.unwrap();
+    assert_eq!(decision["reason_codes"], json!(["memory_policy_unavailable"]));
+    let missing = http
+        .get(format!("{}/v1/memory/m1", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 404, "nothing was stored");
+}

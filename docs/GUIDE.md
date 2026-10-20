@@ -298,6 +298,15 @@ minimal, development-only implementation):
   mid-run blocks the next effect. Without it, boundary controls (`isolation.required`,
   `network.mediated`, `credentials.brokered`) are proven per action by the control
   plane's attestations.
+- **Memory-governance service** (optional, `[providers.memory]`) — for each memory
+  lifecycle record a run submits (`POST /v1/runs/{run_id}/memory`: propose, promote,
+  correct, delete), returns the trusted context: allowed readers and operations,
+  which operations need review, maximum retention, the verified access observation
+  and the data-flow request and policy for writing into memory. The kernel's
+  `validate_memory_lifecycle` decides (review bound to the exact record, reader scope,
+  retention, data-flow policy, and verified propagation for deletions); every decision
+  is audited and only allowed records become the memory's state
+  (`GET /v1/memory/{record_id}`). Without the service, memory operations are refused.
 - **Data-governance service** (optional, `[providers.data_flow]`) — for each authorized
   action that sends data to a destination, returns the `DataFlowRequest` (source
   artifacts and their verified classifications, processor and residency observations,

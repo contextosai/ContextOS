@@ -15,6 +15,8 @@
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
 //! | `POST /v1/runs/{run_id}/mcp` | `dispatch` | MCP server for the run: `tools/list` of surfaced capabilities, governed `tools/call` |
+//! | `POST /v1/runs/{run_id}/memory` | `dispatch` | govern a memory lifecycle operation against trusted memory policy |
+//! | `GET /v1/memory/{record_id}` | `audit:read` | a memory's current governed lifecycle state |
 //! | `GET /v1/runs/{run_id}` | `dispatch` | lifecycle status and current executor generation |
 //! | `POST /v1/runs/{run_id}/takeover` | `dispatch` | move the run to a new executor; the old generation goes stale |
 //! | `POST /v1/runs/{run_id}/complete` | `dispatch` | complete the run (no unresolved effect, open child or work in flight) |
@@ -1191,6 +1193,75 @@ where
     Ok(response)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryBody {
+    record: Value,
+}
+
+/// Governs a memory lifecycle operation (propose, promote, correct, delete).
+async fn govern_memory<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: MemoryBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "Expected a record.",
+        )
+    })?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    require_owner(gateway, &admission, &headers).await?;
+    let decision = gateway.govern_memory(&admission, &request.record).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    })?;
+    let status = if decision.allowed {
+        StatusCode::OK
+    } else {
+        StatusCode::UNPROCESSABLE_ENTITY
+    };
+    Ok((status, axum::Json(decision)).into_response())
+}
+
+/// A memory's current governed lifecycle state.
+async fn memory_state<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(record_id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let found = gateway
+        .memory_state(&caller.tenant_id, &record_id)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "memory_not_found", "No such memory."))?;
+    Ok(axum::Json(found).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -1226,6 +1297,8 @@ where
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
         .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
+        .route("/v1/runs/{run_id}/memory", post(govern_memory::<S, L>))
+        .route("/v1/memory/{record_id}", get(memory_state::<S, L>))
         .route("/v1/runs/{run_id}/mcp", post(mcp_endpoint::<S, L>))
         .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
         .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))

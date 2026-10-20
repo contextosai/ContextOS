@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Governed memory lifecycle: propose, promote, correct and delete decided by the
+  kernel against trusted memory policy, audited, with current state per memory.
 - Active execution boundary: an optional boundary controller's facts are evaluated by
   the kernel at run start, resume and every dispatch.
 - Data permissions in dispatch: an optional data-governance provider supplies flow

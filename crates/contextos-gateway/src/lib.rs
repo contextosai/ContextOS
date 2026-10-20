@@ -26,6 +26,7 @@ mod delegation;
 mod input;
 mod lifecycle;
 pub mod manifest;
+mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
@@ -56,6 +57,7 @@ pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_r
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
+pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
 pub use ports::{
     Adapter, AdapterCall, AdapterResponse, ApprovalProvider, AuthorityFacts, AuthorityProvider, Clock,
@@ -111,6 +113,8 @@ pub struct Ports {
     /// Execution-boundary controller. When present, run start, resume and every
     /// dispatch require the kernel to find the run's boundary active now.
     pub boundary: Option<Arc<dyn BoundaryProvider>>,
+    /// Memory-governance context for memory lifecycle operations.
+    pub memory: Option<Arc<dyn MemoryPolicyProvider>>,
 }
 
 /// The run's `BoundaryRequirement` and the controller's current verified

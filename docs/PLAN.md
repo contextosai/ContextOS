@@ -109,7 +109,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 31 Security review | done — six findings fixed with regression tests (see the threat model's review log) |
 | 32 Data permissions in dispatch | done — DataFlowProvider port, binding checks, kernel evaluate_data_flow, audited decisions, remote provider and config |
 | 33 Active boundary | done — BoundaryProvider port; kernel readiness at start/resume and per dispatch; start no longer reports an unchecked boundary as ready when a controller exists |
-| 34 Next: memory lifecycle service | next |
+| 34 Memory lifecycle | done — MemoryPolicyProvider port, kernel validate_memory_lifecycle, audited decisions, memory state, HTTP routes. Every kernel capability is now reachable through the server |
+| 35 Next: end-to-end example of a full agent loop (planner/executor/critic over the HTTP client with delegation and decisions) | next |
 
 ## Non-negotiables carried from the spec
 

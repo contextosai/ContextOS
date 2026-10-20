@@ -346,6 +346,18 @@ async fn harness_full(
     data_flow: Option<Arc<dyn DataFlowProvider>>,
     boundary: Option<Arc<dyn BoundaryProvider>>,
 ) -> Harness {
+    harness_ports(verdict, behavior, tool_calls, cost_cents, data_flow, boundary, None).await
+}
+
+async fn harness_ports(
+    verdict: &'static str,
+    behavior: Behavior,
+    tool_calls: u64,
+    cost_cents: f64,
+    data_flow: Option<Arc<dyn DataFlowProvider>>,
+    boundary: Option<Arc<dyn BoundaryProvider>>,
+    memory: Option<Arc<dyn MemoryPolicyProvider>>,
+) -> Harness {
     let store = Arc::new(MemoryStore::new());
     let authority = Arc::new(Authority::default());
     let audit = Arc::new(AuditWriter::new(
@@ -367,6 +379,7 @@ async fn harness_full(
         idempotency: None,
         data_flow,
         boundary,
+        memory,
     };
     let adapter = Arc::new(Payments {
         calls: AtomicUsize::new(0),
@@ -1469,4 +1482,92 @@ async fn an_inactive_boundary_blocks_start_and_dispatch() {
         .await
         .unwrap();
     assert_eq!(out.report.reason_codes, vec!["boundary_binding_mismatch".to_owned()]);
+}
+
+fn rebased_memory_case(admission: &RunAdmission) -> Value {
+    let path = format!(
+        "{}/../../conformance/vectors/boundary.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut text = String::new();
+    std::io::Read::read_to_string(
+        &mut flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()),
+        &mut text,
+    )
+    .unwrap();
+    for (from, to) in [
+        ("2026-10-16T07:59:59Z", "2026-10-20T09:59:59Z"),
+        ("2026-10-16T08:05:00Z", "2026-10-20T10:05:00Z"),
+        ("2026-10-16T00:00:00Z", "2026-10-20T00:00:00Z"),
+        ("2026-10-17T00:00:00Z", "2026-10-21T00:00:00Z"),
+        ("contract_reference", &admission.contract_id),
+        ("run_contract", &admission.run_id),
+    ] {
+        text = text.replace(from, to);
+    }
+    let vectors: Value = serde_json::from_str(&text).unwrap();
+    vectors["memory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "base")
+        .unwrap()["input"]
+        .clone()
+}
+
+/// A memory-governance service serving the rebased conformance context.
+struct MemoryPolicy;
+
+#[async_trait]
+impl MemoryPolicyProvider for MemoryPolicy {
+    async fn memory_context(&self, admission: &RunAdmission, _record: &Value) -> Result<Value, PortError> {
+        Ok(rebased_memory_case(admission)["context"].clone())
+    }
+}
+
+#[tokio::test]
+async fn memory_operations_are_governed_by_trusted_context() {
+    let h = harness_ports(
+        "allow",
+        Behavior::Confirm,
+        8,
+        25.0,
+        None,
+        None,
+        Some(Arc::new(MemoryPolicy)),
+    )
+    .await;
+    let reviewed = |mut record: Value| {
+        record["review"]["record_digest"] =
+            json!(contextos_kernel::execution_boundary::memory_intent_digest(&record).unwrap());
+        record
+    };
+    let record = reviewed(rebased_memory_case(&h.admission)["record"].clone());
+    let decision = h.gateway.govern_memory(&h.admission, &record).await.unwrap();
+    assert!(decision.allowed, "{:?}", decision.reason_codes);
+    let state = h
+        .gateway
+        .memory_state(TENANT, record["record_id"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state["record"]["operation"], "promote");
+
+    // A reader the trusted context does not allow cannot be granted by the caller.
+    let mut widened = record.clone();
+    widened["readers"] = json!(["usr_771", "usr_outsider"]);
+    let widened = reviewed(widened);
+    assert!(!h.gateway.govern_memory(&h.admission, &widened).await.unwrap().allowed);
+
+    // The review must cover exactly this record.
+    let mut altered = record.clone();
+    altered["namespace"] = json!("billing");
+    assert!(!h.gateway.govern_memory(&h.admission, &altered).await.unwrap().allowed);
+
+    // Records for another run are refused before the policy is consulted.
+    let mut foreign = record.clone();
+    foreign["run_id"] = json!("run_other");
+    let refused = h.gateway.govern_memory(&h.admission, &foreign).await.unwrap();
+    assert_eq!(refused.reason_codes, vec!["memory_binding_mismatch".to_owned()]);
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }

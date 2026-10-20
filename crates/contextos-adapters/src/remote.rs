@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
 use contextos_gateway::{
     ApprovalProvider, AuthorityFacts, AuthorityProvider, BoundaryProvider, CapabilityManifest, ConstraintProvider,
-    DataFlowProvider, IdempotencyProvider, PortError, RunAdmission,
+    DataFlowProvider, IdempotencyProvider, MemoryPolicyProvider, PortError, RunAdmission,
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -203,6 +203,25 @@ impl BoundaryProvider for RemoteBoundary {
             return Err(PortError::new("boundary", "malformed facts"));
         }
         Ok((facts["requirement"].clone(), facts["observation"].clone()))
+    }
+}
+
+/// Memory-governance service: returns `{"context"}` for a lifecycle record.
+#[derive(Debug, Clone)]
+pub struct RemoteMemoryPolicy(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl MemoryPolicyProvider for RemoteMemoryPolicy {
+    async fn memory_context(&self, admission: &RunAdmission, record: &Value) -> Result<Value, PortError> {
+        let facts = self
+            .0
+            .call("memory", &json!({"run": run_summary(admission), "record": record}))
+            .await?;
+        facts
+            .get("context")
+            .filter(|c| c.is_object())
+            .cloned()
+            .ok_or_else(|| PortError::new("memory", "malformed facts"))
     }
 }
 
