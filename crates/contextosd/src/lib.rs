@@ -4,6 +4,7 @@ pub mod app;
 pub mod attest;
 pub mod auth;
 pub mod config;
+pub mod feedback;
 pub mod kms;
 pub mod limits;
 pub mod mcp;

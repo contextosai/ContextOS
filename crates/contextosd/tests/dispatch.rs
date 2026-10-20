@@ -2843,3 +2843,110 @@ async fn exported_audit_verifies_against_published_keys() {
     assert!(entries.len() >= 3);
     contextos_audit::verify_chain(&entries, None, &ring).expect("the exported chain verifies without the server");
 }
+
+#[tokio::test]
+async fn operator_corrections_become_replay_obligations() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_corrected", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_corrected/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_corrected", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let recorded: Value = http.post(format!("{}/v1/runs/run_corrected/decisions", w.base)).bearer_auth("acme-key")
+        .json(&json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED", "outcome": "refund_issued",
+            "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out["report"]["operation_id"]}]}))
+        .send().await.unwrap().json().await.unwrap();
+    let record_id = recorded["record"]["record_id"].as_str().unwrap();
+    let file = |key: &'static str, body: Value| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/runs/run_corrected/feedback", w.base));
+        async move { plain.post(url).bearer_auth(key).json(&body).send().await.unwrap() }
+    };
+    let correction = json!({"kind": "correction", "target_surface": "policy", "decision_record_id": record_id,
+        "summary": "Refund issued without checking the order was delivered damaged.", "expected_outcome": "escalate"});
+
+    // Only an independent reviewer files feedback; references must exist.
+    assert_eq!(file("acme-key", correction.clone()).await.status(), 403);
+    let mut unknown = correction.clone();
+    unknown["decision_record_id"] = json!("decision_nope");
+    assert_eq!(file("judge-key", unknown).await.status(), 404);
+    let mut invalid = correction.clone();
+    invalid["kind"] = json!("praise");
+    assert_eq!(file("judge-key", invalid).await.status(), 422);
+
+    let filed = file("judge-key", correction).await;
+    assert_eq!(filed.status(), 201);
+    let filed: Value = filed.json().await.unwrap();
+    assert_eq!(filed["status"], "open");
+    assert_eq!(filed["replay_obligation"]["case"], "run_corrected");
+    let id = filed["feedback_id"].as_str().unwrap().to_owned();
+
+    // Open feedback is the replay corpus a candidate change must pass.
+    let open: Value = plain
+        .get(format!("{}/v1/feedback", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(open["open"], 1);
+    assert_eq!(open["feedback"][0]["feedback_id"], id.as_str());
+
+    // Closed only by an operator, only with evidence, and only once.
+    let close = |body: Value| {
+        let (plain, url) = (plain.clone(), format!("{}/v1/feedback/{id}/close", w.base));
+        async move { plain.post(url).bearer_auth("ops-key").json(&body).send().await.unwrap() }
+    };
+    assert_eq!(
+        close(json!({"status": "fixed", "evidence_ref": {}})).await.status(),
+        422
+    );
+    let evidence = json!({"artifact_type": "gate_report", "artifact_id": "gate_2026_10_21", "sha256": format!("sha256:{}", "a".repeat(64))});
+    let closed = close(json!({"status": "fixed", "evidence_ref": evidence.clone()})).await;
+    assert_eq!(closed.status(), 200);
+    assert_eq!(closed.json::<Value>().await.unwrap()["closed_by"], "svc_oncall");
+    assert_eq!(
+        close(json!({"status": "fixed", "evidence_ref": evidence}))
+            .await
+            .status(),
+        409
+    );
+    let open: Value = plain
+        .get(format!("{}/v1/feedback", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(open["open"], 0);
+    let verified: Value = plain
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(verified["verified"], true);
+}

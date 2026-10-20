@@ -55,6 +55,8 @@ pub enum DocKind {
     Rollouts,
     /// A run's counts of identical tool calls (loop guard).
     LoopGuard,
+    /// Operator feedback records and the tenant's open index (improvement loop).
+    Feedback,
 }
 
 impl DocKind {
@@ -79,6 +81,7 @@ impl DocKind {
             DocKind::Replicas => "replicas",
             DocKind::Rollouts => "rollouts",
             DocKind::LoopGuard => "loop_guard",
+            DocKind::Feedback => "feedback",
         }
     }
 }

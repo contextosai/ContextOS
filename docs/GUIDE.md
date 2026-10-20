@@ -371,6 +371,23 @@ the next stage that changes no outcome. `POST /v1/rollouts/clear` returns all ne
 to the baseline; revoking the candidate pack (the kill switch) also stops runs already
 on it.
 
+### Close the loop on operator corrections
+
+When a reviewer corrects or overrides an agent, file it against the run
+(`POST /v1/runs/{run_id}/feedback`, `evaluate` scope, independent of the run):
+
+```json
+{"kind": "correction", "target_surface": "policy", "decision_record_id": "decision_…",
+ "summary": "Refund issued without confirming the delivery was damaged.", "expected_outcome": "escalate"}
+```
+
+The run's replay case becomes the feedback's replay obligation, so `GET /v1/feedback`
+(open feedback, oldest first) is the corpus a candidate change must pass through
+`ctx gate` and `ctx scorecard-gate`. An operator closes it as `fixed`, `still_failing`,
+`invalid` or `superseded` only with an evidence reference (for example the digest of
+the passing gate report): `POST /v1/feedback/{feedback_id}/close`. Filing and closing are
+audited.
+
 ### Gate on scorecards
 
 `ctx gate` checks what a candidate *permits*; `ctx scorecard-gate` checks how it

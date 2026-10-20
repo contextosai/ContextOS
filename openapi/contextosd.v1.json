@@ -2623,6 +2623,276 @@
         "security": [],
         "x-contextos-scope": "public"
       }
+    },
+    "/v1/runs/{run_id}/feedback": {
+      "post": {
+        "operationId": "file_feedback",
+        "summary": "File an operator correction or override against a run",
+        "description": "From an independent reviewer (`evaluate`, neither `admit` nor `dispatch`, not the run's admitter). Bound to the run, its trace and optionally a decision of it; the run's replay case becomes the replay obligation. Audited (summary by digest).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "target_surface",
+                  "summary"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "correction",
+                      "override",
+                      "approval_verdict"
+                    ]
+                  },
+                  "target_surface": {
+                    "enum": [
+                      "run_context",
+                      "pack",
+                      "policy",
+                      "tool",
+                      "memory",
+                      "skill",
+                      "evaluator",
+                      "unknown"
+                    ]
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "decision_record_id": {
+                    "type": "string"
+                  },
+                  "expected_outcome": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Filed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feedback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "evaluate"
+            ]
+          }
+        ],
+        "x-contextos-scope": "evaluate"
+      }
+    },
+    "/v1/feedback": {
+      "get": {
+        "operationId": "list_feedback",
+        "summary": "The tenant's open feedback, oldest first (the replay corpus a change must pass)",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open feedback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "open",
+                    "feedback"
+                  ],
+                  "properties": {
+                    "open": {
+                      "type": "integer"
+                    },
+                    "feedback": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Feedback"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/feedback/{feedback_id}/close": {
+      "post": {
+        "operationId": "close_feedback",
+        "summary": "Close feedback with evidence",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "evidence_ref"
+                ],
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "fixed",
+                      "still_failing",
+                      "invalid",
+                      "superseded"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "object",
+                    "required": [
+                      "artifact_type",
+                      "artifact_id",
+                      "sha256"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feedback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {
@@ -3743,6 +4013,109 @@
           },
           "record_digest": {
             "type": "string"
+          }
+        }
+      },
+      "Feedback": {
+        "type": "object",
+        "required": [
+          "feedback_id",
+          "run_id",
+          "trace_id",
+          "kind",
+          "target_surface",
+          "summary",
+          "reporter",
+          "filed_at",
+          "status",
+          "replay_obligation"
+        ],
+        "properties": {
+          "feedback_id": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "decision_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "correction",
+              "override",
+              "approval_verdict"
+            ]
+          },
+          "target_surface": {
+            "enum": [
+              "run_context",
+              "pack",
+              "policy",
+              "tool",
+              "memory",
+              "skill",
+              "evaluator",
+              "unknown"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "expected_outcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reporter": {
+            "type": "string"
+          },
+          "filed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "fixed",
+              "still_failing",
+              "invalid",
+              "superseded"
+            ]
+          },
+          "replay_obligation": {
+            "type": "object",
+            "required": [
+              "case",
+              "replay_case"
+            ],
+            "properties": {
+              "case": {
+                "type": "string"
+              },
+              "replay_case": {
+                "type": "string"
+              }
+            }
+          },
+          "closed_at": {
+            "type": "string"
+          },
+          "closed_by": {
+            "type": "string"
+          },
+          "evidence_ref": {
+            "type": "object"
           }
         }
       }

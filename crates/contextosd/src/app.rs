@@ -18,6 +18,9 @@
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
 //! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
 //! | `POST /v1/rollouts/clear` | `control` | return all of a baseline's new runs to it |
+//! | `POST /v1/runs/{run_id}/feedback` | `evaluate` (independent) | file an operator correction or override, with the run's replay case as obligation |
+//! | `GET /v1/feedback` | `audit:read` | the tenant's open feedback (the replay corpus a change must pass) |
+//! | `POST /v1/feedback/{feedback_id}/close` | `control` | close feedback as fixed/still_failing/invalid/superseded, with evidence |
 //! | `POST /v1/conformance/assess` | `audit:read` | assess a conformance report for this deployment against configured trust anchors; audited |
 //! | `GET /v1/audit/keys` | – | the audit signing public keys, for independent verification (`ctx audit-verify`) |
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
@@ -1553,6 +1556,261 @@ where
     Ok(axum::Json(checkpoint).into_response())
 }
 
+fn feedback_error(error: crate::feedback::FeedbackError) -> ApiError {
+    use crate::feedback::FeedbackError;
+    match error {
+        FeedbackError::Invalid(why) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "feedback_invalid", why),
+        FeedbackError::Full => ApiError::new(StatusCode::CONFLICT, "feedback_full", "Too many open feedback records."),
+        FeedbackError::NotFound => {
+            ApiError::new(StatusCode::NOT_FOUND, "feedback_not_found", "No such feedback record.")
+        }
+        FeedbackError::Closed => ApiError::new(
+            StatusCode::CONFLICT,
+            "feedback_closed",
+            "The feedback record is already closed.",
+        ),
+        FeedbackError::Store(_) => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        ),
+    }
+}
+
+/// Files an operator correction or override against a run, with its replay case as
+/// the replay obligation (independent reviewers only).
+async fn file_feedback<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("evaluate"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: crate::feedback::FeedbackBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid feedback: {e}"),
+        )
+    })?;
+    request.check().map_err(feedback_error)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    if caller.has("dispatch") || caller.has("admit") || caller.principal_id == admission.admitted_by {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "reviewer_not_independent",
+            "Feedback comes from a reviewer independent of the run.",
+        ));
+    }
+    let unavailable = |_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    if let Some(record_id) = &request.decision_record_id {
+        let issued = state
+            .store
+            .get(&DocKey::new(
+                &admission.tenant_id,
+                DocKind::DecisionLog,
+                &admission.run_id,
+            ))
+            .await
+            .map_err(unavailable)?
+            .is_some_and(|d| {
+                d.body["record_ids"]
+                    .as_array()
+                    .is_some_and(|ids| ids.iter().any(|i| i == record_id))
+            });
+        if !issued {
+            return Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                "decision_not_found",
+                "No such decision in this run.",
+            ));
+        }
+    }
+    let now = gateway.now();
+    let id = format!(
+        "fb_{}",
+        &contextos_contract::canonical::sha256_text(&format!(
+            "{}\u{0}{}\u{0}{}\u{0}{now}",
+            admission.tenant_id, run_id, caller.principal_id
+        ))[7..31]
+    );
+    let summary_digest = contextos_contract::canonical::sha256_text(&request.summary);
+    let record = json!({"feedback_id": id, "tenant_id": admission.tenant_id, "run_id": run_id, "trace_id": admission.trace_id,
+        "decision_record_id": request.decision_record_id, "kind": request.kind, "target_surface": request.target_surface,
+        "summary": request.summary, "expected_outcome": request.expected_outcome, "reporter": caller.principal_id,
+        "filed_at": now, "status": "open",
+        "replay_obligation": {"case": run_id, "replay_case": format!("/v1/runs/{run_id}/replay-case")}});
+    // Audited by digest: the summary itself stays out of the chain.
+    state
+        .audit
+        .append(
+            &admission.tenant_id,
+            "feedback_filed",
+            json!({"feedback_id": id, "run_id": run_id,
+            "kind": record["kind"], "target_surface": record["target_surface"], "summary_digest": summary_digest,
+            "reporter": caller.principal_id}),
+            &now,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
+    crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
+        .await
+        .map_err(feedback_error)?;
+    state
+        .store
+        .create(&crate::feedback::record_key(&admission.tenant_id, &id), &record)
+        .await
+        .map_err(unavailable)?;
+    Ok((StatusCode::CREATED, axum::Json(record)).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct FeedbackQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// The tenant's open feedback, oldest first: the replay corpus a change must pass.
+async fn list_feedback<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Query(query): Query<FeedbackQuery>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let ids = crate::feedback::open_ids(state.store.as_ref(), &caller.tenant_id)
+        .await
+        .map_err(feedback_error)?;
+    let mut records = Vec::new();
+    for id in ids.iter().take(query.limit.unwrap_or(500).min(1000)) {
+        if let Some(record) = state
+            .store
+            .get(&crate::feedback::record_key(&caller.tenant_id, id))
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "store_unavailable",
+                    "The store is unavailable.",
+                )
+            })?
+        {
+            records.push(record.body);
+        }
+    }
+    Ok(axum::Json(json!({"open": ids.len(), "feedback": records})).into_response())
+}
+
+/// Closes feedback with evidence (operators only).
+async fn close_feedback<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(feedback_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    use crate::feedback::{CLOSED, CloseBody, FeedbackError};
+    let caller = authorize(&state, &headers, Some("control"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let request: CloseBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid closure: {e}"),
+        )
+    })?;
+    let evidence = &request.evidence_ref;
+    let referenced = ["artifact_type", "artifact_id"]
+        .iter()
+        .all(|k| evidence[*k].as_str().is_some_and(|v| !v.is_empty()))
+        && evidence["sha256"]
+            .as_str()
+            .is_some_and(contextos_contract::canonical::is_sha256_digest);
+    if !CLOSED.contains(&request.status.as_str()) || !referenced {
+        return Err(feedback_error(FeedbackError::Invalid(
+            "status must be fixed, still_failing, invalid or superseded, with an evidence_ref {artifact_type, artifact_id, sha256}",
+        )));
+    }
+    let key = crate::feedback::record_key(&caller.tenant_id, &feedback_id);
+    let unavailable = |_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    };
+    let current = state
+        .store
+        .get(&key)
+        .await
+        .map_err(unavailable)?
+        .ok_or_else(|| feedback_error(FeedbackError::NotFound))?;
+    if current.body["status"] != "open" {
+        return Err(feedback_error(FeedbackError::Closed));
+    }
+    let now = gateway.now();
+    let mut closed = current.body.clone();
+    closed["status"] = json!(request.status);
+    closed["closed_at"] = json!(now);
+    closed["closed_by"] = json!(caller.principal_id);
+    closed["evidence_ref"] = request.evidence_ref.clone();
+    state
+        .audit
+        .append(
+            &caller.tenant_id,
+            "feedback_closed",
+            json!({"feedback_id": feedback_id, "status": request.status,
+            "evidence_ref": request.evidence_ref, "closed_by": caller.principal_id}),
+            &now,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
+    match state.store.compare_and_swap(&key, current.revision, &closed).await {
+        Ok(_) => {}
+        Err(e) if e.is_conflict() => return Err(feedback_error(FeedbackError::Closed)),
+        Err(_) => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            ));
+        }
+    }
+    crate::feedback::index_close(state.store.as_ref(), &caller.tenant_id, &feedback_id)
+        .await
+        .map_err(feedback_error)?;
+    Ok(axum::Json(closed).into_response())
+}
+
 /// The tenant's staged rollouts.
 async fn list_rollouts<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
 where
@@ -2242,6 +2500,9 @@ where
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
         .route("/v1/revocations/restore", post(restore::<S, L>))
         .route("/v1/conformance/assess", post(assess_conformance::<S, L>))
+        .route("/v1/runs/{run_id}/feedback", post(file_feedback::<S, L>))
+        .route("/v1/feedback", get(list_feedback::<S, L>))
+        .route("/v1/feedback/{feedback_id}/close", post(close_feedback::<S, L>))
         .route("/v1/rollouts", get(list_rollouts::<S, L>).post(set_rollout::<S, L>))
         .route("/v1/rollouts/clear", post(clear_rollout::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
