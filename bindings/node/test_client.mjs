@@ -111,6 +111,11 @@ try {
   assert.equal(resolved.status, "fixed");
   assert.equal((await client.openFeedback()).open, 0);
 
+  // No escalations are open; resolving an unknown one is refused.
+  assert.equal((await client.openEscalations()).open, 0);
+  await assert.rejects(new Client(client.baseUrl, { token: OPS_KEY }).resolveEscalation("esc_unknown", "handled", "n/a"),
+    (error) => error instanceof ContextOSHTTPError && error.status === 404);
+
   // A read-only research lane funded by the run.
   const agent = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
   const childId = `${run.runId}_lane`;

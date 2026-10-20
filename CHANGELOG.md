@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Python and Node clients: `open_escalations`/`openEscalations`,
+  `resolve_escalation`/`resolveEscalation`.
 - Eighth security review fixes: output schemas govern every outcome's output; erasure
   cannot miss concurrent feedback; rollout waivers audited and never on feedback cases;
   delegated result checks fail closed; `ctx trajectory-gate --audit`; escalations

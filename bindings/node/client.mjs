@@ -137,6 +137,19 @@ export class Client {
     return this.request("POST", `/v1/runs/${segment(runId)}/feedback`, { body });
   }
 
+  /** The tenant's open policy escalations, oldest first (`audit:read`). */
+  openEscalations({ limit = 500 } = {}) {
+    return this.request("GET", "/v1/escalations", { query: { limit } });
+  }
+
+  /**
+   * Records how a human resolved an escalation, `handled` or `dismissed` (`control`).
+   * Grants nothing: an action the human approves is retried through policy.
+   */
+  resolveEscalation(escalationId, resolution, reason) {
+    return this.request("POST", `/v1/escalations/${segment(escalationId)}/resolve`, { body: { resolution, reason } });
+  }
+
   /** The tenant's open feedback, oldest first: the replay corpus a change must pass. */
   openFeedback({ limit = 500 } = {}) {
     return this.request("GET", "/v1/feedback", { query: { limit } });

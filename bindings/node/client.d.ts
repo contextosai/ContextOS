@@ -62,6 +62,10 @@ export declare class Client {
   score(runId: string, recordId: string, scores: { evaluatorRef: string; policy: number; utility: number; safety: number }): Promise<{ score: Record<string, any>; audit_sequence: number }>;
   /** Files an operator correction or override against a run (token with `evaluate`, independent of the run). */
   fileFeedback(runId: string, feedback: { kind: "correction" | "override" | "approval_verdict"; targetSurface: FeedbackSurface; summary: string; decisionRecordId?: string; expectedOutcome?: string }): Promise<Feedback>;
+  /** The tenant's open policy escalations, oldest first. */
+  openEscalations(options?: { limit?: number }): Promise<{ open: number; escalations: Record<string, Json>[] }>;
+  /** Records how a human resolved an escalation (token with `control`); grants nothing. */
+  resolveEscalation(escalationId: string, resolution: "handled" | "dismissed", reason: string): Promise<Record<string, Json>>;
   /** The tenant's open feedback, oldest first. */
   openFeedback(options?: { limit?: number }): Promise<{ open: number; feedback: Feedback[] }>;
   /** Closes feedback with a reference to the evidence (token with `control`). */

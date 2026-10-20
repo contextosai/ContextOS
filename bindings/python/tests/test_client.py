@@ -129,6 +129,14 @@ def main() -> None:
         assert closed["status"] == "fixed"
         assert client.open_feedback()["open"] == 0
 
+        # No escalations are open; resolving an unknown one is refused.
+        assert client.open_escalations()["open"] == 0
+        try:
+            Client(client.base_url, OPS_KEY).resolve_escalation("esc_unknown", "handled", "n/a")
+            raise AssertionError("resolved an unknown escalation")
+        except ContextOSHTTPError as refused:
+            assert refused.status == 404, refused
+
         # Failover: a second executor takes over; the first is fenced.
         replacement = client.attach(run.run_id, run.trace_id, run.principal_chain).take_over()
         assert replacement.executor_generation == 4

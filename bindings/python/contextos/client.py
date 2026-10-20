@@ -168,6 +168,16 @@ class Client:
             body["expected_outcome"] = expected_outcome
         return self.request("POST", f"/v1/runs/{_quote(run_id)}/feedback", body)
 
+    def open_escalations(self, limit: int = 500) -> dict:
+        """The tenant's open policy escalations, oldest first (`audit:read`)."""
+        return self.request("GET", "/v1/escalations", query={"limit": limit})
+
+    def resolve_escalation(self, escalation_id: str, resolution: str, reason: str) -> dict:
+        """Records how a human resolved an escalation, `handled` or `dismissed` (`control`).
+        Grants nothing: an action the human approves is retried through policy."""
+        return self.request("POST", f"/v1/escalations/{_quote(escalation_id)}/resolve",
+                            {"resolution": resolution, "reason": reason})
+
     def open_feedback(self, limit: int = 500) -> dict:
         """The tenant's open feedback, oldest first: the replay corpus a change must pass."""
         return self.request("GET", "/v1/feedback", query={"limit": limit})
