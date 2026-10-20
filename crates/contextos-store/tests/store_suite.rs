@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use contextos_kernel::budget_ledger::reserve_child_budget;
 use contextos_kernel::operation_ledger::claim_operation;
-use contextos_store::{Commit, DocKey, DocKind, DocumentStore, MemoryStore, StoreError, transact};
+use contextos_store::{
+    AppendLog, Commit, DocKey, DocKind, DocumentStore, LogRow, MemoryLog, MemoryStore, StoreError, transact,
+};
 use serde_json::{Value, json};
 
 fn durable_vectors() -> Value {
@@ -126,8 +128,32 @@ async fn concurrent_claims_admit_one<S: DocumentStore + 'static>(store: Arc<S>, 
     assert_eq!(written, 1, "exactly one attempt may be in flight");
 }
 
+async fn append_log_semantics<L: AppendLog>(log: &L, tenant: &str) {
+    let row = |sequence: u64| LogRow {
+        sequence,
+        record_hash: format!("sha256:{sequence:064x}"),
+        body: json!({"s": sequence}),
+    };
+    assert_eq!(log.head(tenant).await.unwrap(), None);
+    assert!(
+        log.append(tenant, &row(2)).await.unwrap_err().is_conflict(),
+        "gap before genesis"
+    );
+    log.append(tenant, &row(1)).await.unwrap();
+    assert!(
+        log.append(tenant, &row(1)).await.unwrap_err().is_conflict(),
+        "fork at sequence 1"
+    );
+    log.append(tenant, &row(2)).await.unwrap();
+    assert!(log.append(tenant, &row(4)).await.unwrap_err().is_conflict(), "gap");
+    assert_eq!(log.head(tenant).await.unwrap().unwrap().sequence, 2);
+    let rows = log.range(tenant, 2, 10).await.unwrap();
+    assert_eq!(rows, vec![row(2)]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn memory_store_suite() {
+    append_log_semantics(&MemoryLog::new(), "tenant_a").await;
     let store = Arc::new(MemoryStore::new());
     basic_semantics(store.as_ref(), "tenant_a").await;
     concurrent_budget_is_conserved(store.clone(), "tenant_a").await;
@@ -147,6 +173,7 @@ async fn postgres_store_suite() {
     store.migrate().await.unwrap();
     let tenant = format!("tenant_{}", std::process::id());
     basic_semantics(&store, &tenant).await;
+    append_log_semantics(&store, &tenant).await;
     let store = Arc::new(store);
     concurrent_budget_is_conserved(store.clone(), &tenant).await;
     concurrent_claims_admit_one(store, &tenant).await;

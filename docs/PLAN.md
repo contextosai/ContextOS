@@ -77,7 +77,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 7 Run lifecycle, resume, operation ledger, budget ledger | done — 1 900 vectors |
 | 8 Conformance assessment | done — 320 vectors |
 | 9 Stores with CAS + fencing | done — memory + PostgreSQL; contention tests (budget conservation, single in-flight claim) |
-| 10 Audit chain, signed DecisionRecords, replay packets | next |
+| 10 Audit chain, signed DecisionRecords, replay packets | done — ed25519 hash chain, tamper/fork/rotation tests, open-gate commit refusal |
+| 11 Tool Gateway pipeline + adapters | next |
 
 ## Non-negotiables carried from the spec
 

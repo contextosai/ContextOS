@@ -20,7 +20,7 @@ pub mod memory;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
-pub use memory::MemoryStore;
+pub use memory::{MemoryLog, MemoryStore};
 
 /// Kinds of protected documents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -193,4 +193,29 @@ where
         expected: None,
         actual: None,
     })
+}
+
+/// One row of a per-tenant append-only log.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogRow {
+    pub sequence: u64,
+    pub record_hash: String,
+    pub body: Value,
+}
+
+/// Append-only, per-tenant hash-chained log storage. `append` succeeds only for the
+/// next sequence after the current head, so concurrent writers cannot fork the chain;
+/// the loser gets `Conflict` and must rebuild its entry on the new head.
+pub trait AppendLog: Send + Sync {
+    fn head(&self, tenant_id: &str) -> impl Future<Output = Result<Option<LogRow>, StoreError>> + Send;
+
+    fn append(&self, tenant_id: &str, row: &LogRow) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Rows with `sequence >= from`, ascending, at most `limit`.
+    fn range(
+        &self,
+        tenant_id: &str,
+        from: u64,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<LogRow>, StoreError>> + Send;
 }

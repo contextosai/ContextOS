@@ -73,3 +73,63 @@ impl DocumentStore for MemoryStore {
         })
     }
 }
+
+/// `(sequence, record_hash, canonical body)`.
+type StoredRow = (u64, String, String);
+
+/// In-process append-only log.
+#[derive(Debug, Default)]
+pub struct MemoryLog {
+    rows: RwLock<HashMap<String, Vec<StoredRow>>>,
+}
+
+impl MemoryLog {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl crate::AppendLog for MemoryLog {
+    async fn head(&self, tenant_id: &str) -> Result<Option<crate::LogRow>, StoreError> {
+        let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
+        rows.get(tenant_id)
+            .and_then(|r| r.last())
+            .map(|(sequence, hash, text)| row(*sequence, hash, text))
+            .transpose()
+    }
+
+    async fn append(&self, tenant_id: &str, entry: &crate::LogRow) -> Result<(), StoreError> {
+        let (text, _) = encode(&entry.body)?;
+        let mut rows = self.rows.write().map_err(|_| MemoryStore::poisoned())?;
+        let chain = rows.entry(tenant_id.to_owned()).or_default();
+        let head = chain.last().map(|(sequence, _, _)| *sequence);
+        if entry.sequence != head.map_or(1, |h| h + 1) {
+            return Err(StoreError::Conflict {
+                expected: Some(entry.sequence.saturating_sub(1)),
+                actual: head,
+            });
+        }
+        chain.push((entry.sequence, entry.record_hash.clone(), text));
+        Ok(())
+    }
+
+    async fn range(&self, tenant_id: &str, from: u64, limit: usize) -> Result<Vec<crate::LogRow>, StoreError> {
+        let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
+        rows.get(tenant_id)
+            .into_iter()
+            .flatten()
+            .filter(|(sequence, _, _)| *sequence >= from)
+            .take(limit)
+            .map(|(sequence, hash, text)| row(*sequence, hash, text))
+            .collect()
+    }
+}
+
+fn row(sequence: u64, record_hash: &str, text: &str) -> Result<crate::LogRow, StoreError> {
+    let body = serde_json::from_str(text).map_err(|_| StoreError::Integrity)?;
+    Ok(crate::LogRow {
+        sequence,
+        record_hash: record_hash.to_owned(),
+        body,
+    })
+}
