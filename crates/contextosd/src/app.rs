@@ -14,6 +14,7 @@
 //! | `GET /v1/runs/{run_id}/evidence` | `audit:read` | the run's evidence bundle |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
 //! | `POST /v1/runs` with `delegation` | `admit` | admit a delegated child run (narrowed lane, sub-budget reserved from the parent) |
+//! | `POST /v1/runs/{run_id}/mcp` | `dispatch` | MCP server for the run: `tools/list` of surfaced capabilities, governed `tools/call` |
 //! | `GET /v1/runs/{run_id}` | `dispatch` | lifecycle status and current executor generation |
 //! | `POST /v1/runs/{run_id}/takeover` | `dispatch` | move the run to a new executor; the old generation goes stale |
 //! | `POST /v1/runs/{run_id}/complete` | `dispatch` | complete the run (no unresolved effect, open child or work in flight) |
@@ -1140,6 +1141,39 @@ async fn audit_entries<S, L: AppendLog>(
     Ok(axum::Json(json!({"entries": entries, "next": next})).into_response())
 }
 
+/// MCP gateway mode for one run (see [`crate::mcp`]).
+async fn mcp_endpoint<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let Ok(request) = parse_body(&state, &body) else {
+        return Ok(crate::mcp::parse_error());
+    };
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "dispatch_concurrency_limited",
+            "The tenant has the maximum number of governed effects in progress.",
+        )
+        .retry_after(std::time::Duration::from_secs(1))
+    })?;
+    let mut response = crate::mcp::handle(gateway, &admission, &caller.principal_id, &headers, &request).await;
+    response.headers_mut().insert(
+        "mcp-protocol-version",
+        header::HeaderValue::from_static(crate::mcp::PROTOCOL_VERSION),
+    );
+    Ok(response)
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -1175,6 +1209,7 @@ where
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
         .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
+        .route("/v1/runs/{run_id}/mcp", post(mcp_endpoint::<S, L>))
         .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
         .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))
         .route("/v1/runs/{run_id}/{action}", post(lifecycle::<S, L>))

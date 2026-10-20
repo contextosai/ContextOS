@@ -79,6 +79,42 @@ const issueRefund = governedTool(run, "adp_payments.issue_refund", {
 await issueRefund({ order_id: "ord_881", customer_id: "cus_77", amount_minor: 1200 });
 ```
 
+### Or connect any MCP host
+
+Every admitted run is also an MCP server at `POST /v1/runs/{run_id}/mcp` (Streamable
+HTTP, JSON responses; the stateless `2026-07-28` profile, with `initialize` answered
+for older hosts). Point an MCP-capable agent host at it with the caller's token and
+the executor generation as headers, for example:
+
+```json
+{
+  "mcpServers": {
+    "contextos": {
+      "type": "http",
+      "url": "https://contextos.internal/v1/runs/run_123/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CONTEXTOS_TOKEN}",
+        "ContextOS-Executor-Generation": "2"
+      }
+    }
+  }
+}
+```
+
+The host sees only the run's surfaced capabilities, with their reviewed input schemas
+and risk annotations. Each `tools/call` runs the full governed pipeline. Refusals come
+back as tool errors whose `structuredContent` carries the status and reason codes, so
+the model sees that the action did not happen. Operation identity comes from
+`_meta["io.contextos/idempotencyKey"]` when given; otherwise effectful calls derive it
+from the capability and arguments, so a host that retries a call it thinks failed
+cannot apply the effect twice. Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`.
+A tool's `input_required` is passed through with `requestState`, and the host's retry
+with `inputResponses` continues the same operation.
+
+Give capability manifests an `input_schema` (JSON Schema) and `description`: the
+schema is shown to hosts and enforced on every call (`arguments_invalid`), and
+violations report argument paths only, never values.
+
 ## 3. Run `contextosd`
 
 ```sh

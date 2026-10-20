@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- MCP gateway mode: every run is an MCP server whose tools are its governed
+  capabilities; reviewed input schemas on manifests, enforced on every call.
 - TypeScript/Node HTTP client (`@contextos/kernel/client`, no dependencies, typed).
 - Python HTTP client (`contextos.client`, standard library only) with typed outcomes,
   fencing handled, and a `governed_tool` decorator for agent frameworks.

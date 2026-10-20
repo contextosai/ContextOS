@@ -210,3 +210,39 @@ mod tests {
         assert!(validate(&target, &json!({"control_id": "a", "control_version": "1", "x": 1})).is_err());
     }
 }
+
+/// A reviewed JSON Schema for a capability's arguments (draft 2020-12), compiled once.
+/// References to remote documents are not resolved.
+#[derive(Clone)]
+pub struct ArgumentSchema(Arc<Validator>);
+
+impl std::fmt::Debug for ArgumentSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArgumentSchema")
+    }
+}
+
+impl ArgumentSchema {
+    pub fn compile(schema: &Value) -> Result<Self, String> {
+        jsonschema::options()
+            .offline()
+            .build(schema)
+            .map(|v| Self(Arc::new(v)))
+            .map_err(|e| e.to_string())
+    }
+
+    /// Instance paths of the first violations. Values are never echoed, so a
+    /// refusal cannot leak argument contents.
+    pub fn check(&self, instance: &Value) -> Result<(), Vec<String>> {
+        let paths: Vec<String> = self
+            .0
+            .iter_errors(instance)
+            .take(MAX_REPORTED_VIOLATIONS)
+            .map(|e| {
+                let path = e.instance_path().to_string();
+                if path.is_empty() { "/".to_owned() } else { path }
+            })
+            .collect();
+        if paths.is_empty() { Ok(()) } else { Err(paths) }
+    }
+}

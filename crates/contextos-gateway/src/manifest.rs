@@ -101,6 +101,13 @@ pub struct CapabilityManifest {
     /// Pinned digest refs of the adapter build and this capability definition.
     pub adapter_ref: Value,
     pub capability_ref: Value,
+    /// Reviewed JSON Schema (draft 2020-12) for the arguments. When present, calls
+    /// whose arguments do not conform are rejected before authorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    /// Human-readable description shown to agents (for example as an MCP tool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -115,6 +122,8 @@ pub enum ManifestError {
     CapabilityId(String),
     #[error("capability {0} timeout must be between 1 ms and 10 minutes")]
     Timeout(String),
+    #[error("capability {0} input_schema does not compile: {1}")]
+    InputSchema(String, String),
 }
 
 impl CapabilityManifest {
@@ -140,6 +149,10 @@ impl CapabilityManifest {
         }
         if self.timeout_ms == 0 || self.timeout_ms > 600_000 {
             return Err(ManifestError::Timeout(id.clone()));
+        }
+        if let Some(schema) = &self.input_schema {
+            contextos_contract::schema::ArgumentSchema::compile(schema)
+                .map_err(|e| ManifestError::InputSchema(id.clone(), e))?;
         }
         Ok(())
     }

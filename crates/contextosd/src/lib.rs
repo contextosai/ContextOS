@@ -4,6 +4,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod limits;
+pub mod mcp;
 pub mod metrics;
 pub mod oidc;
 pub mod runtime;

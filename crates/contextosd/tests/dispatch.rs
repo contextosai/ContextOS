@@ -151,6 +151,10 @@ async fn world(controls: &[&str]) -> World {
         "recovery": {"strategy": "manual_reconcile", "max_attempts": 2, "retry_delays_seconds": [0]},
         "timeout_ms": 2000, "reservation": {"tokens": 0, "tool_calls": 1, "replans": 0, "cost_units": 100},
         "adapter_ref": artifact("adapter", "payments@3"), "capability_ref": artifact("capability", "issue_refund@3"),
+        "description": "Refund an order to the customer's original payment method.",
+        "input_schema": {"type": "object", "additionalProperties": false, "required": ["order_id", "customer_id", "amount_minor"],
+            "properties": {"order_id": {"type": "string"}, "customer_id": {"type": "string"},
+                "amount_minor": {"type": "integer", "minimum": 1}}},
     }).to_string()).unwrap();
     let controls = controls
         .iter()
@@ -891,4 +895,143 @@ async fn decisions_are_verified_gated_signed_and_exported() {
     assert_eq!(page["entries"].as_array().unwrap().len(), 3);
     assert_eq!(page["entries"][0]["sequence"], 1);
     assert_eq!(page["next"], 4);
+}
+
+#[tokio::test]
+async fn agent_hosts_use_governed_tools_over_mcp() {
+    let w = world(&ALL_CONTROLS).await;
+    let http = executor_client(2);
+    assert_eq!(
+        http.post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&run_body("run_mcp", 1200))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    let url = format!("{}/v1/runs/run_mcp/mcp", w.base);
+    let rpc = |id: u64, method: &str, params: Value| {
+        let http = http.clone();
+        let url = url.clone();
+        let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    let init = rpc(
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "host", "version": "1"}}),
+    )
+    .await;
+    assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+
+    let tools = rpc(2, "tools/list", json!({})).await;
+    let tools = tools["result"]["tools"].as_array().unwrap();
+    let refund = tools
+        .iter()
+        .find(|t| t["name"] == "adp_payments.issue_refund")
+        .expect("surfaced capability listed");
+    assert_eq!(refund["annotations"]["destructiveHint"], true);
+    assert_eq!(
+        refund["inputSchema"]["required"],
+        json!(["order_id", "customer_id", "amount_minor"])
+    );
+
+    let evidence = json!({"io.contextos/evidenceRefs": ["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"]});
+    let call = |id: u64, arguments: Value| {
+        rpc(
+            id,
+            "tools/call",
+            json!({"name": "adp_payments.issue_refund", "arguments": arguments, "_meta": evidence}),
+        )
+    };
+    let args = json!({"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 120_000});
+    let done = call(3, args.clone()).await;
+    assert_eq!(done["result"]["isError"], false, "{done}");
+    assert_eq!(done["result"]["structuredContent"]["refund_id"], "rf_77");
+
+    // A host retrying what it believes failed cannot refund twice.
+    let retried = call(4, args.clone()).await;
+    assert_eq!(retried["result"]["isError"], true);
+    assert_eq!(
+        retried["result"]["structuredContent"]["reason_codes"],
+        json!(["retry_unsafe"])
+    );
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    // Arguments are checked against the reviewed schema before anything else.
+    let invalid = call(
+        5,
+        json!({"order_id": "ord_9", "customer_id": "cus_77", "amount_minor": 5, "note": "x"}),
+    )
+    .await;
+    assert_eq!(
+        invalid["result"]["structuredContent"]["reason_codes"],
+        json!(["arguments_invalid"])
+    );
+
+    // A tool that needs input: the host answers and the same operation continues.
+    let ask = call(
+        6,
+        json!({"order_id": "ord_555", "customer_id": "cus_77", "amount_minor": 555}),
+    )
+    .await;
+    assert_eq!(ask["result"]["resultType"], "input_required", "{ask}");
+    let state = ask["result"]["requestState"].clone();
+    let answered = rpc(
+        7,
+        "tools/call",
+        json!({"name": "adp_payments.issue_refund", "_meta": evidence,
+        "arguments": {"order_id": "ord_555", "customer_id": "cus_77", "amount_minor": 555},
+        "inputResponses": {"reason": {"action": "accept", "content": {"reason": "late"}}}, "requestState": state}),
+    )
+    .await;
+    assert_eq!(answered["result"]["isError"], false, "{answered}");
+    assert_eq!(answered["result"]["structuredContent"]["reason"], "late");
+
+    let unknown = rpc(
+        8,
+        "tools/call",
+        json!({"name": "adp_crm.delete_customer", "arguments": {}}),
+    )
+    .await;
+    assert_eq!(unknown["error"]["code"], -32602);
+    let stale = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth("acme-key")
+        .header("contextos-executor-generation", "1")
+        .json(&json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "adp_payments.issue_refund", "arguments": args, "_meta": evidence}}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(
+        stale["result"]["structuredContent"]["reason_codes"],
+        json!(["executor_stale"])
+    );
+    let missing = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth("acme-key")
+        .json(&json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "adp_payments.issue_refund", "arguments": args}}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(missing["error"]["code"], -32602, "the executor generation is required");
 }

@@ -148,6 +148,7 @@ pub struct Gateway<S, L> {
     ports: Ports,
     adapters: HashMap<String, Arc<dyn Adapter>>,
     manifests: HashMap<String, CapabilityManifest>,
+    schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -256,6 +257,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             ports,
             adapters: HashMap::new(),
             manifests: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -266,6 +268,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Pins a reviewed capability manifest.
     pub fn pin_capability(&mut self, manifest: CapabilityManifest) -> Result<(), GatewayError> {
         manifest.validate()?;
+        if let Some(schema) = &manifest.input_schema {
+            let compiled = contextos_contract::schema::ArgumentSchema::compile(schema)
+                .map_err(|e| ManifestError::InputSchema(manifest.capability_id.clone(), e))?;
+            self.schemas.insert(manifest.capability_id.clone(), compiled);
+        }
         self.manifests.insert(manifest.capability_id.clone(), manifest);
         Ok(())
     }
@@ -439,6 +446,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "No adapter is registered for this capability.",
             ));
         };
+        if let Some(schema) = self.schemas.get(capability_id)
+            && let Err(paths) = schema.check(&envelope["args"])
+        {
+            p.report.obligations.push(format!("fix_arguments:{}", paths.join(",")));
+            return Ok(p.stop(
+                "rejected",
+                vec!["arguments_invalid".into()],
+                "The arguments do not match the capability's input schema.",
+            ));
+        }
         let mut evidence_refs = Vec::new();
         for evidence_ref in envelope["evidence_refs"].as_array().into_iter().flatten() {
             match admission.evidence.get(evidence_ref.as_str().unwrap_or_default()) {
