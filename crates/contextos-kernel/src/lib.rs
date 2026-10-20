@@ -10,6 +10,7 @@ pub mod action_risk;
 pub mod authorization;
 pub mod budget_ledger;
 pub mod compiler;
+pub mod conformance;
 pub mod execution_boundary;
 pub mod negotiation;
 pub mod operation_ledger;

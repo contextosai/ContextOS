@@ -72,7 +72,11 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 2 JsonLogic | done — 5 935/6 000 exact, 65 fail visibly by design (ADR-0002) |
 | 3 Action risk + compiler | done — 43/43 compilations byte-identical incl. `compiled_context_hash` |
 | 4 Profiles + negotiation | done — 3 000+ vectors |
-| 5 Authority, policy composition, approvals, authorization | next |
+| 5 Authority, policy composition, approvals, authorization | done — 2 659 vectors |
+| 6 Execution boundary, data flow, memory lifecycle | done — 1 700 vectors + Node path / WHATWG origin corpora |
+| 7 Run lifecycle, resume, operation ledger, budget ledger | done — 1 900 vectors |
+| 8 Conformance assessment | done — 320 vectors |
+| 9 Stores with CAS + fencing | next |
 
 ## Non-negotiables carried from the spec
 
