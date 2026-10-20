@@ -293,4 +293,8 @@ async fn negotiate_validate_metrics_and_audit() {
         metrics.contains(r#"contextos_http_requests_total{route="/v1/contracts/negotiate",status="200"} 2"#),
         "{metrics}"
     );
+    assert!(
+        metrics.contains("contextos_replicas 1\n"),
+        "a lone replica owns the full limits: {metrics}"
+    );
 }

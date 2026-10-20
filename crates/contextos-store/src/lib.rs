@@ -49,6 +49,8 @@ pub enum DocKind {
     RunScore,
     /// The tenant's revoked targets (kill switch).
     Revocations,
+    /// Live server replicas (shared tenant limits).
+    Replicas,
 }
 
 impl DocKind {
@@ -70,6 +72,7 @@ impl DocKind {
             DocKind::ReplayCase => "replay_case",
             DocKind::RunScore => "run_score",
             DocKind::Revocations => "revocations",
+            DocKind::Replicas => "replicas",
         }
     }
 }

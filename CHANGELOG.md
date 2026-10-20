@@ -46,6 +46,8 @@ First release candidate of the ContextOS runtime.
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
   strict JSON ingress; overload protection (global load shedding, per-tenant rate and
   concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
+- Cluster-wide tenant limits: replicas heartbeat into the store and each enforces its
+  share of every tenant's rate, burst and dispatch cap (`contextos_replicas` gauge).
 - `ctx scorecards` collects evaluator scorecards from evidence bundles into
   `ctx scorecard-gate` input. Python and TypeScript clients gain `revoke`, `restore`
   and `revocations` for operators.

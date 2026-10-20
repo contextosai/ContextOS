@@ -78,6 +78,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # requests_per_second = 500.0
 # burst = 1000.0
 # max_concurrent_dispatch = 256
+# heartbeat_ms = 5000          # tenant limits are shared across live replicas
 # [[limits.tenants]]
 # tenant_id = "tenant_acme_prod"
 # requests_per_second = 2000.0

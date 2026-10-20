@@ -116,7 +116,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 38 Independent scoring | done — `RunScore` scorecards for decisions from separate evaluator principals (`evaluate` scope, separation of duties enforced), runtime-measured cost, signed and in the evidence bundle |
 | 39 Scorecard gate | done — kernel `scorecard_gate` and `ctx scorecard-gate`: floors per scorecard, no policy/safety regression, bounded utility/latency/cost deltas, missing/unmeasured/underpowered fail |
 | 40 Kill switch | done — tenant/pack/agent/adapter/capability revocation (`control` scope), enforced in the concurrent authorization reads and at admission, audited before effect, restorable |
-| 41 Next | next |
+| 41 Cluster-wide limits | done — replica membership heartbeat (CAS on one document), per-replica share of tenant rate/burst/dispatch cap, no per-request store traffic, `contextos_replicas` gauge |
+| 42 Next | next |
 
 ## Non-negotiables carried from the spec
 

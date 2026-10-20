@@ -257,7 +257,11 @@ async fn readyz<S: DocumentStore, L>(State(state): State<Arc<AppState<S, L>>>) -
 async fn metrics<S, L>(State(state): State<Arc<AppState<S, L>>>) -> Response {
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        state.metrics.render(),
+        format!(
+            "{}# HELP contextos_replicas Live replicas sharing tenant limits.\n# TYPE contextos_replicas gauge\ncontextos_replicas {}\n",
+            state.metrics.render(),
+            state.limits.replicas()
+        ),
     )
         .into_response()
 }

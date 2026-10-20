@@ -5,6 +5,7 @@ pub mod auth;
 pub mod config;
 pub mod limits;
 pub mod mcp;
+pub mod membership;
 pub mod metrics;
 pub mod oidc;
 pub mod runtime;
@@ -84,10 +85,16 @@ where
         .iter()
         .map(|c| oidc::OidcIssuer::new(c.clone(), development).map(Arc::new))
         .collect::<Result<Vec<_>, _>>()?;
+    let limits = Arc::new(limits::Limiter::new(config.limits.clone()));
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         for issuer in &issuers {
             runtime.spawn(issuer.clone().run_refresh());
         }
+        runtime.spawn(membership::run(
+            store.clone(),
+            limits.clone(),
+            std::time::Duration::from_millis(config.limits.heartbeat_ms),
+        ));
     }
     Ok(Arc::new(AppState {
         store,
@@ -101,6 +108,6 @@ where
         gateway,
         trust_domain,
         gateway_principal_id,
-        limits: Arc::new(limits::Limiter::new(config.limits.clone())),
+        limits,
     }))
 }

@@ -433,7 +433,12 @@ The check runs alongside the other authorization reads, so it adds no serial lat
   per tenant (`requests_per_second` / `burst`, default 500 / 1000; `429` with
   `Retry-After`) and governed effects in progress per tenant (`max_concurrent_dispatch`,
   default 256). `[[limits.tenants]]` overrides any of these for one tenant. Limits
-  apply after authentication; health probes and metrics are exempt.
+  apply after authentication; health probes and metrics are exempt. Tenant limits
+  are cluster-wide: replicas sharing a store heartbeat every `heartbeat_ms` (default
+  5000) and each enforces its share (limit ÷ live replicas, `contextos_replicas` in
+  `/metrics`), with no store round trip per request. The split assumes the load
+  balancer spreads a tenant's traffic evenly; a dead replica's share returns to the
+  others within three heartbeats.
 - **Declare only what you enforce:** `[support].controls` is a claim that your providers
   enforce those controls. Runs that need more are refused at admission.
 - **Traces:** set `OTEL_EXPORTER_OTLP_ENDPOINT` (and optionally `OTEL_SERVICE_NAME`,

@@ -11,8 +11,15 @@
 //!
 //! Limits apply after authentication, so an unauthenticated caller cannot exhaust a
 //! tenant's allowance. Per-tenant overrides raise or lower the defaults.
+//!
+//! Tenant limits are **cluster-wide**: each replica enforces its share, the configured
+//! value divided by the number of live replicas sharing the store (see
+//! [`crate::membership`]). No request waits on the store; the split is exact when the
+//! load balancer spreads a tenant's traffic evenly and approximate otherwise. The
+//! global in-flight cap protects one process and stays per replica.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -32,6 +39,13 @@ pub struct LimitsConfig {
     pub max_concurrent_dispatch: usize,
     #[serde(default)]
     pub tenants: Vec<TenantLimits>,
+    /// How often replicas record their heartbeat for shared tenant limits.
+    #[serde(default = "default_heartbeat")]
+    pub heartbeat_ms: u64,
+}
+
+fn default_heartbeat() -> u64 {
+    5_000
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,6 +81,7 @@ impl Default for LimitsConfig {
             burst: default_burst(),
             max_concurrent_dispatch: default_dispatch(),
             tenants: Vec::new(),
+            heartbeat_ms: default_heartbeat(),
         }
     }
 }
@@ -76,6 +91,7 @@ impl LimitsConfig {
         let rate_ok = |r: f64, b: f64| r.is_finite() && b.is_finite() && r > 0.0 && b >= 1.0;
         if self.max_in_flight == 0
             || self.max_concurrent_dispatch == 0
+            || !(100..=60_000).contains(&self.heartbeat_ms)
             || !rate_ok(self.requests_per_second, self.burst)
         {
             return Err("limits must be positive".into());
@@ -104,7 +120,19 @@ pub struct Limiter {
     overrides: HashMap<String, TenantLimits>,
     in_flight: Arc<Semaphore>,
     buckets: Mutex<HashMap<String, Bucket>>,
-    dispatch: Mutex<HashMap<String, Arc<Semaphore>>>,
+    dispatch: Mutex<HashMap<String, Arc<AtomicUsize>>>,
+    /// Live replicas sharing the tenant limits (at least 1).
+    replicas: AtomicUsize,
+}
+
+/// One governed dispatch in progress; released on drop.
+#[derive(Debug)]
+pub struct DispatchSlot(Arc<AtomicUsize>);
+
+impl Drop for DispatchSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl std::fmt::Debug for Limiter {
@@ -128,7 +156,17 @@ impl Limiter {
             overrides,
             buckets: Mutex::default(),
             dispatch: Mutex::default(),
+            replicas: AtomicUsize::new(1),
         }
+    }
+
+    /// Sets the number of live replicas the tenant limits are shared across.
+    pub fn set_replicas(&self, replicas: usize) {
+        self.replicas.store(replicas.max(1), Ordering::Relaxed);
+    }
+
+    pub fn replicas(&self) -> usize {
+        self.replicas.load(Ordering::Relaxed)
     }
 
     /// A slot for one request, or `None` when the server is saturated.
@@ -136,12 +174,16 @@ impl Limiter {
         self.in_flight.clone().try_acquire_owned().ok()
     }
 
+    /// This replica's share of the tenant's rate and burst.
+    #[allow(clippy::cast_precision_loss)]
     fn rate(&self, tenant_id: &str) -> (f64, f64) {
         let o = self.overrides.get(tenant_id);
+        let share = self.replicas() as f64;
         (
             o.and_then(|o| o.requests_per_second)
-                .unwrap_or(self.config.requests_per_second),
-            o.and_then(|o| o.burst).unwrap_or(self.config.burst),
+                .unwrap_or(self.config.requests_per_second)
+                / share,
+            (o.and_then(|o| o.burst).unwrap_or(self.config.burst) / share).max(1.0),
         )
     }
 
@@ -168,23 +210,23 @@ impl Limiter {
         }
     }
 
-    /// A slot for one governed dispatch by `tenant_id`, or `None` at the tenant's cap.
-    pub fn dispatch_permit(&self, tenant_id: &str) -> Option<OwnedSemaphorePermit> {
-        let semaphore = {
+    /// A slot for one governed dispatch by `tenant_id`, or `None` at this replica's
+    /// share of the tenant's cap.
+    pub fn dispatch_permit(&self, tenant_id: &str) -> Option<DispatchSlot> {
+        let cap = self
+            .overrides
+            .get(tenant_id)
+            .and_then(|o| o.max_concurrent_dispatch)
+            .unwrap_or(self.config.max_concurrent_dispatch)
+            .div_ceil(self.replicas());
+        let counter = {
             let mut slots = self.dispatch.lock().unwrap_or_else(PoisonError::into_inner);
-            slots
-                .entry(tenant_id.to_owned())
-                .or_insert_with(|| {
-                    let cap = self
-                        .overrides
-                        .get(tenant_id)
-                        .and_then(|o| o.max_concurrent_dispatch)
-                        .unwrap_or(self.config.max_concurrent_dispatch);
-                    Arc::new(Semaphore::new(cap))
-                })
-                .clone()
+            slots.entry(tenant_id.to_owned()).or_default().clone()
         };
-        semaphore.try_acquire_owned().ok()
+        counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < cap).then_some(n + 1))
+            .ok()
+            .map(|_| DispatchSlot(counter))
     }
 }
 
@@ -204,7 +246,28 @@ mod tests {
                 burst: Some(5.0),
                 max_concurrent_dispatch: Some(2),
             }],
+            heartbeat_ms: 5_000,
         })
+    }
+
+    #[test]
+    fn replicas_share_each_tenant_limit() {
+        let l = limiter();
+        l.set_replicas(2);
+        let t0 = Instant::now();
+        // Burst 5 across two replicas: this one allows 2.5, so 2 immediate requests.
+        assert!(l.take_at("big", t0).is_ok() && l.take_at("big", t0).is_ok());
+        assert!(l.take_at("big", t0).is_err());
+        // Dispatch cap 2 across two replicas: one here.
+        let only = l.dispatch_permit("big").unwrap();
+        assert!(l.dispatch_permit("big").is_none());
+        drop(only);
+        // A share never rounds down to zero.
+        l.set_replicas(10);
+        assert!(l.dispatch_permit("a").is_some());
+        assert!(l.take_at("c", t0).is_ok());
+        l.set_replicas(0);
+        assert_eq!(l.replicas(), 1);
     }
 
     #[test]
