@@ -266,16 +266,12 @@ fn valid_ledger(v: &Value) -> bool {
     }
     let reservations = arr(&v["reservations"]);
     let mutations = arr(&v["mutations"]);
-    let unique = |items: &[Value], key: &str| {
-        items
-            .iter()
-            .map(|i| s(&i[key]))
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-            == items.len()
-    };
-    if !unique(reservations, "reservation_id")
-        || !unique(mutations, "mutation_id")
+    fn ids<'a>(items: &'a [Value], key: &str) -> std::collections::HashSet<&'a str> {
+        items.iter().map(|i| s(&i[key])).collect()
+    }
+    let reservation_ids = ids(reservations, "reservation_id");
+    if reservation_ids.len() != reservations.len()
+        || ids(mutations, "mutation_id").len() != mutations.len()
         || arr(&v["trusted_observers"])
             .iter()
             .any(|p| p["tenant_id"] != v["tenant_id"])
@@ -288,10 +284,10 @@ fn valid_ledger(v: &Value) -> bool {
     }) {
         return false;
     }
-    if mutations.iter().any(|m| {
-        int(&m["result_revision"]) > int(&v["revision"])
-            || !reservations.iter().any(|r| r["reservation_id"] == m["reservation_id"])
-    }) {
+    if mutations
+        .iter()
+        .any(|m| int(&m["result_revision"]) > int(&v["revision"]) || !reservation_ids.contains(s(&m["reservation_id"])))
+    {
         return false;
     }
     KEYS.iter().all(|k| {

@@ -29,7 +29,7 @@ equals UTF-16 order.
 
 | Measure | Result |
 |---|---|
-| One run, sequential effects (average over 50 effects) | ~0.66 ms per effect |
+| One run, sequential effects (average over 50 effects) | ~0.59 ms per effect |
 | 32 runs of one tenant in parallel, 50 effects each | ~138 µs per effect (~7,200 effects/s) |
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
@@ -43,7 +43,9 @@ parallelism and the process is CPU-bound (~6.7 cores busy at 32 runs). Tenants n
 share a chain, so throughput across tenants scales with cores and replicas.
 
 History: 1.2 ms → 0.74 ms per sequential effect from one ledger document per
-operation; → ~0.66 ms with mimalloc (the server's default allocator). Single-tenant
+operation; → ~0.66 ms with mimalloc (the server's default allocator); → ~0.59 ms by
+removing a quadratic receipt-to-reservation check from budget-ledger validation and
+computing canonical string and integer lengths without encoding them. Single-tenant
 parallel throughput ~1,900 → ~7,200 effects/s from group commit.
 
 With PostgreSQL, a batch is one `INSERT … SELECT unnest(…)` round trip, so per-tenant
@@ -52,9 +54,10 @@ over round-trip time. Run the PostgreSQL benchmarks with
 `CONTEXTOS_BENCH_DATABASE_URL=postgres://… cargo bench -p contextos-gateway --bench dispatch -- postgres`
 (CI runs them on every push).
 
-Remaining per-effect CPU: canonical encoding and hashing of ledgers and audit
-payloads, and kernel re-validation of the run's budget ledger, whose cost grows with
-the receipts it holds.
+Remaining per-effect CPU: the run's budget ledger (reserve and settle each re-validate
+and re-encode it; about half of a sequential effect, growing with its receipts),
+canonical encoding and hashing of audit payloads, and authorization. The kernel
+deliberately re-validates every ledger it is given rather than trusting stored state.
 
 ## Known limits
 

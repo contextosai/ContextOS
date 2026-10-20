@@ -108,6 +108,14 @@ impl LimitCounter {
 }
 
 fn number_len(number: &serde_json::Number, buffer: &mut ryu_js::Buffer) -> Result<usize, CanonicalError> {
+    // Integers that f64 represents exactly print as their decimal digits.
+    const SAFE: u64 = 1 << 53;
+    if let Some(i) = number.as_i64()
+        && i.unsigned_abs() <= SAFE
+    {
+        let digits = i.unsigned_abs().checked_ilog10().map_or(1, |d| d as usize + 1);
+        return Ok(digits + usize::from(i < 0));
+    }
     #[allow(clippy::cast_precision_loss)]
     let value = if let Some(i) = number.as_i64() {
         i as f64
@@ -126,15 +134,18 @@ fn number_len(number: &serde_json::Number, buffer: &mut ryu_js::Buffer) -> Resul
     })
 }
 
+/// Length of the JCS-quoted string. Escapes involve only ASCII bytes, and every
+/// other character is emitted as its UTF-8 bytes, so counting bytes is exact.
 fn quoted_len(value: &str) -> usize {
-    2 + value
-        .chars()
-        .map(|c| match c {
-            '"' | '\\' | '\u{08}' | '\u{0c}' | '\n' | '\r' | '\t' => 2,
-            c if (c as u32) < 0x20 => 6,
-            c => c.len_utf8(),
+    let extra: usize = value
+        .bytes()
+        .map(|b| match b {
+            b'"' | b'\\' | 0x08 | 0x0c | b'\n' | b'\r' | b'\t' => 1,
+            0x00..=0x1f => 5,
+            _ => 0,
         })
-        .sum::<usize>()
+        .sum();
+    2 + value.len() + extra
 }
 
 /// Canonicalizes any serializable value through its JSON form.
@@ -552,5 +563,53 @@ mod tests {
         );
         assert!(is_sha256_digest(&digest));
         assert!(!is_sha256_digest("sha256:E3B0"));
+    }
+}
+
+#[cfg(test)]
+mod length_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn counted_lengths_match_the_encoding() {
+        let strings = [
+            "",
+            "plain",
+            "quote\"back\\slash",
+            "\u{1}\u{8}\u{c}\n\r\t\u{1f}",
+            "é€😀",
+            "\u{7f}\u{fffd}",
+        ];
+        for text in strings {
+            assert_eq!(quoted_len(text), canonicalize(&json!(text)).unwrap().len(), "{text:?}");
+        }
+        let numbers = [
+            json!(0),
+            json!(-0.0),
+            json!(7),
+            json!(-7),
+            json!(10),
+            json!(999_999),
+            json!(-1_000_000),
+            json!(9_007_199_254_740_992_i64),
+            json!(-9_007_199_254_740_992_i64),
+            json!(9_007_199_254_740_993_i64),
+            json!(9_999_999_999_999_999_i64),
+            json!(u64::MAX),
+            json!(i64::MIN),
+            json!(1.5),
+            json!(1e21),
+            json!(1e-7),
+        ];
+        let mut buffer = ryu_js::Buffer::new();
+        for number in numbers {
+            let Value::Number(n) = &number else { unreachable!() };
+            assert_eq!(
+                number_len(n, &mut buffer).unwrap(),
+                canonicalize(&number).unwrap().len(),
+                "{number}"
+            );
+        }
     }
 }
