@@ -67,6 +67,7 @@ pub struct AppState<S, L> {
     pub gateway: Option<Arc<Gateway<S, L>>>,
     pub trust_domain: String,
     pub gateway_principal_id: String,
+    pub limits: Arc<crate::limits::Limiter>,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -84,6 +85,7 @@ pub struct ApiError {
     code: &'static str,
     message: String,
     detail: Option<Value>,
+    retry_after_seconds: Option<u64>,
 }
 
 impl ApiError {
@@ -93,7 +95,14 @@ impl ApiError {
             code,
             message: message.into(),
             detail: None,
+            retry_after_seconds: None,
         }
+    }
+
+    fn retry_after(mut self, wait: std::time::Duration) -> Self {
+        // Whole seconds, rounded up, at least one.
+        self.retry_after_seconds = Some((wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1));
+        self
     }
 
     fn with_detail(mut self, detail: Value) -> Self {
@@ -125,6 +134,11 @@ impl IntoResponse for ApiError {
             body["error"]["detail"] = detail;
         }
         let mut response = (self.status, axum::Json(body)).into_response();
+        if let Some(seconds) = self.retry_after_seconds {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, header::HeaderValue::from(seconds));
+        }
         if self.status == StatusCode::UNAUTHORIZED {
             response
                 .headers_mut()
@@ -139,10 +153,20 @@ type ApiResult = Result<Response, ApiError>;
 fn authorize<S, L>(state: &AppState<S, L>, headers: &HeaderMap, scope: Option<&str>) -> Result<Caller, ApiError> {
     let header = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
     let caller = state.auth.authenticate(header).ok_or_else(ApiError::unauthorized)?;
-    match scope {
-        Some(scope) if !caller.has(scope) => Err(ApiError::forbidden()),
-        _ => Ok(caller),
+    if let Some(scope) = scope
+        && !caller.has(scope)
+    {
+        return Err(ApiError::forbidden());
     }
+    state.limits.take(&caller.tenant_id).map_err(|wait| {
+        ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "The tenant's request rate limit is exceeded.",
+        )
+        .retry_after(wait)
+    })?;
+    Ok(caller)
 }
 
 fn parse_body<S, L>(state: &AppState<S, L>, body: &Bytes) -> Result<Value, ApiError> {
@@ -524,6 +548,14 @@ where
     L: AppendLog + 'static,
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "dispatch_concurrency_limited",
+            "The tenant has the maximum number of governed effects in progress.",
+        )
+        .retry_after(std::time::Duration::from_secs(1))
+    })?;
     let gateway = dispatch_gateway(&state)?;
     let envelope = parse_body(&state, &body)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
@@ -586,6 +618,14 @@ where
     L: AppendLog + 'static,
 {
     let caller = authorize(&state, &headers, Some("reconcile"))?;
+    let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "dispatch_concurrency_limited",
+            "The tenant has the maximum number of governed effects in progress.",
+        )
+        .retry_after(std::time::Duration::from_secs(1))
+    })?;
     let gateway = dispatch_gateway(&state)?;
     let request: ReconcileBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
         ApiError::new(
@@ -645,6 +685,14 @@ where
     L: AppendLog + 'static,
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "dispatch_concurrency_limited",
+            "The tenant has the maximum number of governed effects in progress.",
+        )
+        .retry_after(std::time::Duration::from_secs(1))
+    })?;
     let gateway = dispatch_gateway(&state)?;
     let request: InputBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
         ApiError::new(
@@ -671,6 +719,24 @@ where
         })?;
     state.metrics.dispatch_outcome(outcome.report.status.as_str());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
+}
+
+/// Sheds load beyond the global in-flight cap. Probes and metrics are exempt so an
+/// overloaded instance still reports its state.
+async fn shed<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
+    if matches!(request.uri().path(), "/healthz" | "/readyz" | "/metrics") {
+        return next.run(request).await;
+    }
+    let Some(_slot) = state.limits.admit_request() else {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded",
+            "The server is at capacity; retry shortly.",
+        )
+        .retry_after(std::time::Duration::from_secs(1))
+        .into_response();
+    };
+    next.run(request).await
 }
 
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
@@ -712,6 +778,7 @@ where
             "/v1/runs/{run_id}/operations/{operation_id}/reconcile",
             post(reconcile::<S, L>),
         )
+        .layer(middleware::from_fn_with_state(state.clone(), shed::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,

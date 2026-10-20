@@ -33,7 +33,8 @@ First release candidate of the ContextOS runtime.
 - `contextosd`: compile, contract negotiation, schema validation, run admission,
   governed tool calls, input continuation, reconciliation, audit verification, health,
   readiness and Prometheus metrics; API keys and OIDC JWT callers bound to one tenant;
-  strict JSON ingress; OTLP trace export with W3C trace-context propagation.
+  strict JSON ingress; overload protection (global load shedding, per-tenant rate and
+  concurrent-dispatch limits); OTLP trace export with W3C trace-context propagation.
 - `ctx` command line; Python, Node and WebAssembly bindings over one JSON facade.
 
 ### Operations

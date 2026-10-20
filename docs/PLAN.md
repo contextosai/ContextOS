@@ -95,7 +95,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 20a Throughput | done — parallel benchmark found per-tenant audit appends serialized on lock handoffs (~1.9k effects/s flat); group commit with atomic batched log appends → ~7.2k effects/s single-tenant, CPU-bound; PostgreSQL benchmarks in CI; mimalloc |
 | 20b Open-source readiness | done — CONTRIBUTING, GOVERNANCE, code of conduct, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot; security contact published. **Blocked on the owner: license choice.** |
 | 21 Long runs and per-effect CPU | done — linear ledger validation, exact length counting, budget-ledger compaction (ADR-0003): runs beyond 64 effects, sequential 0.59→0.37 ms, ~10.4k effects/s single tenant |
-| 22 Propose ADR-0003 upstream to the spec; PostgreSQL results from CI (needs owner); license (needs owner) | next |
+| 22 Overload protection; spec proposal | done — load shedding, per-tenant rate and dispatch-concurrency limits; `docs/proposals/spec-0001` drafted for the spec maintainers |
+| 23 Delegation: child runs with narrowed authority and child budgets (subagent lanes); executor failover/resume API | next |
 
 ## Non-negotiables carried from the spec
 

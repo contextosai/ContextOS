@@ -148,6 +148,12 @@ HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
   deletes are also blocked by trigger).
 - **Keys:** the audit signing seed comes from your KMS/HSM via environment. Rotate by
   adding the new public key to verifiers before switching writers.
+- **Overload protection:** `[limits]` caps concurrent requests per instance
+  (`max_in_flight`, default 4096; beyond it, `503` with `Retry-After`), request rate
+  per tenant (`requests_per_second` / `burst`, default 500 / 1000; `429` with
+  `Retry-After`) and governed effects in progress per tenant (`max_concurrent_dispatch`,
+  default 256). `[[limits.tenants]]` overrides any of these for one tenant. Limits
+  apply after authentication; health probes and metrics are exempt.
 - **Declare only what you enforce:** `[support].controls` is a claim that your providers
   enforce those controls. Runs that need more are refused at admission.
 - **Traces:** set `OTEL_EXPORTER_OTLP_ENDPOINT` (and optionally `OTEL_SERVICE_NAME`,

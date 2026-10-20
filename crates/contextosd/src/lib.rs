@@ -3,6 +3,7 @@
 pub mod app;
 pub mod auth;
 pub mod config;
+pub mod limits;
 pub mod metrics;
 pub mod oidc;
 pub mod runtime;
@@ -99,5 +100,6 @@ where
         gateway,
         trust_domain,
         gateway_principal_id,
+        limits: Arc::new(limits::Limiter::new(config.limits.clone())),
     }))
 }

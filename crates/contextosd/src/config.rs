@@ -144,6 +144,9 @@ pub struct Config {
     /// OIDC issuers whose JWTs authenticate callers.
     #[serde(default)]
     pub oidc: Vec<crate::oidc::OidcConfig>,
+    /// Overload protection (see [`crate::limits`]).
+    #[serde(default)]
+    pub limits: crate::limits::LimitsConfig,
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
@@ -196,6 +199,7 @@ impl Config {
                 ));
             }
         }
+        self.limits.check().map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {
             issuer.check(development).map_err(ConfigError::Invalid)?;

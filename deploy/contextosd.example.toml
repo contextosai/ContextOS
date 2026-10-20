@@ -71,3 +71,13 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # audience = "contextosd"
 # jwks_url = "https://login.example.com/.well-known/jwks.json"
 # tenants = ["tenant_acme_prod"]
+
+# Overload protection (defaults shown).
+# [limits]
+# max_in_flight = 4096
+# requests_per_second = 500.0
+# burst = 1000.0
+# max_concurrent_dispatch = 256
+# [[limits.tenants]]
+# tenant_id = "tenant_acme_prod"
+# requests_per_second = 2000.0
