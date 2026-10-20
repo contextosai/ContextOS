@@ -67,6 +67,8 @@ export declare class Run {
   provideInput(paused: ToolPaused, envelope: Record<string, Json>, responses: Record<string, Json>): Promise<Record<string, Json>>;
   reconcile(operationId: string, options?: { outcome?: "confirmed" | "not_applied" | "partial"; evidenceRef?: Record<string, string> }): Promise<any>;
   recordDecision(decisionKey: string, status: DecisionStatus, options?: { decisionVersion?: string; outcome?: string; toolCalls?: { tool_call_id: string; operation_id: string }[]; [field: string]: unknown }): Promise<{ record: any; replay_packet: any }>;
+  delegate(childAdmission: Record<string, any>, envelope: Record<string, any>): Promise<Run>;
+  closeChild(child: Run, decision?: "accept" | "reject"): Promise<{ status: string; usage: Record<string, number> | null; reason_codes: string[] }>;
   status(): Promise<{ run_id: string; status: string; executor_generation: number }>;
   takeOver(): Promise<Run>;
   complete(): Promise<any>;

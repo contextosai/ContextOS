@@ -173,6 +173,25 @@ export class Run {
       tool_calls: toolCalls, ...fields });
   }
 
+  /**
+   * Admits a child run in a narrowed lane (AgentDelegationEnvelope). Its budget is
+   * reserved from this run, which must hold the current generation.
+   */
+  async delegate(childAdmission, envelope) {
+    const admitted = await this.client.request("POST", "/v1/runs", {
+      body: { ...childAdmission, delegation: envelope }, generation: this.executorGeneration,
+    });
+    return new Run(this.client, admitted.run_id, childAdmission.run_context?.trace_id ?? this.traceId,
+      admitted.executor_generation, this.principalChain, admitted);
+  }
+
+  /** Closes a delegated child (`accept` or `reject`), settling its spend into this run. */
+  closeChild(child, decision = "accept") {
+    return this.client.request("POST", `/v1/runs/${segment(child.runId)}/close`, {
+      body: { decision }, generation: this.executorGeneration,
+    });
+  }
+
   status() {
     return this.client.request("GET", this.#path());
   }

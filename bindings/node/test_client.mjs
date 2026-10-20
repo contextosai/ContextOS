@@ -39,7 +39,7 @@ let config = readFileSync(join(example, "contextosd.toml"), "utf8")
   .replace("127.0.0.1:7701", `127.0.0.1:${authority}`)
   .replace("127.0.0.1:7702", `127.0.0.1:${constraints}`)
   .replace("127.0.0.1:7703", `127.0.0.1:${approvals}`)
-  .replace("127.0.0.1:7704", `127.0.0.1:${payments}`)
+  .replaceAll("127.0.0.1:7704", `127.0.0.1:${payments}`)
   .replaceAll('"examples/', `"${join(root, "examples")}/`)
   .replace("sha256:REPLACED_BY_RUN_SH", "sha256:" + createHash("sha256").update(KEY).digest("hex"));
 const configPath = join(mkdtempSync(join(tmpdir(), "contextosd-")), "contextosd.toml");
@@ -80,6 +80,29 @@ try {
     outcome: "refund_issued", toolCalls: [{ tool_call_id: "tc_1", operation_id: call.idempotency_key }],
   });
   assert.equal(decision.record.tool_lineage[0].tool_call_id, "tc_1");
+
+  // A read-only research lane funded by the run.
+  const agent = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
+  const childId = `${run.runId}_lane`;
+  const childBody = structuredClone(agent);
+  childBody.run_context.run_id = childId;
+  childBody.contract.run_id = childId;
+  childBody.contract.contract_id = `contract_${childId}`;
+  const agentId = agent.run_context.agent.agent_id;
+  const lane = await run.delegate(childBody, {
+    envelope_version: "contextos.agent_delegation.v1", delegation_id: `dlg_${childId}`, parent_run_id: run.runId,
+    child_run_id: childId, trace_id: run.traceId, tenant_id: agent.contract.tenant_id, issuer: agentId, subject: agentId,
+    principal_chain: run.principalChain,
+    scope: { allowed_intents: [agent.request.input.intent], allowed_capabilities: ["adp_orders.lookup"],
+      data_classification_ceiling: "CONFIDENTIAL", output_schema_ref: "schema://x" },
+    sub_budget: { total_tokens: 10, bucket_tokens: {}, max_tool_calls: 1, max_replan_attempts: 0, wall_clock_ms: 1000, max_cost_cents: 1 },
+    effect_policy: "read_only", issued_at: "2020-01-01T00:00:00Z", expires_at: "2098-01-01T00:00:00Z",
+    parent_claim_hash: run.admitted.compiled_context_hash,
+  });
+  const order = await lane.callTool("adp_orders.lookup", { order_id: "ord_881" });
+  assert.equal(order.refundable, true);
+  const closed = await run.closeChild(lane);
+  assert.equal(closed.usage.tool_calls, 1);
 
   const replacement = await (await client.attach(run.runId, run.traceId, run.principalChain)).takeOver();
   assert.equal(replacement.executorGeneration, 4);
