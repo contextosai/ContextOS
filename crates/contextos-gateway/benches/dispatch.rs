@@ -311,6 +311,7 @@ async fn admit<S: DocumentStore + 'static>(store: &S) -> RunAdmission {
             gateway_observer: principal("gateway"),
             deadline: "2026-10-20T11:00:00Z".into(),
             admitted_at: "2026-10-20T10:00:00Z".into(),
+            admitted_by: "svc_orchestrator".into(),
             executor_generation: 1,
             limits: BudgetLimits {
                 tokens: 10_000,

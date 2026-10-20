@@ -416,6 +416,7 @@ async fn harness_ports(
             gateway_observer: principal("gateway"),
             deadline: "2026-10-20T11:00:00Z".into(),
             admitted_at: "2026-10-20T10:00:00Z".into(),
+            admitted_by: "svc_orchestrator".into(),
             executor_generation: 1,
             limits: BudgetLimits {
                 tokens: 10_000,
@@ -884,6 +885,7 @@ async fn delegate(h: &Harness, envelope: &Value) -> Result<RunAdmission, Admissi
                 gateway_observer: principal("gateway"),
                 deadline: String::new(),
                 admitted_at: "2026-10-20T10:00:00Z".into(),
+                admitted_by: "svc_orchestrator".into(),
                 executor_generation: 1,
                 limits: BudgetLimits {
                     tokens: 0,
@@ -1647,4 +1649,52 @@ async fn data_flow_covers_fixed_recipients_and_refuses_several() {
         vec!["data_flow_multiple_destinations".to_owned()]
     );
     assert_eq!(calls, 0);
+}
+
+#[tokio::test]
+async fn whoever_ran_or_recorded_a_decision_cannot_score_it() {
+    let h = harness("allow", Behavior::Confirm).await;
+    h.gateway.remember_compiled(&h.admission, &compiled().0).await.unwrap();
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "completed", "{:?}", out.report.reason_codes);
+    let report: DecisionReport = serde_json::from_value(json!({
+        "decision_key": "support.refund.execute", "decision_version": "1", "status": "DEFERRED",
+        "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out.report.operation_id}]}))
+    .unwrap();
+    let recorded = h
+        .gateway
+        .record_decision(&h.admission, report, "svc_recorder")
+        .await
+        .unwrap();
+    let record_id = recorded.record.record_id.clone();
+    let scores: ScoreReport =
+        serde_json::from_value(json!({"evaluator_ref": "e@1", "policy": 1.0, "utility": 1.0, "safety": 1.0})).unwrap();
+    // Same identities with evaluator-only tokens: the admitter, then the recorder.
+    for principal in ["svc_orchestrator", "svc_recorder"] {
+        let refused = h
+            .gateway
+            .score_decision(&h.admission, &record_id, principal, &scores)
+            .await;
+        assert!(
+            matches!(refused, Err(ScoreRefusal::SelfScoring)),
+            "{principal}: {refused:?}"
+        );
+    }
+    // A record id the gateway did not issue for this run.
+    let forged = h
+        .gateway
+        .score_decision(&h.admission, &format!("x/{record_id}"), "svc_judge", &scores)
+        .await;
+    assert!(matches!(forged, Err(ScoreRefusal::UnknownDecision)));
+    let kept = h
+        .gateway
+        .score_decision(&h.admission, &record_id, "svc_judge", &scores)
+        .await
+        .unwrap();
+    assert_eq!(kept["score"]["evaluator"], "svc_judge");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }

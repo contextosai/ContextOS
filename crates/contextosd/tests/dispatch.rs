@@ -201,11 +201,6 @@ async fn world(controls: &[&str]) -> World {
         principal_id = "svc_quality_judge"
         scopes = ["evaluate"]
         [[api_keys]]
-        key_sha256 = "{conflicted}"
-        tenant_id = "{TENANT}"
-        principal_id = "svc_self_grader"
-        scopes = ["evaluate", "dispatch"]
-        [[api_keys]]
         key_sha256 = "{agent_judge}"
         tenant_id = "{TENANT}"
         principal_id = "agt_support"
@@ -214,8 +209,7 @@ async fn world(controls: &[&str]) -> World {
         manifest = manifest_path.display(),
         key = hash_api_key("acme-key"),
         evaluator = hash_api_key("judge-key"),
-        agent_judge = hash_api_key("agent-judge-key"),
-        conflicted = hash_api_key("self-grader-key")
+        agent_judge = hash_api_key("agent-judge-key")
     ))
     .unwrap();
     let vectors: Value = serde_json::from_str(
@@ -1458,21 +1452,13 @@ async fn independent_evaluators_score_decisions() {
         }
     };
 
-    // The executor's own key cannot score, nor can a key that could also run agents.
+    // The executor's key cannot score. (A principal holding `evaluate` on one key and
+    // `admit`/`dispatch` on another is refused at startup; the gateway also refuses the
+    // principal that admitted the run or recorded the decision, whatever its token.)
     assert_eq!(post("acme-key", score.clone()).await.status(), 403);
-    let conflicted = post("self-grader-key", score.clone()).await;
-    assert_eq!(conflicted.status(), 403);
-    assert_eq!(
-        conflicted.json::<Value>().await.unwrap()["error"]["code"],
-        "evaluator_not_independent"
-    );
-    // The run's own agent cannot grade itself, even with an evaluator-only key.
-    let own = post("agent-judge-key", score.clone()).await;
-    assert_eq!(own.status(), 403);
-    assert_eq!(
-        own.json::<Value>().await.unwrap()["error"]["code"],
-        "evaluator_not_independent"
-    );
+    // The agent id is named by the admitter, so it cannot be used to lock out a real
+    // evaluator: an evaluator whose principal matches it still scores.
+    assert_eq!(post("agent-judge-key", score.clone()).await.status(), 201);
     // Scores are bounded and the evaluator must be named.
     assert_eq!(
         post(
@@ -1537,8 +1523,41 @@ async fn independent_evaluators_score_decisions() {
         .unwrap();
     conforms("EvidenceBundle", &evidence);
     let scores = &evidence["decisions"][0]["scores"];
-    assert_eq!(scores.as_array().unwrap().len(), 1);
-    assert_eq!(scores[0]["score"]["evaluator_ref"], "evaluator.refund_quality@3");
+    let evaluators: Vec<&str> = scores
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["score"]["evaluator"].as_str().unwrap())
+        .collect();
+    assert_eq!(evaluators, ["agt_support", "svc_quality_judge"]);
+
+    // A run id cannot hold `/`, so run and record ids cannot alias another run's keys.
+    let mut aliasing = run_body("run_scored/decision_x", 1200);
+    aliasing["contract"]["contract_id"] = json!("contract_aliasing");
+    let refused = reqwest::Client::new()
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&aliasing)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 422);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"]["detail"],
+        json!(["run_id_invalid:/"])
+    );
+    // And only decisions the gateway issued for this run can be scored.
+    let forged = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/runs/run_scored/decisions/x%2F{record_id}/scores",
+            w.base
+        ))
+        .bearer_auth("judge-key")
+        .json(&json!({"evaluator_ref": "e@1", "policy": 1.0, "utility": 1.0, "safety": 1.0}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forged.status(), 404);
     let verified: Value = reqwest::Client::new()
         .get(format!("{}/v1/audit/verify", w.base))
         .bearer_auth("acme-key")

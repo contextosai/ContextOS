@@ -529,6 +529,7 @@ where
         gateway_observer: principal(&state.gateway_principal_id, "workload"),
         deadline: deadline.to_owned(),
         admitted_at: gateway.now(),
+        admitted_by: caller.principal_id.clone(),
         executor_generation: 1,
         limits,
     };
@@ -1074,7 +1075,7 @@ where
     })?;
     let admission = load_admission(&state, &caller, &run_id).await?;
     require_owner(gateway, &admission, &headers).await?;
-    match gateway.record_decision(&admission, report).await {
+    match gateway.record_decision(&admission, report, &caller.principal_id).await {
         Ok(recorded) => Ok((StatusCode::CREATED, axum::Json(recorded)).into_response()),
         Err(refusal) => Err(match refusal {
             DecisionRefusal::Decision(DecisionError::EvidenceGateOpen(key)) => ApiError::new(

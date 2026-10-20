@@ -381,8 +381,11 @@ the `evaluate` scope, and have it post to
 {"evaluator_ref": "evaluator.refund_quality@3", "policy": 1.0, "utility": 0.8, "safety": 1.0}
 ```
 
-A caller that also holds `admit` or `dispatch`, or whose principal is the run's own
-agent, is refused (`evaluator_not_independent`). Policy, utility and safety are the
+Independence is judged on authenticated principals: a caller that also holds `admit`
+or `dispatch`, or that admitted the run or recorded the decision (whatever token it now
+presents), is refused (`evaluator_not_independent`), and a principal holding `evaluate`
+on one API key and `admit`/`dispatch` on another is refused at startup. With OIDC, issue
+evaluator tokens to separate clients. Policy, utility and safety are the
 evaluator's, in `[0, 1]`; the runtime measures cost from the signed decision and
 latency (milliseconds from admission to the decision, also the decision's
 `budget_usage.wall_clock_ms`). Runs admitted before admission times were kept have no

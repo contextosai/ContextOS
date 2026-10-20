@@ -65,6 +65,17 @@ budgets, and the integrity of the evidence record.
   was skipped for fixed-recipient capabilities (now `sends_data`) and judged the
   adapter rather than the recipient the arguments name. Each fix has a regression test.
 
+- 2026-10-20: third review, of independent scoring, wall-clock measurement, the
+  OpenAPI endpoint and the release-gate changes. Fixed: evaluator independence was
+  checked per token and against the caller-named agent id, so an executor with a second
+  evaluate-only token could score its own runs, and an admitter could lock out a real
+  evaluator by naming it as the agent (now: the admitting and recording principals are
+  refused, and keys sharing a principal across evaluate and admit/dispatch are refused
+  at startup); a `/` in run or record ids could alias another run's documents (run ids
+  with `/` are refused at admission; only issued record ids can be scored); a store
+  failure after a score was signed left no not-applied entry; duplicate replay-case
+  names let one acknowledgement cover several cases. Each fix has a regression test.
+
 ## Residual risks and deployment obligations
 
 - **Fact providers are trusted after verification.** The kernel checks currency, binding

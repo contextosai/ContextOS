@@ -1577,7 +1577,7 @@
       "post": {
         "operationId": "score_decision",
         "summary": "An independent evaluator's score of a decision, signed into the audit chain",
-        "description": "Policy, utility and safety come from the evaluator; cost is measured by the runtime from the signed decision; unmeasured latency is omitted. A caller that also holds `admit` or `dispatch`, or is the run's own agent, is refused (`evaluator_not_independent`). Each evaluator scores a decision once.",
+        "description": "Policy, utility and safety come from the evaluator; cost and latency are measured by the runtime from the signed decision. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or is the principal that admitted the run or recorded the decision, whatever token it presents. Only record ids the gateway issued for this run can be scored, and each evaluator scores a decision once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"

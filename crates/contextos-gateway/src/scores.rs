@@ -44,7 +44,7 @@ pub enum ScoreRefusal {
     AlreadyScored,
     #[error("the decision has the maximum number of scores")]
     TooManyScores,
-    #[error("the run's own actor cannot score it")]
+    #[error("the principal that admitted the run or recorded the decision cannot score it")]
     SelfScoring,
     #[error(transparent)]
     Gateway(#[from] GatewayError),
@@ -75,8 +75,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if !(named && unit(report.policy) && unit(report.utility) && unit(report.safety)) || evaluator.is_empty() {
             return Err(ScoreRefusal::Invalid);
         }
-        if admission.actor["principal_id"] == evaluator {
-            return Err(ScoreRefusal::SelfScoring);
+
+        // Only the run's own decisions, by the ids the gateway issued.
+        let issued = self
+            .store
+            .get(&crate::decisions::decisions_key(admission))
+            .await
+            .map_err(GatewayError::from)?
+            .is_some_and(|d| {
+                d.body["record_ids"]
+                    .as_array()
+                    .is_some_and(|ids| ids.iter().any(|id| id == record_id))
+            });
+        if !issued {
+            return Err(ScoreRefusal::UnknownDecision);
         }
         let decision_key = DocKey::new(
             &admission.tenant_id,
@@ -89,6 +101,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await
             .map_err(GatewayError::from)?
             .ok_or(ScoreRefusal::UnknownDecision)?;
+        // Independence is judged on authenticated principals: whoever admitted the run
+        // or recorded the decision cannot score it, whatever token it presents. (The
+        // agent id is named by the admitter, so it is neither trusted nor used.)
+        if evaluator == admission.admitted_by || decision.body["recorded_by"] == evaluator {
+            return Err(ScoreRefusal::SelfScoring);
+        }
         let record = &decision.body["record"];
         let mut scorecard = json!({"policy": report.policy, "utility": report.utility, "safety": report.safety});
         if let Some(cost) = record["budget_usage"]["cost_usd_cents"].as_f64() {
@@ -125,40 +143,52 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .append(&admission.tenant_id, "run_score", score.clone(), &now)
             .await
             .map_err(GatewayError::from)?;
-        let mut current = current;
+        let kept = self.keep_score(&key, current, &score, entry.sequence, &check).await;
+        if let Err(refusal) = &kept {
+            // Every exit after signing says the score was not kept; if even that
+            // append fails, the caller sees the original error and the gap is the
+            // audit writer's to report.
+            let _ = self
+                .score_not_applied(admission, record_id, evaluator, refusal, &now)
+                .await;
+        }
+        kept
+    }
+
+    /// Adds the signed score to the decision's scores against concurrent evaluators.
+    async fn keep_score(
+        &self,
+        key: &DocKey,
+        mut current: Option<contextos_store::Versioned>,
+        score: &Value,
+        sequence: u64,
+        check: &(dyn Fn(&Value) -> Result<(), ScoreRefusal> + Sync),
+    ) -> Result<Value, ScoreRefusal> {
+        let kept = json!({"score": score, "audit_sequence": sequence});
         for _ in 0..MAX_ATTEMPTS {
             let mut scores = current
                 .as_ref()
                 .and_then(|c| c.body["scores"].as_array().cloned())
                 .unwrap_or_default();
-            if let Err(refusal) = check(&json!({"scores": scores})) {
-                self.score_not_applied(admission, record_id, evaluator, &refusal, &now)
-                    .await?;
-                return Err(refusal);
-            }
-            scores.push(json!({"score": score, "audit_sequence": entry.sequence}));
+            check(&json!({"scores": scores}))?;
+            scores.push(kept.clone());
             let state = json!({"scores": scores});
             let written = match &current {
-                None => self.store.create(&key, &state).await.map(|_| ()),
-                Some(c) => self.store.compare_and_swap(&key, c.revision, &state).await.map(|_| ()),
+                None => self.store.create(key, &state).await.map(|_| ()),
+                Some(c) => self.store.compare_and_swap(key, c.revision, &state).await.map(|_| ()),
             };
             match written {
-                Ok(()) => return Ok(json!({"score": score, "audit_sequence": entry.sequence})),
+                Ok(()) => return Ok(kept),
                 Err(e) if e.is_conflict() => {
-                    current = self.store.get(&key).await.map_err(GatewayError::from)?;
+                    current = self.store.get(key).await.map_err(GatewayError::from)?;
                 }
                 Err(e) => return Err(GatewayError::from(e).into()),
             }
         }
-        let contended = || {
-            ScoreRefusal::Gateway(GatewayError::from(StoreError::Conflict {
-                expected: None,
-                actual: None,
-            }))
-        };
-        self.score_not_applied(admission, record_id, evaluator, &contended(), &now)
-            .await?;
-        Err(contended())
+        Err(ScoreRefusal::Gateway(GatewayError::from(StoreError::Conflict {
+            expected: None,
+            actual: None,
+        })))
     }
 
     async fn score_not_applied(

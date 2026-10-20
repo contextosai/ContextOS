@@ -94,7 +94,7 @@ fn compiled_key(admission: &RunAdmission) -> DocKey {
     DocKey::new(&admission.tenant_id, DocKind::CompiledContext, &admission.run_id)
 }
 
-fn decisions_key(admission: &RunAdmission) -> DocKey {
+pub(crate) fn decisions_key(admission: &RunAdmission) -> DocKey {
     DocKey::new(&admission.tenant_id, DocKind::DecisionLog, &admission.run_id)
 }
 
@@ -138,10 +138,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Verifies, assembles, signs and stores a decision of the run.
+    /// `recorded_by` is the authenticated principal reporting it; it may not score it.
     pub async fn record_decision(
         &self,
         admission: &RunAdmission,
         report: DecisionReport,
+        recorded_by: &str,
     ) -> Result<RecordedDecision, DecisionRefusal> {
         // Bound the work and storage one report can cause before touching anything.
         let detail = json!([
@@ -314,7 +316,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             compiled.context_ledger.pack_ref.clone(),
             transcript_hash,
         )?;
-        let entry = json!({"record": record, "replay_packet": packet});
+        let entry = json!({"record": record, "replay_packet": packet, "recorded_by": recorded_by});
 
         // One document per decision: storage per write stays bounded.
         let entry_key = DocKey::new(

@@ -221,6 +221,23 @@ impl Config {
                 )));
             }
         }
+        // Separation of duties holds per principal, not per key: an evaluator's
+        // principal may not also run or admit agents through another key.
+        let runs = |p: &str| {
+            self.api_keys
+                .iter()
+                .any(|k| k.principal_id == p && k.scopes.iter().any(|s| s == "admit" || s == "dispatch"))
+        };
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "evaluate") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both evaluate and admit or dispatch",
+                key.principal_id
+            )));
+        }
         self.limits.check().map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {
@@ -246,5 +263,11 @@ mod tests {
         assert_ne!(typo, EXAMPLE);
         let error = Config::parse(&typo).unwrap_err().to_string();
         assert!(error.contains("unknown scope"), "{error}");
+        let second_key = format!(
+            "{EXAMPLE}\n[[api_keys]]\nkey_sha256 = \"sha256:{}\"\ntenant_id = \"tenant_acme_prod\"\nprincipal_id = \"svc_orchestrator\"\nscopes = [\"evaluate\"]\n",
+            "1".repeat(64)
+        );
+        let error = Config::parse(&second_key).unwrap_err().to_string();
+        assert!(error.contains("cannot both evaluate"), "{error}");
     }
 }

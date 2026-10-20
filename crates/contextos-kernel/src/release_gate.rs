@@ -181,6 +181,11 @@ pub fn evaluate_release_gate(
     if cases.is_empty() {
         return Err("the release gate needs at least one replay case".into());
     }
+    // Acknowledgements name cases, so a name must identify exactly one.
+    let mut names = BTreeSet::new();
+    if let Some(case) = cases.iter().find(|c| !names.insert(c.name.as_str())) {
+        return Err(format!("replay case {} appears more than once", case.name));
+    }
     let base = ContextPackCompiler::new(baseline.clone()).map_err(|e| format!("baseline: {e}"))?;
     let cand = ContextPackCompiler::new(candidate.clone()).map_err(|e| format!("candidate: {e}"))?;
     let mut reports = Vec::with_capacity(cases.len());

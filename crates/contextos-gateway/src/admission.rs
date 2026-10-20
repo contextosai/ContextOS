@@ -53,6 +53,9 @@ pub struct RunAdmission {
     /// Empty for admissions recorded before it was kept (wall clock unknown).
     #[serde(default)]
     pub admitted_at: String,
+    /// The authenticated principal that admitted the run (not the caller-named agent).
+    #[serde(default)]
+    pub admitted_by: String,
 }
 
 /// Inputs to admission. `features` must be derived by trusted admission from the
@@ -74,6 +77,8 @@ pub struct AdmissionRequest<'a> {
     pub deadline: String,
     /// Admission time by the gateway's clock.
     pub admitted_at: String,
+    /// The authenticated principal admitting the run.
+    pub admitted_by: String,
     pub executor_generation: u64,
     pub limits: BudgetLimits,
 }
@@ -174,6 +179,11 @@ pub async fn admit_run<S: DocumentStore>(
     let contract = request.contract;
     let s = |key: &str| contract[key].as_str().unwrap_or_default().to_owned();
     let (tenant_id, run_id, contract_id) = (s("tenant_id"), s("run_id"), s("contract_id"));
+    // Document keys join run ids with `/` (run/decision, run/scores): a run id holding
+    // one could alias another run's documents.
+    if run_id.contains('/') {
+        return Err(AdmissionError::ContractRejected(vec!["run_id_invalid:/".into()]));
+    }
     let operation_ledger_id = format!("operations:{run_id}");
     let budget_ledger_id = format!("budget:{run_id}");
 
@@ -251,6 +261,7 @@ pub async fn admit_run<S: DocumentStore>(
         compiled_context_hash: request.compiled.context_ledger.compiled_context_hash.clone(),
         lineage: None,
         admitted_at: request.admitted_at,
+        admitted_by: request.admitted_by,
         tenant_id,
         run_id,
     })

@@ -253,3 +253,11 @@ fn a_policy_acknowledgement_covers_only_the_cases_it_names() {
     );
     assert_eq!(report.verdict, "fail");
 }
+
+#[test]
+fn duplicate_case_names_are_refused() {
+    let (baseline, cases) = setup();
+    let mut twice = cases.clone();
+    twice[1].name = twice[0].name.clone();
+    assert!(evaluate_release_gate(&pack(&baseline), &pack(&baseline), &twice, &Acknowledgements::default()).is_err());
+}
