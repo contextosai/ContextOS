@@ -545,7 +545,9 @@ name the model and evaluators too, the executor pins them in its execution contr
 
 Every DecisionRecord of the run then carries `lineage.model_profile` and
 `lineage.evaluator_suite` (`id@version`), signed with the record, so a decision can be
-replayed against what produced it. `[guards] required_release_refs = ["model_profile",
+replayed against what produced it. When a model router chose the model (or fell back
+to another), report its decision id in the decision's `routing_decision_id`; it is
+recorded in the signed lineage too. `[guards] required_release_refs = ["model_profile",
 "evaluator_suite"]` refuses admission (`release_ref_missing`) for a contract that does
 not pin them.
 

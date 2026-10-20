@@ -2274,3 +2274,31 @@ async fn unreported_effects_and_accepted_children_are_judged_too() {
     assert_eq!(refused.status, "rejected");
     assert_eq!(refused.reason_codes, vec!["decision_unscored".to_owned()]);
 }
+
+#[tokio::test]
+async fn decisions_record_the_routing_decision() {
+    let h = harness("allow", Behavior::Confirm).await;
+    h.gateway.remember_compiled(&h.admission, &compiled().0).await.unwrap();
+    let report = |routing: Value| -> DecisionReport {
+        serde_json::from_value(
+            json!({"decision_key": "support.refund.execute", "decision_version": "1",
+            "status": "DEFERRED", "tool_calls": [], "routing_decision_id": routing}),
+        )
+        .unwrap()
+    };
+    let recorded = h
+        .gateway
+        .record_decision(&h.admission, report(json!("route:2026-10-21/r_881")), "svc_recorder")
+        .await
+        .unwrap();
+    assert_eq!(
+        recorded.record.lineage.routing_decision_id.as_deref(),
+        Some("route:2026-10-21/r_881")
+    );
+    assert!(
+        h.gateway
+            .record_decision(&h.admission, report(json!("bad id\nwith newline")), "svc_recorder")
+            .await
+            .is_err()
+    );
+}

@@ -50,6 +50,7 @@ First release candidate of the ContextOS runtime.
   (`memory_conflict`).
 - Production mode refuses delegations whose `output_schema_ref` is not a registered
   `[[result_schemas]]` entry.
+- Decisions record the model router's `routing_decision_id` in their lineage.
 - Production turns on `completion_requires_scores` by default (policy 1.0, safety 0.9);
   the gate covers every applied effect and accepted children. Ninth security review fixes.
 - `[guards] completion_requires_scores`: a run completes only when every effectful decision

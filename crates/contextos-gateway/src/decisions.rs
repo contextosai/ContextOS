@@ -59,6 +59,11 @@ pub struct DecisionReport {
     /// (the call's idempotency key, or its tool call id when it had none).
     #[serde(default)]
     pub tool_calls: Vec<ReportedToolCall>,
+    /// The model router's decision that chose the model for this decision (its id in
+    /// the router's own log), recorded in the signed lineage beside the pinned
+    /// `model_profile` so a routed or fallen-back model is traceable.
+    #[serde(default)]
+    pub routing_decision_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,7 +158,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             report.subject_ids,
             report.allowed_outcomes
         ]);
-        if report.tool_calls.len() > MAX_DECISION_TOOL_CALLS
+        let routing_ok = report.routing_decision_id.as_deref().is_none_or(|id| {
+            !id.is_empty() && id.len() <= 256 && id.chars().all(|c| c.is_ascii_alphanumeric() || "._:/@-".contains(c))
+        });
+        if !routing_ok
+            || report.tool_calls.len() > MAX_DECISION_TOOL_CALLS
             || contextos_contract::canonical::canonicalize(&detail)
                 .map_or(true, |t| t.len() > MAX_DECISION_DETAIL_BYTES)
         {
@@ -270,7 +279,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 kg_snapshot: None,
                 model_profile: pinned_release(admission, "model_profile"),
                 evaluator_suite: pinned_release(admission, "evaluator_suite"),
-                routing_decision_id: None,
+                routing_decision_id: report.routing_decision_id.clone(),
             },
             scorecard: None,
             confidence: report.confidence,
