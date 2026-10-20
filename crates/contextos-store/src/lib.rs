@@ -167,7 +167,7 @@ pub async fn commit_transition<S: DocumentStore>(
 }
 
 /// Maximum optimistic retries before reporting contention.
-pub const MAX_CAS_ATTEMPTS: usize = 16;
+pub const MAX_CAS_ATTEMPTS: u32 = 64;
 
 /// Read → decide → compare-and-swap, re-reading and re-deciding on conflict.
 ///
@@ -179,13 +179,16 @@ where
     S: DocumentStore,
     F: FnMut(&Value) -> TransitionResult + Send,
 {
-    for _ in 0..MAX_CAS_ATTEMPTS {
+    for attempt in 0..MAX_CAS_ATTEMPTS {
+        if attempt > 0 {
+            // Bounded exponential backoff on a hot document (≤ 8 ms per wait).
+            let micros = 50_u64 << attempt.min(7);
+            tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
+        }
         let read = store.get(key).await?.ok_or(StoreError::NotFound)?;
         let result = decide(&read.body);
         match commit_transition(store, key, &read, result).await {
-            Err(error) if error.is_conflict() => {
-                tokio::task::yield_now().await;
-            }
+            Err(error) if error.is_conflict() => {}
             other => return other,
         }
     }

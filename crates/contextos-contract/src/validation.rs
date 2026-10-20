@@ -134,6 +134,24 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
+/// Formats microseconds since the Unix epoch as a contract timestamp
+/// (`YYYY-MM-DDTHH:MM:SS.ffffffZ`). Runtime clocks use this; the kernel never does.
+pub fn format_unix_micros(micros: i64) -> String {
+    let seconds = micros.div_euclid(1_000_000);
+    let fraction = micros.rem_euclid(1_000_000);
+    // 1970-01-01 relative to the epoch used by days_from_civil.
+    let epoch_days = days_from_civil(1970, 1, 1);
+    let days = epoch_days + seconds.div_euclid(86_400);
+    let rem = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{fraction:06}Z",
+        rem / 3_600,
+        (rem % 3_600) / 60,
+        rem % 60
+    )
+}
+
 pub fn is_contract_timestamp(value: &str) -> bool {
     ContractTime::parse(value).is_some()
 }
@@ -246,6 +264,13 @@ mod tests {
         assert!(is_within_contract_interval(start, start, end));
         assert!(!is_within_contract_interval(end, start, end));
         assert!(!is_within_contract_interval(start, end, start));
+    }
+
+    #[test]
+    fn unix_micros_format() {
+        assert_eq!(format_unix_micros(0), "1970-01-01T00:00:00.000000Z");
+        assert_eq!(format_unix_micros(1_792_489_200_123_456), "2026-10-20T09:40:00.123456Z");
+        assert!(is_contract_timestamp(&format_unix_micros(1_792_489_200_123_456)));
     }
 
     #[test]

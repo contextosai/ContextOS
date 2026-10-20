@@ -78,7 +78,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 8 Conformance assessment | done — 320 vectors |
 | 9 Stores with CAS + fencing | done — memory + PostgreSQL; contention tests (budget conservation, single in-flight claim) |
 | 10 Audit chain, signed DecisionRecords, replay packets | done — ed25519 hash chain, tamper/fork/rotation tests, open-gate commit refusal |
-| 11 Tool Gateway pipeline + adapters | next |
+| 11a Tool Gateway governed pipeline | done — surface/bind/authorize/redeem/reserve/claim/dispatch/observe/settle/audit; 7 end-to-end tests incl. approval redemption, timeout reconciliation, 16-way duplicate race |
+| 11b MCP (2026-07-28 stateless) and HTTP adapters | next |
 
 ## Non-negotiables carried from the spec
 

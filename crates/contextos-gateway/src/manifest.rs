@@ -1,0 +1,151 @@
+//! Pinned capability manifests.
+//!
+//! Admission of a capability comes only from a reviewed, pinned manifest, never from
+//! protocol discovery: tool descriptions, annotations and prompts are metadata, not
+//! permission. The manifest fixes the native risk, how resource/destination/amount
+//! bindings are extracted from arguments, the recovery strategy and the per-call
+//! budget reservation.
+
+use contextos_contract::types::{ActionRisk, ApprovalMode};
+use contextos_kernel::action_risk::project_action_risk;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryStrategy {
+    /// Query the provider for the outcome of an unknown attempt.
+    Query,
+    /// Retry under a verified provider idempotency contract.
+    IdempotentRetry,
+    /// Escalate unknown outcomes to an operator.
+    ManualReconcile,
+    /// Never retry.
+    NoRetry,
+}
+
+impl RecoveryStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecoveryStrategy::Query => "query",
+            RecoveryStrategy::IdempotentRetry => "idempotent_retry",
+            RecoveryStrategy::ManualReconcile => "manual_reconcile",
+            RecoveryStrategy::NoRetry => "no_retry",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderIdempotency {
+    /// Pinned artifact describing the provider's idempotency guarantee.
+    pub provider_contract_ref: Value,
+    /// Provider key scope, e.g. `payments:<tenant>`.
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recovery {
+    pub strategy: RecoveryStrategy,
+    pub max_attempts: u32,
+    /// One delay per retry (`max_attempts - 1` entries).
+    pub retry_delays_seconds: Vec<u64>,
+    #[serde(default)]
+    pub idempotency: Option<ProviderIdempotency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmountBinding {
+    /// JSON pointer to an integer amount in minor units inside the arguments.
+    pub minor_units_pointer: String,
+    /// ISO 4217 currency code.
+    pub currency: String,
+}
+
+/// Budget reserved for one attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallCost {
+    pub tokens: u64,
+    pub tool_calls: u64,
+    pub replans: u64,
+    pub cost_units: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityManifest {
+    /// `<adapter_id>.<capability>`.
+    pub capability_id: String,
+    pub capability_version: String,
+    pub adapter_id: String,
+    /// Tool name at the protocol layer (MCP tool, OpenAPI operation id, …).
+    pub protocol_tool: String,
+    pub purpose_id: String,
+    pub desired_effect: String,
+    pub action_risk: ActionRisk,
+    pub approval_mode: ApprovalMode,
+    /// Pointers into arguments whose string values are the resources acted on.
+    #[serde(default)]
+    pub resource_pointers: Vec<String>,
+    /// Pointers into arguments whose string values are effect recipients.
+    #[serde(default)]
+    pub destination_pointers: Vec<String>,
+    #[serde(default)]
+    pub amount: Option<AmountBinding>,
+    pub recovery: Recovery,
+    pub timeout_ms: u64,
+    pub reservation: CallCost,
+    /// Pinned digest refs of the adapter build and this capability definition.
+    pub adapter_ref: Value,
+    pub capability_ref: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ManifestError {
+    #[error("capability {0} approval_mode is less conservative than its ActionRisk projection")]
+    NonConservativeApprovalMode(String),
+    #[error("capability {0} has {1} retry delays for {2} attempts")]
+    RetryDelays(String, usize, u32),
+    #[error("capability {0} declares idempotent_retry without a provider idempotency contract")]
+    MissingIdempotency(String),
+    #[error("capability {0} must be named <adapter_id>.<capability>")]
+    CapabilityId(String),
+    #[error("capability {0} timeout must be between 1 ms and 10 minutes")]
+    Timeout(String),
+}
+
+impl CapabilityManifest {
+    /// Structural review of a manifest before it can be pinned.
+    pub fn validate(&self) -> Result<(), ManifestError> {
+        let id = &self.capability_id;
+        if !id.starts_with(&format!("{}.", self.adapter_id)) || id.len() <= self.adapter_id.len() + 1 {
+            return Err(ManifestError::CapabilityId(id.clone()));
+        }
+        if self.approval_mode < project_action_risk(&self.action_risk) {
+            return Err(ManifestError::NonConservativeApprovalMode(id.clone()));
+        }
+        let expected = self.recovery.max_attempts.saturating_sub(1) as usize;
+        if self.recovery.max_attempts == 0 || self.recovery.retry_delays_seconds.len() != expected {
+            return Err(ManifestError::RetryDelays(
+                id.clone(),
+                self.recovery.retry_delays_seconds.len(),
+                self.recovery.max_attempts,
+            ));
+        }
+        if self.recovery.strategy == RecoveryStrategy::IdempotentRetry && self.recovery.idempotency.is_none() {
+            return Err(ManifestError::MissingIdempotency(id.clone()));
+        }
+        if self.timeout_ms == 0 || self.timeout_ms > 600_000 {
+            return Err(ManifestError::Timeout(id.clone()));
+        }
+        Ok(())
+    }
+
+    /// The adapter-local capability name.
+    pub fn capability_name(&self) -> &str {
+        &self.capability_id[self.adapter_id.len() + 1..]
+    }
+}

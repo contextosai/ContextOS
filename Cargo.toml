@@ -15,6 +15,7 @@ contextos-policy = { path = "crates/contextos-policy" }
 contextos-kernel = { path = "crates/contextos-kernel" }
 contextos-store = { path = "crates/contextos-store" }
 contextos-audit = { path = "crates/contextos-audit" }
+contextos-gateway = { path = "crates/contextos-gateway" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11"
@@ -28,6 +29,7 @@ url = "2"
 ed25519-dalek = { version = "2", features = ["zeroize"] }
 base64 = "0.22"
 zeroize = "1"
+async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
 jsonschema = { version = "0.59", default-features = false }
@@ -45,6 +47,7 @@ must_use_candidate = "allow"
 doc_markdown = "allow"
 too_many_lines = "allow"
 match_same_arms = "allow"
+needless_pass_by_value = "allow"
 # Kernel `expect`s only assert invariants established by prior shape validation.
 missing_panics_doc = "allow"
 # Contract semantics require exact IEEE-754 comparison (JavaScript parity), never an epsilon.
