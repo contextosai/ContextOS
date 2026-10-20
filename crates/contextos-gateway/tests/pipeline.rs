@@ -360,7 +360,8 @@ async fn allowed_effect_is_dispatched_settled_and_audited() {
         json!({"tokens": 0, "tool_calls": 1, "replans": 0, "cost_units": 40})
     );
     assert_eq!(budget["reserved"]["cost_units"], json!(0));
-    let ops = ledger(&h, DocKind::OperationLedger, &h.admission.operation_ledger_id).await;
+    let key = operation_ledger_key(&h.admission, "refund_ord_881");
+    let ops = h.store.get(&key).await.unwrap().unwrap().body;
     assert_eq!(ops["operations"][0]["outcome"], "confirmed");
     assert_eq!(verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap(), 3);
     contextos_contract::schema::validate(

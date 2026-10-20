@@ -85,7 +85,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 13 `ctx` CLI | done — validate, compile, digest, negotiate, manifest, profiles, hash-key; exit codes tested |
 | 14 Python / Node / WASM bindings | done — one JSON facade; PyO3 abi3 (GIL released), N-API (async on thread pool), import-free WASM; all reproduce reference hashes; CI job |
 | 15 Security hardening | done — threat model (17 threats → controls → tests), property fuzzing of every kernel entry point (80k cases clean), cargo-deny policy, security headers, SECURITY.md |
-| 16 Performance: benchmarks, load tests, tuning | next |
+| 16 Performance | done — kernel and gateway benchmarks; authorization 161→63 µs; dispatch 1.2→0.74 ms via per-operation ledgers; budget rollover is an open spec decision |
+| 17 Observability (OTEL spans), docs, examples, quickstart | next |
 
 ## Non-negotiables carried from the spec
 

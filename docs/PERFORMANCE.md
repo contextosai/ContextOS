@@ -29,18 +29,27 @@ equals UTF-16 order.
 
 | Measure | Latency |
 |---|---|
-| Full dispatch, average over the first 50 effects of a run | ~1.2 ms |
+| Full dispatch, average over the first 50 effects of a run | ~0.74 ms |
 
-Profile per effect: four ledger transactions dominate (≈ 200 µs each), split between
-kernel re-validation of the whole run ledger (≈ 100 µs), canonical encoding on commit
-(≈ 55 µs) and reads. Because the run-wide operation ledger grows with every effect,
-this cost is O(effects in the run).
+History: 1.2 ms → 0.74 ms by moving from one run-wide operation ledger to one ledger
+document per operation (the kernel evaluates the single-operation projection; attempt
+ids are fresh and provider keys derive from the operation id, so no cross-operation
+check is lost). Operation cost no longer grows with the run, and parallel operations
+in a run no longer contend.
+
+Remaining profile per effect: the shared run budget ledger (reserve + settle, kernel
+re-validation of up to 128 receipts, canonical encoding) is the largest component;
+then authorization (~63 µs plus fact gathering) and three signed audit appends
+(~25 µs each). With PostgreSQL, round trips to the store dominate: one dispatch makes
+about nine store operations.
 
 ## Known limits
 
 - One budget ledger holds at most 128 mutation receipts (spec bound), so a run supports
   ~64 governed effects before its ledger must roll over.
-- One operation ledger holds at most 128 operations per run.
 
-Planned (next): per-operation ledger documents (constant per-effect cost, no
-cross-operation contention inside a run) and budget-ledger rollover.
+Open design decision: safely rolling a run's budget into a new ledger segment needs a
+fence that retires the old segment for new reservations while still accepting its
+settlements. The spec's executor generation fences stale executors, and overloading it
+for this would weaken that guarantee, so rollover waits for a spec-level design (or
+long runs delegate work to child runs with their own reserved budgets).

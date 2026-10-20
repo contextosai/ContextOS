@@ -193,6 +193,29 @@ impl Pipeline<'_> {
     }
 }
 
+/// Each operation has its own ledger document, so per-effect cost is independent of
+/// how many effects the run has made and parallel operations never contend. The
+/// kernel evaluates the projection holding just this operation; the cross-operation
+/// checks it would otherwise perform hold by construction here: attempt ids are
+/// fresh, provider idempotency keys derive from the operation id, and compensation
+/// is not dispatched through this path.
+pub fn operation_ledger_key(admission: &RunAdmission, operation_id: &str) -> DocKey {
+    let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id));
+    DocKey::new(
+        &admission.tenant_id,
+        DocKind::OperationLedger,
+        format!("op_{}", &digest[7..39]),
+    )
+}
+
+fn operation_ledger_template(admission: &RunAdmission, ledger_id: &str) -> Value {
+    json!({
+        "ledger_id": ledger_id, "contract_id": admission.contract_id, "run_id": admission.run_id,
+        "tenant_id": admission.tenant_id, "revision": 0, "executor_generation": admission.executor_generation,
+        "deadline": admission.deadline, "trusted_observers": [admission.gateway_observer], "operations": [],
+    })
+}
+
 fn pointer_string(arguments: &Value, pointer: &str) -> Option<String> {
     arguments.pointer(pointer).and_then(Value::as_str).map(str::to_owned)
 }
@@ -506,11 +529,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Fast path: an operation with an attempt in flight or an applied effect cannot
         // be claimed again, so turn the duplicate away before it contends on the budget
         // ledger. The claim below remains the authoritative, atomic check.
-        let operations_key = DocKey::new(
-            &admission.tenant_id,
-            DocKind::OperationLedger,
-            &admission.operation_ledger_id,
-        );
+        let operations_key = operation_ledger_key(admission, &operation_id);
         if let Some(read) = self.store.get(&operations_key).await? {
             let existing = read.body["operations"]
                 .as_array()
@@ -590,6 +609,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "dispatch_state": "claimed", "last_observation_ref": null},
             "evaluation_time": now, "provider_observation": proof,
         });
+        if self.store.get(&operations_key).await?.is_none() {
+            match self
+                .store
+                .create(
+                    &operations_key,
+                    &operation_ledger_template(admission, &operations_key.id),
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
         let commit = transact(self.store.as_ref(), &operations_key, |ledger| {
             claim_operation(
                 ledger,

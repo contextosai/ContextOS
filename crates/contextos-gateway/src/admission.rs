@@ -36,6 +36,7 @@ pub struct RunAdmission {
     pub surfaced_capabilities: HashSet<String>,
     /// Admitted evidence by `evidence_ref`, as artifact refs.
     pub evidence: HashMap<String, Value>,
+    /// Namespace of this run's per-operation ledger documents.
     pub operation_ledger_id: String,
     pub budget_ledger_id: String,
     pub executor_generation: u64,
@@ -159,11 +160,6 @@ pub async fn admit_run<S: DocumentStore>(
     let operation_ledger_id = format!("operations:{run_id}");
     let budget_ledger_id = format!("budget:{run_id}");
 
-    let operation_ledger = json!({
-        "ledger_id": operation_ledger_id, "contract_id": contract_id, "run_id": run_id, "tenant_id": tenant_id,
-        "revision": 0, "executor_generation": request.executor_generation, "deadline": request.deadline,
-        "trusted_observers": [request.gateway_observer], "operations": [],
-    });
     let unit = json!({"currency": "USD", "units_per_cent": USD_UNITS_PER_CENT});
     let cost_units = match convert_legacy_cost_to_units(&json!(request.limits.cost_cents), &unit) {
         CostUnitConversion::Converted { units } => units,
@@ -187,12 +183,6 @@ pub async fn admit_run<S: DocumentStore>(
     budget_ledger["original_limits_ref"] = artifact("budget_limits", &budget_ledger_id, limits_digest);
     budget_ledger["opening_usage_ref"] = artifact("budget_opening", &budget_ledger_id, opening_digest);
 
-    store
-        .create(
-            &DocKey::new(&tenant_id, DocKind::OperationLedger, &operation_ledger_id),
-            &operation_ledger,
-        )
-        .await?;
     store
         .create(
             &DocKey::new(&tenant_id, DocKind::BudgetLedger, &budget_ledger_id),
