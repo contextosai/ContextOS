@@ -297,11 +297,11 @@
         "summary": "Verify the caller tenant's signed audit chain",
         "responses": {
           "200": {
-            "description": "Verification result",
+            "description": "The chain verifies; `entries` is its length",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/AuditVerification"
                 }
               }
             }
@@ -326,6 +326,16 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "The chain does not verify",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerification"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -455,6 +465,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -506,6 +519,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -579,6 +595,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -646,6 +665,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -730,6 +752,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -839,6 +864,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -874,28 +902,6 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Signed record and replay packet",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "record",
-                    "replay_packet"
-                  ],
-                  "properties": {
-                    "record": {
-                      "$ref": "https://contextosai.com/schemas/decision-record.v1.schema.json"
-                    },
-                    "replay_packet": {
-                      "$ref": "https://contextosai.com/schemas/replay-packet.v1.schema.json"
-                    }
-                  }
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/Error"
           },
@@ -918,6 +924,19 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Signed record and replay packet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedDecision"
+                }
+              }
+            }
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -993,6 +1012,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -1049,6 +1071,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -1131,6 +1156,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -1158,7 +1186,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/EvidenceBundle"
                 }
               }
             }
@@ -1182,6 +1210,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -1234,6 +1265,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -1332,6 +1366,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -1393,6 +1430,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -1456,6 +1496,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "security": [
@@ -1514,6 +1557,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -1912,6 +1958,9 @@
                 }
               }
             }
+          },
+          "rationale": {
+            "type": "object"
           }
         }
       },
@@ -1972,6 +2021,112 @@
             ]
           }
         }
+      },
+      "RecordedDecision": {
+        "type": "object",
+        "required": [
+          "record",
+          "replay_packet"
+        ],
+        "properties": {
+          "record": {
+            "$ref": "https://contextosai.com/schemas/decision-record.v1.schema.json"
+          },
+          "replay_packet": {
+            "$ref": "https://contextosai.com/schemas/replay-packet.v1.schema.json"
+          }
+        }
+      },
+      "EvidenceBundle": {
+        "type": "object",
+        "required": [
+          "evidence_version",
+          "run_id",
+          "admission",
+          "run_state",
+          "budget_ledger",
+          "budget_archives",
+          "decisions"
+        ],
+        "properties": {
+          "evidence_version": {
+            "const": "contextos-rs.run_evidence.v1"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "admission": {
+            "type": "object",
+            "description": "The run's pinned admission (contract, policy outcomes, controls, limits)"
+          },
+          "run_state": {
+            "type": "object"
+          },
+          "budget_ledger": {
+            "type": "object"
+          },
+          "budget_archives": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "record",
+                "replay_packet"
+              ],
+              "properties": {
+                "record": {
+                  "$ref": "https://contextosai.com/schemas/decision-record.v1.schema.json"
+                },
+                "replay_packet": {
+                  "$ref": "https://contextosai.com/schemas/replay-packet.v1.schema.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AuditVerification": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verified",
+              "entries"
+            ],
+            "properties": {
+              "verified": {
+                "const": true
+              },
+              "entries": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verified",
+              "error"
+            ],
+            "properties": {
+              "verified": {
+                "const": false
+              },
+              "error": {
+                "type": "string"
+              }
+            }
+          }
+        ]
       }
     }
   }

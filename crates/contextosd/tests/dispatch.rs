@@ -1269,6 +1269,16 @@ fn conforms(component: &str, value: &Value) {
     assert!(errors.is_empty(), "{component} does not describe the body: {errors:#?}");
 }
 
+/// The document lists `status` among the operation's responses.
+fn documented(method: &str, path: &str, status: u16) {
+    let doc: Value = serde_json::from_str(contextosd::app::OPENAPI).unwrap();
+    let responses = &doc["paths"][path][method]["responses"];
+    assert!(
+        responses.get(status.to_string()).is_some(),
+        "{method} {path} returned undocumented {status}"
+    );
+}
+
 #[tokio::test]
 async fn bodies_match_the_api_description() {
     let w = world(&ALL_CONTROLS).await;
@@ -1321,6 +1331,36 @@ async fn bodies_match_the_api_description() {
     let page: Value = audit.json().await.unwrap();
     assert_eq!(page["entries"].as_array().unwrap().len(), 2);
     conforms("AuditPage", &page);
+
+    let decision = json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
+        "outcome": "refund_issued", "rationale": {"strategy": "policy_and_evidence"},
+        "tool_calls": [{"tool_call_id": "tc_1", "operation_id": out["report"]["operation_id"]}]});
+    conforms("DecisionReport", &decision);
+    let recorded = http
+        .post(format!("{}/v1/runs/run_shapes/decisions", w.base))
+        .bearer_auth("acme-key")
+        .json(&decision)
+        .send()
+        .await
+        .unwrap();
+    documented("post", "/v1/runs/{run_id}/decisions", recorded.status().as_u16());
+    conforms("RecordedDecision", &recorded.json().await.unwrap());
+    let evidence = http
+        .get(format!("{}/v1/runs/run_shapes/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    documented("get", "/v1/runs/{run_id}/evidence", evidence.status().as_u16());
+    conforms("EvidenceBundle", &evidence.json().await.unwrap());
+    let verified = http
+        .get(format!("{}/v1/audit/verify", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    documented("get", "/v1/audit/verify", verified.status().as_u16());
+    conforms("AuditVerification", &verified.json().await.unwrap());
 
     let case: Value = http
         .get(format!("{}/v1/runs/run_shapes/replay-case", w.base))
