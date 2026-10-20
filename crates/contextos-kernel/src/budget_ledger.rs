@@ -192,6 +192,10 @@ fn arr(v: &Value) -> &[Value] {
     v.as_array().map_or(&[], Vec::as_slice)
 }
 
+fn ids<'a>(items: &'a [Value], key: &str) -> std::collections::HashSet<&'a str> {
+    items.iter().map(|i| s(&i[key])).collect()
+}
+
 fn valid_ledger(v: &Value) -> bool {
     let structural = exact_keys(
         v,
@@ -266,9 +270,6 @@ fn valid_ledger(v: &Value) -> bool {
     }
     let reservations = arr(&v["reservations"]);
     let mutations = arr(&v["mutations"]);
-    fn ids<'a>(items: &'a [Value], key: &str) -> std::collections::HashSet<&'a str> {
-        items.iter().map(|i| s(&i[key])).collect()
-    }
     let reservation_ids = ids(reservations, "reservation_id");
     if reservation_ids.len() != reservations.len()
         || ids(mutations, "mutation_id").len() != mutations.len()
