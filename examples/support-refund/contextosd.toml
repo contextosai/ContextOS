@@ -47,3 +47,11 @@ key_sha256 = "sha256:REPLACED_BY_RUN_SH"
 tenant_id = "tenant_acme_prod"
 principal_id = "svc_quickstart"
 scopes = ["compile", "admit", "dispatch", "audit:read"]
+
+# Development evaluator, key "dev-judge-0123456789abcdef0123456789abcd". An evaluator
+# holds only `evaluate`: a key that can also run agents cannot score them.
+[[api_keys]]
+key_sha256 = "sha256:99acec3e900c700b272b3f9c5e98fc3266eee5ae5d15e7f8a9b7fedcb3af9619"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_quality_judge"
+scopes = ["evaluate"]

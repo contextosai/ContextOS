@@ -116,6 +116,16 @@ export class Client {
     return new Run(this, runId, traceId, status.executor_generation, principalChain, status);
   }
 
+  /**
+   * Scores a recorded decision as an independent evaluator (a client whose token has
+   * only the `evaluate` scope). The runtime adds the measured cost and latency.
+   */
+  score(runId, recordId, { evaluatorRef, policy, utility, safety }) {
+    return this.request("POST", `/v1/runs/${segment(runId)}/decisions/${segment(recordId)}/scores`, {
+      body: { evaluator_ref: evaluatorRef, policy, utility, safety },
+    });
+  }
+
   /** Yields the tenant's signed audit entries in order. */
   async *auditEntries({ from = 1, page = 500 } = {}) {
     let cursor = from;

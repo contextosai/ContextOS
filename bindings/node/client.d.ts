@@ -53,6 +53,8 @@ export declare class Client {
   request<T = any>(method: string, path: string, options?: { body?: unknown; generation?: number; query?: Record<string, string | number> }): Promise<T>;
   admit(body: Record<string, any>, options?: { principalChain?: { kind: string; id: string }[] }): Promise<Run>;
   attach(runId: string, traceId: string, principalChain: { kind: string; id: string }[]): Promise<Run>;
+  /** Scores a recorded decision as an independent evaluator (token with only `evaluate`). */
+  score(runId: string, recordId: string, scores: { evaluatorRef: string; policy: number; utility: number; safety: number }): Promise<{ score: Record<string, any>; audit_sequence: number }>;
   auditEntries(options?: { from?: number; page?: number }): AsyncGenerator<Record<string, Json>>;
 }
 

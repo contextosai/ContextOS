@@ -150,6 +150,13 @@ class Client:
         status = self.request("GET", f"/v1/runs/{_quote(run_id)}")
         return Run(self, run_id, trace_id, status["executor_generation"], principal_chain, status)
 
+    def score(self, run_id: str, record_id: str, evaluator_ref: str, *, policy: float, utility: float,
+              safety: float) -> dict:
+        """Scores a recorded decision as an independent evaluator (a client whose token
+        has only the `evaluate` scope). The runtime adds the measured cost and latency."""
+        return self.request("POST", f"/v1/runs/{_quote(run_id)}/decisions/{_quote(record_id)}/scores",
+                            {"evaluator_ref": evaluator_ref, "policy": policy, "utility": utility, "safety": safety})
+
     def audit_entries(self, start: int = 1, page: int = 500):
         """Yields the tenant's signed audit entries in order."""
         cursor: Optional[int] = start

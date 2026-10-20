@@ -15,12 +15,13 @@ import tempfile
 import time
 import urllib.request
 
-from contextos.client import Client, ToolBlocked, ToolPaused, governed_tool
+from contextos.client import Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BINARY = ROOT / "target/release/contextosd"
 EXAMPLE = ROOT / "examples/support-refund"
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
+JUDGE_KEY = "dev-judge-0123456789abcdef0123456789abcd"
 
 
 def free_port() -> int:
@@ -98,6 +99,17 @@ def main() -> None:
         decision = run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
                                        tool_calls=[{"tool_call_id": "tc_1", "operation_id": call["idempotency_key"]}])
         assert decision["record"]["tool_lineage"][0]["tool_call_id"] == "tc_1"
+
+        # An independent evaluator scores the decision; the executor's key cannot.
+        record_id = decision["record"]["record_id"]
+        try:
+            client.score(run.run_id, record_id, "evaluator.refund_quality@3", policy=1.0, utility=0.9, safety=1.0)
+            raise AssertionError("the executor scored its own decision")
+        except ContextOSHTTPError as refused:
+            assert refused.status == 403, refused
+        judge = Client(client.base_url, JUDGE_KEY)
+        scored = judge.score(run.run_id, record_id, "evaluator.refund_quality@3", policy=1.0, utility=0.9, safety=1.0)
+        assert scored["score"]["scorecard"]["latency"] == decision["record"]["budget_usage"]["wall_clock_ms"]
 
         # Failover: a second executor takes over; the first is fenced.
         replacement = client.attach(run.run_id, run.trace_id, run.principal_chain).take_over()

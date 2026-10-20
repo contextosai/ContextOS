@@ -8,12 +8,13 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client, ToolBlocked, ToolPaused, governedTool } from "./client.mjs";
+import { Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool } from "./client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const binary = join(root, "target/release/contextosd");
 const example = join(root, "examples/support-refund");
 const KEY = "dev-key-0123456789abcdef0123456789abcdef";
+const JUDGE_KEY = "dev-judge-0123456789abcdef0123456789abcd";
 
 if (!existsSync(binary)) {
   console.log(`skipped: ${binary} not built`);
@@ -80,6 +81,14 @@ try {
     outcome: "refund_issued", toolCalls: [{ tool_call_id: "tc_1", operation_id: call.idempotency_key }],
   });
   assert.equal(decision.record.tool_lineage[0].tool_call_id, "tc_1");
+
+  // An independent evaluator scores the decision; the executor's key cannot.
+  const scores = { evaluatorRef: "evaluator.refund_quality@3", policy: 1, utility: 0.9, safety: 1 };
+  await assert.rejects(client.score(run.runId, decision.record.record_id, scores), (error) =>
+    error instanceof ContextOSHTTPError && error.status === 403);
+  const judge = new Client(client.baseUrl, { token: JUDGE_KEY });
+  const scored = await judge.score(run.runId, decision.record.record_id, scores);
+  assert.equal(scored.score.scorecard.latency, decision.record.budget_usage.wall_clock_ms);
 
   // A read-only research lane funded by the run.
   const agent = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
