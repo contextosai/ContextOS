@@ -120,5 +120,6 @@ where
         trust_domain,
         gateway_principal_id,
         limits,
+        conformance: config.conformance.clone(),
     }))
 }

@@ -80,6 +80,18 @@ pub struct SupportConfig {
     pub profiles: Vec<String>,
 }
 
+/// Principals whose conformance reports and control evidence this deployment trusts.
+/// Each names its tenant; an assessment uses those of the caller's tenant only. The
+/// caller of an assessment never supplies these.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConformanceConfig {
+    #[serde(default)]
+    pub trusted_assessors: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub trusted_evidence_observers: Vec<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityConfig {
@@ -158,6 +170,9 @@ pub struct Config {
     /// Overload protection (see [`crate::limits`]).
     #[serde(default)]
     pub limits: crate::limits::LimitsConfig,
+    /// Trust anchors for conformance assessment (`POST /v1/conformance/assess`).
+    #[serde(default)]
+    pub conformance: ConformanceConfig,
     /// Retention of runs' personal content (see [`crate::retention`]); off by default.
     #[serde(default)]
     pub retention: crate::retention::RetentionConfig,

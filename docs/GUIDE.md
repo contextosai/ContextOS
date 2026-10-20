@@ -453,7 +453,26 @@ per sweep, and erases each finished run exactly as `POST /v1/runs/{id}/erase` wo
 with `contextos.retention` as the operator. Runs still in progress are revisited on a
 later sweep, never erased under their executor.
 
-## 9. Operate
+## 9. Assess conformance
+
+Conformance applies to one exact workflow, implementation, release and environment, and
+needs current runtime evidence verified by observers you trust. Configure those trust
+anchors, each naming its tenant:
+
+```toml
+[conformance]
+trusted_assessors = [{ principal_id = "assessor_ci", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }]
+trusted_evidence_observers = [{ principal_id = "control_monitor", principal_type = "workload", trust_domain = "acme.internal", tenant_id = "tenant_acme_prod" }]
+```
+
+`POST /v1/conformance/assess` (`audit:read`) takes the report, its verification, the
+control evidence, the contract, features and the workflow scope. The deployment supplies
+its own implementation identity, support declaration, profile registry, clock and the
+trust anchors for the caller's tenant, so a caller cannot certify itself. Missing,
+stale, synthetic or unverified evidence yields `insufficient_evidence`; every outcome is
+audited.
+
+## 10. Operate
 
 - **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
   `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and

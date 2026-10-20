@@ -53,6 +53,7 @@ otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", 
 
 [dev-dependencies]
 jsonschema.workspace = true
+flate2.workspace = true
 ring.workspace = true
 base64.workspace = true
 

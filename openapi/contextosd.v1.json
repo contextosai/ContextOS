@@ -1889,6 +1889,120 @@
         ],
         "x-contextos-scope": "control"
       }
+    },
+    "/v1/conformance/assess": {
+      "post": {
+        "operationId": "assess_conformance",
+        "summary": "Assess a conformance report for this deployment",
+        "description": "The caller supplies the report, its verification, the control evidence, the contract, features and the workflow scope. The deployment supplies its implementation identity, support declaration, the standard profile registry, the evaluation time and the trusted assessors and evidence observers configured for the caller's tenant (`conformance_not_configured` otherwise); the caller cannot supply any of these. Every outcome is audited.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contract",
+                  "features",
+                  "report",
+                  "report_verification",
+                  "evidence_observations",
+                  "scope"
+                ],
+                "properties": {
+                  "contract": {
+                    "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json"
+                  },
+                  "features": {
+                    "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/WorkflowFeatureSet"
+                  },
+                  "report": {
+                    "type": "object"
+                  },
+                  "report_verification": {
+                    "type": "object"
+                  },
+                  "evidence_observations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "scope": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "workflow_id",
+                      "release_refs",
+                      "environment_ref",
+                      "required_utility_case_ids"
+                    ],
+                    "properties": {
+                      "workflow_id": {
+                        "type": "string"
+                      },
+                      "release_refs": {
+                        "type": "array"
+                      },
+                      "environment_ref": {
+                        "type": "object"
+                      },
+                      "required_utility_case_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Assessment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConformanceAssessment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
     }
   },
   "components": {
@@ -2649,6 +2763,69 @@
                   "type": "string"
                 }
               }
+            }
+          }
+        }
+      },
+      "ConformanceAssessment": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "reasons",
+          "limitations",
+          "missing_controls",
+          "unsupported_optional",
+          "release_refs"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "description": "`passed`, or why not (e.g. `insufficient_evidence`)"
+          },
+          "report_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workflow_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "implementation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "implementation_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_refs": {
+            "type": "array"
+          },
+          "registry_ref": {},
+          "missing_controls": {
+            "type": "array"
+          },
+          "unsupported_optional": {
+            "type": "array"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }

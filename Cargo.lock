@@ -597,6 +597,7 @@ dependencies = [
  "contextos-gateway",
  "contextos-kernel",
  "contextos-store",
+ "flate2",
  "hex",
  "http",
  "jsonschema",

@@ -11,6 +11,7 @@
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
+//! | `POST /v1/conformance/assess` | `audit:read` | assess a conformance report for this deployment against configured trust anchors; audited |
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
 //! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
 //! | `POST /v1/revocations/restore` | `control` | restore a revoked target |
@@ -92,6 +93,8 @@ pub struct AppState<S, L> {
     pub trust_domain: String,
     pub gateway_principal_id: String,
     pub limits: Arc<crate::limits::Limiter>,
+    /// Conformance trust anchors.
+    pub conformance: crate::config::ConformanceConfig,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -1209,6 +1212,102 @@ where
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct AssessmentScope {
+    workflow_id: Value,
+    release_refs: Value,
+    environment_ref: Value,
+    required_utility_case_ids: Value,
+}
+
+/// What the caller of an assessment supplies; trust anchors, the support declaration,
+/// the registry, the implementation identity and the evaluation time are the server's.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssessmentBody {
+    contract: Value,
+    features: Value,
+    report: Value,
+    report_verification: Value,
+    evidence_observations: Value,
+    scope: AssessmentScope,
+}
+
+/// Assesses a conformance report for this deployment and audits the outcome.
+async fn assess_conformance<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let body: AssessmentBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            format!("Invalid assessment: {e}"),
+        )
+    })?;
+    let tenant_only = |principals: &[Value]| -> Vec<Value> {
+        principals
+            .iter()
+            .filter(|p| p["tenant_id"] == caller.tenant_id.as_str())
+            .cloned()
+            .collect()
+    };
+    let assessors = tenant_only(&state.conformance.trusted_assessors);
+    let observers = tenant_only(&state.conformance.trusted_evidence_observers);
+    if assessors.is_empty() || observers.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "conformance_not_configured",
+            "No trusted assessors or evidence observers are configured for this tenant.",
+        ));
+    }
+    let now = state.gateway.as_ref().map_or_else(
+        || {
+            let micros = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
+            contextos_contract::validation::format_unix_micros(micros)
+        },
+        |g| g.now(),
+    );
+    let input = json!({
+        "contract": body.contract, "features": body.features, "report": body.report,
+        "report_verification": body.report_verification, "evidence_observations": body.evidence_observations,
+        "support": state.support, "registry": serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null),
+        "evaluation_time": now,
+        "scope": {"workflow_id": body.scope.workflow_id, "release_refs": body.scope.release_refs,
+            "environment_ref": body.scope.environment_ref, "required_utility_case_ids": body.scope.required_utility_case_ids,
+            "implementation_id": state.support["implementation_id"], "implementation_version": state.support["implementation_version"]},
+        "trusted_assessors": assessors, "trusted_evidence_observers": observers,
+    });
+    let assessment = contextos_kernel::conformance::assess_conformance_report(&input);
+    state
+        .audit
+        .append(
+            &caller.tenant_id,
+            "conformance_assessed",
+            json!({"report_id": assessment.report_id, "workflow_id": assessment.workflow_id,
+                "outcome": assessment.outcome, "reasons": assessment.reasons, "assessed_for": caller.principal_id}),
+            &now,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
+    Ok(axum::Json(assessment).into_response())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ErasureBody {
     reason: String,
 }
@@ -1587,6 +1686,7 @@ where
         .route("/v1/audit/entries", get(audit_entries::<S, L>))
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
         .route("/v1/revocations/restore", post(restore::<S, L>))
+        .route("/v1/conformance/assess", post(assess_conformance::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
