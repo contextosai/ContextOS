@@ -159,6 +159,26 @@ pub fn is_within_contract_interval(time: &str, start: &str, end: &str) -> bool {
     )
 }
 
+/// True when `0 <= time - observed <= maximum_seconds`, computed exactly over whole
+/// seconds plus arbitrary-precision fractional digits.
+pub fn age_within_limit(time: &str, observed: &str, maximum_seconds: u64) -> bool {
+    const MAX_SAFE: u64 = (1 << 53) - 1;
+    let (Some(t), Some(o)) = (ContractTime::parse(time), ContractTime::parse(observed)) else {
+        return false;
+    };
+    if maximum_seconds > MAX_SAFE {
+        return false;
+    }
+    let whole = t.whole_seconds() - o.whole_seconds();
+    let width = t.fraction.len().max(o.fraction.len());
+    let (ft, fo) = (format!("{:0<width$}", t.fraction), format!("{:0<width$}", o.fraction));
+    // elapsed = whole + (ft - fo) / 10^width, with |ft - fo| / 10^width < 1.
+    let non_negative = whole > 0 || (whole == 0 && ft >= fo);
+    let max = i64::try_from(maximum_seconds).unwrap_or(i64::MAX);
+    let within_max = whole < max || (whole == max && ft <= fo);
+    non_negative && within_max
+}
+
 /// Adds whole seconds while preserving the original fractional digits exactly.
 /// Returns `None` for invalid input or a result after `9999-12-31T23:59:59Z`.
 pub fn add_contract_seconds(time: &str, seconds: u64) -> Option<String> {
@@ -226,6 +246,19 @@ mod tests {
         assert!(is_within_contract_interval(start, start, end));
         assert!(!is_within_contract_interval(end, start, end));
         assert!(!is_within_contract_interval(start, end, start));
+    }
+
+    #[test]
+    fn age_is_exact_with_fractions() {
+        assert!(age_within_limit("2026-01-01T00:00:10Z", "2026-01-01T00:00:00Z", 10));
+        assert!(!age_within_limit(
+            "2026-01-01T00:00:10.000000001Z",
+            "2026-01-01T00:00:00Z",
+            10
+        ));
+        assert!(age_within_limit("2026-01-01T00:00:10.5Z", "2026-01-01T00:00:00.5Z", 10));
+        assert!(!age_within_limit("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.1Z", 10));
+        assert!(age_within_limit("2026-01-01T00:00:00.1Z", "2026-01-01T00:00:00.1Z", 0));
     }
 
     #[test]

@@ -9,7 +9,9 @@
 pub mod action_risk;
 pub mod authorization;
 pub mod compiler;
+pub mod execution_boundary;
 pub mod negotiation;
+pub mod pathspec;
 pub mod profiles;
 
 pub use action_risk::{evaluate_action_risk, evaluate_action_risk_json, project_action_risk};
