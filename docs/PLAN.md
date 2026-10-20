@@ -81,7 +81,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 11a Tool Gateway governed pipeline | done — surface/bind/authorize/redeem/reserve/claim/dispatch/observe/settle/audit; 7 end-to-end tests incl. approval redemption, timeout reconciliation, 16-way duplicate race |
 | 11b MCP (2026-07-28 stateless) and HTTP adapters | done — effect-knowledge classification, pinned HTTPS endpoints, no redirects, brokered credentials; 9 tests against live local servers |
 | 12a contextosd: config, API-key auth + tenant binding, strict ingress, compile/negotiate/validate/audit, metrics, health, container | done |
-| 12b Run admission + governed dispatch API, remote fact providers, pack policy provider | next |
+| 12b Run admission + governed dispatch API, remote fact providers, pinned pack policy | done — derived workflow features, end-to-end HTTP tests with remote providers and MCP |
+| 13 `ctx` CLI | next |
 
 ## Non-negotiables carried from the spec
 

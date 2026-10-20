@@ -6,8 +6,10 @@
 
 pub mod http;
 pub mod mcp;
+pub mod remote;
 pub mod transport;
 
 pub use http::HttpAdapter;
 pub use mcp::McpAdapter;
+pub use remote::{RemoteApprovals, RemoteAuthority, RemoteConstraints, RemoteFacts, RemoteIdempotency};
 pub use transport::{Credential, CredentialBroker, EndpointError, NoCredentials, TransportPolicy};

@@ -63,6 +63,17 @@ pub trait IdempotencyProvider: Send + Sync {
     ) -> Result<Option<Value>, PortError>;
 }
 
+/// Authorizes effects against the policy outcomes pinned at admission.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PinnedPolicy;
+
+#[async_trait::async_trait]
+impl PolicyProvider for PinnedPolicy {
+    async fn outcomes(&self, admission: &RunAdmission, _binding: &Value) -> Result<Vec<Value>, PortError> {
+        Ok(admission.policy_outcomes.clone())
+    }
+}
+
 /// Deployment-supplied ports.
 #[derive(Clone)]
 pub struct Ports {
@@ -214,6 +225,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         manifest.validate()?;
         self.manifests.insert(manifest.capability_id.clone(), manifest);
         Ok(())
+    }
+
+    /// A pinned capability manifest.
+    pub fn manifest(&self, capability_id: &str) -> Option<&CapabilityManifest> {
+        self.manifests.get(capability_id)
+    }
+
+    /// The audit writer this gateway appends to.
+    pub fn audit(&self) -> &Arc<AuditWriter<L>> {
+        &self.audit
     }
 
     fn now(&self) -> String {

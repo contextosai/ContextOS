@@ -90,7 +90,7 @@ impl Default for TransportPolicy {
     }
 }
 
-pub(crate) fn pinned_endpoint(endpoint: &str, policy: &TransportPolicy) -> Result<Url, EndpointError> {
+pub fn pinned_endpoint(endpoint: &str, policy: &TransportPolicy) -> Result<Url, EndpointError> {
     let url = Url::parse(endpoint).map_err(|_| EndpointError::Invalid)?;
     if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
         return Err(EndpointError::Unsafe);
@@ -108,7 +108,7 @@ pub(crate) fn pinned_endpoint(endpoint: &str, policy: &TransportPolicy) -> Resul
     }
 }
 
-pub(crate) fn client(policy: &TransportPolicy) -> reqwest::Client {
+pub fn client(policy: &TransportPolicy) -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(policy.connect_timeout)

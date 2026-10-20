@@ -22,6 +22,6 @@ mod support;
 pub use support::TransitionResult;
 
 pub use action_risk::{evaluate_action_risk, evaluate_action_risk_json, project_action_risk};
-pub use compiler::{CompileDeps, CompileError, ContextPackCompiler};
+pub use compiler::{CompileDeps, CompileError, ContextPackCompiler, ResolvedRule};
 pub use negotiation::negotiate_execution_contract;
 pub use profiles::STANDARD_PROFILE_REGISTRY;

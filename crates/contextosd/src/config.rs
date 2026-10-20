@@ -82,6 +82,58 @@ pub struct SupportConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct IdentityConfig {
+    /// Trust domain of agent principals admitted by this deployment.
+    pub trust_domain: String,
+    /// Principal id the gateway uses for its own observations.
+    pub gateway_principal_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProvider {
+    pub url: String,
+    /// Environment variable holding this service's bearer credential.
+    #[serde(default)]
+    pub token_env: Option<String>,
+    #[serde(default = "default_provider_timeout")]
+    pub timeout_ms: u64,
+}
+
+fn default_provider_timeout() -> u64 {
+    2_000
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvidersConfig {
+    pub authority: RemoteProvider,
+    pub constraints: RemoteProvider,
+    pub approvals: RemoteProvider,
+    #[serde(default)]
+    pub idempotency: Option<RemoteProvider>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterKind {
+    Mcp,
+    Http,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdapterConfig {
+    pub id: String,
+    pub kind: AdapterKind,
+    pub endpoint: String,
+    /// Environment variable holding the provider credential issued by your broker.
+    #[serde(default)]
+    pub token_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: ServerConfig,
     pub store: StoreConfig,
@@ -92,6 +144,16 @@ pub struct Config {
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
+    /// Reviewed capability manifest JSON files to pin at startup.
+    #[serde(default)]
+    pub capabilities: Vec<PathBuf>,
+    #[serde(default)]
+    pub identity: Option<IdentityConfig>,
+    /// Remote fact services; dispatch is disabled without them.
+    #[serde(default)]
+    pub providers: Option<ProvidersConfig>,
+    #[serde(default)]
+    pub adapters: Vec<AdapterConfig>,
 }
 
 #[derive(Debug, thiserror::Error)]

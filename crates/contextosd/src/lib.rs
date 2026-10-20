@@ -4,6 +4,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod metrics;
+pub mod runtime;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,24 +48,43 @@ pub fn support_declaration(config: &Config) -> Value {
 
 /// Assembles server state for any store backend.
 #[allow(clippy::implicit_hasher)]
-pub fn build_state<S, L: contextos_store::AppendLog>(
+pub fn build_state<S, L>(
     config: &Config,
     store: Arc<S>,
     log: L,
     signer: AuditSigner,
     packs: HashMap<String, LoadedPack>,
-) -> Arc<AppState<S, L>> {
+    dispatch: Option<runtime::DispatchSetup>,
+) -> Result<Arc<AppState<S, L>>, String>
+where
+    S: contextos_store::DocumentStore + 'static,
+    L: contextos_store::AppendLog + 'static,
+{
     let mut keys = KeyRing::new();
     keys.insert(signer.kid(), signer.verifying_key());
     let _ = &*STANDARD_PROFILE_REGISTRY;
-    Arc::new(AppState {
+    let audit = Arc::new(AuditWriter::new(log, signer));
+    let (trust_domain, gateway_principal_id) = dispatch
+        .as_ref()
+        .map(|d| (d.trust_domain.clone(), d.gateway_principal_id.clone()))
+        .unwrap_or_default();
+    let gateway = match dispatch {
+        Some(setup) => Some(Arc::new(
+            runtime::build_gateway(store.clone(), audit.clone(), setup).map_err(|e| e.to_string())?,
+        )),
+        None => None,
+    };
+    Ok(Arc::new(AppState {
         store,
-        audit: Arc::new(AuditWriter::new(log, signer)),
+        audit,
         audit_keys: keys,
         auth: auth::Authenticator::new(&config.api_keys),
         metrics: Arc::default(),
         packs,
         support: support_declaration(config),
         max_body_bytes: config.server.max_body_bytes,
-    })
+        gateway,
+        trust_domain,
+        gateway_principal_id,
+    }))
 }

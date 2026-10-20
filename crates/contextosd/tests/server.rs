@@ -76,7 +76,9 @@ async fn start(max_body: usize) -> String {
         MemoryLog::new(),
         AuditSigner::from_seed("audit-test", [5; 32]),
         packs,
-    );
+        None,
+    )
+    .unwrap();
     let app = router(state, Duration::from_secs(5));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

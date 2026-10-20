@@ -9,6 +9,8 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
+//! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
 //! bound to the caller's tenant; a mismatched tenant is refused without detail.
@@ -28,6 +30,8 @@ use contextos_audit::{AuditWriter, KeyRing, verify_tenant_chain};
 use contextos_contract::ingress::parse_strict;
 use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
+use contextos_contract::validation::is_contract_timestamp;
+use contextos_gateway::{AdmissionError, AdmissionRequest, BudgetLimits, Gateway, RunAdmission, admit_run};
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
 };
@@ -54,6 +58,10 @@ pub struct AppState<S, L> {
     /// `RuntimeSupportDeclaration` for this deployment.
     pub support: Value,
     pub max_body_bytes: usize,
+    /// Governed dispatch; `None` when no fact providers are configured.
+    pub gateway: Option<Arc<Gateway<S, L>>>,
+    pub trust_domain: String,
+    pub gateway_principal_id: String,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -308,6 +316,230 @@ async fn audit_verify<S, L: AppendLog>(State(state): State<Arc<AppState<S, L>>>,
     }
 }
 
+fn dispatch_gateway<S, L>(state: &AppState<S, L>) -> Result<&Arc<Gateway<S, L>>, ApiError> {
+    state.gateway.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "dispatch_disabled",
+            "Governed dispatch is not configured on this deployment.",
+        )
+    })
+}
+
+async fn admit<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("admit"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let input = parse_body(&state, &body)?;
+    schema_check(
+        &SchemaTarget::document(SchemaDoc::InvokeAgent),
+        &input["request"],
+        "request_invalid",
+    )?;
+    schema_check(
+        &SchemaTarget::document(SchemaDoc::RunContext),
+        &input["run_context"],
+        "run_context_invalid",
+    )?;
+    for tenant in [
+        &input["request"]["tenant_id"],
+        &input["run_context"]["tenant_id"],
+        &input["contract"]["tenant_id"],
+    ] {
+        same_tenant(&caller, tenant)?;
+    }
+    let run_context_value = &input["run_context"];
+    if input["contract"]["run_id"] != run_context_value["run_id"]
+        || input["contract"]["trace_id"] != run_context_value["trace_id"]
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contract_unbound",
+            "The contract is not bound to this run.",
+        ));
+    }
+    let deadline = input["deadline"]
+        .as_str()
+        .filter(|d| is_contract_timestamp(d))
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "deadline_invalid",
+                "A contract timestamp deadline is required.",
+            )
+        })?;
+    let limits: BudgetLimits = serde_json::from_value(input["limits"].clone()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "limits_invalid",
+            "Budget limits are required.",
+        )
+    })?;
+    let pack = state
+        .packs
+        .get(input["pack_ref"].as_str().unwrap_or_default())
+        .filter(|p| p.tenant_id == caller.tenant_id)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "pack_not_found",
+                "No such Context Pack for this tenant.",
+            )
+        })?;
+    let request: InvokeRequest = serde_json::from_value(input["request"].clone()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request_invalid",
+            "The request is invalid.",
+        )
+    })?;
+    let run_context: RunContext = serde_json::from_value(run_context_value.clone()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "run_context_invalid",
+            "The run context is invalid.",
+        )
+    })?;
+    let list = |key: &str| input["deps"][key].as_array().cloned().unwrap_or_default();
+    let deps = CompileDeps {
+        evidence: list("evidence"),
+        evidence_conflicts: list("evidence_conflicts"),
+        promoted_memory: list("promoted_memory"),
+    };
+    let compiled = pack
+        .compiler
+        .compile(&request, &run_context, &deps)
+        .map_err(|e| match e {
+            CompileError::PolicyEval(detail) => ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "policy_eval_error",
+                "An applicable policy predicate could not be evaluated.",
+            )
+            .with_detail(serde_json::to_value(&*detail).unwrap_or(Value::Null)),
+            CompileError::Invalid(message) => {
+                ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "compile_invalid", message)
+            }
+        })?;
+    let features = crate::runtime::derive_features(
+        gateway,
+        &compiled,
+        pack.compiler.pack().pack_meta.data_classification,
+        &input["features"],
+    )
+    .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "features_invalid", message))?;
+    let principal = |id: &str, kind: &str| json!({"principal_id": id, "principal_type": kind, "trust_domain": state.trust_domain, "tenant_id": caller.tenant_id});
+    let admission = admit_run(
+        state.store.as_ref(),
+        AdmissionRequest {
+            contract: &input["contract"],
+            support: &state.support,
+            registry: &STANDARD_PROFILE_REGISTRY,
+            features,
+            compiled: &compiled,
+            compiler: &pack.compiler,
+            request: &request,
+            run_context: &run_context,
+            actor: principal(&run_context.agent.agent_id, "agent"),
+            gateway_observer: principal(&state.gateway_principal_id, "workload"),
+            deadline: deadline.to_owned(),
+            executor_generation: 1,
+            limits,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        AdmissionError::ContractRejected(reasons) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contract_rejected",
+            "The execution contract cannot be admitted.",
+        )
+        .with_detail(json!(reasons)),
+        AdmissionError::Store(e) if e.is_conflict() => ApiError::new(
+            StatusCode::CONFLICT,
+            "run_exists",
+            "This run has already been admitted.",
+        ),
+        AdmissionError::Budget(code) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "limits_invalid", code),
+        other => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "admission_failed", other.to_string()),
+    })?;
+    let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
+    state
+        .store
+        .create(
+            &DocKey::new(&caller.tenant_id, DocKind::RunAdmission, &admission.run_id),
+            &stored,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::CONFLICT,
+                "run_exists",
+                "This run has already been admitted.",
+            )
+        })?;
+    Ok((
+        StatusCode::CREATED,
+        axum::Json(json!({
+            "run_id": admission.run_id,
+            "compiled_context_hash": compiled.context_ledger.compiled_context_hash,
+            "required_controls": admission.required_controls,
+            "policy_refs": admission.policy_refs,
+            "policy_outcomes": admission.policy_outcomes,
+            "features": features,
+            "compiled": compiled,
+        })),
+    )
+        .into_response())
+}
+
+async fn tool_call<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let envelope = parse_body(&state, &body)?;
+    // The admission is looked up under the caller's tenant, so another tenant's run
+    // is indistinguishable from a missing one.
+    let stored = state
+        .store
+        .get(&DocKey::new(&caller.tenant_id, DocKind::RunAdmission, &run_id))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "run_not_found", "No such run."))?;
+    let admission: RunAdmission = serde_json::from_value(stored.body).map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "admission_corrupt",
+            "The stored admission is unreadable.",
+        )
+    })?;
+    let outcome = gateway.dispatch(&admission, &envelope).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "dispatch_unavailable",
+            "Governed dispatch is temporarily unavailable.",
+        )
+    })?;
+    state.metrics.dispatch_outcome(outcome.report.status.as_str());
+    Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
+}
+
 async fn observe<S, L>(State(state): State<Arc<AppState<S, L>>>, request: Request, next: Next) -> Response {
     let route = request
         .extensions()
@@ -337,6 +569,8 @@ where
         .route("/v1/contracts/negotiate", post(negotiate::<S, L>))
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
+        .route("/v1/runs", post(admit::<S, L>))
+        .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(max_body))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(

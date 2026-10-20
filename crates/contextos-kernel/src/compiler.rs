@@ -74,6 +74,17 @@ const SYSTEM_INSTRUCTION: &[&str] = &[
     "Return a typed DecisionRecord from the Decision Catalog; never free-form text for governed actions.",
 ];
 
+/// A policy rule resolved for a request, with its effective verdict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRule {
+    pub bundle_id: String,
+    pub priority: i64,
+    pub rule_id: String,
+    pub allow: bool,
+    pub approval_gate: Option<String>,
+    pub requires: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct ActiveRule {
     bundle_id: String,
@@ -247,6 +258,37 @@ impl ContextPackCompiler {
             budget_report,
             context_ledger,
         })
+    }
+
+    /// Policy rules that apply to this request, with the effective branch (`then`, or
+    /// the synthesized `else`) in resolution order. This is exactly the set recorded in
+    /// the compiled policy manifest, so dispatch can be authorized against it.
+    pub fn resolve_active_rules(
+        &self,
+        request: &InvokeRequest,
+        run_ctx: &RunContext,
+    ) -> Result<Vec<ResolvedRule>, CompileError> {
+        let intent = classify_intent(request);
+        let eval_ctx = build_rule_eval_context(&intent, request, run_ctx);
+        let priorities: HashMap<&str, i64> = self
+            .pack
+            .policy_layer
+            .policy_bundles
+            .iter()
+            .map(|b| (b.bundle_id.as_str(), b.priority))
+            .collect();
+        Ok(self
+            .resolve_policies(&intent, &eval_ctx)?
+            .into_iter()
+            .map(|a| ResolvedRule {
+                priority: priorities.get(a.bundle_id.as_str()).copied().unwrap_or_default(),
+                rule_id: a.rule.rule_id.clone(),
+                allow: a.rule.then.allow,
+                approval_gate: a.rule.then.approval_gate().filter(|g| !g.is_empty()).map(str::to_owned),
+                requires: a.rule.then.requires.clone().unwrap_or_default(),
+                bundle_id: a.bundle_id,
+            })
+            .collect())
     }
 
     fn resolve_policies(&self, intent: &str, eval_ctx: &Value) -> Result<Vec<ActiveRule>, CompileError> {

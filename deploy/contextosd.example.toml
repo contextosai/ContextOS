@@ -3,6 +3,8 @@
 
 # Context Pack JSON files loaded and validated at startup.
 packs = []
+# Reviewed capability manifests pinned at startup (see deploy/capabilities/).
+capabilities = []
 
 [server]
 listen = "0.0.0.0:8080"
@@ -36,3 +38,29 @@ tenant_id = "tenant_acme_prod"
 principal_id = "svc_orchestrator"
 scopes = ["compile", "admit", "dispatch", "audit:read"]
 
+
+# ── Governed dispatch ────────────────────────────────────────────────────────
+# Without [providers], /v1/runs and tool calls return 501. Each provider is a
+# service you operate that answers with verified, normalized facts.
+
+[identity]
+trust_domain = "contextos.prod"
+gateway_principal_id = "contextosd"
+
+[providers.authority]          # identity / mandate broker
+url = "https://authority.internal.example/contextos/facts"
+token_env = "CONTEXTOS_AUTHORITY_TOKEN"
+
+[providers.constraints]        # control plane attesting active independent controls
+url = "https://controls.internal.example/contextos/facts"
+token_env = "CONTEXTOS_CONTROLS_TOKEN"
+
+[providers.approvals]          # approval service
+url = "https://approvals.internal.example/contextos/facts"
+token_env = "CONTEXTOS_APPROVALS_TOKEN"
+
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"                   # stateless MCP 2026-07-28 over Streamable HTTP
+endpoint = "https://payments-mcp.internal.example/mcp"
+token_env = "CONTEXTOS_PAYMENTS_TOKEN"

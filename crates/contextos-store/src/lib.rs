@@ -32,6 +32,7 @@ pub enum DocKind {
     Checkpoint,
     ContextPack,
     ProfileRegistry,
+    RunAdmission,
 }
 
 impl DocKind {
@@ -44,6 +45,7 @@ impl DocKind {
             DocKind::Checkpoint => "checkpoint",
             DocKind::ContextPack => "context_pack",
             DocKind::ProfileRegistry => "profile_registry",
+            DocKind::RunAdmission => "run_admission",
         }
     }
 }

@@ -205,7 +205,7 @@ impl Adapter for Payments {
     }
 }
 
-fn compiled() -> CompiledContext {
+fn compiled() -> (CompiledContext, ContextPackCompiler, InvokeRequest, RunContext) {
     let path = format!("{}/../../conformance/vectors/compiler.json", env!("CARGO_MANIFEST_DIR"));
     let vectors: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let case = vectors["cases"]
@@ -221,10 +221,9 @@ fn compiled() -> CompiledContext {
         evidence: case["deps"]["evidence"].as_array().unwrap().clone(),
         ..CompileDeps::default()
     };
-    ContextPackCompiler::new(pack)
-        .unwrap()
-        .compile(&request, &run, &deps)
-        .unwrap()
+    let compiler = ContextPackCompiler::new(pack).unwrap();
+    let compiled = compiler.compile(&request, &run, &deps).unwrap();
+    (compiled, compiler, request, run)
 }
 
 fn manifest() -> CapabilityManifest {
@@ -262,7 +261,11 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SeqIds::default()),
         authority: Arc::new(Authority),
-        policy: Arc::new(Policy(verdict)),
+        policy: if verdict == "pinned" {
+            Arc::new(PinnedPolicy)
+        } else {
+            Arc::new(Policy(verdict))
+        },
         constraints: Arc::new(Constraints),
         approvals: approvals.clone(),
         idempotency: None,
@@ -282,7 +285,7 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
     let support = json!({"implementation_id": "contextos-rs", "implementation_version": "0.1.0",
         "supported_profiles": registry.profiles.iter().map(|p| &p.profile).collect::<Vec<_>>(),
         "supported_controls": registry.controls.iter().map(|c| &c.control).collect::<Vec<_>>()});
-    let compiled = compiled();
+    let (compiled, compiler, request, run_context) = compiled();
     let admission = admit_run(
         store.as_ref(),
         AdmissionRequest {
@@ -294,8 +297,10 @@ async fn harness(verdict: &'static str, behavior: Behavior) -> Harness {
                 ..WorkflowFeatureSet::default()
             },
             compiled: &compiled,
+            compiler: &compiler,
+            request: &request,
+            run_context: &run_context,
             actor: principal("agt_support"),
-            policy_refs: vec![artifact("policy_bundle", "refund_policy")],
             gateway_observer: principal("gateway"),
             deadline: "2026-10-20T11:00:00Z".into(),
             executor_generation: 1,
@@ -526,4 +531,21 @@ async fn concurrent_duplicates_dispatch_once() {
     let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
     assert_eq!(budget["used"]["tool_calls"], json!(1));
     assert_eq!(budget["reserved"]["tool_calls"], json!(0));
+}
+
+#[tokio::test]
+async fn pinned_pack_policy_governs_dispatch() {
+    // The demo pack's R_HIGH_VALUE_REQUIRES_APPROVAL fired at compile time for this
+    // support_agent refund above the threshold; admission pinned it.
+    let h = harness("pinned", Behavior::Confirm).await;
+    assert!(
+        h.admission
+            .policy_outcomes
+            .iter()
+            .any(|o| o["rule_id"] == "R_HIGH_VALUE_REQUIRES_APPROVAL" && o["verdict"] == "require_approval")
+    );
+    let out = h.gateway.dispatch(&h.admission, &call("tc_1", None)).await.unwrap();
+    assert_eq!(out.result["status"], "paused");
+    assert!(out.report.reason_codes.contains(&"approval_required".to_owned()));
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
 }

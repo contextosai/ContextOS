@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use contextos_store::{MemoryLog, MemoryStore};
 use contextosd::config::StoreConfig;
+use contextosd::runtime::dispatch_setup_from_config;
 use contextosd::{Config, build_state, load_pack, router, signer_from_env};
 use tracing_subscriber::EnvFilter;
 
@@ -35,12 +36,21 @@ async fn main() {
         tracing::info!(%pack_ref, tenant = %pack.tenant_id, "loaded context pack");
         packs.insert(pack_ref, pack);
     }
+    let dispatch = dispatch_setup_from_config(&config).unwrap_or_else(|e| fail(e));
     let timeout = Duration::from_millis(config.server.request_timeout_ms);
     let app = match &config.store {
         StoreConfig::Memory => {
             tracing::warn!("using in-memory store: state is lost on restart");
             router(
-                build_state(&config, Arc::new(MemoryStore::new()), MemoryLog::new(), signer, packs),
+                build_state(
+                    &config,
+                    Arc::new(MemoryStore::new()),
+                    MemoryLog::new(),
+                    signer,
+                    packs,
+                    dispatch,
+                )
+                .unwrap_or_else(|e| fail(e)),
                 timeout,
             )
         }
@@ -55,7 +65,8 @@ async fn main() {
             store.migrate().await.unwrap_or_else(|e| fail(e));
             let store = Arc::new(store);
             router(
-                build_state(&config, store.clone(), (*store).clone(), signer, packs),
+                build_state(&config, store.clone(), (*store).clone(), signer, packs, dispatch)
+                    .unwrap_or_else(|e| fail(e)),
                 timeout,
             )
         }

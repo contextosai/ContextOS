@@ -3,12 +3,14 @@
 
 use std::collections::{HashMap, HashSet};
 
+use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::execution::{NegotiationStatus, ProfileRegistrySnapshot, WorkflowFeatureSet};
-use contextos_contract::types::CompiledContext;
+use contextos_contract::types::{CompiledContext, InvokeRequest, RunContext};
 use contextos_kernel::budget_ledger::{
     CostUnitConversion, budget_limits_digest, budget_opening_digest, convert_legacy_cost_to_units,
 };
 use contextos_kernel::negotiation::negotiate_execution_contract;
+use contextos_kernel::{CompileError, ContextPackCompiler};
 use contextos_store::{DocKey, DocKind, DocumentStore, StoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -26,6 +28,8 @@ pub struct RunAdmission {
     /// The authenticated workload acting for this run (`PrincipalRef`).
     pub actor: Value,
     pub policy_refs: Vec<Value>,
+    /// Normalized policy outcomes resolved at compile time for this run.
+    pub policy_outcomes: Vec<Value>,
     pub profile_refs: Vec<Value>,
     pub release_refs: Vec<Value>,
     /// Capability ids that survived compilation for this run.
@@ -49,8 +53,12 @@ pub struct AdmissionRequest<'a> {
     pub registry: &'a ProfileRegistrySnapshot,
     pub features: WorkflowFeatureSet,
     pub compiled: &'a CompiledContext,
+    /// The pinned pack and the request it was compiled for; admission pins the
+    /// policy outcomes resolved for this run.
+    pub compiler: &'a ContextPackCompiler,
+    pub request: &'a InvokeRequest,
+    pub run_context: &'a RunContext,
     pub actor: Value,
-    pub policy_refs: Vec<Value>,
     pub gateway_observer: Value,
     pub deadline: String,
     pub executor_generation: u64,
@@ -75,6 +83,49 @@ pub enum AdmissionError {
     Budget(String),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error("policy resolution failed: {0}")]
+    Policy(#[from] CompileError),
+}
+
+/// Pins the compile-time policy resolution as normalized outcomes. Every applicable
+/// rule is a business outcome of its bundle's priority: a disallowing rule denies, a
+/// rule with an approval gate requires approval, otherwise it allows. A run with no
+/// applicable rule has no business allowance, so its effects are denied.
+fn policy_outcomes(request: &AdmissionRequest<'_>) -> Result<(Vec<Value>, Vec<Value>), AdmissionError> {
+    let pack = request.compiler.pack();
+    let pack_ref = pack.pack_meta.pack_ref();
+    let rules = request
+        .compiler
+        .resolve_active_rules(request.request, request.run_context)?;
+    let mut refs: Vec<(String, Value)> = Vec::new();
+    let mut outcomes = Vec::new();
+    for rule in rules {
+        let bundle = pack
+            .policy_layer
+            .policy_bundles
+            .iter()
+            .find(|b| b.bundle_id == rule.bundle_id);
+        let digest = bundle
+            .and_then(|b| serde_json::to_value(b).ok())
+            .and_then(|b| sha256_canonical(&b).ok())
+            .unwrap_or_default();
+        let bundle_ref = json!({"artifact_type": "policy_bundle", "artifact_id": rule.bundle_id, "version": pack_ref, "sha256": digest});
+        if !refs.iter().any(|(id, _)| *id == rule.bundle_id) {
+            refs.push((rule.bundle_id.clone(), bundle_ref.clone()));
+        }
+        let verdict = if !rule.allow {
+            "deny"
+        } else if rule.approval_gate.is_some() {
+            "require_approval"
+        } else {
+            "allow"
+        };
+        outcomes.push(
+            json!({"category": "business", "priority": rule.priority, "verdict": verdict,
+            "rule_id": rule.rule_id, "bundle_ref": bundle_ref, "obligations": rule.requires}),
+        );
+    }
+    Ok((refs.into_iter().map(|(_, r)| r).collect(), outcomes))
 }
 
 const USD_UNITS_PER_CENT: u64 = 100;
@@ -89,6 +140,7 @@ pub async fn admit_run<S: DocumentStore>(
     store: &S,
     request: AdmissionRequest<'_>,
 ) -> Result<RunAdmission, AdmissionError> {
+    let (policy_refs, policy_outcomes) = policy_outcomes(&request)?;
     let registry = serde_json::to_value(request.registry).unwrap_or(Value::Null);
     let features = serde_json::to_value(request.features).unwrap_or(Value::Null);
     let negotiation = negotiate_execution_contract(request.contract, request.support, &registry, &features);
@@ -180,7 +232,8 @@ pub async fn admit_run<S: DocumentStore>(
         contract: contract.clone(),
         contract_id,
         actor: request.actor,
-        policy_refs: request.policy_refs,
+        policy_refs,
+        policy_outcomes,
         surfaced_capabilities: surfaced,
         evidence,
         operation_ledger_id,
