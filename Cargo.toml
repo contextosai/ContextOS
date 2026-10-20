@@ -19,6 +19,7 @@ thiserror = "2"
 ryu-js = "1"
 icu_collator = "2"
 proptest = "1"
+jsonschema = { version = "0.59", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

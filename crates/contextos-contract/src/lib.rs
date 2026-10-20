@@ -3,4 +3,7 @@
 //! digests only bind data so that the kernel can decide over it.
 
 pub mod canonical;
+pub mod errors;
+pub mod schema;
+pub mod types;
 pub mod validation;

@@ -15,6 +15,7 @@ hex.workspace = true
 thiserror.workspace = true
 ryu-js.workspace = true
 icu_collator.workspace = true
+jsonschema.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

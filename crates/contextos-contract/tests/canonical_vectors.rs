@@ -16,8 +16,16 @@ fn canonical_encodings_match_reference() {
     assert!(!cases.is_empty());
     for case in cases {
         let input = &case["input"];
-        assert_eq!(canonicalize(input).unwrap(), case["jcs"].as_str().unwrap(), "jcs of {input}");
+        assert_eq!(
+            canonicalize(input).unwrap(),
+            case["jcs"].as_str().unwrap(),
+            "jcs of {input}"
+        );
         assert_eq!(sha256_canonical(input).unwrap(), case["jcs_sha256"].as_str().unwrap());
-        assert_eq!(legacy_stable_stringify(input), case["legacy"].as_str().unwrap(), "legacy of {input}");
+        assert_eq!(
+            legacy_stable_stringify(input),
+            case["legacy"].as_str().unwrap(),
+            "legacy of {input}"
+        );
     }
 }
