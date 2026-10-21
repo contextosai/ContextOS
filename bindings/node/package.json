@@ -1,6 +1,7 @@
 {
   "name": "@contextos/kernel",
   "description": "ContextOS kernel for Node.js: governed context, authorization and durable effects for AI agents",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "index.mjs",
   "exports": {

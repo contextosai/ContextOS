@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Licensing
+- Code is licensed under Apache-2.0 and documentation prose under CC BY 4.0; the
+  name and logo are covered by a separate trademark policy (`TRADEMARKS.md`).
+
 ### Decision kernel
 - Context Pack compiler, ActionRisk evaluation, profile negotiation, authority and
   delegation validation, policy composition, approvals and authorization, execution

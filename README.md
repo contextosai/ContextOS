@@ -71,4 +71,10 @@ Parity vectors live in `conformance/vectors/` and are regenerated from the spec 
 
 ## License
 
-Not yet decided. No license is granted at this time.
+| Material | License |
+|---|---|
+| Runtime, bindings, CLI, schemas, examples, conformance tools and code examples in the docs | [Apache-2.0](LICENSE) |
+| Documentation prose (`docs/`, guides) | [CC BY 4.0](LICENSE-docs) |
+| The ContextOS name and logo | [Trademark policy](TRADEMARKS.md) |
+
+Contributions are accepted under the same licenses (see [CONTRIBUTING.md](CONTRIBUTING.md)).

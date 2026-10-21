@@ -1,8 +1,10 @@
 # Contributing
 
-> **Before the first public release:** the project license has not been chosen, so
-> contributions from outside the maintainers cannot be accepted yet. This guide
-> describes how the project works so it is ready when that changes.
+Code is licensed under [Apache-2.0](LICENSE) and documentation prose under
+[CC BY 4.0](LICENSE-docs). By submitting a contribution you license it under the same
+terms (Apache-2.0, section 5, for code and code examples; CC BY 4.0 for prose), and
+confirm you have the right to do so. Use of the name and logo is covered by
+[TRADEMARKS.md](TRADEMARKS.md).
 
 ## Ground rules
 

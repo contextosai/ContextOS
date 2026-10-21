@@ -14,7 +14,7 @@ allow = [
     "MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
     "ISC", "Zlib", "Unicode-3.0", "CDLA-Permissive-2.0", "Unlicense", "BSL-1.0", "0BSD",
 ]
-# Workspace crates are unpublished until the project license is decided.
+# Workspace crates (Apache-2.0) are not published to crates.io yet.
 private = { ignore = true }
 
 [bans]

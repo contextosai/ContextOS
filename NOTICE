@@ -1,0 +1,13 @@
+ContextOS
+Copyright 2026 The ContextOS Authors
+
+This product includes software developed as part of the ContextOS project
+(https://github.com/contextosai/ContextOS), licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+Documentation prose in docs/ and the Markdown guides is licensed under the
+Creative Commons Attribution 4.0 International license (see LICENSE-docs);
+code examples within it are licensed under Apache-2.0.
+
+"ContextOS" and its logo are trademarks of the ContextOS project; neither
+license grants rights to use them (see TRADEMARKS.md).

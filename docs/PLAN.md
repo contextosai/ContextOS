@@ -93,7 +93,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 19a Effect reconciliation | done — MCP task handles kept as attempt references, `tasks/get` provider queries, evidenced operator assertions under a `reconcile` scope, kernel-recorded facts, budget settlement, audit |
 | 19b MCP `input_required` continuation | done — definitive not-applied attempt, persisted single-use requests, re-authorized continuation bound to the same action digest, schema-checked answers, secret-field refusal, audited by digest |
 | 20a Throughput | done — parallel benchmark found per-tenant audit appends serialized on lock handoffs (~1.9k effects/s flat); group commit with atomic batched log appends → ~7.2k effects/s single-tenant, CPU-bound; PostgreSQL benchmarks in CI; mimalloc |
-| 20b Open-source readiness | done — CONTRIBUTING, GOVERNANCE, code of conduct, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot; security contact published. **Blocked on the owner: license choice.** |
+| 20b Open-source readiness | done — CONTRIBUTING, GOVERNANCE, code of conduct, CHANGELOG, issue/PR templates, CODEOWNERS, Dependabot; security contact published; Apache-2.0 for code, CC BY 4.0 for prose, separate trademark policy |
 | 21 Long runs and per-effect CPU | done — linear ledger validation, exact length counting, budget-ledger compaction (ADR-0003): runs beyond 64 effects, sequential 0.59→0.37 ms, ~10.4k effects/s single tenant |
 | 22 Overload protection; spec proposal | done — load shedding, per-tenant rate and dispatch-concurrency limits; `docs/proposals/spec-0001` drafted for the spec maintainers |
 | 23 Delegation (subagent lanes) | done — envelope binding and narrowing, parent-funded sub-budgets, attested run links, capacity-locking close, HTTP API |
@@ -138,4 +138,4 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 
 ## Open decisions for the maintainers
 
-- **License.** The spec repo is "All rights reserved" and its maintainers recorded the license as an open stewardship decision. Crates are marked `publish = false` with no license grant until that decision is made.
+- **License.** Decided for this runtime: Apache-2.0 for code, CC BY 4.0 for prose, the name and logo under `TRADEMARKS.md`. The spec repository and website still say "All rights reserved" and need the matching change there. Crates stay `publish = false` until a release is cut.
