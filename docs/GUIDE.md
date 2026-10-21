@@ -119,7 +119,8 @@ and the host's own call id, if it has one, in `_meta["io.contextos/toolCallId"]`
 result names the call and its operation in `_meta` (`io.contextos/toolCallId`,
 `io.contextos/operationId`), which is what a DecisionRecord cites. Keep one effect on
 one route: a call keyed explicitly and a call keyed by derivation are different
-operations, so the gateway does not deduplicate them against each other.
+operations. Once one has applied the effect, the gateway refuses the other
+(`effect_repeated`, see the loop guard below), but calls racing in parallel can both pass.
 A tool's `input_required` is passed through with `requestState`, and the host's retry
 with `inputResponses` continues the same operation.
 
@@ -584,6 +585,21 @@ to contention is audited (`loop_guard_count_lost`). Retrying an existing operati
 a new call. The count is read with the other authorization facts and written while the
 provider works, so the guard adds no serial latency; identical calls racing in parallel
 can overshoot by their concurrency.
+
+### Repeated effects
+
+An effect is applied once per run however it is keyed. A new operation whose effect is
+identical (same capability and canonical arguments) to one the run already applied, or
+may have applied, is refused with `effect_repeated` and the obligation
+`reconcile_existing_operation`, naming the operation that applied it. This covers a host
+that retries a call under a fresh idempotency key, and one effect sent both as a keyed
+tool call and as a derived-key MCP call. An effect the provider definitively did not
+apply is not recorded, so it may be attempted again under a new key; an unknown outcome
+is recorded, because it may have happened. Calls racing in parallel can both pass: the
+guard closes the sequential case. Capabilities whose identical calls are distinct
+effects (two equal top-ups) set `"repeatable": true` in their manifest; `[guards]
+refuse_repeated_effects = false` turns the guard off. A run records at most 1,024
+distinct effects; past that, new ones are refused (`effect_guard_saturated`).
 
 ## 7. Score decisions independently
 

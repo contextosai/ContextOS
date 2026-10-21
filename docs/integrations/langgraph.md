@@ -275,7 +275,7 @@ which a DecisionRecord can cite. The adapter does not send per-call `_meta`, so 
 cannot set `io.contextos/idempotencyKey`, `io.contextos/toolCallId` or cite
 `io.contextos/evidenceRefs`; use `governed_tool` for effects that must cite evidence or use
 a key of your choosing, and keep each effect on one route (an explicitly keyed call and a
-derived-key call are two operations). After a
+derived-key call are two operations; the second is refused as `effect_repeated`). After a
 takeover, rebuild the transport with the new generation.
 
 ## 9. Record the decision and complete

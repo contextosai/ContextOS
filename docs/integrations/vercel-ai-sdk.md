@@ -280,7 +280,7 @@ operation key derived from capability and arguments, so a repeated call is
 `retry_unsafe`, not a second refund. Every result's `_meta` names
 `io.contextos/toolCallId` and `io.contextos/operationId`, which the DecisionRecord
 cites. Keep one effect on one route: an explicitly keyed call (section 3) and a
-derived-key MCP call are different operations. You still need the budget middleware, and after a
+derived-key MCP call are different operations (the second is refused, `effect_repeated`). You still need the budget middleware, and after a
 `takeOver()` the client must be rebuilt with the new generation. Prefer section 3 when
 you want your own idempotency keys, evidence refs and outcome mapping.
 

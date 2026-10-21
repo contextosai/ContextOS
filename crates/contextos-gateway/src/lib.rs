@@ -45,6 +45,7 @@ use std::time::Duration;
 use contextos_audit::AuditWriter;
 use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
+use contextos_contract::types::ActionEffect;
 use contextos_contract::validation::{add_contract_seconds, compare_contract_times};
 use contextos_kernel::TransitionResult;
 use contextos_kernel::authorization::{digest_action_binding, evaluate_authorization, transition_approval_redemption};
@@ -200,6 +201,9 @@ pub struct Gateway<S, L> {
     /// Identical tool calls (same capability and arguments, new operation) a run may
     /// make before the loop guard refuses the next; `None` disables it.
     loop_limit: Option<u64>,
+    /// Refuse a new operation whose effect is identical to one the run already applied
+    /// (see [`loop_guard`]); capabilities marked `repeatable` are exempt.
+    refuse_repeated_effects: bool,
     /// Tokens every model-call reservation covers at least.
     model_call_floor: u64,
     /// Scores every effectful decision needs from an independent evaluator before the
@@ -332,6 +336,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             output_schemas: HashMap::new(),
             result_schemas: HashMap::new(),
             loop_limit: None,
+            refuse_repeated_effects: false,
             model_call_floor: 0,
             completion_floor: None,
             require_result_schemas: false,
@@ -342,6 +347,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// refused with `loop_detected` (see [`loop_guard`]).
     pub fn set_loop_limit(&mut self, limit: Option<u64>) {
         self.loop_limit = limit;
+    }
+
+    /// Refuses a new operation (a new operation key) whose effect is identical to one
+    /// the run already applied or may have applied: same capability and canonical
+    /// arguments, `effect_repeated`. Capabilities whose manifest is `repeatable` are
+    /// exempt (see [`loop_guard`]).
+    pub fn set_refuse_repeated_effects(&mut self, refuse: bool) {
+        self.refuse_repeated_effects = refuse;
     }
 
     /// Sets the tokens every model-call reservation covers at least (see
@@ -753,9 +766,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.boundary_readiness(admission, &now),
             self.store.get(&revocations_key),
             async {
-                match self.loop_limit {
-                    Some(_) => self.store.get(&loop_key).await,
-                    None => Ok(None),
+                if self.loop_limit.is_some() || self.refuse_repeated_effects {
+                    self.store.get(&loop_key).await
+                } else {
+                    Ok(None)
                 }
             },
         );
@@ -826,6 +840,41 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 vec![reason.into()],
                 "This call repeats too often, or the run has made too many kinds of call.",
             ));
+        }
+        // Repeated effect: the same effect under another operation key (a host retrying
+        // with a fresh key, or one effect sent through two routes) is not applied twice.
+        let guards_effect =
+            self.refuse_repeated_effects && manifest.action_risk.effect != ActionEffect::None && !manifest.repeatable;
+        if guards_effect && existing_ledger.is_none() {
+            let applied = loop_guard::applied_effect(loop_state, &call_signature);
+            if applied.is_some() || loop_guard::effects_saturated(loop_state, &call_signature) {
+                let reason = if applied.is_some() {
+                    "effect_repeated"
+                } else {
+                    "effect_guard_saturated"
+                };
+                let entry = self
+                    .audit
+                    .append(
+                        &admission.tenant_id,
+                        "repeated_effect_refusal",
+                        json!({"run_id": admission.run_id, "operation_id": operation_id,
+                            "capability_id": manifest.capability_id, "call_signature": call_signature,
+                            "applied_operation_id": applied, "reason_codes": [reason]}),
+                        &now,
+                    )
+                    .await?;
+                p.report.audit_sequences.push(entry.sequence);
+                p.report.obligations.push("reconcile_existing_operation".into());
+                return Ok(p.stop(
+                    "blocked",
+                    vec![reason.into()],
+                    &applied.map_or_else(
+                        || "The run has recorded too many distinct effects to guard another.".to_owned(),
+                        |op| format!("An identical effect was already requested in this run as operation {op}."),
+                    ),
+                ));
+            }
         }
         let new_operation = existing_ledger.is_none();
         let policy_outcomes = match policy_outcomes {
@@ -1267,6 +1316,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             },
         );
         let response = response.unwrap_or_else(|_| AdapterResponse::unknown());
+        // Every effect that may have applied is recorded; one the provider definitively
+        // did not apply may be attempted again under a new key.
+        let may_have_applied = !(response.definitive
+            && matches!(
+                response.outcome,
+                EffectOutcome::NotApplied | EffectOutcome::NotDispatched
+            ));
+        if guards_effect
+            && new_operation
+            && may_have_applied
+            && let Err(error) =
+                loop_guard::note_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await
+        {
+            // An unrecorded effect weakens the guard; make it visible in the evidence.
+            tracing::warn!(%error, "repeated-effect guard not recorded");
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "effect_guard_record_lost",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
+                    &now,
+                )
+                .await?;
+        }
         if let Err(error) = counted {
             // A lost count weakens the guard; make it visible in the evidence.
             tracing::warn!(%error, "loop guard count not recorded");

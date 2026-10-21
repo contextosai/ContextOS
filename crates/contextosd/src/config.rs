@@ -120,6 +120,11 @@ pub struct GuardsConfig {
     /// make before the next is refused with `loop_detected`; 0 disables the guard.
     #[serde(default = "default_identical_calls")]
     pub identical_tool_calls: u64,
+    /// Refuse a new operation whose effect is identical (same capability and
+    /// arguments) to one the run already applied, unless the capability is
+    /// `repeatable`: `effect_repeated`. On by default.
+    #[serde(default = "default_true")]
+    pub refuse_repeated_effects: bool,
     /// Tokens every model-call reservation covers at least, so an executor cannot
     /// reserve (and self-settle) a model call for nothing.
     #[serde(default = "default_model_call_tokens")]
@@ -179,6 +184,10 @@ fn default_model_call_tokens() -> u64 {
     1_000
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_identical_calls() -> u64 {
     5
 }
@@ -187,6 +196,7 @@ impl Default for GuardsConfig {
     fn default() -> Self {
         Self {
             identical_tool_calls: default_identical_calls(),
+            refuse_repeated_effects: true,
             model_call_min_tokens: default_model_call_tokens(),
             required_release_refs: None,
             require_user_role: None,

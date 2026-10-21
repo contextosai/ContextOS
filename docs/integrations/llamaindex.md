@@ -283,7 +283,7 @@ codes. Effectful calls derive their operation key from capability and arguments 
 `_meta["io.contextos/idempotencyKey"]` is given. Every result's `_meta` names
 `io.contextos/toolCallId` and `io.contextos/operationId`, which a DecisionRecord can
 cite; keep one effect on one route, since an explicitly keyed call and a derived-key
-call are different operations. You still budget model calls with the
+call are different operations (the second is refused, `effect_repeated`). You still budget model calls with the
 LLM wrapper, and after a takeover you must rebuild the client with the new generation.
 
 ## Record the decision and complete

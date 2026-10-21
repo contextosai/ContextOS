@@ -351,7 +351,8 @@ cannot apply twice. Every result carries `_meta["io.contextos/toolCallId"]` and
 send per-call `_meta`, so it cannot set `io.contextos/idempotencyKey` or
 `io.contextos/toolCallId`, or cite `io.contextos/evidenceRefs`; use `governed_tool` for
 effects that must cite evidence or use a key of your choosing, and keep each effect on
-one route (a keyed call and a derived-key call are two operations). After a takeover,
+one route (a keyed call and a derived-key call are two operations; the second is
+refused as `effect_repeated`). After a takeover,
 rebuild the server config with the new generation. If you manage the connection
 yourself with `MCPServerAdapter` (`crewai-tools[mcp]`), give it the same URL and both
 headers; the refusal and key behavior is the server's, so it is the same. The budget hook of section 4 applies unchanged.

@@ -170,6 +170,15 @@ First release candidate of the ContextOS runtime.
   fencing handled, and a `governed_tool` decorator for agent frameworks.
 - `ctx` command line; Python, Node and WebAssembly bindings over one JSON facade.
 
+### Repeated effects
+- A new operation whose effect is identical to one the run already applied, or may
+  have applied, is refused with `effect_repeated` (obligation
+  `reconcile_existing_operation`), whatever its idempotency key or route, so a host
+  retrying under a fresh key or mixing keyed calls with derived-key MCP calls cannot
+  apply an effect twice. Capabilities marked `repeatable` and `[guards]
+  refuse_repeated_effects = false` opt out. **Behavior change:** identical effects
+  under different keys in one run were previously each applied.
+
 ### Framework integrations
 - Implementation guides (`docs/integrations/`) and runnable examples
   (`examples/frameworks/`) for LangGraph, the OpenAI Agents SDK (Python and

@@ -265,7 +265,7 @@ message ("ContextOS paused: retry_unsafe. This call had no effect; do not retry 
 unchanged. …") the agent loop passes to the model; the `structuredContent` with reason
 codes and obligations is lost, so you cannot tell an approval pause from a refusal on
 this route. Keep one effect on one route: an explicitly keyed call (section 3) and a
-derived-key MCP call are different operations. You still need the budget processor, and after
+derived-key MCP call are different operations (the second is refused, `effect_repeated`). You still need the budget processor, and after
 `takeOver()` the client must be rebuilt with the new generation. Prefer section 3.
 
 ## 9. Record the decision and complete

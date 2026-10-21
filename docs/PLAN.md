@@ -129,6 +129,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 51 Framework integrations | done — guides and runnable examples for LangGraph, OpenAI Agents SDK (Python, TypeScript), Google ADK, Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Vercel AI SDK and Mastra, each on the framework's own loop with scripted models offline; `ToolPaused.kind`, `governed_tool` call ids, MCP result ids and effect-aware refusal text |
 | 52 Approvals end to end | done — the development approval service records requests and grants exact approvals for a reviewer; `--approval` runs every framework example through its own human-in-the-loop path (pause, approve, identical re-send redeems once), plain and approval runs of all eleven in CI |
 | 53 Async client and budget errors | done — `contextos.aio` (`AsyncClient`/`AsyncRun`, async `governed_tool`, async audit paging), `BudgetExhausted` in both clients, `budgeted_model_call` / `budgetedModelCall`; the async framework examples use them |
+| 54 Repeated effects | done — a new operation repeating an effect the run already applied (same capability and canonical arguments, any key or route) is refused with `effect_repeated`, naming the applying operation; definitive non-application is not recorded; `repeatable` manifests and `[guards] refuse_repeated_effects` opt out |
 | Next | next |
 
 ## Non-negotiables carried from the spec

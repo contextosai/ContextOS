@@ -125,7 +125,7 @@ and what does not:
 - The generation header is fixed when the client connects. After a takeover, rebuild
   the options with the new generation, or every call is refused as `executor_stale`.
 - Do not mix routes for one effect. A call keyed `refund:ord_881` and the derived
-  `mcp:…` key are two operations.
+  `mcp:…` key are two operations; the gateway refuses the second as `effect_repeated`.
 
 Use this route for read-only tools, for prototyping, or when the agent must not hold
 `dispatch` credentials in process. Use route A for effects that must cite evidence or

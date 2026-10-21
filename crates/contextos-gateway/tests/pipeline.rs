@@ -2326,3 +2326,50 @@ async fn decisions_record_the_routing_decision() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn an_applied_effect_is_refused_under_a_new_key_unless_repeatable() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_refuse_repeated_effects(true);
+    let first = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_1", Some("refund_a")))
+        .await
+        .unwrap();
+    assert_eq!(first.result["status"], "completed", "{:?}", first.report);
+    let again = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_2", Some("refund_b")))
+        .await
+        .unwrap();
+    assert_eq!(again.result["status"], "blocked");
+    assert_eq!(again.report.reason_codes, ["effect_repeated"]);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+
+    // A capability whose identical calls are distinct effects opts out.
+    let mut repeatable = manifest();
+    repeatable.repeatable = true;
+    h.gateway.pin_capability(repeatable).unwrap();
+    let distinct = h
+        .gateway
+        .dispatch(&h.admission, &call("tc_3", Some("refund_c")))
+        .await
+        .unwrap();
+    assert_eq!(distinct.result["status"], "completed", "{:?}", distinct.report);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn an_effect_the_provider_did_not_apply_may_be_attempted_again() {
+    let mut h = harness("allow", Behavior::RefuseInjected).await;
+    h.gateway.set_refuse_repeated_effects(true);
+    for (id, key) in [("tc_1", "refund_a"), ("tc_2", "refund_b")] {
+        let out = h.gateway.dispatch(&h.admission, &call(id, Some(key))).await.unwrap();
+        assert_eq!(out.result["status"], "failed", "{:?}", out.report);
+    }
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        2,
+        "a definitive non-application records nothing"
+    );
+}

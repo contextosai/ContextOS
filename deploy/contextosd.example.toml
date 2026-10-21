@@ -96,6 +96,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 
 # [guards]
 # identical_tool_calls = 5     # loop guard: refuse the next identical call in a run
+# refuse_repeated_effects = true  # refuse an effect identical to one the run applied, under a new key
 # required_release_refs = ["model_profile", "evaluator_suite"]   # the production default; [] opts out
 # require_user_role = true      # the production default: runs must state user.role
 # require_tool_schemas = true   # capabilities need input and output schemas

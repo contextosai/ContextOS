@@ -84,7 +84,13 @@ async fn world(controls: &[&str]) -> World {
 /// `replicas` servers sharing one in-memory store and one audit log, as separate
 /// processes sharing a database would.
 async fn world_n(controls: &[&str], replicas: usize) -> World {
-    let (config, provider_calls) = world_setup(controls).await;
+    world_with(controls, replicas, |_| {}).await
+}
+
+/// As [`world_n`], with the configuration adjusted first.
+async fn world_with(controls: &[&str], replicas: usize, adjust: impl FnOnce(&mut Config)) -> World {
+    let (mut config, provider_calls) = world_setup(controls).await;
+    adjust(&mut config);
     let (store, log) = (Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
     let mut bases = Vec::new();
     let mut first = None;
@@ -2588,7 +2594,9 @@ async fn many_model_calls_keep_the_budget_ledger_compact() {
 
 #[tokio::test]
 async fn repeated_identical_calls_trip_the_loop_guard() {
-    let w = world(&ALL_CONTROLS).await;
+    // Identical effects under new keys are what the repeated-effect guard refuses; turn
+    // it off to reach the loop guard (as for a capability marked `repeatable`).
+    let w = world_with(&ALL_CONTROLS, 1, |c| c.guards.refuse_repeated_effects = false).await;
     let plain = reqwest::Client::new();
     let admitted: Value = plain
         .post(format!("{}/v1/runs", w.base))
@@ -2642,6 +2650,82 @@ async fn repeated_identical_calls_trip_the_loop_guard() {
     assert_eq!(retry["report"]["reason_codes"], json!(["retry_unsafe"]), "{retry}");
     let other = call("loop_other", 120_001).await;
     assert_eq!(other["result"]["status"], "completed", "{other}");
+}
+
+#[tokio::test]
+async fn an_effect_is_not_applied_twice_under_a_new_key() {
+    let w = world(&ALL_CONTROLS).await;
+    let plain = reqwest::Client::new();
+    let admitted: Value = plain
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_rekeyed", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let call = |key: &str, amount: u64| {
+        let mut body = tool_call("run_rekeyed", &format!("tc_{key}"), amount);
+        body["idempotency_key"] = json!(key);
+        let (http, url) = (http.clone(), format!("{}/v1/runs/run_rekeyed/tool-calls", w.base));
+        async move {
+            http.post(url)
+                .bearer_auth("acme-key")
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+    let before = w.provider_calls.load(Ordering::SeqCst);
+    assert_eq!(call("refund:a", 120_000).await["result"]["status"], "completed");
+    // A host retrying under a fresh key (or the same effect sent through another route)
+    // is refused before anything is claimed or sent, naming the operation that applied it.
+    let again = call("refund:b", 120_000).await;
+    assert_eq!(again["result"]["status"], "blocked", "{again}");
+    assert_eq!(again["report"]["reason_codes"], json!(["effect_repeated"]));
+    assert!(
+        again["report"]["obligations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o == "reconcile_existing_operation")
+    );
+    assert!(
+        again["result"]["error"].as_str().unwrap().contains("refund:a"),
+        "{again}"
+    );
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), before + 1);
+    // The original operation's retry is answered from its ledger; a different effect runs.
+    assert_eq!(
+        call("refund:a", 120_000).await["report"]["reason_codes"],
+        json!(["retry_unsafe"])
+    );
+    assert_eq!(call("refund:c", 119_999).await["result"]["status"], "completed");
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), before + 2);
+    let page: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=500", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "repeated_effect_refusal"),
+        "the refusal is audited"
+    );
 }
 
 #[tokio::test]

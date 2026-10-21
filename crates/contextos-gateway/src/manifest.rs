@@ -100,6 +100,11 @@ pub struct CapabilityManifest {
     pub sends_data: bool,
     #[serde(default)]
     pub amount: Option<AmountBinding>,
+    /// Identical calls under different operation keys are distinct effects (for example
+    /// two equal top-ups). Off by default: a new operation repeating an effect the run
+    /// already applied is refused with `effect_repeated`.
+    #[serde(default)]
+    pub repeatable: bool,
     pub recovery: Recovery,
     pub timeout_ms: u64,
     pub reservation: CallCost,

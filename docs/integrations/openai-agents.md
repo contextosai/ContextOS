@@ -351,7 +351,7 @@ output with the gateway's text (`ContextOS paused: retry_unsafe. This call had n
 effect; do not retry it unchanged. …`), not exceptions, so an approval pause does not
 stop the run; use function tools where you need that. Keep one effect on one route: a
 refund keyed `refund:ord_881` through function tools and the same refund over MCP
-without that key are two operations. Model calls are not governed by
+without that key are two operations, and the second is refused (`effect_repeated`). Model calls are not governed by
 MCP: keep the budgeted provider. After a takeover, reconnect with the new generation.
 
 ## 9. Record the decision and complete

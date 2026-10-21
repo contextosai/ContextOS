@@ -7,6 +7,12 @@
 //! authorization facts and recorded while the provider works, so the guard adds no
 //! serial latency; identical calls racing in parallel may overshoot the limit by their
 //! concurrency, which bounds a loop rather than enforcing an exact quota.
+//!
+//! The same document records, per signature, the first operation whose effect may have
+//! applied (`effects`), so a second identical effect under another operation key is
+//! refused (`effect_repeated`): a host that retries under a new key, or sends one
+//! effect through two routes, cannot apply it twice. Calls racing in parallel can
+//! still both pass; the guard closes the sequential case, the one retries produce.
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{DocKey, DocKind, DocumentStore, StoreError};
@@ -42,8 +48,66 @@ pub(crate) fn count(state: Option<&Value>, signature: &str) -> u64 {
     state.and_then(|s| s["counts"][signature].as_u64()).unwrap_or(0)
 }
 
+/// The operation that already applied (or may have applied) an identical effect.
+pub(crate) fn applied_effect<'a>(state: Option<&'a Value>, signature: &str) -> Option<&'a str> {
+    state.and_then(|s| s["effects"][signature].as_str())
+}
+
+/// Whether the run's effect table is full and `signature` is not in it: the guard
+/// can no longer record effects, so it refuses new ones (fails closed).
+pub(crate) fn effects_saturated(state: Option<&Value>, signature: &str) -> bool {
+    state
+        .and_then(|s| s["effects"].as_object())
+        .is_some_and(|e| e.len() >= MAX_SIGNATURES && !e.contains_key(signature))
+}
+
+/// Records that `operation_id` may have applied the effect with `signature`; the first
+/// operation recorded for a signature is kept.
+pub(crate) async fn note_effect<S: DocumentStore>(
+    store: &S,
+    key: &DocKey,
+    signature: &str,
+    operation_id: &str,
+) -> Result<(), StoreError> {
+    update(store, key, |state| {
+        let effects = state
+            .as_object_mut()
+            .ok_or(StoreError::Integrity)?
+            .entry("effects")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or(StoreError::Integrity)?;
+        if effects.contains_key(signature) || effects.len() >= MAX_SIGNATURES {
+            return Ok(false);
+        }
+        effects.insert(signature.to_owned(), json!(operation_id));
+        Ok(true)
+    })
+    .await
+}
+
 /// Counts one more new operation with `signature`.
 pub(crate) async fn note<S: DocumentStore>(store: &S, key: &DocKey, signature: &str) -> Result<(), StoreError> {
+    update(store, key, |state| {
+        let counts = state["counts"].as_object_mut().ok_or(StoreError::Integrity)?;
+        if !counts.contains_key(signature) && counts.len() >= MAX_SIGNATURES {
+            // Refused at authorization; nothing to count.
+            return Ok(false);
+        }
+        let next = counts.get(signature).and_then(Value::as_u64).unwrap_or(0) + 1;
+        counts.insert(signature.to_owned(), json!(next));
+        Ok(true)
+    })
+    .await
+}
+
+/// Applies `change` to the run's document with compare-and-swap; `change` returns
+/// whether there is anything to write.
+async fn update<S: DocumentStore>(
+    store: &S,
+    key: &DocKey,
+    change: impl Fn(&mut Value) -> Result<bool, StoreError>,
+) -> Result<(), StoreError> {
     for attempt in 0..32_u32 {
         if attempt > 0 {
             // Parallel calls of one run contend on its document: back off briefly.
@@ -53,13 +117,9 @@ pub(crate) async fn note<S: DocumentStore>(store: &S, key: &DocKey, signature: &
         let mut state = current
             .as_ref()
             .map_or_else(|| json!({"counts": {}}), |c| c.body.clone());
-        let counts = state["counts"].as_object_mut().ok_or(StoreError::Integrity)?;
-        if !counts.contains_key(signature) && counts.len() >= MAX_SIGNATURES {
-            // Refused at authorization; nothing to count.
+        if !change(&mut state)? {
             return Ok(());
         }
-        let next = counts.get(signature).and_then(Value::as_u64).unwrap_or(0) + 1;
-        counts.insert(signature.to_owned(), json!(next));
         let written = match &current {
             None => store.create(key, &state).await.map(|_| ()),
             Some(c) => store.compare_and_swap(key, c.revision, &state).await.map(|_| ()),

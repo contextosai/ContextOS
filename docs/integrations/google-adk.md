@@ -289,8 +289,8 @@ A DecisionRecord cites each call by `tool_call_id` and `operation_id`. Every MCP
 success or refusal, returns both in `_meta` (`io.contextos/toolCallId`,
 `io.contextos/operationId`; the gateway assigns an `mcp_…` call id when you send none),
 so an MCP call can be cited. Keep each effect on one route: a call keyed in `_meta` and
-one keyed by derivation are two operations, and the gateway does not deduplicate them
-against each other.
+one keyed by derivation are two operations; once one has applied, the gateway refuses
+the other (`effect_repeated`).
 
 ## Record the decision and complete
 

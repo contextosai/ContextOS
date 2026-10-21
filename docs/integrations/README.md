@@ -98,7 +98,9 @@ shows only what its framework adds.
   decision. Many MCP clients cannot set per-call `_meta`; the guides say which can.
 
 Do not send one effect through both routes: an explicitly keyed call and a call keyed
-by derivation are different operations. After a takeover, rebuild any MCP transport
+by derivation are different operations. Once one has applied the effect the gateway
+refuses the other (`effect_repeated`, `[guards] refuse_repeated_effects`), but two
+racing in parallel can both pass. After a takeover, rebuild any MCP transport
 that carries the old generation header.
 
 ### Outcomes

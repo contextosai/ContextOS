@@ -303,7 +303,8 @@ async def with_meta(ctx, call_tool, name, args):
 
 Every result carries `_meta["io.contextos/toolCallId"]` and
 `_meta["io.contextos/operationId"]`, the ids the DecisionRecord cites. Keep each effect
-on one route: a call keyed in `_meta` and one keyed by derivation are two operations.
+on one route: a call keyed in `_meta` and one keyed by derivation are two operations,
+and the second is refused as `effect_repeated`.
 
 After a takeover the generation changes; build a new `MCPToolset` with the new header.
 The MCP path still needs `BudgetedModel` for model requests, and the DecisionRecord is

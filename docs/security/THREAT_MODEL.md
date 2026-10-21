@@ -24,7 +24,7 @@ budgets, and the integrity of the evidence record.
 | T3 | Approval replay for another operation | single-use redemption CAS bound to operation + digest (`transition_approval_redemption`, store CAS) | authorization vectors |
 | T4 | Stale/revoked authority | grant observations must be verified, current and unrevoked; unknown revocation blocks (`validate_authority`) | authorization vectors (revoked, unknown, stale) |
 | T5 | Delegation widening | child grants must strictly narrow scope, depth and validity (`validate_authority`) | delegation vectors |
-| T6 | Duplicate effects (retries, races, lost responses) | operation ledger: one in-flight attempt, unknown outcomes block blind retries, idempotent retry only with verified provider proof; CAS commits | `concurrent_duplicates_dispatch_once`, `timeout_is_unknown_and_blocks_blind_retry`, store contention suite |
+| T6 | Duplicate effects (retries, races, lost responses, re-keyed retries) | operation ledger: one in-flight attempt, unknown outcomes block blind retries, idempotent retry only with verified provider proof; CAS commits; an effect identical to one the run applied is refused under any new key (`effect_repeated`) | `concurrent_duplicates_dispatch_once`, `timeout_is_unknown_and_blocks_blind_retry`, `an_effect_is_not_applied_twice_under_a_new_key`, store contention suite |
 | T7 | Budget overspend under concurrency | conserved budget ledger with reservations; unknown usage keeps reservations | `concurrent_budget_is_conserved` |
 | T8 | Stale executor acting after failover | kernel run lifecycle with a generation per event; every effectful request must present the current generation, re-checked after the operation claim commits and before dispatch (a claim that loses that check is recorded as not dispatched and its budget released); takeover by fenced suspend/resume; in-flight work stays visible in the operation ledger for reconciliation; generation forwarded for target-side fencing | durable vectors |
 | T9 | Cross-tenant access | every key includes tenant; callers bound to one tenant; lookups scoped by caller tenant | server tests (other tenant → 403/404) |
@@ -203,6 +203,11 @@ budgets, and the integrity of the evidence record.
 - **Fact providers are trusted after verification.** The kernel checks currency, binding
   and scope of observations; it cannot detect a dishonest provider. Operate identity,
   control-plane and approval services with their own hardening and audit.
+- **Re-keyed effects in parallel.** The repeated-effect guard records an effect once the
+  provider has answered, so two identical effects under different keys dispatched
+  concurrently can both pass; it closes the sequential case (a host retrying under a
+  fresh key, one effect sent through two routes). Capabilities marked `repeatable` are
+  not guarded.
 - **Provider idempotency.** Duplicate prevention across a lost response relies on the
   provider honouring the `Idempotency-Key`/operation identity, or on reconciliation.
 - **Signing keys** should stay in a KMS (`[audit.kms]`): the runtime then never holds
