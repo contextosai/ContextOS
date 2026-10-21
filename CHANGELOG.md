@@ -209,6 +209,11 @@ First release candidate of the ContextOS runtime.
   `BudgetExhausted` for a reservation the run cannot afford and have
   `budgeted_model_call` / `budgetedModelCall` to reserve and settle around one model
   call.
+- MCP `tools/list` names tools as model APIs require (`[A-Za-z0-9_-]{1,64}`):
+  `adp_payments.issue_refund` is listed as `adp_payments_issue_refund`, with the
+  capability id in `title` and `_meta["io.contextos/capabilityId"]`; `tools/call` takes
+  either name. **Behavior change:** hosts that matched listed names against capability
+  ids see the new names.
 - MCP `tools/call` accepts the host's call id in `_meta["io.contextos/toolCallId"]`,
   returns the call and operation ids in `_meta` on every result, and tells the model in
   the error text whether the refused call had any effect.

@@ -351,15 +351,14 @@ async with MCPServerStreamableHttp(
     tool_meta_resolver=contextos_meta, custom_data_extractor=contextos_ids, cache_tools_list=True,
 ) as server:
     agent = Agent(name="support", instructions=INSTRUCTIONS, model="gpt-6.1-sol",
-                  mcp_servers=[server], mcp_config={"include_server_in_tool_names": True})
+                  mcp_servers=[server])
     result = await Runner.run(agent, goal, run_config=config)
 ```
 
-The tools are the run's surfaced capabilities with their reviewed input schemas. Their
-names are capability ids such as `adp_payments.issue_refund`, and OpenAI function names
-allow only letters, digits, `_` and `-`; `include_server_in_tool_names` exposes them as
-`mcp_contextos__adp_payments_issue_refund` and still calls the server by the original
-name (TypeScript: `mcpConfig: { includeServerInToolNames: true }`, and
+The tools are the run's surfaced capabilities with their reviewed input schemas, listed
+under names OpenAI function names allow (`adp_payments_issue_refund` for the capability
+`adp_payments.issue_refund`, which is in the tool's `title` and
+`_meta["io.contextos/capabilityId"]`); no renaming option is needed (TypeScript:
 `new MCPServerStreamableHttp({ url, requestInit: { headers }, toolMetaResolver, customDataExtractor })`).
 Every result's `_meta` names the call and its operation (`io.contextos/toolCallId`,
 `io.contextos/operationId`). The SDK hands it to `custom_data_extractor` as

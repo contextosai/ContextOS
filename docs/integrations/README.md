@@ -137,9 +137,10 @@ plainly whether anything happened.
   a seam that can refuse: a model wrapper or middleware.
 - **Retries below the hook.** SDK-level model retries can happen between "before" and
   "after" callbacks. Budget at the lowest layer that sees each attempt.
-- **Tool names.** Capability ids contain dots (`adp_payments.issue_refund`), which some
-  model APIs reject in tool names. In-process tools use the function name; MCP clients
-  need their prefixing or renaming option.
+- **Tool names.** Capability ids contain dots (`adp_payments.issue_refund`), which model
+  APIs reject in tool names. In-process tools use the function name; the MCP endpoint
+  lists names they accept (`adp_payments_issue_refund`) with the capability id in
+  `title` and `_meta["io.contextos/capabilityId"]`, and takes either in a call.
 - **Async frameworks.** Use `contextos.aio` (`AsyncClient`, `AsyncRun`): the same
   methods as coroutines, and `governed_tool` on an `AsyncRun` makes async tools.
   Calling the synchronous client from async code blocks the event loop.

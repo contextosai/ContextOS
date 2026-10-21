@@ -348,8 +348,8 @@ agent = Agent(role="Support agent", goal=GOAL, backstory=INSTRUCTIONS, llm=llm, 
 ```
 
 The agent sees only the run's surfaced capabilities, with their reviewed input schemas,
-named after the server and the sanitized capability id (`adp_orders.lookup` becomes
-`..._adp_orders_lookup`). Refusals come back with `isError: true`, which CrewAI turns
+named after the server and the listed tool name (`adp_orders.lookup` is listed as
+`adp_orders_lookup`, so CrewAI shows `..._adp_orders_lookup`). Refusals come back with `isError: true`, which CrewAI turns
 into a `ToolFailure`, so the model reads the gateway's reason and CrewAI records the
 failure. Operation keys are derived from capability and arguments, so a repeated call
 cannot apply twice. Every result carries `_meta["io.contextos/toolCallId"]` and

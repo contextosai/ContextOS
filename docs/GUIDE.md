@@ -109,7 +109,11 @@ the executor generation as headers, for example:
 ```
 
 The host sees only the run's surfaced capabilities, with their reviewed input schemas
-and risk annotations. Each `tools/call` runs the full governed pipeline. Refusals come
+and risk annotations, under tool names model APIs accept (`[A-Za-z0-9_-]{1,64}`:
+`adp_payments.issue_refund` is listed as `adp_payments_issue_refund`, with the
+capability id in `title` and `_meta["io.contextos/capabilityId"]`; a call may name
+either). Names that would collide, or run past 64 characters, end in a short digest of
+the capability id, so each names exactly one capability. Each `tools/call` runs the full governed pipeline. Refusals come
 back as tool errors whose `structuredContent` carries the status and reason codes, so
 the model sees that the action did not happen. Operation identity comes from
 `_meta["io.contextos/idempotencyKey"]` when given; otherwise effectful calls derive it

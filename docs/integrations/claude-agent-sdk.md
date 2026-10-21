@@ -97,10 +97,11 @@ mcp_servers={"contextos": {
 We checked this route against `contextosd` with Claude Code 2.1.305. Here is what works
 and what does not:
 
-- The server reports `connected`. Tool names are normalized: `adp_orders.lookup`
-  becomes `mcp__contextos__adp_orders_lookup` and `adp_payments.issue_refund` becomes
-  `mcp__contextos__adp_payments_issue_refund`. Read the real names from the `init`
-  message's `tools` before you write allow rules or hook matchers.
+- The server reports `connected`. The server lists `adp_orders.lookup` as
+  `adp_orders_lookup` (names model APIs accept), and Claude Code prefixes it:
+  `mcp__contextos__adp_orders_lookup`, `mcp__contextos__adp_payments_issue_refund`. Read
+  the real names from the `init` message's `tools` before you write allow rules or hook
+  matchers.
 - Each `tools/call` runs the full governed pipeline. A repeated refund comes back with
   `isError: true` and the text `ContextOS paused: retry_unsafe. This call had no
   effect; do not retry it unchanged. ...` (an unknown outcome reads "The outcome is

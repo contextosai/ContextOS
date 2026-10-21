@@ -1024,10 +1024,16 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
     let listed = rpc(2, "tools/list", json!({})).await;
     conforms("McpResponse", &listed);
     let tools = listed["result"]["tools"].as_array().unwrap();
+    // Listed under a name model APIs accept; the capability id travels with it.
     let refund = tools
         .iter()
-        .find(|t| t["name"] == "adp_payments.issue_refund")
+        .find(|t| t["name"] == "adp_payments_issue_refund")
         .expect("surfaced capability listed");
+    assert_eq!(
+        refund["_meta"]["io.contextos/capabilityId"],
+        "adp_payments.issue_refund"
+    );
+    assert_eq!(refund["title"], "adp_payments.issue_refund");
     assert_eq!(refund["annotations"]["destructiveHint"], true);
     assert_eq!(
         refund["inputSchema"]["required"],
@@ -1068,6 +1074,21 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
         json!(["retry_unsafe"])
     );
     assert_eq!(retried["result"]["_meta"]["io.contextos/operationId"], operation);
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    // The listed name and the capability id name the same tool: a retry by either is the
+    // same operation.
+    let by_listed_name = rpc(
+        41,
+        "tools/call",
+        json!({"name": "adp_payments_issue_refund", "arguments": args, "_meta": evidence}),
+    )
+    .await;
+    assert_eq!(
+        by_listed_name["result"]["structuredContent"]["reason_codes"],
+        json!(["retry_unsafe"]),
+        "{by_listed_name}"
+    );
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
 
     // Arguments are checked against the reviewed schema before anything else.

@@ -8,6 +8,10 @@
 //!
 //! - `tools/list` lists only what this run surfaced, with reviewed input schemas and
 //!   risk annotations. Discovery grants nothing; the gateway re-checks every call.
+//!   Tool names are ones model APIs accept (`[A-Za-z0-9_-]{1,64}`): a capability id
+//!   with other characters (`adp_payments.issue_refund`) is listed with them replaced by
+//!   `_`, and the id itself is in `title` and `_meta["io.contextos/capabilityId"]`.
+//!   Calls name a tool by either.
 //! - `tools/call` returns the tool's output on success. Anything else is a tool error
 //!   (`isError: true`) whose `structuredContent` carries the status, reason codes and
 //!   obligations, so the model sees that it may not proceed.
@@ -32,6 +36,7 @@ use contextos_contract::types::ActionEffect;
 use contextos_gateway::{CapabilityManifest, Continuation, DispatchOutcome, Gateway, RunAdmission};
 use contextos_store::{AppendLog, DocumentStore};
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
 
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
 const SUPPORTED_VERSIONS: [&str; 4] = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
@@ -59,7 +64,49 @@ fn generation(headers: &HeaderMap, request: &Value) -> Option<u64> {
         .or_else(|| request["params"]["_meta"]["io.contextos/executorGeneration"].as_u64())
 }
 
-fn tool(manifest: &CapabilityManifest) -> Value {
+/// The longest tool name model APIs accept.
+const MAX_TOOL_NAME: usize = 64;
+
+/// Tool names for a run's surfaced capabilities, name -> capability id. A capability id
+/// model APIs accept is its own name; otherwise characters outside `[A-Za-z0-9_-]`
+/// become `_`. A name that would collide with another capability's, or exceed 64
+/// characters, ends in 8 hex digits of the id's digest, so each names one capability.
+fn tool_names<'a>(capability_ids: impl IntoIterator<Item = &'a String>) -> BTreeMap<String, String> {
+    let mut ids: Vec<&String> = capability_ids.into_iter().collect();
+    ids.sort();
+    ids.dedup();
+    let base = |id: &str| -> String {
+        id.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    for id in &ids {
+        *uses.entry(base(id)).or_default() += 1;
+    }
+    ids.into_iter()
+        .map(|id| {
+            let plain = base(id);
+            let name = if uses[&plain] == 1 && !plain.is_empty() && plain.len() <= MAX_TOOL_NAME {
+                plain
+            } else {
+                let digest = sha256_canonical(&json!(id)).unwrap_or_default();
+                let mut stem = plain;
+                stem.truncate(MAX_TOOL_NAME - 9);
+                format!("{stem}_{}", digest.get(7..15).unwrap_or_default())
+            };
+            (name, id.clone())
+        })
+        .collect()
+}
+
+fn tool(name: &str, manifest: &CapabilityManifest) -> Value {
     let read_only = manifest.action_risk.effect == ActionEffect::None;
     let description = manifest.description.clone().unwrap_or_else(|| {
         format!(
@@ -68,7 +115,8 @@ fn tool(manifest: &CapabilityManifest) -> Value {
         )
     });
     json!({
-        "name": manifest.capability_id,
+        "name": name,
+        "title": manifest.capability_id,
         "description": description,
         "inputSchema": manifest.input_schema.clone().unwrap_or_else(|| json!({"type": "object"})),
         "annotations": {
@@ -77,6 +125,7 @@ fn tool(manifest: &CapabilityManifest) -> Value {
             "idempotentHint": read_only,
             "openWorldHint": true,
         },
+        "_meta": {"io.contextos/capabilityId": manifest.capability_id},
     })
 }
 
@@ -184,12 +233,9 @@ where
         }
         "ping" => rpc_result(id, json!({})),
         "tools/list" => {
-            let mut names: Vec<&String> = admission.surfaced_capabilities.iter().collect();
-            names.sort();
-            let tools: Vec<Value> = names
-                .into_iter()
-                .filter_map(|n| gateway.manifest(n))
-                .map(tool)
+            let tools: Vec<Value> = tool_names(&admission.surfaced_capabilities)
+                .iter()
+                .filter_map(|(name, capability)| gateway.manifest(capability).map(|m| tool(name, m)))
                 .collect();
             rpc_result(id, json!({"tools": tools}))
         }
@@ -197,9 +243,12 @@ where
             let Some(name) = params["name"].as_str() else {
                 return rpc_error(id, INVALID_PARAMS, "params.name is required");
             };
+            // The listed name, or the capability id itself.
+            let names = tool_names(&admission.surfaced_capabilities);
+            let capability = names.get(name).map_or(name, String::as_str);
             let Some(manifest) = gateway
-                .manifest(name)
-                .filter(|_| admission.surfaced_capabilities.contains(name))
+                .manifest(capability)
+                .filter(|_| admission.surfaced_capabilities.contains(capability))
             else {
                 return rpc_error(id, INVALID_PARAMS, "unknown tool");
             };
@@ -225,7 +274,7 @@ where
             let envelope = json!({
                 "envelope_version": "contextos.tool_call.v1",
                 "tool_call_id": tool_call_id,
-                "run_id": admission.run_id, "trace_id": admission.trace_id, "capability_id": name, "args": arguments,
+                "run_id": admission.run_id, "trace_id": admission.trace_id, "capability_id": manifest.capability_id, "args": arguments,
                 "principal_chain": [{"kind": "agent", "id": admission.actor["principal_id"]}],
                 "approval_mode_requested": manifest.approval_mode, "approval_mode_effective": manifest.approval_mode,
                 "approval_mode_highest": manifest.approval_mode,
@@ -255,4 +304,38 @@ where
 /// For malformed bodies.
 pub fn parse_error() -> Response {
     rpc_error(&Value::Null, PARSE_ERROR, "invalid JSON")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(ids: &[&str]) -> BTreeMap<String, String> {
+        let owned: Vec<String> = ids.iter().map(|s| (*s).to_owned()).collect();
+        tool_names(&owned)
+    }
+
+    #[test]
+    fn tool_names_are_ones_model_apis_accept_and_name_one_capability() {
+        let listed = names(&["adp_payments.issue_refund", "adp_orders.lookup", "plain-name_1"]);
+        assert_eq!(listed["adp_payments_issue_refund"], "adp_payments.issue_refund");
+        assert_eq!(listed["adp_orders_lookup"], "adp_orders.lookup");
+        assert_eq!(listed["plain-name_1"], "plain-name_1");
+
+        // Two ids that would share a name each get a distinct, digest-suffixed one.
+        let clash = names(&["a.b", "a_b"]);
+        assert_eq!(clash.len(), 2);
+        assert!(
+            clash.keys().all(|n| n.starts_with("a_b_") && n.len() == 12),
+            "{clash:?}"
+        );
+        assert_ne!(clash.keys().next(), clash.keys().nth(1));
+
+        let long = "x.".repeat(40);
+        let listed = names(&[long.as_str()]);
+        let name = listed.keys().next().unwrap();
+        assert_eq!(name.len(), MAX_TOOL_NAME);
+        let valid = |n: &str| n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        assert!(listed.keys().all(|n| valid(n)));
+    }
 }

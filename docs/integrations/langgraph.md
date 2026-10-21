@@ -271,15 +271,13 @@ from langchain.mcp import MCPAdapter
 transport = StreamableHttpTransport(f"{base_url}/v1/runs/{run.run_id}/mcp", headers={
     "Authorization": f"Bearer {token}", "ContextOS-Executor-Generation": str(run.executor_generation)})
 async with MCPAdapter(MCPClient(transport)) as adapter:
-    tools = await adapter.list_tools()
-    for t in tools:
-        t.name = t.name.replace(".", "_")      # model APIs reject dots in tool names
+    tools = await adapter.list_tools()     # names model APIs accept, e.g. adp_payments_issue_refund
     agent = create_agent(model, tools, middleware=[ContextOS(run)])
     result = await agent.ainvoke({"messages": [{"role": "user", "content": goal}]}, config)
 ```
 
-The tools carry the capabilities' reviewed input schemas, and renaming them is safe: the
-adapter calls the server by the MCP tool's own name. Refusals arrive as error
+The tools carry the capabilities' reviewed input schemas; each tool's `title` and
+`_meta["io.contextos/capabilityId"]` name the capability it governs. Refusals arrive as error
 `ToolMessage`s with the gateway's text (for example `ContextOS paused: retry_unsafe. This
 call had no effect; do not retry it unchanged.`), so `wrap_tool_call` sees no exception;
 inspect `status == "error"` there if you need to interrupt on approval. Operation keys
