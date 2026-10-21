@@ -17,7 +17,7 @@
 //! definitively did not apply the effect.
 
 use contextos_contract::canonical::sha256_canonical;
-use contextos_store::{DocKey, DocKind, DocumentStore, StoreError};
+use contextos_store::{DocKey, DocKind, DocumentStore, StoreError, Versioned};
 use serde_json::{Value, json};
 
 use crate::admission::RunAdmission;
@@ -75,15 +75,20 @@ pub(crate) enum EffectClaim {
 }
 
 /// Claims the effect with `signature` for `operation_id`, atomically: of operations
-/// racing for one signature, exactly one gets [`EffectClaim::Claimed`].
+/// racing for one signature, exactly one gets [`EffectClaim::Claimed`]. With `count`,
+/// a successful new claim also counts the call for the loop guard in the same write.
+/// `seen` is the document as read at authorization: the first attempt writes against
+/// it without reading again (on a store where reads are round trips).
 pub(crate) async fn claim_effect<S: DocumentStore>(
     store: &S,
     key: &DocKey,
     signature: &str,
     operation_id: &str,
+    count: bool,
+    seen: Option<&Versioned>,
 ) -> Result<EffectClaim, StoreError> {
     let outcome = std::sync::Mutex::new(EffectClaim::Claimed);
-    update(store, key, |state| {
+    update_from(store, key, First::Seen(seen), |state| {
         let effects = effects_mut(state)?;
         let (result, write) = match effects.get(signature).and_then(Value::as_str) {
             Some(holder) if holder == operation_id => (EffectClaim::Claimed, false),
@@ -94,6 +99,13 @@ pub(crate) async fn claim_effect<S: DocumentStore>(
                 (EffectClaim::Claimed, true)
             }
         };
+        if write && count {
+            let counts = state["counts"].as_object_mut().ok_or(StoreError::Integrity)?;
+            if counts.contains_key(signature) || counts.len() < MAX_SIGNATURES {
+                let next = counts.get(signature).and_then(Value::as_u64).unwrap_or(0) + 1;
+                counts.insert(signature.to_owned(), json!(next));
+            }
+        }
         *outcome.lock().map_err(|_| StoreError::Integrity)? = result;
         Ok(write)
     })
@@ -152,12 +164,36 @@ async fn update<S: DocumentStore>(
     key: &DocKey,
     change: impl Fn(&mut Value) -> Result<bool, StoreError>,
 ) -> Result<(), StoreError> {
+    update_from(store, key, First::Read, change).await
+}
+
+/// Where [`update_from`] starts: a fresh read, or the document as already seen (`None`
+/// when it was absent).
+enum First<'a> {
+    Read,
+    Seen(Option<&'a Versioned>),
+}
+
+/// As [`update`], starting from `first`.
+async fn update_from<S: DocumentStore>(
+    store: &S,
+    key: &DocKey,
+    first: First<'_>,
+    change: impl Fn(&mut Value) -> Result<bool, StoreError>,
+) -> Result<(), StoreError> {
+    let mut seen = match first {
+        First::Read => None,
+        First::Seen(read) => Some(read),
+    };
     for attempt in 0..32_u32 {
         if attempt > 0 {
             // Parallel calls of one run contend on its document: back off briefly.
             tokio::time::sleep(std::time::Duration::from_micros(50 << attempt.min(8))).await;
         }
-        let current = store.get(key).await?;
+        let current = match seen.take() {
+            Some(read) => read.cloned(),
+            None => store.get(key).await?,
+        };
         let mut state = current
             .as_ref()
             .map_or_else(|| json!({"counts": {}}), |c| c.body.clone());

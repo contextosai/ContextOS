@@ -23,9 +23,15 @@ CONTEXTOS_LOAD_REPLICAS=3 CONTEXTOS_LOAD_AGENTS=64 CONTEXTOS_LOAD_RUNS=40 \
 
 | Setup (one laptop, everything in one process) | Result |
 |---|---|
-| 3 replicas, 64 agents | ~2,600 runs/s (admission + effect), ~5,200 requests/s, p50 9–10 ms, p99 47 ms; admission p50 5.1–5.3 ms (2026-10-21, after the envelope, schema, escalation, metrics and memory-verification checks; ~2,300 before them, within run-to-run variance) |
-| PostgreSQL (local socket), 1 replica, 64 agents | ~1,750 runs/s, ~3,500 requests/s, p50 17 ms, p99 51 ms; admission p50 14 ms |
-| PostgreSQL (local socket), 3 replicas, 64 agents | ~1,530 runs/s, ~3,060 requests/s, p50 16 ms, p99 71 ms |
+| 3 replicas, 64 agents | ~3,200 runs/s (admission + effect), ~6,400 requests/s, p50 6.5 ms, p99 46 ms; admission p50 4.0 ms |
+| PostgreSQL (local socket), 1 replica, 64 agents | ~2,240 runs/s, ~4,480 requests/s, p50 14 ms, p99 34 ms; admission p50 11 ms |
+| PostgreSQL (local socket), 3 replicas, 64 agents | ~1,800 runs/s, ~3,610 requests/s, p50 13 ms, p99 67 ms |
+
+Measured 2026-10-21 after slices 51–57 (repeated-effect guard, approvals, framework
+integrations), with contextosd's default guards, on a laptop under other load (load
+average 3–8); the earlier figures (~2,600, ~1,750 and ~1,530 runs/s) were taken before
+those slices on a quieter machine, so the difference is within this setup's
+run-to-run variance rather than a speedup.
 
 The test asserts what matters at scale: every effect reaches the provider exactly
 once, and one tenant's audit chain written by every replica verifies end to end. The
@@ -76,12 +82,20 @@ equals UTF-16 order.
 | Measure | Result |
 |---|---|
 | One run, sequential effects (average over 50 effects) | ~0.36 ms per effect |
-| 32 runs of one tenant in parallel, 50 effects each | ~98 µs per effect (~10,200 effects/s) |
+| 32 runs of one tenant in parallel, 50 effects each | ~95 µs per effect (~10,500 effects/s) |
 
 The benchmark runs with contextosd's default guards (loop guard, repeated-effect
 guard), and each effect of a run is a distinct refund. The repeated-effect guard claims
-each new effect's signature with one compare-and-swap before dispatch, which costs
-~4% (`CONTEXTOS_BENCH_GUARDS=off`: ~0.35 ms sequential, ~95 µs per effect in parallel).
+each new effect's signature, and counts it for the loop guard, in one compare-and-swap
+before dispatch, seeded from the state read during authorization; in memory that is
+within noise (`CONTEXTOS_BENCH_GUARDS=off` measures without the guards).
+
+`CONTEXTOS_BENCH_COUNT=1 cargo bench -p contextos-gateway --bench dispatch` prints
+document-store operations per sequential effect, counted with reads treated as
+expensive (as on PostgreSQL), besides the audit batch: 5 reads and 6 writes with the
+guards, 4 and 5 without. The guards' read is fetched concurrently with the other
+authorization facts; their one write is serial. (Before the claim and the loop count
+shared one seeded write, the guards cost 3 reads and 2 writes per effect.)
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:
@@ -123,19 +137,21 @@ linearization point). On PostgreSQL every removed read is a round trip.
 ## PostgreSQL
 
 Measured against PostgreSQL 16 on the same laptop (`scripts/dev-postgres.sh`), with
-`synchronous_commit` on:
+`synchronous_commit` on (socket column 2026-10-21 with the default guards, a fresh
+database per measurement; the TCP column is from before them):
 
 | Measure | Over a Unix socket | Over loopback TCP |
 |---|---|---|
-| One run, sequential effects | ~1.4 ms per effect | ~4.0 ms per effect |
-| 32 runs of one tenant in parallel | ~194 µs per effect (~5,100 effects/s) | ~0.89 ms per effect |
+| One run, sequential effects | ~1.25 ms per effect (~1.15 ms without guards) | ~4.0 ms per effect |
+| 32 runs of one tenant in parallel | ~186 µs per effect (~5,400 effects/s; ~173 µs without guards) | ~0.89 ms per effect |
 
 The TCP column is bounded by this machine's loopback, not the runtime: plain
 concurrent reads through the same pool top out at ~9,400/s over TCP against ~124,000/s
 over the socket. In production, throughput per tenant is round trips per effect times
 network latency, so the runtime keeps round trips low:
 
-- about 8 statements per effect (from 13): one run-state read, policy, constraint and
+- about 8 statements per effect (from 13) before the repeated-effect guard, which adds
+  one write and one concurrent read: one run-state read, policy, constraint and
   approval facts fetched concurrently with the operation-ledger read, transactions
   seeded from state the dispatch already holds (claim from the fast-path read,
   observation from the claim, settlement from the reservation) on stores where reads

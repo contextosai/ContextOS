@@ -14,7 +14,9 @@ use contextos_contract::execution::WorkflowFeatureSet;
 use contextos_contract::types::{CompiledContext, ContextPack, InvokeRequest, RunContext};
 use contextos_gateway::*;
 use contextos_kernel::{CompileDeps, ContextPackCompiler, STANDARD_PROFILE_REGISTRY};
-use contextos_store::{AppendLog, DocumentStore, MemoryLog, MemoryStore};
+use contextos_store::{
+    AppendLog, DocKey, DocKind, DocumentStore, Encoded, MemoryLog, MemoryStore, ScanCursor, StoreError, Versioned,
+};
 use criterion::{Criterion, criterion_group, criterion_main};
 use serde_json::{Value, json};
 
@@ -390,11 +392,81 @@ async fn concurrent<S: DocumentStore + 'static, L: AppendLog + 'static>(s: &Setu
     started.elapsed().mul_f64(iterations as f64 / effects as f64)
 }
 
+/// Counts document-store operations, and reports reads as expensive so the gateway
+/// takes the paths it takes on PostgreSQL, where every operation is a round trip.
+struct Counting {
+    inner: MemoryStore,
+    reads: AtomicU64,
+    writes: AtomicU64,
+}
+
+impl DocumentStore for Counting {
+    async fn get(&self, key: &DocKey) -> Result<Option<Versioned>, StoreError> {
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        self.inner.get(key).await
+    }
+    async fn create(&self, key: &DocKey, body: &Value) -> Result<Versioned, StoreError> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.inner.create(key, body).await
+    }
+    async fn compare_and_swap(&self, key: &DocKey, expected: u64, body: &Value) -> Result<Versioned, StoreError> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.inner.compare_and_swap(key, expected, body).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        key: &DocKey,
+        expected: u64,
+        body: Value,
+        encoded: Encoded,
+    ) -> Result<u64, StoreError> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.inner.compare_and_swap_encoded(key, expected, body, encoded).await
+    }
+    async fn expiring(
+        &self,
+        kind: DocKind,
+        before_us: u64,
+        after: Option<&ScanCursor>,
+        limit: usize,
+    ) -> Result<Vec<ScanCursor>, StoreError> {
+        self.inner.expiring(kind, before_us, after, limit).await
+    }
+}
+
+/// `CONTEXTOS_BENCH_COUNT=1`: store reads and writes per sequential effect (round trips
+/// on PostgreSQL, besides the audit batch), instead of timings.
+fn count_round_trips(runtime: &tokio::runtime::Runtime) {
+    let store = Arc::new(Counting { inner: MemoryStore::new(), reads: AtomicU64::new(0), writes: AtomicU64::new(0) });
+    let s = setup(store.clone(), MemoryLog::new());
+    runtime.block_on(async {
+        let admission = admit(s.store.as_ref()).await;
+        // The first effect creates the run's ledgers; count the steady state.
+        let first = call(&admission.run_id, "tc_first", "op_first", 100);
+        s.gateway.dispatch(&admission, &first).await.unwrap();
+        let (reads, writes) = (store.reads.load(Ordering::Relaxed), store.writes.load(Ordering::Relaxed));
+        for i in 0..10 {
+            let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"), i);
+            assert_eq!(s.gateway.dispatch(&admission, &envelope).await.unwrap().result["status"], "completed");
+        }
+        let per = |now: u64, then: u64| (now - then) as f64 / 10.0;
+        println!(
+            "store operations per effect: {:.1} reads, {:.1} writes",
+            per(store.reads.load(Ordering::Relaxed), reads),
+            per(store.writes.load(Ordering::Relaxed), writes)
+        );
+    });
+}
+
 fn bench(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
+    if std::env::var("CONTEXTOS_BENCH_COUNT").is_ok() {
+        count_round_trips(&runtime);
+        return;
+    }
     let memory = setup(Arc::new(MemoryStore::new()), MemoryLog::new());
     c.bench_function("gateway_dispatch_completed", |b| {
         b.to_async(&runtime).iter_custom(|n| sequential(&memory, n))

@@ -1274,8 +1274,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // of identical effects racing under different keys, exactly one is sent. The
         // check at authorization only refuses the sequential case early.
         if guards_effect && new_operation {
-            let claimed_effect =
-                loop_guard::claim_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await;
+            let claimed_effect = loop_guard::claim_effect(
+                self.store.as_ref(),
+                &loop_key,
+                &call_signature,
+                &operation_id,
+                self.loop_limit.is_some(),
+                loops.as_ref(),
+            )
+            .await;
             let refusal = match claimed_effect {
                 Ok(loop_guard::EffectClaim::Claimed) => None,
                 Ok(loop_guard::EffectClaim::Held(holder)) => Some((
@@ -1366,7 +1373,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 adapter.invoke(manifest, &call)
             ),
             async {
-                if self.loop_limit.is_some() && new_operation {
+                // A guarded effect was counted with its claim, in one write.
+                if self.loop_limit.is_some() && new_operation && !guards_effect {
                     loop_guard::note(self.store.as_ref(), &loop_key, &call_signature).await
                 } else {
                     Ok(())
