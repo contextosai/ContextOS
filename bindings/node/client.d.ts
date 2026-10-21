@@ -36,6 +36,12 @@ export declare class ToolOutcome extends Error {
 }
 /** Approval pending, input required, or an unknown outcome to reconcile. Never retry blindly. */
 export declare class ToolPaused extends ToolOutcome {
+  /**
+   * What the pause waits on: `approval` (re-send the same call once approved), `input`
+   * (answer with provideInput), `unknown_outcome` (the effect may have happened:
+   * reconcile), `duplicate` (already requested; not repeated) or `other`.
+   */
+  readonly kind: "approval" | "input" | "unknown_outcome" | "duplicate" | "other";
   readonly inputRequests: Record<string, Json> | null;
 }
 /** Authority, policy, constraints or budget refused the call. */
@@ -125,5 +131,10 @@ export declare class Run {
 export declare function governedTool<A extends Record<string, Json>>(
   run: Run,
   capabilityId: string,
-  options?: { approvalMode?: ApprovalMode; idempotencyKey?: (args: A) => string; evidenceRefs?: string[] },
+  options?: {
+    approvalMode?: ApprovalMode;
+    idempotencyKey?: (args: A) => string;
+    evidenceRefs?: string[];
+    toolCallId?: (args: A) => string;
+  },
 ): (args: A) => Promise<Record<string, Json>>;

@@ -1,0 +1,2 @@
+agent-framework-core==1.22.0
+agent-framework-openai==1.17.0

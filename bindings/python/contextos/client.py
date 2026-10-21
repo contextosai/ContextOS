@@ -70,6 +70,14 @@ class ToolPaused(ToolOutcome):
     """Approval pending, input required, or an unknown outcome awaiting reconciliation."""
 
     @property
+    def kind(self) -> str:
+        """What the pause waits on: ``approval`` (redeem by re-sending the same call once
+        approved), ``input`` (answer with ``provide_input``), ``unknown_outcome`` (the
+        effect may have happened: reconcile), ``duplicate`` (this operation was already
+        requested and is not repeated) or ``other``."""
+        return _pause_kind(self.obligations, self.reason_codes)
+
+    @property
     def input_requests(self) -> Optional[dict]:
         return (self.result.get("output") or {}).get("result", {}).get("inputRequests")
 
@@ -84,6 +92,18 @@ class ToolRejected(ToolOutcome):
 
 class ToolFailed(ToolOutcome):
     """The provider definitively did not apply the effect."""
+
+
+def _pause_kind(obligations: List[str], reason_codes: List[str]) -> str:
+    if "await_approval" in obligations:
+        return "approval"
+    if "provide_requested_input" in obligations:
+        return "input"
+    if "reconcile_effect_before_retry" in obligations:
+        return "unknown_outcome"
+    if "retry_unsafe" in reason_codes or "reconcile_existing_operation" in obligations:
+        return "duplicate"
+    return "other"
 
 
 _OUTCOMES = {"paused": ToolPaused, "blocked": ToolBlocked, "rejected": ToolRejected, "failed": ToolFailed}
@@ -331,12 +351,14 @@ class Run:
 
 def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_only",
                   idempotency_key: Optional[Callable[..., str]] = None,
-                  evidence_refs: Optional[List[str]] = None) -> Callable[[Callable[..., Any]], Callable[..., dict]]:
+                  evidence_refs: Optional[List[str]] = None,
+                  tool_call_id: Optional[Callable[..., str]] = None) -> Callable[[Callable[..., Any]], Callable[..., dict]]:
     """Turns a tool's signature into a governed call: arguments are bound by name and
     sent through the gateway; the decorated body never runs locally.
 
     ``idempotency_key`` derives the operation key from the call's arguments, so a
     retried agent step maps to the same operation and cannot apply twice.
+    ``tool_call_id`` derives the call's id the same way, so a DecisionRecord can cite it.
     """
 
     def wrap(function: Callable[..., Any]) -> Callable[..., dict]:
@@ -348,8 +370,9 @@ def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_on
             bound.apply_defaults()
             arguments = dict(bound.arguments)
             key = idempotency_key(**arguments) if idempotency_key else None
+            call_id = tool_call_id(**arguments) if tool_call_id else None
             return run.call_tool(capability_id, arguments, approval_mode=approval_mode, idempotency_key=key,
-                                 evidence_refs=evidence_refs)
+                                 evidence_refs=evidence_refs, tool_call_id=call_id)
 
         return call
 

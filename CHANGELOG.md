@@ -170,6 +170,20 @@ First release candidate of the ContextOS runtime.
   fencing handled, and a `governed_tool` decorator for agent frameworks.
 - `ctx` command line; Python, Node and WebAssembly bindings over one JSON facade.
 
+### Framework integrations
+- Implementation guides (`docs/integrations/`) and runnable examples
+  (`examples/frameworks/`) for LangGraph, the OpenAI Agents SDK (Python and
+  TypeScript), Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex,
+  Microsoft Agent Framework, the Vercel AI SDK and Mastra. Each runs the framework's
+  own agent loop with governed tools, a budget reservation around every model call and
+  refusals the model can read; without a provider key it uses a scripted model.
+- `ToolPaused.kind` in both clients says what a pause waits on (`approval`, `input`,
+  `unknown_outcome`, `duplicate`), and `governed_tool` / `governedTool` take a
+  `tool_call_id` derivation so a decision can cite the call.
+- MCP `tools/call` accepts the host's call id in `_meta["io.contextos/toolCallId"]`,
+  returns the call and operation ids in `_meta` on every result, and tells the model in
+  the error text whether the refused call had any effect.
+
 ### Operations
 - Distroless non-root image, hardened Helm chart, signed releases with provenance and
   SBOMs, cargo-deny policy, property fuzzing, threat model, benchmarks.

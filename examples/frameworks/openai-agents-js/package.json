@@ -1,0 +1,9 @@
+{
+  "name": "contextos-example-openai-agents-js",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@openai/agents": "0.20.0",
+    "zod": "4.6.7"
+  }
+}

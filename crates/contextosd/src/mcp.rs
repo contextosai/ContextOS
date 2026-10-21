@@ -17,7 +17,10 @@
 //!   effectful calls derive a key from the capability and canonical arguments, so a
 //!   host retrying a call it believes failed cannot apply the effect twice; read-only
 //!   calls get a fresh key per request. Evidence the call cites goes in
-//!   `_meta["io.contextos/evidenceRefs"]`.
+//!   `_meta["io.contextos/evidenceRefs"]`, and the host's own call id in
+//!   `_meta["io.contextos/toolCallId"]`. Every result names the call and operation in
+//!   `_meta` (`io.contextos/toolCallId`, `io.contextos/operationId`), so a decision
+//!   can cite what it relied on.
 //!
 //! The stateless `2026-07-28` profile needs no handshake; `initialize` and
 //! `notifications/initialized` are answered for older hosts without creating a session.
@@ -90,7 +93,13 @@ fn operation_key(manifest: &CapabilityManifest, arguments: &Value, meta: &Value,
     format!("mcp:{}", &digest[7..39])
 }
 
-fn call_result(outcome: &DispatchOutcome) -> Value {
+fn call_result(outcome: &DispatchOutcome, tool_call_id: &str, operation_id: &str) -> Value {
+    let mut call = call_outcome(outcome);
+    call["_meta"] = json!({"io.contextos/toolCallId": tool_call_id, "io.contextos/operationId": operation_id});
+    call
+}
+
+fn call_outcome(outcome: &DispatchOutcome) -> Value {
     let result = &outcome.result;
     let report = &outcome.report;
     let status = result["status"].as_str().unwrap_or_default();
@@ -113,8 +122,15 @@ fn call_result(outcome: &DispatchOutcome) -> Value {
         "status": status, "reason_codes": report.reason_codes, "obligations": report.obligations,
         "operation_id": report.operation_id, "approval_request_id": report.approval_request_id,
     });
+    // Tell the model plainly whether anything happened, so it neither retries an effect
+    // that may have applied nor reports one that did not.
+    let consequence = if report.obligations.iter().any(|o| o == "reconcile_effect_before_retry") {
+        "The outcome is unknown and must be reconciled; do not retry it."
+    } else {
+        "This call had no effect; do not retry it unchanged."
+    };
     let text = format!(
-        "ContextOS {status}: {}. {}",
+        "ContextOS {status}: {}. {consequence} {}",
         if report.reason_codes.is_empty() {
             "no reason codes".to_owned()
         } else {
@@ -202,9 +218,13 @@ where
                 Some(state) if continuing => state.to_owned(),
                 _ => operation_key(manifest, &arguments, meta, id),
             };
+            let tool_call_id = meta["io.contextos/toolCallId"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map_or_else(|| format!("mcp_{}", uuid::Uuid::now_v7().simple()), str::to_owned);
             let envelope = json!({
                 "envelope_version": "contextos.tool_call.v1",
-                "tool_call_id": format!("mcp_{}", uuid::Uuid::now_v7().simple()),
+                "tool_call_id": tool_call_id,
                 "run_id": admission.run_id, "trace_id": admission.trace_id, "capability_id": name, "args": arguments,
                 "principal_chain": [{"kind": "agent", "id": admission.actor["principal_id"]}],
                 "approval_mode_requested": manifest.approval_mode, "approval_mode_effective": manifest.approval_mode,
@@ -224,7 +244,7 @@ where
                 gateway.dispatch_as(admission, &envelope, executor_generation).await
             };
             match outcome {
-                Ok(outcome) => rpc_result(id, call_result(&outcome)),
+                Ok(outcome) => rpc_result(id, call_result(&outcome, &tool_call_id, &key)),
                 Err(_) => rpc_error(id, INTERNAL_ERROR, "governed dispatch is temporarily unavailable"),
             }
         }

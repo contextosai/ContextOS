@@ -1037,10 +1037,21 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
         )
     };
     let args = json!({"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 120_000});
-    let done = call(3, args.clone()).await;
+    let cited = json!({"io.contextos/evidenceRefs": ["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"],
+        "io.contextos/toolCallId": "tc_host_1"});
+    let done = rpc(
+        3,
+        "tools/call",
+        json!({"name": "adp_payments.issue_refund", "arguments": args, "_meta": cited}),
+    )
+    .await;
     assert_eq!(done["result"]["isError"], false, "{done}");
     conforms("McpResponse", &done);
     assert_eq!(done["result"]["structuredContent"]["refund_id"], "rf_77");
+    // The result names the call and operation, so a decision can cite them.
+    assert_eq!(done["result"]["_meta"]["io.contextos/toolCallId"], "tc_host_1");
+    let operation = done["result"]["_meta"]["io.contextos/operationId"].clone();
+    assert!(operation.as_str().unwrap().starts_with("mcp:"), "{operation}");
 
     // A host retrying what it believes failed cannot refund twice.
     let retried = call(4, args.clone()).await;
@@ -1050,6 +1061,7 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
         retried["result"]["structuredContent"]["reason_codes"],
         json!(["retry_unsafe"])
     );
+    assert_eq!(retried["result"]["_meta"]["io.contextos/operationId"], operation);
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
 
     // Arguments are checked against the reviewed schema before anything else.

@@ -5,6 +5,17 @@
   "protocol_tool": "issue_refund",
   "purpose_id": "support.refund",
   "desired_effect": "refund_created",
+  "description": "Issue a refund for an order to its customer, in minor units of the order's currency.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["order_id", "customer_id", "amount_minor"],
+    "properties": {
+      "order_id": {"type": "string"},
+      "customer_id": {"type": "string"},
+      "amount_minor": {"type": "integer", "minimum": 1}
+    }
+  },
   "action_risk": {
     "effect": "external_state",
     "authority": "service",

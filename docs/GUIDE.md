@@ -63,7 +63,9 @@ run.complete()
 
 Register `governed_tool` functions as your framework's tools (LangGraph, OpenAI Agents
 SDK, CrewAI and others accept plain Python callables); the decorated body never runs
-locally. After a crash, `client.attach(...).take_over()` resumes the run and fences the
+locally. [integrations/](integrations/README.md) has a guide and a runnable example for
+each popular framework, covering tools, model-call budgets, pauses and approvals,
+checkpoints, subagents and decisions. After a crash, `client.attach(...).take_over()` resumes the run and fences the
 old process.
 
 The same client exists for Node.js and other `fetch` runtimes, with TypeScript types:
@@ -107,7 +109,12 @@ back as tool errors whose `structuredContent` carries the status and reason code
 the model sees that the action did not happen. Operation identity comes from
 `_meta["io.contextos/idempotencyKey"]` when given; otherwise effectful calls derive it
 from the capability and arguments, so a host that retries a call it thinks failed
-cannot apply the effect twice. Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`.
+cannot apply the effect twice. Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`,
+and the host's own call id, if it has one, in `_meta["io.contextos/toolCallId"]`. Every
+result names the call and its operation in `_meta` (`io.contextos/toolCallId`,
+`io.contextos/operationId`), which is what a DecisionRecord cites. Keep one effect on
+one route: a call keyed explicitly and a call keyed by derivation are different
+operations, so the gateway does not deduplicate them against each other.
 A tool's `input_required` is passed through with `requestState`, and the host's retry
 with `inputResponses` continues the same operation.
 

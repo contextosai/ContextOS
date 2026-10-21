@@ -35,6 +35,15 @@ export class ToolOutcome extends Error {
   }
 }
 export class ToolPaused extends ToolOutcome {
+  /** What the pause waits on; see client.d.ts. */
+  get kind() {
+    const { obligations: o, reasonCodes: r } = this;
+    if (o.includes("await_approval")) return "approval";
+    if (o.includes("provide_requested_input")) return "input";
+    if (o.includes("reconcile_effect_before_retry")) return "unknown_outcome";
+    if (r.includes("retry_unsafe") || o.includes("reconcile_existing_operation")) return "duplicate";
+    return "other";
+  }
   get inputRequests() {
     return this.result.output?.result?.inputRequests ?? null;
   }
@@ -306,10 +315,12 @@ export class Run {
 /**
  * Wraps a capability as an async tool function taking named arguments. Register the
  * result with any framework that accepts async functions (Vercel AI SDK, LangChain.js,
- * OpenAI Agents SDK). `idempotencyKey` derives the operation key from the arguments.
+ * OpenAI Agents SDK). `idempotencyKey` derives the operation key from the arguments,
+ * and `toolCallId` the call's id, so a DecisionRecord can cite it.
  */
-export function governedTool(run, capabilityId, { approvalMode = "read_only", idempotencyKey, evidenceRefs = [] } = {}) {
+export function governedTool(run, capabilityId, { approvalMode = "read_only", idempotencyKey, evidenceRefs = [], toolCallId } = {}) {
   return (args) => run.callTool(capabilityId, args, {
     approvalMode, evidenceRefs, idempotencyKey: idempotencyKey ? idempotencyKey(args) : null,
+    toolCallId: toolCallId ? toolCallId(args) : undefined,
   });
 }

@@ -20,7 +20,8 @@ sed -e "s|sha256:REPLACED_BY_RUN_SH|$HASH|" -e "s|127.0.0.1:8080|127.0.0.1:$SERV
 export CONTEXTOS_AUDIT_SEED="$(python3 -c 'print("11"*32)')"   # development seed only; use [audit.kms] in production
 python3 examples/support-refund/dev_services.py >/dev/null & SERVICES=$!
 ./target/release/contextosd --config "$CONFIG" > "$LOG" 2>&1 & SERVER=$!
-trap 'kill $SERVICES $SERVER 2>/dev/null; wait 2>/dev/null; rm -f "$CONFIG" "$LOG"' EXIT
+# Silence stderr first: the shell reports the jobs it reaps as "Terminated".
+trap 'exec 2>/dev/null; kill $SERVICES $SERVER; wait; rm -f "$CONFIG" "$LOG"' EXIT
 export CONTEXTOS_URL="http://127.0.0.1:$SERVER_PORT"
 # Ready means contextosd answers and every development service accepts connections:
 # contextosd does not wait for its dependencies, so the first call could race them.

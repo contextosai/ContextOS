@@ -1,0 +1,10 @@
+{
+  "name": "contextos-example-vercel-ai-sdk",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.98",
+    "ai": "7.0.147",
+    "zod": "4.6.7"
+  }
+}
