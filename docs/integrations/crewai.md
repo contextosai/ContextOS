@@ -134,7 +134,7 @@ reservations = deque()
 def reserve(context):
     try:
         reservations.append(run.reserve_usage("model_call", tokens=4000))
-    except Exception as refused:               # budget_exhausted, or contextosd unreachable
+    except Exception as refused:               # BudgetExhausted, or contextosd unreachable
         raise HookAborted(f"model call not reserved: {refused}") from refused
 
 def settle(_source, _event):

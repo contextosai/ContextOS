@@ -12,8 +12,9 @@ request:
   approval pause becomes `ApprovalRequired`, and an unknown effect becomes
   `CallDeferred` for reconciliation. Nothing is turned into `ModelRetry`.
 - **Model**: `BudgetedModel` (a `WrapperModel`) reserves 1,000 tokens from the run's
-  budget before every request and settles after it. A run that cannot afford the next
-  request stops with `UsageLimitExceeded` before anything is sent.
+  budget before every request and settles after it, through `contextos.aio` so the
+  event loop never waits on `contextosd`. A run that cannot afford the next request
+  (`BudgetExhausted`) stops with `UsageLimitExceeded` before anything is sent.
 - **Decision**: the run ends with a DecisionRecord whose tool lineage the gateway
   verifies, then completes and prints its evidence.
 

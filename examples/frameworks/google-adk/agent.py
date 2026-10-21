@@ -31,8 +31,9 @@ from google.adk.runners import InMemoryRunner
 from google.adk.tools import FunctionTool
 from google.genai import types
 
-from contextos.client import ContextOSHTTPError
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, finish, offline, refusal, tools)
+from contextos.aio import AsyncRun
+from demo import (GOAL, INSTRUCTIONS, BudgetExhausted, ToolOutcome, ToolPaused, admit, approve, finish, offline,
+                  refusal, tools)
 
 MODEL_CALL_TOKENS = 1000
 warnings.filterwarnings("ignore", message=r"\[EXPERIMENTAL\]")
@@ -72,18 +73,17 @@ def _call(name: str, **args) -> LlmResponse:
         types.Part(function_call=types.FunctionCall(name=name, args=args))]))
 
 
-def budget_callbacks(run):
+def budget_callbacks(run: AsyncRun):
     """One reservation per model call, keyed by invocation and agent: an agent makes
-    one model call at a time, and sub-agents get their own key."""
+    one model call at a time, and sub-agents get their own key. The reservation opens in
+    one callback and settles in another, so it is reserved and settled explicitly."""
     open_reservations: dict = {}
 
     async def before_model(callback_context, llm_request):
         key = (callback_context.invocation_id, callback_context.agent_name)
         try:
-            # The client is synchronous; keep it off the event loop.
-            open_reservations[key] = await asyncio.to_thread(run.reserve_usage, "model_call",
-                                                             tokens=MODEL_CALL_TOKENS)
-        except ContextOSHTTPError as refused:
+            open_reservations[key] = await run.reserve_usage("model_call", tokens=MODEL_CALL_TOKENS)
+        except BudgetExhausted as refused:
             # Answering here skips the model call: no budget, no call.
             return LlmResponse(content=types.Content(role="model", parts=[types.Part(
                 text=f"Stopping: the run's budget refused another model call ({refused.code}).")]))
@@ -92,7 +92,7 @@ def budget_callbacks(run):
     async def settle(callback_context):
         reservation = open_reservations.pop((callback_context.invocation_id, callback_context.agent_name), None)
         if reservation:
-            await asyncio.to_thread(run.settle_usage, reservation)
+            await run.settle_usage(reservation)
 
     async def after_model(callback_context, llm_response):
         # Streaming calls this per chunk; settle once, on the final response.
@@ -150,8 +150,11 @@ def after_tool(tool, args, tool_context, tool_response):
 
 async def main() -> None:
     client, run = admit("google_adk")
-    lookup_order, issue_refund = tools(run)
-    before_model, after_model, on_model_error = budget_callbacks(run)
+    # The same run through the async client: its governed tools are coroutines, which
+    # ADK awaits, and the callbacks await the budget, so no request blocks the loop.
+    governed = AsyncRun(run)
+    lookup_order, issue_refund = tools(governed)
+    before_model, after_model, on_model_error = budget_callbacks(governed)
     scripted = offline("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_GENAI_USE_ENTERPRISE")
     agent = LlmAgent(
         name="support_agent",
@@ -191,7 +194,7 @@ async def main() -> None:
     print(f"agent: {summary}")
     await runner.close()
     for operation_id in UNKNOWN:
-        print(f"reconcile {operation_id}: {run.reconcile(operation_id)['status']}")
+        print(f"reconcile {operation_id}: {(await governed.reconcile(operation_id))['status']}")
 
     # Whether the refund happened comes from the gateway's result, not the model's account.
     finish(client, run, "issue_refund" in SUCCEEDED, summary)

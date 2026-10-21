@@ -76,14 +76,8 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 
 const budget: LanguageModelMiddleware = {
   specificationVersion: "v4",
-  async wrapGenerate({ doGenerate }) {
-    const reservation = await run.reserveUsage("model_call", { tokens: 4000 });
-    try {
-      return await doGenerate();
-    } finally {
-      await run.settleUsage(reservation);
-    }
-  },
+  // Reserves, calls, and settles even when the call throws.
+  wrapGenerate: ({ doGenerate }) => run.budgetedModelCall(() => doGenerate(), { tokens: 4000 }),
   async wrapStream({ doStream }) {
     const reservation = await run.reserveUsage("model_call", { tokens: 4000 });
     let settled: Promise<unknown> | undefined;
@@ -102,12 +96,12 @@ const budget: LanguageModelMiddleware = {
 const model = wrapLanguageModel({ model: openai("gpt-6.1-sol"), middleware: budget });
 ```
 
-A reservation that does not fit is refused with `budget_exhausted` and the call throws
-before the provider is contacted, so the loop stops whatever the model wants. The
+A reservation that does not fit throws `BudgetExhausted` (from the client) before the
+provider is contacted, so the loop stops whatever the model wants. The
 executor settling charges the whole reservation; to charge measured usage, route the
 provider through your LLM gateway with the `meter` scope and hand it the reservation id
-— call `model.doGenerate({ ...params, headers: { ...params.headers, "x-usage-reservation": reservation } })`
-inside `wrapGenerate` instead of `doGenerate()`, and let the gateway settle
+— in `wrapGenerate`, reserve with `run.reserveUsage`, call `model.doGenerate({ ...params, headers: { ...params.headers, "x-usage-reservation": reservation } })`
+instead of `doGenerate()`, and let the gateway settle
 ([GUIDE §6](../GUIDE.md#6-budget-model-calls-and-replans)).
 
 ## 5. Map outcomes

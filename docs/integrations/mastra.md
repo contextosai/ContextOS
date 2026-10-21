@@ -75,7 +75,7 @@ each attempt reserves first and is settled:
 const budget = {
   id: "contextos-budget",
   async processLLMRequest({ state }) {
-    state.reservation = await run.reserveUsage("model_call", { tokens: 4000 });   // refusal throws: no call
+    state.reservation = await run.reserveUsage("model_call", { tokens: 4000 });   // BudgetExhausted throws: no call
   },
   async processLLMResponse({ state }) {
     const reservation = state.reservation;
@@ -86,15 +86,16 @@ const budget = {
 const agent = new Agent({ id: "support", name: "Support", instructions, model: "openai/gpt-6.1-sol", tools, inputProcessors: [budget] });
 ```
 
-A reservation that does not fit is refused with `budget_exhausted`; the error propagates
+A reservation that does not fit throws `BudgetExhausted`; the error propagates
 out of `generate()`/`stream()` before the provider is contacted, so the loop stops
 whatever the model wants. The processor works with model router strings and with AI SDK
 model objects alike. Processors passed to `generate()` replace the agent's array for
 that call, so include `budget` whenever you override `inputProcessors`.
 
 If you prefer to budget below Mastra, wrap the AI SDK model object instead (Mastra
-accepts AI SDK v4-specification models): a wrapper whose `doGenerate`/`doStream` reserve
-before delegating and settle in `finally` or in the stream's `flush`/`cancel`, as in
+accepts AI SDK v4-specification models): a wrapper whose `doGenerate` runs inside
+`run.budgetedModelCall` and whose `doStream` reserves before delegating and settles in
+the stream's `flush`/`cancel`, as in
 [the AI SDK guide](vercel-ai-sdk.md#4-budget-every-model-call).
 
 The executor settling charges the whole reservation; to charge measured usage, have

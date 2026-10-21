@@ -7,7 +7,8 @@
   so (``refusal``); a ContextOS approval pause becomes the framework's
   own approval request, answered with a function approval response.
 - Chat middleware reserves the run's budget before every model call and settles it
-  after; a call the run cannot afford ends the run's model loop (``budget_exhausted``).
+  after, through ``contextos.aio`` so it never blocks the event loop; a call the run
+  cannot afford (``BudgetExhausted``) ends the run's model loop.
 
 Without OPENAI_API_KEY the agent runs on a scripted chat client built on
 ``BaseChatClient`` that emits the tool calls a model would, including a repeated
@@ -24,10 +25,10 @@ import os
 from agent_framework import (Agent, BaseChatClient, ChatContext, ChatMiddlewareLayer, ChatResponse, Content,
                              FunctionInvocationContext, FunctionInvocationLayer, Message,
                              chat_middleware, function_middleware, tool)
-from contextos.client import ContextOSHTTPError
+from contextos.aio import AsyncRun
 
-from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, finish, offline,
-                  refusal, tools)
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, BudgetExhausted, ToolOutcome, ToolPaused, admit, approve,
+                  finish, offline, refusal, tools)
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
@@ -53,16 +54,16 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
             f"Refunded ord_881 in full. The repeated refund was refused: {results[-1]}"])])
 
 
-def budget(run):
+def budget(run: AsyncRun):
     """Chat middleware: reserve before every model call, settle after (for a stream,
     once it has been consumed), stop the loop when the run cannot afford the call."""
 
     @chat_middleware
     async def reserve_model_call(context: ChatContext, call_next) -> None:
         try:
-            reservation = await asyncio.to_thread(run.reserve_usage, "model_call", tokens=MODEL_CALL_TOKENS)
-        except ContextOSHTTPError as refused:
-            if refused.code != "budget_exhausted" or context.stream:
+            reservation = await run.reserve_usage("model_call", tokens=MODEL_CALL_TOKENS)
+        except BudgetExhausted:
+            if context.stream:
                 raise
             # Answer in place of the model, without tool calls: the loop ends here.
             context.result = ChatResponse(messages=[Message(role="assistant", contents=[
@@ -70,7 +71,7 @@ def budget(run):
             return
 
         async def settle() -> None:
-            await asyncio.to_thread(run.settle_usage, reservation)
+            await run.settle_usage(reservation)
 
         if context.stream:
             context.stream_cleanup_hooks.append(settle)
@@ -120,7 +121,7 @@ async def main() -> None:
         from agent_framework.openai import OpenAIChatClient
         chat_client = OpenAIChatClient(model=os.environ.get("OPENAI_MODEL", "gpt-6.1-sol"))
     agent = Agent(client=chat_client, name="support", instructions=INSTRUCTIONS,
-                  tools=[tool(lookup_order), tool(issue_refund)], middleware=[budget(run), governed_outcomes])
+                  tools=[tool(lookup_order), tool(issue_refund)], middleware=[budget(AsyncRun(run)), governed_outcomes])
 
     session = agent.create_session()
     calls, refunded = {}, False

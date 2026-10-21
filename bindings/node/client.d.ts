@@ -26,6 +26,11 @@ export declare class ContextOSHTTPError extends Error {
   readonly detail: unknown;
 }
 
+/** A model-call or replan reservation the run's budget cannot fit; stop the loop. */
+export declare class BudgetExhausted extends ContextOSHTTPError {
+  readonly reasons: string[];
+}
+
 export declare class ToolOutcome extends Error {
   readonly result: Record<string, Json>;
   readonly report: DispatchReport;
@@ -120,6 +125,8 @@ export declare class Run {
   latestCheckpoint(): Promise<{ revision: number; digest: string; state: Json; executor_generation: number; saved_at: string }>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
   settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
+  /** Reserves budget around one model call and settles it afterwards; throws BudgetExhausted first if it cannot fit. */
+  budgetedModelCall<T>(fn: (reservationId: string) => Promise<T>, options: { tokens: number; costCents?: number }): Promise<T>;
   status(): Promise<{ run_id: string; status: string; executor_generation: number }>;
   takeOver(): Promise<Run>;
   complete(): Promise<any>;

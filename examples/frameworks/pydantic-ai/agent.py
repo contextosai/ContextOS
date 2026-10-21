@@ -22,13 +22,13 @@ import os
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
-from contextlib import ExitStack, asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from contextos.client import ContextOSHTTPError
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline,
-                  refusal, tools)
+from contextos.aio import AsyncRun
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, BudgetExhausted, ToolOutcome, ToolPaused, admit, approve,
+                  finish, offline, refusal, tools)
 from pydantic_ai import (Agent, ApprovalRequired, CallDeferred, DeferredToolRequests, DeferredToolResults,
                          FunctionToolset, ModelResponse, TextPart, ToolCallPart, ToolFailed, ToolReturnPart, UsageLimits,
                          WrapperToolset)
@@ -71,29 +71,26 @@ class BudgetedModel(WrapperModel):
 
     def __init__(self, wrapped, run):
         super().__init__(wrapped)
-        self.run = run
+        self.run = AsyncRun(run)  # the model path is async: reserve without blocking the loop
 
     async def request(self, messages, model_settings, model_request_parameters):
-        with self._budget():
+        async with self._budget():
             return await super().request(messages, model_settings, model_request_parameters)
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
-        with self._budget():
+        async with self._budget():
             async with super().request_stream(messages, model_settings, model_request_parameters,
                                               run_context) as stream:
                 yield stream
 
-    @contextmanager
-    def _budget(self):
-        with ExitStack() as stack:
-            try:
-                stack.enter_context(budgeted(self.run))  # reserve now, settle on exit
-            except ContextOSHTTPError as refused:
-                if refused.code == "budget_exhausted":  # no request is sent: the run cannot afford it
-                    raise UsageLimitExceeded(f"ContextOS run budget exhausted: {refused.detail}") from None
-                raise
-            yield
+    @asynccontextmanager
+    async def _budget(self):
+        try:
+            async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):  # reserve now, settle on exit
+                yield
+        except BudgetExhausted as refused:  # no request is sent: the run cannot afford it
+            raise UsageLimitExceeded(f"ContextOS run budget exhausted: {refused.reasons}") from None
 
 
 def scripted(messages: list, info: AgentInfo) -> ModelResponse:

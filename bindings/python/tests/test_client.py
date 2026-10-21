@@ -3,6 +3,7 @@
 Run with: cargo build --release -p contextosd -p ctx &&
           PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py
 """
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -15,7 +16,8 @@ import tempfile
 import time
 import urllib.request
 
-from contextos.client import Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool
+from contextos.aio import AsyncClient, AsyncRun
+from contextos.client import BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BINARY = ROOT / "target/release/contextosd"
@@ -107,6 +109,12 @@ def main() -> None:
         # Model calls spend the run's budget; a self-reported settlement charges it all.
         reservation = run.reserve_usage("model_call", tokens=3000)
         assert run.settle_usage(reservation)["charged"]["tokens"] == 3000
+        # A reservation the run cannot afford is refused before the model is called.
+        try:
+            with run.budgeted_model_call(tokens=1_000_000):
+                raise AssertionError("the model call ran")
+        except BudgetExhausted as exhausted:
+            assert exhausted.status == 409 and exhausted.reasons, exhausted
 
         # An independent evaluator scores the decision; the executor's key cannot.
         record_id = decision["record"]["record_id"]
@@ -164,9 +172,41 @@ def main() -> None:
         entries = list(client.audit_entries(page=2))
         assert [e["sequence"] for e in entries] == list(range(1, len(entries) + 1))
         print(f"ok: client end to end ({len(entries)} audit entries)")
+        asyncio.run(async_client(base, admission))
     finally:
         server.terminate()
         server.wait(timeout=10)
+
+
+async def async_client(base: str, admission: dict) -> None:
+    """The asyncio client: the same flow as coroutines, concurrent on one event loop."""
+    client = AsyncClient(base, token=KEY)
+    admission = json.loads(json.dumps(admission))
+    admission["run_context"]["run_id"] = admission["contract"]["run_id"] = "run_async_1"
+    admission["contract"]["contract_id"] = "contract_run_async_1"
+    run = await client.admit(admission)
+    assert isinstance(run, AsyncRun) and run.executor_generation == 2, run
+
+    @governed_tool(run, "adp_orders.lookup")
+    async def lookup_order(order_id: str) -> dict:  # pragma: no cover
+        raise AssertionError("never runs locally")
+
+    async with run.budgeted_model_call(tokens=1000) as reservation:
+        assert reservation.startswith("usage:"), reservation
+    orders = await asyncio.gather(lookup_order("ord_881"), lookup_order(order_id="ord_881"))
+    assert [o["order_id"] for o in orders] == ["ord_881", "ord_881"], orders
+    try:
+        async with run.budgeted_model_call(tokens=1_000_000):
+            raise AssertionError("the model call ran")
+    except BudgetExhausted:
+        pass
+    # Takeover keeps the handle; the run is fenced at the new generation.
+    taken = await (await client.attach(run.run_id, run.trace_id, run.principal_chain)).take_over()
+    assert isinstance(taken, AsyncRun) and taken.executor_generation == 4, taken
+    assert (await taken.complete())["status"] == "completed"
+    sequences = [entry["sequence"] async for entry in client.audit_entries(page=3)]
+    assert sequences == list(range(1, len(sequences) + 1))
+    print(f"ok: asyncio client end to end ({len(sequences)} audit entries)")
 
 
 if __name__ == "__main__":

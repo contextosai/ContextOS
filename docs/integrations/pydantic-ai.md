@@ -156,40 +156,35 @@ tool calls spend:
 
 ```python
 from contextlib import asynccontextmanager
-from contextos.client import ContextOSHTTPError
+from contextos.aio import AsyncRun
+from contextos.client import BudgetExhausted
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.wrapper import WrapperModel
 
 class BudgetedModel(WrapperModel):
-    def __init__(self, wrapped, run, tokens=1000):
+    def __init__(self, wrapped, run: AsyncRun, tokens=1000):
         super().__init__(wrapped)
         self.run, self.tokens = run, tokens
 
-    async def _reserve(self):
+    @asynccontextmanager
+    async def _budget(self):
         try:
-            return await asyncio.to_thread(self.run.reserve_usage, "model_call", tokens=self.tokens)
-        except ContextOSHTTPError as refused:
-            if refused.code == "budget_exhausted":
-                raise UsageLimitExceeded(f"run budget exhausted: {refused.detail}") from None
-            raise
+            async with self.run.budgeted_model_call(tokens=self.tokens):   # settles even if the request raises
+                yield
+        except BudgetExhausted as refused:                                 # no request is sent
+            raise UsageLimitExceeded(f"run budget exhausted: {refused.reasons}") from None
 
     async def request(self, messages, settings, params):
-        reservation = await self._reserve()
-        try:
+        async with self._budget():
             return await super().request(messages, settings, params)
-        finally:
-            await asyncio.to_thread(self.run.settle_usage, reservation)
 
     @asynccontextmanager
     async def request_stream(self, messages, settings, params, run_context=None):
-        reservation = await self._reserve()
-        try:
+        async with self._budget():
             async with super().request_stream(messages, settings, params, run_context) as stream:
                 yield stream
-        finally:
-            await asyncio.to_thread(self.run.settle_usage, reservation)
 
-agent = Agent(BudgetedModel("anthropic:claude-sonnet-5-5", run), ...)
+agent = Agent(BudgetedModel("anthropic:claude-sonnet-5-5", AsyncRun(run)), ...)
 ```
 
 Settling as the executor charges the whole reservation. To charge measured usage, pass
@@ -251,17 +246,18 @@ narrowed lane, so it can only do what the envelope allows:
 @parent_agent.tool
 async def research_order(ctx: RunContext[Run], order_id: str) -> dict:
     """Have the research agent gather evidence about an order (read-only)."""
-    lane = ctx.deps.delegate(child_admission, envelope)   # effect_policy "read_only"
+    parent = AsyncRun(ctx.deps)
+    lane = await parent.delegate(child_admission, envelope)   # an AsyncRun; effect_policy "read_only"
     try:
         @governed_tool(lane, "adp_orders.lookup", approval_mode="read_only")
-        def lookup_order(order_id: str) -> dict:
+        async def lookup_order(order_id: str) -> dict:
             """Look up an order."""
         result = await research_agent.run(f"Research {order_id}", deps=lane,
                                           toolsets=[ContextOSToolset(FunctionToolset([lookup_order]))],
                                           usage=ctx.usage)
         return result.output
     finally:
-        ctx.deps.close_child(lane, "accept")              # settles its spend into the parent
+        await parent.close_child(lane, "accept")              # settles its spend into the parent
 ```
 
 The envelope (see [GUIDE: Delegating to child runs](../GUIDE.md#delegating-to-child-runs-subagent-lanes)
@@ -343,8 +339,8 @@ did not act, and `run.fail()` when it gives up.
   re-sent call maps to the same operation. Keep Pydantic AI's id only for matching
   `DeferredToolResults`.
 - **Blocking I/O.** `contextos.client` is synchronous. Pydantic AI runs synchronous
-  tools in a thread; in async code such as a model wrapper, call it through
-  `asyncio.to_thread`.
+  tools in a thread; in async code such as a model wrapper, use `contextos.aio`
+  (`AsyncRun(run)`, or `AsyncClient` to admit), whose methods are coroutines.
 - **Local approval is not authority.** `requires_approval`, `ToolApproved` and
   `UsageLimits` shape the loop. Authority, approval and budget are decided by
   `contextosd`.

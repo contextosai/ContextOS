@@ -68,7 +68,8 @@ agent = Agent(
 Derive the idempotency key and tool-call id from the arguments, never from the SDK's
 `call_id`: the model mints a new `call_id` each time it repeats itself, and deriving the
 key from it would let a repeated refund through as a new operation. Sync tools run in a
-worker thread (`asyncio.to_thread`), so the blocking client does not stall the loop.
+worker thread, so the blocking client does not stall the loop; in async code of your own,
+use `contextos.aio` (section 4).
 
 In TypeScript, `tool()` takes a zod schema and calls the governed function:
 
@@ -98,32 +99,27 @@ every model the runner resolves:
 ```python
 from agents import Model, ModelProvider, RunConfig, Runner
 from agents.models.multi_provider import MultiProvider
+from contextos.aio import AsyncRun
 
 class BudgetedModel(Model):
-    def __init__(self, run, inner: Model, tokens: int = 1000):
+    def __init__(self, run: AsyncRun, inner: Model, tokens: int = 1000):
         self.run, self.inner, self.tokens = run, inner, tokens
 
     async def get_response(self, *args, **kwargs):
-        reservation = self.run.reserve_usage("model_call", tokens=self.tokens)  # budget_exhausted raises
-        try:
+        async with self.run.budgeted_model_call(tokens=self.tokens):   # BudgetExhausted raises first
             return await self.inner.get_response(*args, **kwargs)
-        finally:
-            self.run.settle_usage(reservation)
 
     async def stream_response(self, *args, **kwargs):
-        reservation = self.run.reserve_usage("model_call", tokens=self.tokens)
-        try:
+        async with self.run.budgeted_model_call(tokens=self.tokens):
             async for event in self.inner.stream_response(*args, **kwargs):
                 yield event
-        finally:
-            self.run.settle_usage(reservation)
 
     def get_retry_advice(self, request):
         return self.inner.get_retry_advice(request)
 
 class BudgetedProvider(ModelProvider):
     def __init__(self, run, inner: ModelProvider):
-        self.run, self.inner = run, inner
+        self.run, self.inner = AsyncRun(run), inner     # coroutines: the event loop never blocks
 
     def get_model(self, model_name):
         return BudgetedModel(self.run, self.inner.get_model(model_name))
@@ -141,11 +137,12 @@ charge measured usage instead (GUIDE section 6).
 
 The provider applies only to agents whose `model` is a name (or unset). An agent built
 with a `Model` instance bypasses `RunConfig.model_provider`; wrap that instance in
-`BudgetedModel` yourself. In TypeScript, pass the provider to the `Runner`:
+`BudgetedModel(AsyncRun(run), model)` yourself. In TypeScript, pass the provider to the
+`Runner`:
 
 ```ts
 const budgetedModel = (run, inner: Model): Model => ({
-  getResponse: (request) => budgeted(run, () => inner.getResponse(request)),
+  getResponse: (request) => run.budgetedModelCall(() => inner.getResponse(request), { tokens: 1000 }),
   async *getStreamedResponse(request) {
     const reservation = await run.reserveUsage("model_call", { tokens: 1000 });
     try { yield* inner.getStreamedResponse(request); } finally { await run.settleUsage(reservation); }
@@ -158,8 +155,9 @@ const runner = new Runner({
 });
 ```
 
-When the budget is spent the reservation is refused and `Runner.run` raises; record a
-`REJECTED` or `DEFERRED` decision, or fail the run. Do not catch it and retry.
+When the budget is spent the reservation is refused with `BudgetExhausted` and
+`Runner.run` raises; record a `REJECTED` or `DEFERRED` decision, or fail the run. Do not
+catch it and retry.
 
 ## 5. Map outcomes to SDK behavior
 
@@ -403,9 +401,9 @@ watches `RunHooks.on_tool_end`), not from the model's final answer.
   (`traceIncludeSensitiveData: false`) or `OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA=false`,
   and disable tracing where no OpenAI key is configured. The signed audit chain is the
   record; traces are for debugging.
-- **Blocking calls.** The Python client is synchronous. Sync tools run in threads, but
-  the budget calls in `BudgetedModel` run on the event loop; under heavy concurrency move
-  them to `asyncio.to_thread`.
+- **Blocking calls.** `contextos.client` is synchronous. Sync tools run in threads; on
+  the event loop (`BudgetedModel`, async tools, checkpoints between `Runner.run` calls)
+  use `contextos.aio`, whose `AsyncRun` has the same methods as coroutines.
 - **Offline tests.** `agents.testing.ScriptedModel` (`ScriptedModel` from
   `@openai/agents/testing`) implements `Model`, so scripted runs go through the same
   provider, budget and tools as real ones.

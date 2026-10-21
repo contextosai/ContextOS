@@ -24,12 +24,16 @@ mistake a pause, a refusal or an unknown outcome for a result:
 - ``ToolRejected``: malformed, unsurfaced or incompatible reuse;
 - ``ToolFailed``: the provider definitively did not apply the effect.
 
+A model-call reservation the run cannot afford raises ``BudgetExhausted``. For asyncio
+agents, ``contextos.aio`` has the same client as coroutines.
+
 The client retries only requests the server did not process (``429``, ``503``),
 honouring ``Retry-After``. It never retries a tool call after a lost response on
 its own: the gateway's operation ledger makes a retry with the same idempotency key
 safe, but deciding to retry is the caller's.
 """
 
+import contextlib
 import functools
 import inspect
 import json
@@ -38,7 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
 
@@ -51,6 +55,18 @@ class ContextOSHTTPError(Exception):
         self.status = status
         self.code = code
         self.detail = detail
+
+
+class BudgetExhausted(ContextOSHTTPError):
+    """The run's budget cannot fit a model-call or replan reservation (``reasons``
+    says which limit). Stop the loop: retrying the same reservation cannot succeed."""
+
+    @property
+    def reasons(self) -> List[str]:
+        return self.detail if isinstance(self.detail, list) else []
+
+
+_HTTP_ERRORS = {"budget_exhausted": BudgetExhausted}
 
 
 class ToolOutcome(Exception):
@@ -150,8 +166,9 @@ class Client:
                     continue
                 failure = decoded.get("error") if isinstance(decoded, dict) else None
                 if isinstance(failure, dict):
-                    raise ContextOSHTTPError(error.code, failure.get("code", "error"), failure.get("message", ""),
-                                             failure.get("detail")) from None
+                    code = failure.get("code", "error")
+                    raise _HTTP_ERRORS.get(code, ContextOSHTTPError)(error.code, code, failure.get("message", ""),
+                                                                     failure.get("detail")) from None
                 # Lifecycle refusals return their outcome body with 409.
                 raise ContextOSHTTPError(error.code, "refused", json.dumps(decoded), decoded) from None
         raise AssertionError("unreachable")
@@ -326,6 +343,16 @@ class Run:
         the reservation id to your metering gateway instead to settle measured usage."""
         return self._post("/usage/settle", {"reservation_id": reservation_id})
 
+    @contextlib.contextmanager
+    def budgeted_model_call(self, *, tokens: int, cost_cents: int = 0) -> Iterator[str]:
+        """Reserves budget for one model call and settles it afterwards, even if the call
+        raises. Raises ``BudgetExhausted`` before the call when the run cannot afford it."""
+        reservation = self.reserve_usage("model_call", tokens=tokens, cost_cents=cost_cents)
+        try:
+            yield reservation
+        finally:
+            self.settle_usage(reservation)
+
     def status(self) -> dict:
         return self.client.request("GET", self._path())
 
@@ -359,13 +386,13 @@ def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_on
     ``idempotency_key`` derives the operation key from the call's arguments, so a
     retried agent step maps to the same operation and cannot apply twice.
     ``tool_call_id`` derives the call's id the same way, so a DecisionRecord can cite it.
+    With an ``AsyncRun`` (``contextos.aio``) the governed function is a coroutine.
     """
 
-    def wrap(function: Callable[..., Any]) -> Callable[..., dict]:
+    def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
         signature = inspect.signature(function)
 
-        @functools.wraps(function)
-        def call(*args: Any, **kwargs: Any) -> dict:
+        def dispatch(args: Any, kwargs: Any) -> Any:
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
             arguments = dict(bound.arguments)
@@ -373,6 +400,17 @@ def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_on
             call_id = tool_call_id(**arguments) if tool_call_id else None
             return run.call_tool(capability_id, arguments, approval_mode=approval_mode, idempotency_key=key,
                                  evidence_refs=evidence_refs, tool_call_id=call_id)
+
+        if inspect.iscoroutinefunction(run.call_tool):
+            @functools.wraps(function)
+            async def call_async(*args: Any, **kwargs: Any) -> dict:
+                return await dispatch(args, kwargs)
+
+            return call_async
+
+        @functools.wraps(function)
+        def call(*args: Any, **kwargs: Any) -> dict:
+            return dispatch(args, kwargs)
 
         return call
 

@@ -15,16 +15,17 @@ the run is admitted for a refund above the pack's 3,000 threshold, so the refund
 for an exact approval: the example surfaces it through the framework's human-in-the-loop
 mechanism, ``approve`` plays the reviewer, and the framework re-sends the same call.
 """
-import contextlib
 import json
 import os
 import pathlib
 import sys
 import time
 import urllib.request
-from typing import Iterator, Tuple
+from typing import Tuple, Union
 
-from contextos.client import Client, Run, ToolBlocked, ToolFailed, ToolOutcome, ToolPaused, ToolRejected, governed_tool
+from contextos.client import (BudgetExhausted, Client, Run, ToolBlocked, ToolFailed, ToolOutcome, ToolPaused,
+                              ToolRejected, governed_tool)
+from contextos.aio import AsyncRun
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 REQUESTS = ROOT / "examples/support-refund/requests"
@@ -41,8 +42,7 @@ APPROVAL = "--approval" in sys.argv[1:]
 MODEL_CALL_TOKENS = 1000
 
 __all__ = ["GOAL", "INSTRUCTIONS", "EVIDENCE", "APPROVAL", "admit", "tools", "budgeted", "refusal", "approve", "finish",
-           "offline",
-           "ToolOutcome", "ToolPaused", "ToolBlocked", "ToolRejected", "ToolFailed"]
+           "offline", "BudgetExhausted", "ToolOutcome", "ToolPaused", "ToolBlocked", "ToolRejected", "ToolFailed"]
 
 
 def offline(*env_keys: str) -> bool:
@@ -64,9 +64,9 @@ def admit(name: str) -> Tuple[Client, Run]:
     return client, run
 
 
-def tools(run: Run):
+def tools(run: Union[Run, AsyncRun]):
     """The run's two governed tools as plain typed functions, for any framework that
-    builds tool schemas from signatures and docstrings."""
+    builds tool schemas from signatures and docstrings; coroutines for an ``AsyncRun``."""
 
     # The pack's high-value rule gates every call of the run, reads included. An approval
     # binds one operation, so with --approval the lookup is keyed too: the re-sent call
@@ -87,16 +87,12 @@ def tools(run: Run):
     return lookup_order, issue_refund
 
 
-@contextlib.contextmanager
-def budgeted(run: Run, tokens: int = MODEL_CALL_TOKENS) -> Iterator[str]:
-    """Reserves budget for one model call; refused with ``budget_exhausted`` when the run
-    cannot afford it. In production pass the reservation id to your LLM gateway, which
-    meters the call with the ``meter`` scope; settling it here charges all of it."""
-    reservation = run.reserve_usage("model_call", tokens=tokens)
-    try:
-        yield reservation
-    finally:
-        run.settle_usage(reservation)
+def budgeted(run: Run, tokens: int = MODEL_CALL_TOKENS):
+    """Reserves budget for one model call (``Run.budgeted_model_call``); raises
+    ``BudgetExhausted`` when the run cannot afford it. In production pass the
+    reservation id to your LLM gateway, which meters the call with the ``meter`` scope;
+    settling it here charges all of it."""
+    return run.budgeted_model_call(tokens=tokens)
 
 
 def refusal(outcome: ToolOutcome) -> str:

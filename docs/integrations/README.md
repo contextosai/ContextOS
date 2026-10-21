@@ -76,7 +76,7 @@ shows only what its framework adds.
 |---|---|---|
 | **Admission** | `client.admit(body)` before the agent starts; keep the `Run` | The run fixes the compiled context, pinned policy, budget and executor generation that every later call is checked against. |
 | **Tools** | Register governed tools: `governed_tool(run, capability_id, …)` (Python) or `governedTool(run, …)` (TypeScript), or point the framework's MCP client at the run's endpoint | The tool body never runs in the agent process: the gateway authorizes, binds, dispatches, records and audits each call. The agent holds no credentials for the systems it acts on. |
-| **Model calls** | Reserve before every model request and settle after it (`run.reserve_usage("model_call", tokens=…)` / `settle_usage`) in the framework's lowest model seam | Model calls spend the same conserved budget as tools, so a looping agent stops at `budget_exhausted`, across lanes and failover. |
+| **Model calls** | Wrap every model request in `run.budgeted_model_call(tokens=…)` (TypeScript `run.budgetedModelCall`) in the framework's lowest model seam; stop on `BudgetExhausted` | Model calls spend the same conserved budget as tools, so a looping agent stops at `budget_exhausted`, across lanes and failover. |
 | **Outcomes** | Map `ToolPaused`, `ToolBlocked`, `ToolRejected`, `ToolFailed` to framework behavior (below) | The model must see that a refused action did not happen, and a pause must reach a person or a reconciler, never a blind retry. |
 | **Checkpoint** | `run.checkpoint(state, revision)` after each verdict; `client.attach(…).take_over()` and `latest_checkpoint()` to resume | Another executor can resume the run; the old one is fenced (`executor_stale`). Keep the framework's own checkpointer for its loop state, and store its thread or state id in the ContextOS checkpoint. |
 | **Subagents** | Run a subagent or handoff as a delegated child run (`run.delegate(child, envelope)`, `close_child`) | The child gets a narrowed lane (for example `read_only`) and a sub-budget reserved from the parent; it cannot do what its lane does not allow. |
@@ -138,8 +138,9 @@ plainly whether anything happened.
 - **Tool names.** Capability ids contain dots (`adp_payments.issue_refund`), which some
   model APIs reject in tool names. In-process tools use the function name; MCP clients
   need their prefixing or renaming option.
-- **Sync client in async frameworks.** The Python client is synchronous; in an async
-  framework call it through `asyncio.to_thread` so the event loop keeps running.
+- **Async frameworks.** Use `contextos.aio` (`AsyncClient`, `AsyncRun`): the same
+  methods as coroutines, and `governed_tool` on an `AsyncRun` makes async tools.
+  Calling the synchronous client from async code blocks the event loop.
 - **Parallel tool calls** are each governed independently, which is safe, but a step
   that depends on another call's result should run sequentially.
 - **Every model call has a floor.** A model call reserves at least

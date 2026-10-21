@@ -115,7 +115,7 @@ class Governance:
         stack = contextlib.ExitStack()
         try:
             stack.enter_context(budgeted(self.run))
-        except Exception as refused:  # budget_exhausted, or contextosd unreachable
+        except Exception as refused:  # BudgetExhausted, or contextosd unreachable
             raise HookAborted(f"model call not reserved: {refused}") from refused
         self._reservations.append(stack)
 

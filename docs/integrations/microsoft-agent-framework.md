@@ -8,8 +8,8 @@ authorizes it against the run's contract, binds it exactly, dispatches it once, 
 it and signs it into the audit chain, and every model call spends the same run budget.
 The agent holds no authority of its own.
 
-This guide uses `agent-framework-core` 1.22 (Python) and the client in
-`bindings/python/contextos/client.py`. The runnable version is
+This guide uses `agent-framework-core` 1.22 (Python) and the asyncio client in
+`bindings/python/contextos/aio.py`. The runnable version is
 [`examples/frameworks/microsoft-agent-framework`](../../examples/frameworks/microsoft-agent-framework/agent.py).
 In 1.x the agent class is `Agent` (formerly `ChatAgent`) and the tool decorator is
 `tool` (`ai_function` remains an alias).
@@ -21,22 +21,25 @@ pip install "agent-framework-core==1.22.0" "agent-framework-openai==1.17.0"
 ```
 
 `agent-framework` installs every connector; the two packages above are enough here.
-Put `bindings/python` on `PYTHONPATH` or vendor it.
+Put `bindings/python` on `PYTHONPATH` or vendor it. The framework is asyncio, so use
+`contextos.aio`: `AsyncClient` and `AsyncRun` have the client's methods as coroutines
+(each request runs in a worker thread), so middleware never blocks the event loop.
 
 ## Admit a run
 
 ```python
-from contextos.client import Client
+from contextos.aio import AsyncClient
 
-client = Client("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
-run = client.admit(admission_body)     # contract, run context, request; see docs/GUIDE.md §3
+client = AsyncClient("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
+run = await client.admit(admission_body)   # an AsyncRun; contract, run context, request: docs/GUIDE.md §3
 ```
 
 ## Governed tools
 
 Declare each capability with `governed_tool` and register it with `tool`. The body
-never runs locally. The framework runs synchronous tools in a worker thread, so the
-synchronous client does not block the event loop. Derive the idempotency key (and the
+never runs locally. On an `AsyncRun` it is a coroutine, which the framework awaits; on a
+synchronous `Run` it also works, since the framework runs synchronous tools in a worker
+thread (the example does that). Derive the idempotency key (and the
 tool call id a DecisionRecord will cite) from the arguments.
 
 ```python
@@ -47,7 +50,7 @@ from contextos.client import governed_tool
                idempotency_key=lambda order_id, **_: f"refund:{order_id}",
                tool_call_id=lambda order_id, **_: f"tc_refund_{order_id}",
                evidence_refs=["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"])
-def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
+async def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
     """Issue a refund for an order to its customer, in minor units."""
 
 agent = Agent(client=chat_client, name="support", instructions=INSTRUCTIONS,
@@ -64,26 +67,28 @@ grants nothing ContextOS would refuse; use it only as extra UX.
 [Chat middleware](https://learn.microsoft.com/en-us/agent-framework/agents/middleware/)
 runs once per model call inside the function-invocation loop
 ([pipeline](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/agent-pipeline)),
-so it is the seam: reserve before `call_next`, settle after.
+so it is the seam: reserve before `call_next`, settle after. Outside streaming,
+`async with run.budgeted_model_call(tokens=...)` would do both; a stream settles in a
+cleanup hook, so the middleware reserves and settles explicitly.
 
 ```python
 from agent_framework import ChatContext, ChatResponse, Message, chat_middleware
-from contextos.client import ContextOSHTTPError
+from contextos.client import BudgetExhausted
 
-def budget(run):
+def budget(run):                                      # an AsyncRun
     @chat_middleware
     async def reserve_model_call(context: ChatContext, call_next) -> None:
         try:
-            reservation = await asyncio.to_thread(run.reserve_usage, "model_call", tokens=4000)
-        except ContextOSHTTPError as refused:
-            if refused.code != "budget_exhausted" or context.stream:
+            reservation = await run.reserve_usage("model_call", tokens=4000)
+        except BudgetExhausted:
+            if context.stream:
                 raise
             context.result = ChatResponse(messages=[Message(role="assistant",
                 contents=["Stopping: the run's budget is exhausted."])])
             return                                    # no model call, no tool calls: the loop ends
 
         async def settle() -> None:
-            await asyncio.to_thread(run.settle_usage, reservation)
+            await run.settle_usage(reservation)
 
         if context.stream:                            # settle once the stream is consumed
             context.stream_cleanup_hooks.append(settle)
@@ -149,7 +154,7 @@ async def governed_outcomes(context: FunctionInvocationContext, call_next) -> No
 | `ToolPaused`, `kind == "approval"` | `approval_required` | framework approval request, below |
 | `ToolPaused`, `kind == "unknown_outcome"` | `reconcile_effect_before_retry` | "outcome unknown"; reconcile out of band |
 | `ToolPaused`, `kind == "duplicate"` | `retry_unsafe` | "already requested"; the operation already exists |
-| `ToolPaused`, `kind == "input"` | `provide_requested_input` | answer with `run.provide_input(...)`, same operation |
+| `ToolPaused`, `kind == "input"` | `provide_requested_input` | answer with `await run.provide_input(...)`, same operation |
 
 `paused.kind` classifies a pause by what it waits on, so the middleware does not match
 obligation or reason codes itself. For a duplicate the earlier call with that key did happen; the refused repeat did
@@ -192,7 +197,7 @@ request never reaches the tool.
 
 `paused.kind == "unknown_outcome"` (`reconcile_effect_before_retry`) means the effect
 may have happened. Retries are refused
-until it is resolved with `run.reconcile(operation_id)` or an operator assertion with
+until it is resolved with `await run.reconcile(operation_id)` or an operator assertion with
 evidence (GUIDE §3, "Reconciling unknown effects"); `run.complete()` refuses with
 `required_effect_unsatisfied` until then.
 
@@ -214,15 +219,15 @@ ContextOS after each step that matters:
 
 ```python
 blob = store.put(json.dumps(session.to_dict()))     # or the workflow checkpoint id
-revision = run.checkpoint({"session": blob.ref, "sha256": blob.sha256, "step": "refund"}, revision)["revision"]
+revision = (await run.checkpoint({"session": blob.ref, "sha256": blob.sha256, "step": "refund"}, revision))["revision"]
 ```
 
 A replacement executor takes the run over (the old process is fenced with
 `executor_stale`), rebuilds tools and middleware on the new handle, and restores:
 
 ```python
-run = client.attach(run_id, trace_id, principal_chain).take_over()
-saved = run.latest_checkpoint()
+run = await (await client.attach(run_id, trace_id, principal_chain)).take_over()
+saved = await run.latest_checkpoint()
 lookup_order, issue_refund = governed_tools(run)
 agent = Agent(client=chat_client, tools=[tool(lookup_order), tool(issue_refund)],
               middleware=[budget(run), governed_outcomes], instructions=INSTRUCTIONS)
@@ -244,14 +249,14 @@ give each sub-agent its own child run. Admit it with an `AgentDelegationEnvelope
 has the full envelope). A `read_only` lane is surfaced no effectful capability.
 
 ```python
-lane = run.delegate(child_admission, envelope)          # effect_policy "read_only", sub_budget
+lane = await run.delegate(child_admission, envelope)    # effect_policy "read_only", sub_budget
 lane_lookup, _ = governed_tools(lane)
 research = Agent(client=chat_client, name="research", instructions="Look orders up.",
                  tools=[tool(lane_lookup)], middleware=[budget(lane), governed_outcomes])
 support = Agent(client=chat_client, name="support", instructions=INSTRUCTIONS,
                 tools=[research.as_tool(), tool(issue_refund)], middleware=[budget(run), governed_outcomes])
 response = await support.run(goal, session=support.create_session())
-run.close_child(lane, "accept")       # settles the lane's spend into the parent
+await run.close_child(lane, "accept")  # settles the lane's spend into the parent
 ```
 
 The sub-agent's model calls spend the lane's sub-budget (size `sub_budget.total_tokens`
@@ -286,11 +291,11 @@ per request, so it follows a takeover. Chat middleware still budgets the model c
 ## Record the decision and complete
 
 ```python
-run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
-                    tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
-                    rationale={"strategy": response.text[:500]})
-run.complete()
-evidence = run.evidence()
+await run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
+                          tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
+                          rationale={"strategy": response.text[:500]})
+await run.complete()
+evidence = await run.evidence()
 ```
 
 The gateway verifies every cited tool call against its ledgers (`lineage_unverified`

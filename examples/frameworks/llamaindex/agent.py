@@ -6,7 +6,10 @@
   says so (``refusal``); an approval pause becomes the workflow's
   human-in-the-loop (``InputRequiredEvent`` / ``HumanResponseEvent``).
 - ``BudgetedLLM`` wraps the agent's LLM, so every model call reserves the run's budget
-  first and a call the run cannot afford is refused before it reaches the provider.
+  first and a call the run cannot afford is refused (``BudgetExhausted``) before it
+  reaches the provider.
+- Async paths use ``contextos.aio``: the tools are async governed functions and the
+  async chat methods await the budget, so no request blocks the event loop.
 
 Without OPENAI_API_KEY the agent runs on a scripted ``MockFunctionCallingLLM`` that
 emits the tool calls a model would, including a repeated refund the gateway refuses.
@@ -29,19 +32,26 @@ from llama_index.core.llms.mock import MockFunctionCallingLLM
 from llama_index.core.tools import FunctionTool
 from llama_index.core.workflow import Context, HumanResponseEvent, InputRequiredEvent
 
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline,
-                  refusal, tools)
+from contextos.aio import AsyncRun
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish,
+                  offline, refusal, tools)
 
 
 class BudgetedLLM(FunctionCallingLLM):
-    """Delegates to ``inner``; every chat or completion reserves the run's budget first."""
+    """Delegates to ``inner``; every chat or completion reserves the run's budget first
+    (the async methods through ``AsyncRun``, so they do not block the event loop)."""
 
     inner: LLM
     _run: Any = PrivateAttr()
+    _async_run: Any = PrivateAttr()
 
     def __init__(self, inner: LLM, run: Any, **kwargs: Any) -> None:
         super().__init__(inner=inner, **kwargs)
         self._run = run
+        self._async_run = AsyncRun(run)
+
+    def _abudgeted(self):
+        return self._async_run.budgeted_model_call(tokens=MODEL_CALL_TOKENS)
 
     @property
     def metadata(self):
@@ -52,7 +62,7 @@ class BudgetedLLM(FunctionCallingLLM):
             return self.inner.chat(messages, **kwargs)
 
     async def achat(self, messages, **kwargs):
-        with budgeted(self._run):
+        async with self._abudgeted():
             return await self.inner.achat(messages, **kwargs)
 
     def stream_chat(self, messages, **kwargs):
@@ -60,15 +70,15 @@ class BudgetedLLM(FunctionCallingLLM):
             yield from self.inner.stream_chat(messages, **kwargs)
 
     async def astream_chat(self, messages, **kwargs):
-        reservation = budgeted(self._run)
-        reservation.__enter__()  # reserve now: an unaffordable call fails before streaming
+        reservation = self._abudgeted()
+        await reservation.__aenter__()  # reserve now: an unaffordable call fails before streaming
 
         async def stream():
             try:
                 async for chunk in await self.inner.astream_chat(messages, **kwargs):
                     yield chunk
             finally:
-                reservation.__exit__(None, None, None)
+                await reservation.__aexit__(None, None, None)
 
         return stream()
 
@@ -77,7 +87,7 @@ class BudgetedLLM(FunctionCallingLLM):
             return self.inner.complete(prompt, formatted=formatted, **kwargs)
 
     async def acomplete(self, prompt, formatted=False, **kwargs):
-        with budgeted(self._run):
+        async with self._abudgeted():
             return await self.inner.acomplete(prompt, formatted=formatted, **kwargs)
 
     def stream_complete(self, prompt, formatted=False, **kwargs):
@@ -120,13 +130,14 @@ def scripted(messages: Sequence[ChatMessage], **_: Any) -> ChatMessage:
 
 
 def governed_tools(run, state: dict, pending: dict) -> list:
-    """The governed functions as LlamaIndex tools. Each runs off the event loop (the
-    client is synchronous) and turns every outcome into what the model should see."""
-    lookup, refund = tools(run)
+    """The governed functions as LlamaIndex tools. Built on an ``AsyncRun`` they are
+    coroutines, so a call never blocks the event loop; every outcome becomes what the
+    model should see."""
+    lookup, refund = tools(AsyncRun(run))
 
     async def governed(ctx: Context, fn, **args: Any) -> str:
         try:
-            return json.dumps(await asyncio.to_thread(fn, **args))
+            return json.dumps(await fn(**args))
         except ToolPaused as paused:
             if paused.kind != "approval":
                 # An unknown outcome, input request or duplicate: never retry blindly.

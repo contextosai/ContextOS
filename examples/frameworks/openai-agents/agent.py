@@ -30,7 +30,9 @@ from agents import Agent, Model, ModelProvider, ModelSettings, RunConfig, RunHoo
 from agents.models.multi_provider import MultiProvider
 from agents.testing import ModelStep, ScriptedModel, assistant_message, function_call
 
-from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline, refusal, tools
+from contextos.aio import AsyncRun
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, finish, offline,
+                  refusal, tools)
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-6.1-sol")
 
@@ -38,15 +40,15 @@ MODEL = os.environ.get("OPENAI_MODEL", "gpt-6.1-sol")
 class BudgetedModel(Model):
     """Reserves run budget before each model call and settles it after, success or not."""
 
-    def __init__(self, run, inner: Model):
+    def __init__(self, run: AsyncRun, inner: Model):
         self.run, self.inner = run, inner
 
     async def get_response(self, *args, **kwargs):
-        with budgeted(self.run):
+        async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):
             return await self.inner.get_response(*args, **kwargs)
 
     async def stream_response(self, *args, **kwargs):
-        with budgeted(self.run):
+        async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):
             async for event in self.inner.stream_response(*args, **kwargs):
                 yield event
 
@@ -60,7 +62,7 @@ class BudgetedModel(Model):
 class BudgetedProvider(ModelProvider):
     """Every agent the runner drives (handoffs included) gets a budgeted model."""
 
-    def __init__(self, run, inner: ModelProvider):
+    def __init__(self, run: AsyncRun, inner: ModelProvider):
         self.run, self.inner = run, inner
 
     def get_model(self, model_name):
@@ -146,7 +148,8 @@ async def needs_approval(ctx, params: dict, call_id: str) -> bool:
 
 async def main() -> int:
     client, run = admit("openai_agents")
-    lookup_order, issue_refund = map(awaiting_reviewer, tools(run))
+    lookup_order, issue_refund = map(awaiting_reviewer, tools(run))  # sync: the SDK runs them in a worker thread
+    arun = AsyncRun(run)  # the same run, as coroutines, for calls made on the event loop
     agent = Agent(
         name="support",
         instructions=INSTRUCTIONS,
@@ -156,7 +159,7 @@ async def main() -> int:
                function_tool(issue_refund, failure_error_function=governed_failure, needs_approval=needs_approval)],
     )
     scripted = offline("OPENAI_API_KEY")
-    config = RunConfig(model_provider=BudgetedProvider(run, Script() if scripted else MultiProvider()),
+    config = RunConfig(model_provider=BudgetedProvider(arun, Script() if scripted else MultiProvider()),
                        tracing_disabled=scripted, trace_include_sensitive_data=False)
     hooks = Trace()
     revision = 0
@@ -169,7 +172,7 @@ async def main() -> int:
                 state.approve(item)  # a real reviewer decides here
             # Save the approved state with the run: another executor, or this one after a
             # gateway pause, resumes from it and re-sends the same governed call.
-            revision = run.checkpoint({"sdk_run_state": state.to_json()}, revision)["revision"]
+            revision = (await arun.checkpoint({"sdk_run_state": state.to_json()}, revision))["revision"]
             print(f"approved; checkpoint revision {revision}")
             result = await Runner.run(agent, state, run_config=config, hooks=hooks, max_turns=8)
     except UserError as error:

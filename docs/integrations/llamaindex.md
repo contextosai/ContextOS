@@ -7,7 +7,7 @@ exactly, dispatches it once, records it and signs it into the audit chain, and e
 model call spends the same run budget. The agent holds no authority of its own.
 
 This guide uses `llama-index-core` 0.14 and the Python client in
-`bindings/python/contextos/client.py`. The runnable version is
+`bindings/python/contextos/` (`aio.py` for asyncio). The runnable version is
 [`examples/frameworks/llamaindex`](../../examples/frameworks/llamaindex/agent.py).
 
 ## Install
@@ -17,18 +17,19 @@ pip install "llama-index-core==0.14.25" "llama-index-llms-openai==0.8.3"
 ```
 
 The ContextOS client is standard library only: put `bindings/python` on `PYTHONPATH` or
-vendor it. It is synchronous; LlamaIndex tools are async, so call it with
-`asyncio.to_thread` to keep the event loop free (the example does).
+vendor it. LlamaIndex tools and LLM calls are async, so use `contextos.aio`:
+`AsyncClient` and `AsyncRun` have the client's methods as coroutines (each request runs
+in a worker thread), which keeps the event loop free (the example does).
 
 ## Admit a run
 
 Admit before you build the agent: the tools and the LLM wrapper hold the run handle.
 
 ```python
-from contextos.client import Client
+from contextos.aio import AsyncClient
 
-client = Client("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
-run = client.admit(admission_body)     # contract, run context, request; see docs/GUIDE.md §3
+client = AsyncClient("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
+run = await client.admit(admission_body)   # an AsyncRun; contract, run context, request: docs/GUIDE.md §3
 ```
 
 ## Governed tools
@@ -36,6 +37,7 @@ run = client.admit(admission_body)     # contract, run context, request; see doc
 Declare each capability with `governed_tool`; the decorated body never runs locally.
 Derive the idempotency key from the arguments, so a replayed step maps to the same
 operation, and derive the tool call id the same way if a DecisionRecord will cite it.
+On an `AsyncRun` the governed function is a coroutine.
 
 ```python
 from contextos.client import governed_tool, ToolOutcome, ToolPaused
@@ -44,7 +46,7 @@ from contextos.client import governed_tool, ToolOutcome, ToolPaused
                idempotency_key=lambda order_id, **_: f"refund:{order_id}",
                tool_call_id=lambda order_id, **_: f"tc_refund_{order_id}",
                evidence_refs=["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"])
-def refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
+async def refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
     """Issue a refund for an order to its customer, in minor units."""
 ```
 
@@ -57,7 +59,7 @@ from llama_index.core.workflow import Context
 
 async def issue_refund(ctx: Context, order_id: str, customer_id: str, amount_minor: int) -> str:
     try:
-        return json.dumps(await asyncio.to_thread(refund, order_id, customer_id, amount_minor))
+        return json.dumps(await refund(order_id, customer_id, amount_minor))
     except ToolOutcome as outcome:
         return not_done(outcome)      # see "Map outcomes" below
 
@@ -89,24 +91,22 @@ class BudgetedLLM(FunctionCallingLLM):
     def metadata(self):
         return self.inner.metadata
 
-    async def achat(self, messages, **kw):
-        reservation = self._run.reserve_usage("model_call", tokens=4000)   # budget_exhausted raises here
-        try:
+    async def achat(self, messages, **kw):                 # self._run is the AsyncRun
+        async with self._run.budgeted_model_call(tokens=4000):   # BudgetExhausted raises here
             return await self.inner.achat(messages, **kw)
-        finally:
-            self._run.settle_usage(reservation)
 
     async def astream_chat(self, messages, **kw):          # FunctionAgent streams by default
-        reservation = self._run.reserve_usage("model_call", tokens=4000)
+        reservation = await self._run.reserve_usage("model_call", tokens=4000)
         async def stream():
             try:
                 async for chunk in await self.inner.astream_chat(messages, **kw):
                     yield chunk
             finally:
-                self._run.settle_usage(reservation)
+                await self._run.settle_usage(reservation)
         return stream()
 
-    # chat, stream_chat, complete variants: the same pattern.
+    # acomplete: the same pattern. Sync chat/complete variants need a sync Run
+    # (`with run.budgeted_model_call(tokens=...)`).
     def _prepare_chat_with_tools(self, tools, **kw):
         return self.inner._prepare_chat_with_tools_compat(tools, **kw)
 
@@ -116,8 +116,8 @@ class BudgetedLLM(FunctionCallingLLM):
 
 `FunctionCallingLLM.achat_with_tools` calls `_prepare_chat_with_tools` and then
 `achat`, so delegating those two keeps the provider's tool formatting and routes every
-call through the reservation. A refused reservation raises `ContextOSHTTPError` with
-code `budget_exhausted` out of `agent.run`; stop there and fail or complete the run,
+call through the reservation. A refused reservation raises `BudgetExhausted`
+(`.reasons` names the limit) out of `agent.run`; stop there and fail or complete the run,
 do not catch and continue. Reserve at least `[guards] model_call_min_tokens` (1,000 by
 default). Settling as the executor charges the whole reservation; to charge measured
 tokens, pass the reservation id to an LLM gateway holding the `meter` scope and let it
@@ -136,7 +136,7 @@ workflow should see:
 | `ToolPaused`, `kind == "approval"` | `approval_required` | human-in-the-loop, below |
 | `ToolPaused`, `kind == "unknown_outcome"` | `reconcile_effect_before_retry` | "outcome unknown"; reconcile out of band |
 | `ToolPaused`, `kind == "duplicate"` | `retry_unsafe` | "already requested"; the operation already exists |
-| `ToolPaused`, `kind == "input"` | `provide_requested_input` | answer with `run.provide_input(...)`, same operation |
+| `ToolPaused`, `kind == "input"` | `provide_requested_input` | answer with `await run.provide_input(...)`, same operation |
 
 `paused.kind` classifies a pause by what it waits on, so you do not match obligation
 or reason codes yourself:
@@ -201,7 +201,7 @@ give read-only tools a derived key and call id so their re-send redeems too.
 
 `paused.kind == "unknown_outcome"` (`reconcile_effect_before_retry`) means the effect may have happened. The operation stays
 reserved and retries are refused until someone resolves it with
-`run.reconcile(operation_id)` (provider query) or an operator assertion with evidence
+`await run.reconcile(operation_id)` (provider query) or an operator assertion with evidence
 (GUIDE §3, "Reconciling unknown effects"). Tell the model it is unresolved and end the
 step; `run.complete()` refuses with `required_effect_unsatisfied` until it is resolved.
 
@@ -221,7 +221,7 @@ plus your step pointer, in ContextOS after each step that matters:
 ```python
 data = handler.ctx.to_dict(serializer=JsonSerializer())
 blob = store.put(json.dumps(data))
-revision = run.checkpoint({"ctx": blob.ref, "sha256": blob.sha256, "step": "refund"}, revision)["revision"]
+revision = (await run.checkpoint({"ctx": blob.ref, "sha256": blob.sha256, "step": "refund"}, revision))["revision"]
 ```
 
 A replacement executor takes the run over, which fences the old process
@@ -229,8 +229,8 @@ A replacement executor takes the run over, which fences the old process
 restores:
 
 ```python
-run = client.attach(run_id, trace_id, principal_chain).take_over()
-saved = run.latest_checkpoint()
+run = await (await client.attach(run_id, trace_id, principal_chain)).take_over()
+saved = await run.latest_checkpoint()
 agent = FunctionAgent(tools=governed_tools(run), llm=BudgetedLLM(model, run), system_prompt=INSTRUCTIONS)
 ctx = Context.from_dict(agent, json.loads(store.get(saved["state"]["ctx"])), serializer=JsonSerializer())
 handler = agent.run(ctx=ctx)       # a workflow waiting for input waits again; send the response
@@ -248,14 +248,14 @@ GUIDE §3 "Delegating to child runs" and `examples/agent-loop/agent.py` for the 
 envelope). A `read_only` lane is surfaced no effectful capability at all.
 
 ```python
-lane = run.delegate(child_admission, envelope)          # effect_policy "read_only", sub_budget
+lane = await run.delegate(child_admission, envelope)    # effect_policy "read_only", sub_budget
 research = FunctionAgent(name="research", description="Looks orders up.",
                          tools=governed_tools(lane, only=["lookup_order"]),   # your factory, on the lane
                          llm=BudgetedLLM(model, lane), can_handoff_to=["support"])
 support = FunctionAgent(name="support", tools=governed_tools(run), llm=BudgetedLLM(model, run))
 workflow = AgentWorkflow(agents=[research, support], root_agent="research")
 result = await workflow.run(user_msg=goal)
-run.close_child(lane, "accept")       # settles the lane's spend into the parent
+await run.close_child(lane, "accept")  # settles the lane's spend into the parent
 ```
 
 The research agent's model calls spend the lane's sub-budget (size `sub_budget.total_tokens`
@@ -289,11 +289,11 @@ LLM wrapper, and after a takeover you must rebuild the client with the new gener
 ## Record the decision and complete
 
 ```python
-run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
-                    tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
-                    rationale={"strategy": str(result)[:500]})
-run.complete()
-evidence = run.evidence()
+await run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
+                          tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
+                          rationale={"strategy": str(result)[:500]})
+await run.complete()
+evidence = await run.evidence()
 ```
 
 The gateway verifies every cited tool call against its ledgers (`lineage_unverified`
@@ -309,7 +309,8 @@ otherwise). Cite what your tools observed, not what the model said.
   `allow_parallel_tool_calls=False` when one call's result should inform the next.
 - **Retries in the provider client.** LLM client retries are new model calls; they
   stay inside one reservation only if they happen inside the wrapper call.
-- **Blocking the loop.** The client is synchronous; use `asyncio.to_thread`.
+- **Blocking the loop.** `contextos.client` is synchronous; from async code use
+  `contextos.aio` (`AsyncClient`, `AsyncRun`).
 - **Unpinned model.** Pin the model in the contract's `release_refs` so decisions name
   it (GUIDE §6, "Pin the model and evaluators").
 

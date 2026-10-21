@@ -3,7 +3,7 @@
 // ./examples/frameworks/run.sh <framework>.
 import { readFileSync } from "node:fs";
 import {
-  Client, ToolBlocked, ToolFailed, ToolOutcome, ToolPaused, ToolRejected, governedTool,
+  BudgetExhausted, Client, ToolBlocked, ToolFailed, ToolOutcome, ToolPaused, ToolRejected, governedTool,
 } from "../../../bindings/node/client.mjs";
 
 const REQUESTS = new URL("../../support-refund/requests/", import.meta.url);
@@ -18,7 +18,7 @@ export const INSTRUCTIONS =
 export const APPROVAL = process.argv.slice(2).includes("--approval");
 // A model call reserves at least `[guards] model_call_min_tokens` (1,000 by default).
 export const MODEL_CALL_TOKENS = 1000;
-export { ToolOutcome, ToolPaused, ToolBlocked, ToolRejected, ToolFailed };
+export { BudgetExhausted, ToolOutcome, ToolPaused, ToolBlocked, ToolRejected, ToolFailed };
 
 /** True when none of the provider keys is set: the example then uses a scripted model. */
 export const offline = (...envKeys) => !envKeys.some((key) => process.env[key]);
@@ -53,16 +53,11 @@ export function tools(run) {
   };
 }
 
-/** Reserves budget for one model call around `fn` (refused with budget_exhausted when
- * the run cannot afford it). In production pass the reservation id to your LLM
- * gateway, which meters the call; settling it here charges all of it. */
-export async function budgeted(run, fn, tokens = MODEL_CALL_TOKENS) {
-  const reservation = await run.reserveUsage("model_call", { tokens });
-  try {
-    return await fn(reservation);
-  } finally {
-    await run.settleUsage(reservation);
-  }
+/** Reserves budget for one model call around `fn` (`run.budgetedModelCall`); throws
+ * BudgetExhausted when the run cannot afford it. In production pass the reservation id
+ * to your LLM gateway, which meters the call; settling it here charges all of it. */
+export function budgeted(run, fn, tokens = MODEL_CALL_TOKENS) {
+  return run.budgetedModelCall(fn, { tokens });
 }
 
 /** What the model is told when the gateway did not complete a call (see demo.py). */

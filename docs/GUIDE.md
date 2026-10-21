@@ -68,6 +68,11 @@ each popular framework, covering tools, model-call budgets, pauses and approvals
 checkpoints, subagents and decisions. After a crash, `client.attach(...).take_over()` resumes the run and fences the
 old process.
 
+For asyncio agents, `contextos.aio` has the same client as coroutines (`AsyncClient`,
+`AsyncRun`; `governed_tool` on an `AsyncRun` makes async tools). It stays
+standard-library only by running each request in a worker thread, so the event loop
+never blocks on the network.
+
 The same client exists for Node.js and other `fetch` runtimes, with TypeScript types:
 
 ```ts
@@ -515,7 +520,12 @@ POST /v1/runs/{run_id}/usage/reserve   {"kind": "model_call", "tokens": 4000, "c
 POST /v1/runs/{run_id}/usage/settle    {"reservation_id": "usage:…", "tokens": 1830}
 ```
 
-A reservation that does not fit is refused (`budget_exhausted`); replans count against
+In the clients, `run.budgeted_model_call(tokens=…)` (TypeScript
+`run.budgetedModelCall(fn, {tokens})`) reserves before the call and settles after it,
+even when the call fails.
+
+A reservation that does not fit is refused (`budget_exhausted`; the clients raise
+`BudgetExhausted`, which the loop should treat as a stop, not a retry); replans count against
 the run's replan allowance. A model call reserves at least `[guards]
 model_call_min_tokens` (default 1,000), so no call is free. Settlement depends on who reports: an LLM gateway or other
 metering service holding the `meter` scope (and neither `admit` nor `dispatch`) settles

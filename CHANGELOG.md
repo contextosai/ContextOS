@@ -185,6 +185,11 @@ First release candidate of the ContextOS runtime.
   --approval` pauses each framework example for approval, approves it through the
   framework's human-in-the-loop mechanism and redeems it with the identical call. CI
   runs every framework example in both modes.
+- `contextos.aio`: the Python client for asyncio agents (`AsyncClient`, `AsyncRun`,
+  async governed tools), still standard-library only. Both clients raise
+  `BudgetExhausted` for a reservation the run cannot afford and have
+  `budgeted_model_call` / `budgetedModelCall` to reserve and settle around one model
+  call.
 - MCP `tools/call` accepts the host's call id in `_meta["io.contextos/toolCallId"]`,
   returns the call and operation ids in `_meta` on every result, and tells the model in
   the error text whether the refused call had any effect.

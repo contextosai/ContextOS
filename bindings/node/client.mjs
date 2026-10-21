@@ -22,6 +22,15 @@ export class ContextOSHTTPError extends Error {
   }
 }
 
+/** The run's budget cannot fit a model-call or replan reservation; `reasons` says which
+ * limit. Stop the loop: retrying the same reservation cannot succeed. */
+export class BudgetExhausted extends ContextOSHTTPError {
+  get reasons() {
+    return Array.isArray(this.detail) ? this.detail : [];
+  }
+}
+const HTTP_ERRORS = { budget_exhausted: BudgetExhausted };
+
 export class ToolOutcome extends Error {
   constructor(result, report) {
     const reasons = report.reason_codes ?? [];
@@ -107,7 +116,8 @@ export class Client {
       }
       const failure = decoded?.error;
       if (failure && typeof failure === "object") {
-        throw new ContextOSHTTPError(response.status, failure.code ?? "error", failure.message ?? "", failure.detail);
+        const code = failure.code ?? "error";
+        throw new (HTTP_ERRORS[code] ?? ContextOSHTTPError)(response.status, code, failure.message ?? "", failure.detail);
       }
       throw new ContextOSHTTPError(response.status, "refused", text, decoded);
     }
@@ -292,6 +302,18 @@ export class Run {
    */
   settleUsage(reservationId) {
     return this.#post("/usage/settle", { reservation_id: reservationId });
+  }
+
+  /** Reserves budget for one model call around `fn(reservationId)` and settles it
+   * afterwards, even if `fn` throws. Throws BudgetExhausted before calling `fn` when the
+   * run cannot afford it. */
+  async budgetedModelCall(fn, { tokens, costCents = 0 }) {
+    const reservation = await this.reserveUsage("model_call", { tokens, costCents });
+    try {
+      return await fn(reservation);
+    } finally {
+      await this.settleUsage(reservation);
+    }
   }
 
   status() {

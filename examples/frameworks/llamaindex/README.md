@@ -21,7 +21,7 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
 What is governed:
 
 - **Tools.** `lookup_order` and `issue_refund` are `FunctionTool`s over the run's
-  governed functions. contextosd authorizes, dispatches and audits each call; the
+  governed functions, async through `contextos.aio`'s `AsyncRun`. contextosd authorizes, dispatches and audits each call; the
   refund cites the order snapshot and is keyed `refund:ord_881`, so the second refund
   is refused (`retry_unsafe`) and the model is told it was already requested and not
   repeated.

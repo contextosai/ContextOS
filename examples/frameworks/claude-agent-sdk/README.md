@@ -71,7 +71,8 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
 ## What is governed
 
 - **Tools.** `create_sdk_mcp_server` exposes `lookup_order` and `issue_refund`. Their
-  handlers call the shared `governed_tool` functions, so each call goes to
+  handlers await the shared `governed_tool` functions (built on the run's `AsyncRun`
+  from `contextos.aio`), so each call goes to
   `contextosd`, which authorizes, dispatches, records and audits it. The refund is
   keyed `refund:ord_881` and cites the order snapshot as evidence, so the second call
   cannot apply twice.

@@ -30,9 +30,10 @@ import sys
 
 from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, HookMatcher, ResultMessage,
                               SystemMessage, TextBlock, ToolUseBlock, create_sdk_mcp_server, tool)
-from contextos.client import ContextOSHTTPError
+from contextos.aio import AsyncRun
 
-from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline, refusal, tools
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, BudgetExhausted, ToolOutcome, ToolPaused, admit, approve,
+                  finish, offline, refusal, tools)
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
 SERVER = "contextos"
@@ -41,22 +42,22 @@ SERVER = "contextos"
 class Turns:
     """Reserves the run's budget for each model turn before it starts."""
 
-    def __init__(self, run):
+    def __init__(self, run: AsyncRun):
         self.run = run
         self.count = 0
 
-    def reserve(self) -> None:
+    async def reserve(self) -> None:
         # The executor settles its own reservation, so all of it is charged. A metering
         # LLM gateway (`meter` scope) would settle the measured usage instead.
-        with budgeted(self.run):
+        async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):
             self.count += 1
 
     async def pre_tool_use(self, input_data, tool_use_id, context):
         """Every tool result is read by one more model turn: reserve it now, or refuse
         the tool and stop the agent."""
         try:
-            await asyncio.to_thread(self.reserve)
-        except ContextOSHTTPError as refused:
+            await self.reserve()
+        except BudgetExhausted as refused:
             return {"continue_": False, "stopReason": f"ContextOS: {refused.code}",
                     "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": f"NOT DONE (budget): {refused.code}."}}
@@ -64,14 +65,15 @@ class Turns:
 
 
 def governed_server(run):
-    """The run's governed tools as an in-process MCP server, and what they did."""
+    """The run's governed tools as an in-process MCP server, and what they did. Built
+    on an ``AsyncRun``, the governed functions are coroutines the handlers await."""
     lookup_order, issue_refund = tools(run)
     state = {"refunded": False}
 
     async def call(function, args: dict) -> dict:
         try:
             try:
-                output = await asyncio.to_thread(function, **args)
+                output = await function(**args)
             except ToolPaused as paused:
                 if paused.kind != "approval":
                     raise
@@ -81,7 +83,7 @@ def governed_server(run):
                 print(f"  paused for approval: {paused.report['approval_request_id']}")
                 await asyncio.to_thread(approve, paused)
                 print("  resumed: re-sending the same call")
-                output = await asyncio.to_thread(function, **args)
+                output = await function(**args)
         except ToolOutcome as outcome:
             return {"content": [{"type": "text", "text": refusal(outcome)}], "is_error": True}
         return {"content": [{"type": "text", "text": json.dumps(output)}]}
@@ -112,7 +114,7 @@ async def live(server, turns: Turns) -> str:
         env={"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"},
     )
     summary = ""
-    turns.reserve()  # the query's first model turn
+    await turns.reserve()  # the query's first model turn
     async with ClaudeSDKClient(options=options) as agent:
         await agent.query(GOAL)
         async for message in agent.receive_response():
@@ -136,7 +138,7 @@ async def scripted(handlers: dict, turns: Turns) -> str:
     """The calls the model would make, through the same hook and handlers."""
     print("no ANTHROPIC_API_KEY: scripted path, the same hook and tool handlers without a model")
     refund = {"order_id": "ord_881", "customer_id": "cus_77"}
-    turns.reserve()  # the first model turn
+    await turns.reserve()  # the first model turn
     order = None
     for name, args in [("lookup_order", {"order_id": "ord_881"}), ("issue_refund", refund),
                        ("issue_refund", refund)]:
@@ -156,8 +158,9 @@ async def scripted(handlers: dict, turns: Turns) -> str:
 
 def main() -> int:
     client, run = admit("claude_agent_sdk")
-    server, handlers, state = governed_server(run)
-    turns = Turns(run)
+    governed = AsyncRun(run)  # the same run through the async client, for the async handlers and hook
+    server, handlers, state = governed_server(governed)
+    turns = Turns(governed)
     if offline("ANTHROPIC_API_KEY"):
         summary = asyncio.run(scripted(handlers, turns))
     else:

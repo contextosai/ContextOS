@@ -21,8 +21,10 @@ pip install google-adk==2.12.0            # add the [mcp] extra for McpToolset
 export PYTHONPATH=/path/to/ContextOS/bindings/python
 ```
 
-`contextos.client` uses only the standard library. Its calls are synchronous: from async
-callbacks, run them with `asyncio.to_thread` so they do not block the event loop.
+`contextos.client` uses only the standard library. ADK is asyncio, so use
+`contextos.aio`: `AsyncClient` and `AsyncRun` have the client's methods as coroutines,
+each request running in a worker thread, so tools and callbacks never block the event
+loop.
 
 ## Admit a run
 
@@ -30,10 +32,10 @@ Admit the run before you build the agent. The tools and callbacks need the run h
 which carries the executor generation.
 
 ```python
-from contextos.client import Client
+from contextos.aio import AsyncClient
 
-client = Client(os.environ["CONTEXTOS_URL"], token=os.environ["CONTEXTOS_TOKEN"])
-run = client.admit(admission_body)        # POST /v1/runs: contract, context, budget
+client = AsyncClient(os.environ["CONTEXTOS_URL"], token=os.environ["CONTEXTOS_TOKEN"])
+run = await client.admit(admission_body)  # POST /v1/runs: contract, context, budget; an AsyncRun
 ```
 
 Admit one ContextOS run per unit of governed work, and treat the ADK session as that
@@ -44,21 +46,22 @@ fine. Do not share one run between unrelated sessions.
 
 ADK builds a `FunctionDeclaration` from a function's signature and docstring.
 `governed_tool` keeps both: it uses `functools.wraps`, and `inspect.signature` follows
-`__wrapped__`. So a governed function can be passed to `FunctionTool` unchanged:
+`__wrapped__`. Built on an `AsyncRun`, a governed function is a coroutine, which ADK
+awaits, and it can be passed to `FunctionTool` unchanged:
 
 ```python
 from contextos.client import governed_tool
 from google.adk.tools import FunctionTool
 
 @governed_tool(run, "adp_orders.lookup", approval_mode="read_only")
-def lookup_order(order_id: str) -> dict:
+async def lookup_order(order_id: str) -> dict:
     """Look up an order's status, amount (amount_minor) and refund eligibility."""
 
 @governed_tool(run, "adp_payments.issue_refund", approval_mode="destructive",
                idempotency_key=lambda order_id, **_: f"refund:{order_id}",
                tool_call_id=lambda order_id, **_: f"tc_refund_{order_id}",
                evidence_refs=["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"])
-def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
+async def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
     """Issue a refund for an order to its customer, in minor units of the order's currency."""
 
 tools = [FunctionTool(lookup_order), FunctionTool(issue_refund)]
@@ -79,10 +82,12 @@ the gateway refuses to apply it twice (`retry_unsafe`).
 
 Reserve from the run's budget before each model call and settle after it. That is the
 same ledger tool calls use, so a looping agent stops at the budget and a resumed run
-does not start a fresh budget.
+does not start a fresh budget. Where one function makes the call,
+`async with run.budgeted_model_call(tokens=...)` reserves and settles around it; ADK
+splits the call across callbacks, so reserve in one and settle in the others:
 
 ```python
-from contextos.client import ContextOSHTTPError
+from contextos.client import BudgetExhausted
 from google.adk.models import LlmResponse
 from google.genai import types
 
@@ -91,8 +96,8 @@ reservations = {}
 async def before_model(callback_context, llm_request):
     key = (callback_context.invocation_id, callback_context.agent_name)
     try:
-        reservations[key] = await asyncio.to_thread(run.reserve_usage, "model_call", tokens=4000)
-    except ContextOSHTTPError as refused:      # budget_exhausted, run not running, ...
+        reservations[key] = await run.reserve_usage("model_call", tokens=4000)
+    except BudgetExhausted as refused:         # refused.reasons names the limit
         # A truthy response skips the model call.
         return LlmResponse(content=types.Content(role="model", parts=[types.Part(
             text=f"Stopping: the run's budget refused another model call ({refused.code}).")]))
@@ -100,7 +105,7 @@ async def before_model(callback_context, llm_request):
 async def settle(callback_context):
     key = (callback_context.invocation_id, callback_context.agent_name)
     if reservation := reservations.pop(key, None):
-        await asyncio.to_thread(run.settle_usage, reservation)
+        await run.settle_usage(reservation)
 
 async def after_model(callback_context, llm_response):
     if not llm_response.partial:              # called per chunk when streaming
@@ -182,11 +187,11 @@ def on_tool_error(tool, args, tool_context, error):
   Do not use `FunctionTool(require_confirmation=True)` for this: that asks before the
   gateway has decided whether approval is needed.
 - **Input required (`kind == "input"`).** `error.input_requests` holds the
-  questions. Answer them with `run.provide_input(error, envelope, responses)`, where
-  `envelope` is `run.envelope(...)` rebuilt with the call's arguments, key and
+  questions. Answer them with `await run.provide_input(error, envelope, responses)`, where
+  `envelope` is `await run.envelope(...)` rebuilt with the call's arguments, key and
   `tool_call_id`. That continues the same operation. Do not answer by calling the tool again.
 - **Unknown outcome (`kind == "unknown_outcome"`).** The effect may have happened.
-  Do not tell the model either way. Call `run.reconcile(operation_id)` (provider query)
+  Do not tell the model either way. Call `await run.reconcile(operation_id)` (provider query)
   or have an operator assert the outcome with evidence. `complete` is refused until it
   is resolved.
 
@@ -202,16 +207,16 @@ in a durable `SessionService`, and checkpoint a pointer to it after each step th
 matters:
 
 ```python
-revision = run.checkpoint({"session_id": session.id, "step": "refund", "verdict": "accept"},
-                          revision)["revision"]
+revision = (await run.checkpoint({"session_id": session.id, "step": "refund", "verdict": "accept"},
+                                 revision))["revision"]
 ```
 
 After a crash, the replacement process takes the run over, which fences the old
 process, and then continues from the checkpoint:
 
 ```python
-run = client.attach(run_id, trace_id, principal_chain).take_over()
-saved = run.latest_checkpoint()              # {"state": {...}, "revision": n}
+run = await (await client.attach(run_id, trace_id, principal_chain)).take_over()
+saved = await run.latest_checkpoint()        # {"state": {...}, "revision": n}
 session = await session_service.get_session(app_name=APP, user_id=user, session_id=saved["state"]["session_id"])
 ```
 
@@ -233,13 +238,13 @@ no effects at all. Admit the lane, build the sub-agent from the lane's tools, an
 the lane when the parent is done with it:
 
 ```python
-lane = run.delegate(child_admission, envelope)    # effect_policy "read_only", allowed_capabilities, sub_budget
+lane = await run.delegate(child_admission, envelope)  # effect_policy "read_only", allowed_capabilities, sub_budget
 lane_lookup, _ = make_tools(lane)                 # governed_tool bound to the child run
 researcher = LlmAgent(name="researcher", model=MODEL, tools=[FunctionTool(lane_lookup)],
                       before_model_callback=..., after_model_callback=...)   # reserve from `lane`
 root = LlmAgent(name="support_agent", model=MODEL, tools=[AgentTool(agent=researcher), FunctionTool(issue_refund)])
 # ... run the invocation ...
-run.close_child(lane, "accept")                   # settles the lane's spend into the parent
+await run.close_child(lane, "accept")             # settles the lane's spend into the parent
 ```
 
 The envelope fields are listed in
@@ -293,11 +298,11 @@ Record the decision from what the gateway reported, not from the model's final t
 then complete the run:
 
 ```python
-run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
-                    tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
-                    rationale={"strategy": summary[:500]})
-run.complete()       # refused while an effect is unknown, a child is open or a call is in flight
-evidence = run.evidence()
+await run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
+                          tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
+                          rationale={"strategy": summary[:500]})
+await run.complete() # refused while an effect is unknown, a child is open or a call is in flight
+evidence = await run.evidence()
 ```
 
 The gateway checks each cited call against the run's operation ledger
@@ -308,8 +313,8 @@ Gemini model as a `model_profile` release ref so that the record names the model
 ## Pitfalls
 
 - **Parallel function calls.** Gemini can return several calls in one turn. ADK runs
-  them concurrently. Synchronous tools run inline on the event loop, one after another,
-  unless you pass `run_config=RunConfig(tool_thread_pool_config=ToolThreadPoolConfig())`
+  them concurrently. Async governed tools overlap on the event loop; synchronous tools
+  would run inline on it, one after another, unless you pass `run_config=RunConfig(tool_thread_pool_config=ToolThreadPoolConfig())`
   (both from `google.adk.agents.run_config`) to `run_async`. Each
   governed call is authorized separately, and identical effects share an operation key,
   so a duplicated refund in one turn is still applied once.

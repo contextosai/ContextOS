@@ -60,7 +60,8 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
 ## What is governed
 
 - **Tools.** `lookup_order` and `issue_refund` are `governed_tool` functions from
-  `_shared/demo.py`, wrapped in ADK `FunctionTool`s. ADK builds their declarations from
+  `_shared/demo.py`, built on the run's `AsyncRun` (`contextos.aio`) so they are
+  coroutines that never block the event loop, and wrapped in ADK `FunctionTool`s. ADK builds their declarations from
   the signatures and docstrings. Their bodies never run locally: each call goes through
   the gateway, which authorizes it, dispatches it and audits it.
 - **Exactly once.** The refund is keyed `refund:ord_881`. The model's second refund

@@ -23,7 +23,7 @@ const { lookupOrder, issueRefund } = tools(run);
 
 // Budget: a processor whose processLLMRequest runs just before every provider call
 // (each attempt, retries included) and processLLMResponse just after it, even when the
-// call fails. A refused reservation (budget_exhausted) throws, so no call is made.
+// call fails. A reservation the run cannot afford throws BudgetExhausted: no call is made.
 const budget = {
   id: "contextos-budget",
   async processLLMRequest({ state }: { state: Record<string, unknown> }) {

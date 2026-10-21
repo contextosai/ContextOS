@@ -72,7 +72,8 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
   so the second call cannot apply twice.
 - **Model calls.** `BudgetedProvider` wraps every model the runner resolves, so each
   call (and each SDK retry of it) reserves 1,000 tokens first and settles after, even
-  when it raises: four calls here, 4,000 tokens.
+  when it raises: four calls here, 4,000 tokens. On the event loop the run is an
+  `AsyncRun` (`contextos.aio`); the sync tools run in the SDK's worker thread.
 - **Outcomes.** `failure_error_function=governed_failure` turns refusals and a paused
   repeat (`paused.kind == "duplicate"`) into `refusal()` text, instead of the SDK's
   default "Please try again". A pause whose `kind` is `approval`, `input` or

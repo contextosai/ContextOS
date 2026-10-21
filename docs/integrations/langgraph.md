@@ -91,11 +91,8 @@ class ContextOS(AgentMiddleware):
         self.run, self.tokens = run, tokens
 
     def wrap_model_call(self, request, handler):
-        reservation = self.run.reserve_usage("model_call", tokens=self.tokens)  # budget_exhausted raises
-        try:
+        with self.run.budgeted_model_call(tokens=self.tokens):   # BudgetExhausted raises first
             return handler(request)
-        finally:
-            self.run.settle_usage(reservation)
 
     def wrap_tool_call(self, request, handler):
         call = request.tool_call
@@ -124,20 +121,19 @@ to the LLM gateway that meters the call (`meter` scope) instead of calling
 `settle_usage` yourself; it settles what was measured and releases the rest.
 
 For `agent.ainvoke` and async tools (MCP tools are async-only), also implement
-`awrap_model_call` and `awrap_tool_call`, running the blocking client in a thread:
+`awrap_model_call` and `awrap_tool_call` (the same mapping, awaiting `handler`), with
+`contextos.aio` so the event loop never blocks on `contextosd`:
 
 ```python
     async def awrap_model_call(self, request, handler):
-        reservation = await asyncio.to_thread(self.run.reserve_usage, "model_call", tokens=self.tokens)
-        try:
+        async with AsyncRun(self.run).budgeted_model_call(tokens=self.tokens):   # from contextos.aio
             return await handler(request)
-        finally:
-            await asyncio.to_thread(self.run.settle_usage, reservation)
 ```
 
-When a reservation is refused, `reserve_usage` raises `ContextOSHTTPError` out of
-`agent.invoke`. Catch it there, record a `DEFERRED` or `REJECTED` decision if you can,
-and `run.fail()` or `run.complete()`; do not catch it inside the graph.
+`governed_tool(AsyncRun(run), ...)` makes a governed tool async. When a reservation is
+refused, `BudgetExhausted` (from `contextos.client`) propagates out of `agent.invoke`.
+Catch it there, record a `DEFERRED` or `REJECTED` decision if you can, and `run.fail()`
+or `run.complete()`; do not catch it inside the graph.
 
 ## 5. Map outcomes to LangGraph behavior
 

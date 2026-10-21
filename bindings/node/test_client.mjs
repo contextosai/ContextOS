@@ -8,7 +8,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool } from "./client.mjs";
+import { BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool } from "./client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const binary = join(root, "target/release/contextosd");
@@ -89,6 +89,10 @@ try {
   // Model calls spend the run's budget; a self-reported settlement charges it all.
   const reservation = await run.reserveUsage("model_call", { tokens: 3000 });
   assert.equal((await run.settleUsage(reservation)).charged.tokens, 3000);
+  // A reservation the run cannot afford is refused before the model is called.
+  await assert.rejects(run.budgetedModelCall(async () => assert.fail("the model call ran"), { tokens: 1_000_000 }),
+    (error) => error instanceof BudgetExhausted && error.status === 409 && error.reasons.length > 0);
+  assert.equal(await run.budgetedModelCall(async (id) => id.startsWith("usage:"), { tokens: 1000 }), true);
 
   // An independent evaluator scores the decision; the executor's key cannot.
   const scores = { evaluatorRef: "evaluator.refund_quality@3", policy: 1, utility: 0.9, safety: 1 };

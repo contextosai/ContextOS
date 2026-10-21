@@ -24,17 +24,19 @@ No separate Claude Code install is needed. Set `cli_path` (TypeScript:
 `pathToClaudeCodeExecutable`) only to pin a CLI you manage yourself. Authenticate the
 model with `ANTHROPIC_API_KEY`, or route the model through a gateway with
 `ANTHROPIC_BASE_URL` (section 6). `contextos.client` uses the standard library only:
-vendor `bindings/python/contextos`.
+vendor `bindings/python/contextos`. Tool handlers and hooks are async, so use
+`contextos.aio`: `AsyncClient` and `AsyncRun` have the client's methods as coroutines,
+each request running in a worker thread, so they never block the event loop.
 
 ## 2. Admit a run
 
-Admit one ContextOS run per agent task before you build the agent's options. The `Run`
+Admit one ContextOS run per agent task before you build the agent's options. The run
 handle holds the executor generation that every governed call carries:
 
 ```python
-from contextos.client import Client
-client = Client("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
-run = client.admit(admission_body)        # POST /v1/runs
+from contextos.aio import AsyncClient
+client = AsyncClient("https://contextos.internal", token=os.environ["CONTEXTOS_TOKEN"])
+run = await client.admit(admission_body)  # POST /v1/runs; an AsyncRun
 ```
 
 ## 3. Route A: governed tools in an in-process SDK MCP server (recommended)
@@ -42,7 +44,8 @@ run = client.admit(admission_body)        # POST /v1/runs
 Use `create_sdk_mcp_server` with handlers that call the run's governed functions. With
 `governed_tool`, the client sets each call's operation key, `tool_call_id` and cited
 evidence. A retried refund therefore maps to the same operation, and the
-DecisionRecord can cite the call by a known id:
+DecisionRecord can cite the call by a known id. On an `AsyncRun` the governed function
+is a coroutine the handler awaits:
 
 ```python
 from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -53,13 +56,13 @@ from demo import refusal                 # examples/frameworks/_shared/demo.py
                idempotency_key=lambda order_id, **_: f"refund:{order_id}",
                tool_call_id=lambda order_id, **_: f"tc_refund_{order_id}",
                evidence_refs=["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"])
-def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
+async def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
     """Issue a refund for an order to its customer, in minor units."""
 
 @tool("issue_refund", issue_refund.__doc__, {"order_id": str, "customer_id": str, "amount_minor": int})
 async def refund(args):
     try:
-        output = await asyncio.to_thread(issue_refund, **args)   # the client is blocking
+        output = await issue_refund(**args)
     except ToolOutcome as outcome:                              # refusal(): worded by outcome.kind
         return {"content": [{"type": "text", "text": refusal(outcome)}], "is_error": True}
     return {"content": [{"type": "text", "text": json.dumps(output)}]}
@@ -165,14 +168,17 @@ exactly one more model turn. Reserve the first turn before `query()`, and reserv
 following turn in `PreToolUse`, before the tool runs:
 
 ```python
+from contextos.client import BudgetExhausted
+
 class Turns:
-    def __init__(self, run): self.run = run
-    def reserve(self):                                   # budget_exhausted -> ContextOSHTTPError 409
-        self.run.settle_usage(self.run.reserve_usage("model_call", tokens=1000))
+    def __init__(self, run): self.run = run              # an AsyncRun
+    async def reserve(self):                             # raises BudgetExhausted when it cannot fit
+        async with self.run.budgeted_model_call(tokens=1000):
+            pass
     async def pre_tool_use(self, input_data, tool_use_id, context):
         try:
-            await asyncio.to_thread(self.reserve)
-        except ContextOSHTTPError as refused:
+            await self.reserve()
+        except BudgetExhausted as refused:
             return {"continue_": False, "stopReason": f"ContextOS: {refused.code}",
                     "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": f"NOT DONE (budget): {refused.code}."}}
@@ -211,7 +217,7 @@ what counts.
 | --- | --- | --- |
 | `ToolBlocked`, `ToolRejected`, `ToolFailed` | `is_error` text: not done, why, do not retry | nothing; the model explains |
 | `ToolPaused`, `kind == "duplicate"` | `is_error` text: already requested, not repeated | nothing; the earlier call stands |
-| `ToolPaused`, `kind == "unknown_outcome"` | `is_error` text: outcome unknown, do not retry | reconcile the operation (`run.reconcile`), never resend it |
+| `ToolPaused`, `kind == "unknown_outcome"` | `is_error` text: outcome unknown, do not retry | reconcile the operation (`await run.reconcile`), never resend it |
 | `ToolPaused`, `kind == "approval"` | nothing yet: the call waits in the handler | a reviewer decides, then the handler re-sends the same call |
 
 For an approval, the handler is the human-in-the-loop seam. The agent loop awaits the
@@ -223,12 +229,12 @@ example does, exercised end to end by
 
 ```python
 try:
-    output = await asyncio.to_thread(issue_refund, **args)
+    output = await issue_refund(**args)
 except ToolPaused as paused:
     if paused.kind != "approval":
         raise                                         # mapped by the table above
     await wait_for_reviewer(paused.report["approval_request_id"])
-    output = await asyncio.to_thread(issue_refund, **args)   # the same call, redeemed
+    output = await issue_refund(**args)               # the same call, redeemed
 ```
 
 If the wait can outlast the MCP tool timeout (`MCP_TOOL_TIMEOUT`) or the process,
@@ -250,10 +256,10 @@ Keep both. After each query, or at each approval pause, save the session id with
 own state:
 
 ```python
-revision = run.checkpoint({"session_id": result.session_id, "step": "refunded"}, revision)["revision"]
+revision = (await run.checkpoint({"session_id": result.session_id, "step": "refunded"}, revision))["revision"]
 ```
 
-A replacement executor calls `run.take_over()`, reads `run.latest_checkpoint()`, and
+A replacement executor awaits `run.take_over()`, reads `run.latest_checkpoint()`, and
 starts a new query with `resume=state["session_id"]`. Session transcripts live on the
 local disk (`~/.claude/projects/...`). For another host, configure the SDK's
 `session_store` or copy the `.jsonl` file. Otherwise, start a fresh session from the
@@ -269,7 +275,7 @@ lane its own child run instead, narrowed by an `AgentDelegationEnvelope` (GUIDE
 section 3, "Delegating to child runs"), and its own server:
 
 ```python
-lane = run.delegate(child_admission, envelope)            # effect_policy "read_only", sub_budget
+lane = await run.delegate(child_admission, envelope)      # effect_policy "read_only", sub_budget
 research = create_sdk_mcp_server("research", tools=[lookup_for(lane)])
 options = ClaudeAgentOptions(
     tools=["Agent"], allowed_tools=["mcp__contextos__*", "mcp__research__*"],
@@ -279,7 +285,7 @@ options = ClaudeAgentOptions(
                                           tools=["mcp__research__lookup_order"], model="haiku")},
     env={"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"}, disallowed_tools=["Agent(fork)"], ...)
 # after the query
-run.close_child(lane, "accept")                           # settles the lane's spend into the parent
+await run.close_child(lane, "accept")                     # settles the lane's spend into the parent
 ```
 
 The lane cannot act even if the subagent tries, because the gateway gives a `read_only`
@@ -295,10 +301,10 @@ the rest. Close every child before `complete()`, or completion fails with
 ## 10. Record the decision and complete
 
 ```python
-decision = run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
-                               tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
-                               rationale={"strategy": result.result[:500]})
-run.complete()
+decision = await run.record_decision("support.refund.execute", "DECIDED", outcome="refund_issued",
+                                     tool_calls=[{"tool_call_id": "tc_refund_ord_881", "operation_id": "refund:ord_881"}],
+                                     rationale={"strategy": result.result[:500]})
+await run.complete()
 ```
 
 The gateway checks each cited `operation_id` against the run's ledger: it must exist
@@ -312,7 +318,7 @@ key; on route B, cite the ids from the result's `_meta` (section 4). Then call `
 - **Settings leak in.** Without `setting_sources=[]` and `strict_mcp_config=True`,
   `.claude/settings.json`, `.mcp.json`, filesystem agents and hooks can add tools.
 - **Blocking calls in async handlers.** `contextos.client` is synchronous. Use
-  `asyncio.to_thread` in handlers and hooks.
+  `contextos.aio` (`AsyncClient`, `AsyncRun`) in handlers and hooks.
 - **Raising from a handler.** The SDK turns the exception text into an error result
   the model may read as "try again". Return explicit refusal text.
 - **Retries.** Claude may retry a tool that failed. The operation key makes that safe

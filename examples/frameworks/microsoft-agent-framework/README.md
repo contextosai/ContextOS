@@ -34,7 +34,7 @@ What is governed:
   approved replay re-sends the identical call, which redeems the exact approval. Any
   other pause is reported, never retried.
 - **Model calls.** Chat middleware reserves 1,000 tokens before every model call and
-  settles after (`tokens: 4000` for four calls); `budget_exhausted` ends the loop.
+  settles after (`tokens: 4000` for four calls); a `BudgetExhausted` refusal ends the loop.
 - **Decision.** `finish` records the DecisionRecord (its tool lineage verified by the
   gateway), completes the run and reads its evidence.
 

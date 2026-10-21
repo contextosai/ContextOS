@@ -31,8 +31,8 @@ evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2
   authorizes, dispatches, records and audits each call. The refund is keyed
   `refund:ord_881`, so the second call cannot apply twice.
 - **Model calls.** A `wrapLanguageModel` middleware reserves 1,000 tokens from the run's
-  budget before every provider call (`wrapGenerate`, and `wrapStream` settling when the
-  stream ends) — four calls here, 4,000 tokens. When the budget is spent the
+  budget before every provider call (`wrapGenerate` through `run.budgetedModelCall`, and
+  `wrapStream` settling when the stream ends) — four calls here, 4,000 tokens. When the budget is spent the
   reservation is refused and the loop stops, whatever the model wants.
 - **Outcomes.** `ToolBlocked`, `ToolRejected`, `ToolFailed` and a paused repeat
   (`retry_unsafe`) become a tool result with `refusal()` text. A pause that waits on

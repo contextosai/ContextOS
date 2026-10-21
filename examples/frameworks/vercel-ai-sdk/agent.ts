@@ -19,18 +19,12 @@ import {
 const { client, run } = await admit("vercel_ai_sdk");
 const { lookupOrder, issueRefund } = tools(run);
 
-// Budget: reserve before every provider call, settle after (even when it fails). In
-// production send the reservation id to your LLM gateway so it meters the call.
+// Budget: reserve before every provider call, settle after (even when it fails); a run
+// that cannot afford the call throws BudgetExhausted first. In production send the
+// reservation id to your LLM gateway so it meters the call.
 const budget: LanguageModelMiddleware = {
   specificationVersion: "v4",
-  async wrapGenerate({ doGenerate }) {
-    const reservation = await run.reserveUsage("model_call", { tokens: MODEL_CALL_TOKENS });
-    try {
-      return await doGenerate();
-    } finally {
-      await run.settleUsage(reservation);
-    }
-  },
+  wrapGenerate: ({ doGenerate }) => run.budgetedModelCall(() => doGenerate(), { tokens: MODEL_CALL_TOKENS }),
   async wrapStream({ doStream }) {
     const reservation = await run.reserveUsage("model_call", { tokens: MODEL_CALL_TOKENS });
     let settled: Promise<unknown> | undefined;
