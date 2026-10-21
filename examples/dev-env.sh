@@ -22,6 +22,9 @@ python3 examples/support-refund/dev_services.py >/dev/null & SERVICES=$!
 ./target/release/contextosd --config "$CONFIG" > "$LOG" 2>&1 & SERVER=$!
 trap 'kill $SERVICES $SERVER 2>/dev/null; wait 2>/dev/null; rm -f "$CONFIG" "$LOG"' EXIT
 export CONTEXTOS_URL="http://127.0.0.1:$SERVER_PORT"
+# Ready means contextosd answers and every development service accepts connections:
+# contextosd does not wait for its dependencies, so the first call could race them.
+services_up() { for p in $P1 $P2 $P3 $P4; do (: > "/dev/tcp/127.0.0.1/$p") 2>/dev/null || return 1; done; }
 READY=""
-for _ in $(seq 100); do curl -sf "$CONTEXTOS_URL/readyz" >/dev/null && READY=1 && break; sleep 0.1; done
-if [ -z "$READY" ]; then echo "contextosd did not become ready:" >&2; cat "$LOG" >&2; exit 1; fi
+for _ in $(seq 100); do curl -sf "$CONTEXTOS_URL/readyz" >/dev/null && services_up && READY=1 && break; sleep 0.1; done
+if [ -z "$READY" ]; then echo "contextosd or the development services did not become ready:" >&2; cat "$LOG" >&2; exit 1; fi

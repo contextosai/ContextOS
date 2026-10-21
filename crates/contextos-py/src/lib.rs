@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 #[pyfunction]
 fn call(py: Python<'_>, operation: &str, input: &str) -> String {
     let (operation, input) = (operation.to_owned(), input.to_owned());
-    py.allow_threads(move || contextos_embed::call(&operation, input.as_bytes()))
+    py.detach(move || contextos_embed::call(&operation, input.as_bytes()))
 }
 
 #[pymodule]
