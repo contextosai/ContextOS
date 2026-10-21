@@ -180,6 +180,11 @@ First release candidate of the ContextOS runtime.
 - `ToolPaused.kind` in both clients says what a pause waits on (`approval`, `input`,
   `unknown_outcome`, `duplicate`), and `governed_tool` / `governedTool` take a
   `tool_call_id` derivation so a decision can cite the call.
+- The development approval service records approval requests and grants an exact
+  approval when a reviewer approves one; `examples/frameworks/run.sh <framework>
+  --approval` pauses each framework example for approval, approves it through the
+  framework's human-in-the-loop mechanism and redeems it with the identical call. CI
+  runs every framework example in both modes.
 - MCP `tools/call` accepts the host's call id in `_meta["io.contextos/toolCallId"]`,
   returns the call and operation ids in `_meta` on every result, and tells the model in
   the error text whether the refused call had any effect.

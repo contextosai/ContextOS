@@ -25,6 +25,38 @@ run completed
 evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 11 signed audit entries
 ```
 
+## Approval
+
+```sh
+./examples/frameworks/run.sh langgraph --approval
+```
+
+With `--approval` the run is admitted for a refund above the pack's 3,000 threshold, so
+every governed call needs an exact approval. Each pause becomes a LangGraph `interrupt()`:
+`agent.invoke` returns with `__interrupt__` and the thread is checkpointed. `approve()`
+plays the reviewer in the development approval service, then `Command(resume=...)` on
+the same thread re-runs the tool node, which re-sends the identical call (same
+arguments, same operation key) and the gateway redeems the approval. The model's later
+steps run as before:
+
+```
+admitted run_langgraph_1792551959534 (executor generation 2)
+checkpoint revision 1: thread run_langgraph_1792551959534
+paused for approval: dev_approval:2eacbd1c77ba (lookup_order {'order_id': 'ord_881'})
+reviewer approved dev_approval:2eacbd1c77ba
+resuming thread run_langgraph_1792551959534
+paused for approval: dev_approval:5b6bf7e47b65 (issue_refund {'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000})
+reviewer approved dev_approval:5b6bf7e47b65
+resuming thread run_langgraph_1792551959534
+  lookup_order -> {"amount_minor": 120000, "currency": "INR", "customer_id": "cus_77", "order_id": "ord_881", "refundable": true, "status": "delivered_damaged"}
+  issue_refund -> {"refund_id": "rf_ord_881"}
+  issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
+agent: Order ord_881 was refundable; I refunded it once. A repeat refund was refused and did not happen.
+decision decision_01a15c6c3c30758ea0966e9d233ea25a (refunded)
+run completed
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 13 signed audit entries
+```
+
 ## What is governed
 
 - **Tools.** `lookup_order` and `issue_refund` are `governed_tool` functions passed to

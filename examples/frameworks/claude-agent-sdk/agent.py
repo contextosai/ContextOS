@@ -10,15 +10,18 @@ enters at two seams:
   the tool's result, and stops the agent when the run cannot afford it. The first
   turn is reserved before the query starts, so no model turn is unbudgeted.
 
-A refusal or pause comes back as a tool error (``is_error``) with ``refusal()`` text
-the model reads as "not done" or "already requested", and "do not retry". The run's MCP endpoint (``/v1/runs/{id}/mcp``) is the other
-route; see docs/integrations/claude-agent-sdk.md.
+A refusal comes back as a tool error (``is_error``) with ``refusal()`` text the model
+reads as "not done" or "already requested", and "do not retry". A pause for approval
+holds the tool call open: the handler waits for the reviewer (``approve``), then
+re-sends the identical call, which redeems that exact approval (``--approval``). The
+run's MCP endpoint (``/v1/runs/{id}/mcp``) is the other route; see
+docs/integrations/claude-agent-sdk.md.
 
 Without ANTHROPIC_API_KEY there is no model to run the SDK's loop, so a scripted path
 calls the same hook and the same registered tool handlers in the order the model would:
 look the order up, refund it, then try the refund again, which the gateway refuses.
 
-Run with: ./examples/frameworks/run.sh claude-agent-sdk
+Run with: ./examples/frameworks/run.sh claude-agent-sdk [--approval]
 """
 import asyncio
 import json
@@ -29,7 +32,7 @@ from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKCli
                               SystemMessage, TextBlock, ToolUseBlock, create_sdk_mcp_server, tool)
 from contextos.client import ContextOSHTTPError
 
-from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline, refusal, tools
+from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline, refusal, tools
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
 SERVER = "contextos"
@@ -63,14 +66,23 @@ class Turns:
 def governed_server(run):
     """The run's governed tools as an in-process MCP server, and what they did."""
     lookup_order, issue_refund = tools(run)
-    state = {"refunded": False, "paused": []}
+    state = {"refunded": False}
 
     async def call(function, args: dict) -> dict:
         try:
-            output = await asyncio.to_thread(function, **args)
+            try:
+                output = await asyncio.to_thread(function, **args)
+            except ToolPaused as paused:
+                if paused.kind != "approval":
+                    raise
+                # The agent loop awaits this handler, so the call waits here while a
+                # reviewer decides; then the identical call (same arguments, same
+                # idempotency key) is re-sent and redeems that exact approval.
+                print(f"  paused for approval: {paused.report['approval_request_id']}")
+                await asyncio.to_thread(approve, paused)
+                print("  resumed: re-sending the same call")
+                output = await asyncio.to_thread(function, **args)
         except ToolOutcome as outcome:
-            if isinstance(outcome, ToolPaused) and outcome.kind == "approval":
-                state["paused"].append(outcome)  # for a human, not for a retry
             return {"content": [{"type": "text", "text": refusal(outcome)}], "is_error": True}
         return {"content": [{"type": "text", "text": json.dumps(output)}]}
 
@@ -151,8 +163,6 @@ def main() -> int:
     else:
         summary = asyncio.run(live(server, turns))
     print(f"model turns reserved: {turns.count}")
-    for paused in state["paused"]:
-        print(f"awaiting approval (not retried): {paused.reason_codes} {paused.obligations}")
     finish(client, run, state["refunded"], summary)
     return 0
 

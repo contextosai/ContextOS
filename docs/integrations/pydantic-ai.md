@@ -75,8 +75,8 @@ class ContextOSToolset(WrapperToolset):
             return await super().call_tool(name, tool_args, ctx, tool)
         except ToolPaused as paused:
             meta = {"operation_id": paused.operation_id, "reason_codes": paused.reason_codes}
-            if paused.kind == "approval":
-                raise ApprovalRequired(metadata=meta)
+            if paused.kind == "approval" and not ctx.tool_call_approved:
+                raise ApprovalRequired(metadata=meta)     # approved but still pending: refused below
             if paused.kind in ("unknown_outcome", "input"):
                 raise CallDeferred(metadata=meta)
             raise ToolFailed(not_done(paused))           # e.g. a duplicate (retry_unsafe)
@@ -117,17 +117,20 @@ if isinstance(result.output, DeferredToolRequests):
 The human's decision of record is made in your approval service, which ContextOS asked
 for approval bound to the exact action digest. When it is granted, resume the agent
 with the approval; the toolset re-sends the identical call (same arguments, same
-idempotency key) and the gateway redeems the approval:
+idempotency key) and the gateway redeems the approval. `run.sh pydantic-ai --approval`
+exercises this loop:
 
 ```python
-results = DeferredToolResults()
-for call in requests.approvals:
-    results.approvals[call.tool_call_id] = ToolApproved() if granted(call) else ToolDenied("Not approved.")
-result = await agent.run(message_history=messages, deferred_tool_results=results)
+while isinstance(result.output, DeferredToolRequests) and result.output.approvals:
+    results = DeferredToolResults()
+    for call in result.output.approvals:
+        results.approvals[call.tool_call_id] = ToolApproved() if granted(call) else ToolDenied("Not approved.")
+    result = await agent.run(message_history=result.all_messages(), deferred_tool_results=results)
 ```
 
 - Approving in Pydantic AI only lets the loop re-send the call. If the approval
-  service has not granted it, the gateway pauses it again; nothing is applied.
+  service has not granted it, the gateway pauses it again and the toolset reports it as
+  not done (`ctx.tool_call_approved` is set); nothing is applied.
 - Do not use `ToolApproved(override_args=...)`: the approval is bound to the original
   arguments, so changed arguments are a different action and need their own approval.
 - Do not rely on `requires_approval=True` or `ApprovalRequiredToolset` alone. They are

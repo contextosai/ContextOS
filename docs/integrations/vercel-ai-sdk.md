@@ -152,7 +152,7 @@ const agent = new ToolLoopAgent({
 | `ToolRejected` (malformed, unsurfaced, key reuse) | the refusal text | fix the schema or capability if it recurs |
 | `ToolFailed` (provider did not apply it) | the refusal text | retry only per the capability's recovery policy |
 | `ToolPaused`, `kind: "duplicate"` (`retry_unsafe`) | "already requested" | nothing: the operation already exists |
-| `ToolPaused`, `kind: "approval"` | the refusal text, then the loop stops | wait for the approval service, then resume |
+| `ToolPaused`, `kind: "approval"` | the loop stops | resume with an SDK tool approval response once approved (below) |
 | `ToolPaused`, `kind: "input"` | the loop stops | answer `paused.inputRequests` with `run.provideInput(...)` |
 | `ToolPaused`, `kind: "unknown_outcome"` | "outcome unknown", then the loop stops | an operator reconciles the operation; never re-send |
 
@@ -160,13 +160,42 @@ const agent = new ToolLoopAgent({
 for you), so `governed` never matches obligation or reason codes itself.
 
 Approval in ContextOS is decided by your approval service against the action digest,
-not in the SDK. Do not translate it into the SDK's `toolApproval` (the newer form of the
-deprecated `needsApproval`): that is a local confirmation before `execute` runs, useful
-as an extra UI prompt, but it grants nothing and the gateway still decides. To resume
-after an approval, persist `result.response.messages` and the paused call's arguments,
-re-send the same governed call (same arguments, so the same operation key: it runs only
-once approved and cannot apply twice), then continue the conversation with a message
-that states the outcome. Never retry a paused call in a loop.
+not in the SDK. The SDK's `toolApproval` (the newer form of the deprecated
+`needsApproval`) decides before `execute` runs, so it cannot raise a pause the gateway
+only reports during the call, and it grants nothing. Its resume path fits, though:
+record the pause by the call's `toolCallId` (from `execute`'s options) and stop the
+loop. Once the approval service has approved, continue the conversation with
+`result.responseMessages` (all steps, not `response.messages`), the paused call's
+placeholder result removed and a `tool-approval-request` added for it, then an
+approving `tool-approval-response`. The SDK executes the approved call with its
+identical input, which redeems the exact approval, and the loop goes on.
+`./examples/frameworks/run.sh vercel-ai-sdk --approval` runs this:
+
+```ts
+const approvals = new Map<string, ToolPaused>();         // toolCallId -> approval pause, set in execute
+let messages: ModelMessage[] = [{ role: "user", content: goal }];
+let result = await agent.generate({ prompt: goal });      // stopWhen also stops on approvals.size > 0
+while (approvals.size > 0) {
+  for (const pause of approvals.values()) await askReviewer(pause);   // decided in the approval service
+  const id = (callId: string) => approvals.get(callId)?.report.approval_request_id;
+  const step = result.responseMessages.map((m) =>
+    m.role === "assistant" && typeof m.content !== "string"
+      ? { ...m, content: [...m.content, ...m.content.flatMap((p) => p.type === "tool-call" && id(p.toolCallId)
+          ? [{ type: "tool-approval-request", approvalId: id(p.toolCallId), toolCallId: p.toolCallId }] : [])] }
+      : m.role === "tool" ? { ...m, content: m.content.filter((p) => !(p.type === "tool-result" && id(p.toolCallId))) } : m,
+  ).filter((m) => m.role !== "tool" || m.content.length > 0);
+  const responses = [...approvals.values()].map((p) => ({
+    type: "tool-approval-response", approvalId: p.report.approval_request_id, approved: true }));
+  messages = [...messages, ...step, { role: "tool", content: responses }];
+  approvals.clear();
+  result = await agent.generate({ messages });
+}
+```
+
+If the approval was not granted, the re-sent call pauses again. In a high-value run the
+gate covers every call of the run, so the lookup pauses as well; give read-only tools a
+derived key and call id so their re-send redeems too. Never retry a paused call in a
+loop of your own.
 
 ## 6. Checkpoint and resume
 

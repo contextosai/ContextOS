@@ -145,10 +145,12 @@ def on_tool_error(tool, args, tool_context, error):
     if kind == "duplicate":
         return {"error": f"ALREADY REQUESTED ({reasons}): this exact action was submitted before "
                          "and was not repeated."}
-    if kind == "approval":
+    if kind == "approval" and tool_context.tool_confirmation is None:
         tool_context.request_confirmation(
             hint=f"{tool.name} is waiting for approval.",
-            payload={"approval_request_id": error.report.get("approval_request_id")})
+            payload={"approval_request_id": error.report["approval_request_id"]})
+        tool_context.actions.skip_summarization = True    # end the turn here, no model call
+        return {"error": "Awaiting approval; the call has not run."}
     return {"error": f"NOT DONE ({error.status}: {reasons}). The action did not take effect; do not retry it."}
 ```
 
@@ -161,12 +163,24 @@ def on_tool_error(tool, args, tool_context, error):
 - **Approval (`kind == "approval"`).** ADK's
   [tool confirmation](https://adk.dev/tools-custom/confirmation/) pauses the
   invocation and emits an `adk_request_confirmation` call to your client. The approval
-  is decided in your approval service, not by the ADK confirmation. When the human has
-  decided, send the confirmation `FunctionResponse` back, with the `invocation_id` if
-  the app is resumable. ADK then runs the same call again. It carries the same
-  operation key, so the gateway checks the approval against the action digest and
-  dispatches the call once or refuses it. Do not use `FunctionTool(require_confirmation=True)`
-  for this: that asks before the gateway has decided whether approval is needed.
+  is decided in your approval service, not by the ADK confirmation. Set
+  `skip_summarization`, or ADK hands the error to the model and the invocation goes on.
+  When the human has decided, send the confirmation `FunctionResponse` back (with the
+  `invocation_id` if the app is resumable). ADK then runs the same call again. It carries
+  the same operation key, so the gateway checks the approval against the action digest
+  and dispatches the call once or refuses it. The example exercises this with
+  `run.sh google-adk --approval`:
+
+  ```python
+  async for event in runner.run_async(user_id=user, session_id=sid, new_message=message):
+      confirmations += [c for c in event.get_function_calls() if c.name == "adk_request_confirmation"]
+  # ... once the approval service has decided:
+  message = types.Content(role="user", parts=[types.Part(function_response=types.FunctionResponse(
+      id=c.id, name="adk_request_confirmation", response={"confirmed": True})) for c in confirmations])
+  ```
+
+  Do not use `FunctionTool(require_confirmation=True)` for this: that asks before the
+  gateway has decided whether approval is needed.
 - **Input required (`kind == "input"`).** `error.input_requests` holds the
   questions. Answer them with `run.provide_input(error, envelope, responses)`, where
   `envelope` is `run.envelope(...)` rebuilt with the call's arguments, key and

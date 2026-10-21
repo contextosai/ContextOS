@@ -6,7 +6,8 @@ laptop with no dependencies beyond Python 3:
 
   :7701 authority   - an identity/mandate broker that grants exactly what is asked
   :7702 constraints - a control plane that attests every required control
-  :7703 approvals   - an approval service with no approvals on file
+  :7703 approvals   - an approval service: it records each request, and a reviewer grants
+                      one with {"op": "approve", "approval_request_id": ...}
   :7704 tools       - an MCP (2026-07-28, stateless) server with issue_refund and lookup_order
 
 The gateway still verifies every fact it receives (currency, binding, scope, digests),
@@ -64,14 +65,11 @@ def authority(req):
     else:
         grants = [grant("dev_grant", principal("dev_broker", tenant), 1)]
     observer = principal("dev_control_plane", tenant)
-    # Development only: trusting the gateway as an observer lets it vouch for the
-    # delegated-run facts it consumes. A production broker verifies delegation itself.
-    gateway = {"principal_id": "contextosd", "principal_type": "workload", "trust_domain": TD, "tenant_id": tenant}
     return {
         "authenticated": {"principal": run["actor"], "audience": "contextosd", "root_run_id": root_run_id, "run_id": run["run_id"],
                           "mandate_kind": "workload", "trusted_issuers": [principal("dev_broker", tenant)],
                           # The gateway attests run links for delegated runs.
-                          "trusted_observers": [observer, gateway],
+                          "trusted_observers": trusted_observers(tenant),
                           "verification_status": "verified", "verification_ref": artifact("authentication", "dev"), **WINDOW},
         "leaf_grant_ref": {"grant_id": grants[0]["grant_id"], "grant_revision": "1"},
         "grants": grants,
@@ -83,6 +81,13 @@ def authority(req):
     }
 
 
+def trusted_observers(tenant):
+    # Development only: trusting the gateway as an observer lets it vouch for the
+    # delegated-run facts it consumes. A production broker verifies delegation itself.
+    gateway = {"principal_id": "contextosd", "principal_type": "workload", "trust_domain": TD, "tenant_id": tenant}
+    return [principal("dev_control_plane", tenant), gateway]
+
+
 def constraints(req):
     observer = principal("dev_control_plane", req["run"]["tenant_id"])
     return {"observations": [
@@ -91,8 +96,54 @@ def constraints(req):
         for c in req["required_controls"]]}
 
 
+# Inside every window, and never before the decision it verifies.
+DECIDED = "2026-01-02T00:00:00Z"
+# action digest -> the request as opened, and the verified approval once granted.
+REQUESTS, APPROVED = {}, {}
+
+
 def approvals(req):
-    return {"approval": None} if req.get("op") == "lookup" else {"approval_request_id": "dev_approval_request"}
+    if req["op"] == "lookup":
+        return {"approval": APPROVED.get(req["action_digest"])}
+    if req["op"] == "request":
+        request_id = "dev_approval:" + req["action_digest"][7:19]
+        REQUESTS[req["action_digest"]] = {"request_id": request_id, "run": req["run"], "binding": req["binding"]}
+        print(f"[approvals] request {request_id} for {req['binding']['capability_id']}", flush=True)
+        return {"approval_request_id": request_id}
+    # A reviewer's decision. A real approval service authenticates the person, checks
+    # their entitlement and shows them the exact binding before recording a decision.
+    action_digest, opened = next((d, r) for d, r in REQUESTS.items() if r["request_id"] == req["approval_request_id"])
+    APPROVED[action_digest] = approved(action_digest, opened)
+    print(f"[approvals] approved {opened['request_id']}", flush=True)
+    return {"approved": opened["request_id"]}
+
+
+def approved(action_digest, opened):
+    """The verified approval material for one exact action: request, decision, the
+    observation that verified the decision, and the approver's entitlement."""
+    run, binding, request_id = opened["run"], opened["binding"], opened["request_id"]
+    tenant = run["tenant_id"]
+    approver = {"principal_id": "dev_finance_lead", "principal_type": "person", "trust_domain": TD, "tenant_id": tenant}
+    observer = principal("dev_control_plane", tenant)
+    proposal = {"request_id": request_id, "proposal_id": binding["proposal_id"], "run_id": binding["run_id"],
+                "tenant_id": tenant, "operation_id": binding["operation_id"], "action_digest": action_digest,
+                "policy_refs": binding["policy_refs"], "authority_refs": binding["authority_refs"],
+                "not_before": WINDOW["observed_at"], "expires_at": WINDOW["valid_until"]}
+    request = {**proposal, "approval_request_id": request_id, "requester": run["actor"],
+               "eligible_approvers": [approver], "eligible_approver_roles": ["finance_lead"], "required_approvals": 1,
+               "prohibit_self_approval": True, "verification_ref": artifact("approval_request", request_id)}
+    decision = {**proposal, "approval_id": f"{request_id}:1", "approval_request_id": request_id, "approver": approver,
+                "decision": "approved", "decided_at": DECIDED,
+                "verification_ref": artifact("approval_decision", f"{request_id}:1")}
+    observation = {"approval_id": decision["approval_id"],
+                   "decision_digest": digest({"domain": "contextos.approval_decision.v1", "decision": decision}),
+                   "verification_ref": decision["verification_ref"], "verification_status": "verified",
+                   "observer": observer, "observed_at": DECIDED, "valid_until": WINDOW["valid_until"]}
+    entitlement = {"approver": approver, "role_id": "finance_lead", "approval_request_id": request_id,
+                   "action_digest": action_digest, "observer": observer, "verification_status": "verified",
+                   "verification_ref": artifact("entitlement", "finance_lead"), **WINDOW}
+    return {"proposal": proposal, "request": request, "decisions": [decision], "verification_observations": [observation],
+            "entitlements": [entitlement], "trusted_observers": trusted_observers(tenant)}
 
 
 def payments(req):

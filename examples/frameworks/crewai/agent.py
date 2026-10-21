@@ -7,7 +7,9 @@ native tool-calling loop. ContextOS adds three things:
   the gateway does not complete is returned to the model as ``refusal()`` text instead
   of raised, because CrewAI turns tool exceptions into retries; result caching is off,
   so a repeated call reaches the gateway instead of replaying a cached result. A pause
-  for approval, input or reconciliation stops the crew at its next model call.
+  for input or reconciliation stops the crew at its next model call; a pause for
+  approval goes to CrewAI's human input (``Task(human_input=True)``), where the reviewer
+  decides and the agent, told it was approved, re-sends the identical call.
 - Budget: a ``before_llm_call`` hook reserves budget for every model call and aborts
   the crew (``HookAborted``) when the run cannot afford it; the reservation is settled
   when CrewAI reports the call completed or failed on its event bus.
@@ -16,7 +18,10 @@ native tool-calling loop. ContextOS adds three things:
 Without OPENAI_API_KEY a scripted model drives the same loop: it looks the order up,
 refunds it, tries the refund again (the gateway refuses it) and reports.
 
-Run with: ./examples/frameworks/run.sh crewai
+With ``--approval`` the refund needs an exact approval, which ``approve`` grants as the
+reviewer when CrewAI asks for human input.
+
+Run with: ./examples/frameworks/run.sh crewai [--approval]
 """
 import contextlib
 import functools
@@ -33,6 +38,7 @@ os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
 
 from crewai import LLM, Agent, Crew, Process, Task  # noqa: E402
+from crewai.core.providers.human_input import SyncHumanInputProvider, set_provider  # noqa: E402
 from crewai.events import LLMCallCompletedEvent, LLMCallFailedEvent, crewai_event_bus  # noqa: E402
 from crewai.events.types.llm_events import LLMCallType  # noqa: E402
 from crewai.hooks import HookAborted, register_before_llm_call_hook  # noqa: E402
@@ -40,12 +46,14 @@ from crewai.llms.base_llm import BaseLLM, llm_call_context  # noqa: E402
 from crewai.tools import tool  # noqa: E402
 from crewai.tools.tool_failure import ToolFailure  # noqa: E402
 
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline,  # noqa: E402
-                  refusal, tools)
+from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish,  # noqa: E402
+                  offline, refusal, tools)
 
 
-# Pauses the crew must not talk its way past: a human approves, answers, or reconciles.
-STOP_KINDS = {"approval", "input", "unknown_outcome"}
+# Pauses the crew must not talk its way past: a human answers or reconciles. A pause for
+# approval waits for the reviewer at CrewAI's human input step instead (Reviewer below).
+STOP_KINDS = {"input", "unknown_outcome"}
+AWAITING = "AWAITING APPROVAL"
 
 
 class Governance:
@@ -55,6 +63,7 @@ class Governance:
         self.run = run
         self.calls: list = []        # (tool name, None) or (tool name, ToolOutcome), in order
         self.stopped = None          # the pause that stops the crew, if any
+        self.awaiting = None         # the approval pause the reviewer decides, if any
         self._reservations: deque = deque()
         register_before_llm_call_hook(self._reserve)
         crewai_event_bus.on(LLMCallCompletedEvent)(self._settle)
@@ -73,6 +82,14 @@ class Governance:
                 output = function(**arguments)
             except ToolOutcome as outcome:
                 self.calls.append((function.__name__, outcome))
+                if isinstance(outcome, ToolPaused) and outcome.kind == "approval":
+                    self.awaiting = outcome
+                    request_id = outcome.report["approval_request_id"]
+                    print(f"{function.__name__}({arguments}) -> awaiting approval {request_id}")
+                    return ToolFailure(message=f"{AWAITING} ({request_id}): the call has not run; a reviewer "
+                                               f"decides, then it is re-sent unchanged.",
+                                       code=outcome.status, retryable=False,
+                                       details={"approval_request_id": request_id})
                 if isinstance(outcome, ToolPaused) and outcome.kind in STOP_KINDS:
                     self.stopped = outcome
                 print(f"{function.__name__}({arguments}) -> {refusal(outcome)}")
@@ -110,6 +127,29 @@ class Governance:
             self._reservations.popleft().close()
 
 
+class Reviewer(SyncHumanInputProvider):
+    """CrewAI's human input step, given to the reviewer. With ``Task(human_input=True)``
+    CrewAI asks for feedback after the agent's answer and, given some, appends it and runs
+    the agent loop again on the same conversation. When a call awaits approval the
+    reviewer decides it here; otherwise there is nothing to add and the answer stands."""
+
+    def __init__(self, governance):
+        self.governance = governance
+
+    def handle_feedback(self, answer, context):
+        while (paused := self.governance.awaiting) is not None:
+            self.governance.awaiting = None
+            request_id = paused.report["approval_request_id"]
+            print(f"paused for approval: {request_id}")
+            approve(paused)  # in production: wait for the approval service's decision
+            print("resuming the agent loop with the reviewer's decision")
+            context.messages.append(context._format_feedback_message(
+                f"Approved ({request_id}). Re-send the call that was awaiting approval, unchanged."))
+            answer = context._invoke_loop()
+        context.ask_for_human_input = False
+        return answer
+
+
 class ScriptedLLM(BaseLLM):
     """A stand-in for a model with native tool calling, so the crew runs offline. Like
     CrewAI's providers, it runs the model-call hooks and reports each call on the event
@@ -135,6 +175,9 @@ class ScriptedLLM(BaseLLM):
     @staticmethod
     def _next(messages):
         results = [m["content"] for m in messages if m.get("role") == "tool"]
+        if messages[-1].get("role") == "tool" and results[-1].startswith(AWAITING):
+            return f"Waiting for a reviewer: {results[-1]}"
+        results = [r for r in results if not r.startswith(AWAITING)]  # re-sent once approved
         if not results:
             return [_tool_call("lookup_order", order_id="ord_881")]
         if len(results) in (1, 2):  # refund, then (wrongly) the same refund again
@@ -153,6 +196,7 @@ def _tool_call(name: str, **arguments) -> dict:
 def main() -> int:
     client, run = admit("crewai")
     governance = Governance(run)
+    set_provider(Reviewer(governance))
     lookup_order, issue_refund = (governance.tool(function) for function in tools(run))
     llm = ScriptedLLM(model="scripted") if offline("OPENAI_API_KEY") else \
         LLM(model=os.environ.get("MODEL", "openai/gpt-6.1-sol"))
@@ -161,7 +205,7 @@ def main() -> int:
     agent = Agent(role="Support agent", goal=GOAL, backstory=INSTRUCTIONS, llm=llm,
                   tools=[lookup_order, issue_refund], allow_delegation=False, max_iter=6, verbose=False)
     task = Task(description=GOAL, expected_output="What was done for the customer, and anything refused.",
-                agent=agent)
+                agent=agent, human_input=True)
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, cache=False, verbose=False)
     try:
         result = crew.kickoff()

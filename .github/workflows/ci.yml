@@ -73,6 +73,25 @@ jobs:
         run: |
           node bindings/node/test_client.mjs
           npx -y -p typescript@5.6.3 tsc --noEmit --strict --lib es2022,dom bindings/node/client.d.ts
+  frameworks:
+    # Each framework example on its own agent loop with a scripted model, plain and
+    # with an approval that a scripted reviewer grants.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [langgraph, openai-agents, openai-agents-js, google-adk, claude-agent-sdk, crewai,
+                  pydantic-ai, llamaindex, microsoft-agent-framework, vercel-ai-sdk, mastra]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v10
+      - run: ./examples/frameworks/run.sh ${{ matrix.example }}
+      - run: ./examples/frameworks/run.sh ${{ matrix.example }} --approval
   supply-chain:
     runs-on: ubuntu-24.04
     steps:

@@ -7,19 +7,22 @@
 // - A refusal reaches the model as `refusal()` text ("NOT DONE", or "ALREADY REQUESTED"
 //   for a repeat) through `errorFunction`; the SDK's default tells the model "Please try
 //   again". A pause for approval, input or an unknown outcome stops the run instead.
-// - The refund needs a human's approval in the SDK too (`needsApproval`); the paused
+// - The refund needs a human's approval in the SDK too (`needsApproval`); the approved
 //   RunState is checkpointed in ContextOS before the run resumes.
+// - When the gateway pauses any call for an exact approval (`--approval`), the tool call
+//   waits for the reviewer (`approve`) and then re-sends the identical call, which
+//   redeems that approval (`awaitingReviewer`).
 //
 // Without OPENAI_API_KEY a scripted model (the SDK's ScriptedModel) drives the loop:
 // look up, refund, refund again (refused), answer.
 //
-// Run with: ./examples/frameworks/run.sh openai-agents-js
+// Run with: ./examples/frameworks/run.sh openai-agents-js [--approval]
 import { Agent, OpenAIProvider, Runner, ToolCallError, tool } from "@openai/agents";
 import type { Model, ModelProvider, ModelRequest } from "@openai/agents";
 import { ScriptedModel, assistantMessage, functionCall, modelResponder } from "@openai/agents/testing";
 import type { RecordedModelCall } from "@openai/agents/testing";
 import { z } from "zod";
-import { GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline, refusal, tools } from "../_shared/demo.mjs";
+import { GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline, refusal, tools } from "../_shared/demo.mjs";
 
 const MODEL = process.env.OPENAI_MODEL ?? "gpt-6.1-sol";
 
@@ -78,8 +81,28 @@ function governedFailure(_context: unknown, error: unknown): string {
   throw error; // approval pending, input required, unknown outcome, transport error: the run stops
 }
 
+/** A gateway pause for approval waits here, in the tool call, while a reviewer decides;
+ * then the identical call (same arguments, same operation key) is re-sent and redeems
+ * that exact approval. The gateway decides only when the call arrives, after the SDK's
+ * own approval point. */
+function awaitingReviewer(name: string, call: (args: any) => Promise<any>) {
+  return async (args: any) => {
+    try {
+      return await call(args);
+    } catch (error) {
+      if (!(error instanceof ToolPaused) || error.kind !== "approval") throw error;
+      console.log(`paused for approval: ${error.report.approval_request_id}`);
+      await approve(error); // a reviewer decides in your approval service
+      console.log(`resumed: re-sending the same ${name} call`);
+      return await call(args);
+    }
+  };
+}
+
 const { client, run } = await admit("openai_agents_js");
-const { lookupOrder, issueRefund } = tools(run);
+const governed = tools(run);
+const lookupOrder = awaitingReviewer("lookup_order", governed.lookupOrder);
+const issueRefund = awaitingReviewer("issue_refund", governed.issueRefund);
 const agent = new Agent({
   name: "support",
   instructions: INSTRUCTIONS,

@@ -184,7 +184,7 @@ obligation or reason codes itself:
 |---|---|
 | `blocked`, `rejected`, `failed` | Tool output is the refusal text; the model explains instead of retrying. |
 | `paused`, `kind == "duplicate"` (`retry_unsafe`, `operation_in_flight`) | A repeat of an operation that already exists. Refusal text: "ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated." |
-| `paused`, `kind == "approval"` | Raise. The run stops; the approval service decides (below). |
+| `paused`, `kind == "approval"` | Wait in the tool call while a reviewer decides, then re-send the same call (below). Raised again, it stops the run. |
 | `paused`, `kind == "input"` | Raise. Answer with `run.provide_input(paused, envelope, responses)`. |
 | `paused`, `kind == "unknown_outcome"` | Raise. The effect may have happened: `run.reconcile(operation_id)` first. |
 | `ContextOSHTTPError` (transport, `executor_stale`) | Raise. Never text; the outcome of an effect is unknown. |
@@ -208,11 +208,38 @@ interrupts *before* a tool runs: `result.interruptions` lists the pending
 `ToolApprovalItem`s, your reviewer calls `state.approve(item)` or `state.reject(item)`
 on `state = result.to_state()` (TypeScript: `result.state`), and `Runner.run(agent, state)`
 resumes. Approving there grants nothing at the gateway: the call is still authorized,
-and the approval service bound to the action digest still has the final say. When the
-gateway itself pauses for approval (`kind == "approval"`), the SDK run stops as above; once the
-request is approved, resume from the checkpointed, approved `RunState` (section 6). The
-runner re-sends the same governed call with the same operation key, which runs once
-approved and is refused if it already ran.
+and the approval service bound to the action digest still has the final say.
+
+When the gateway itself pauses for approval (`kind == "approval"`), it has decided only
+now, as the call arrived: after the SDK's approval point, and a running tool cannot raise
+an SDK interruption. For an approval a reviewer gives promptly, wait inside the tool
+call, then re-send the identical call (same arguments, same operation key), which
+redeems that exact approval. The model never sees the pause. Wrap each governed
+function before `function_tool` (TypeScript: around `execute`); this is what the
+examples do, exercised end to end by `./examples/frameworks/run.sh openai-agents
+--approval` (and `openai-agents-js`), where the lookup and the refund both pause:
+
+```python
+def awaiting_reviewer(function):
+    @functools.wraps(function)                      # keeps the signature for the tool schema
+    def call(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except ToolPaused as paused:
+            if paused.kind != "approval":
+                raise                               # mapped by governed_failure
+            wait_for_reviewer(paused.report["approval_request_id"])
+            return function(*args, **kwargs)        # the same call, redeemed
+    return call
+
+lookup_order, issue_refund = map(awaiting_reviewer, tools(run))
+```
+
+If the wait can outlast the process, let the pause raise instead (the run stops as
+above) and resume, once approved, from a `RunState` checkpointed before the call
+(section 6): the runner re-sends the same call, which redeems the approval. That needs
+an SDK interruption, and so a checkpoint, before every call the gateway can pause; the
+examples do not exercise that route.
 
 ## 6. Checkpoint and resume
 

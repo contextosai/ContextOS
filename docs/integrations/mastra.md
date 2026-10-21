@@ -122,7 +122,7 @@ async function governed(fn, input, context) {
     return await fn(input);              // on resume this re-sends the same call: same operation key
   } catch (error) {
     if (!(error instanceof ToolOutcome)) throw error;
-    if (error instanceof ToolPaused && error.kind === "approval" && context?.agent?.suspend) {
+    if (error instanceof ToolPaused && error.kind === "approval" && context?.agent?.suspend && !context.agent.resumeData) {
       return await context.agent.suspend({ operation_id: error.operationId, approval_request_id: error.report.approval_request_id });
     }
     return refusal(error);
@@ -130,16 +130,29 @@ async function governed(fn, input, context) {
 }
 ```
 
-Give the tool a `suspendSchema` and `resumeSchema` (for example `{ decided: z.boolean() }`).
 `agent.generate()` then returns `finishReason: "suspended"` with a `runId`; when your
-approval service has decided, `agent.resumeGenerate({ decided: true }, { runId })` runs
-`execute` again, which re-sends the same governed call. It runs only if the approval was
-granted and cannot apply twice; if it was denied, the gateway's refusal is what the model
-reads. Suspension needs the agent registered on a `Mastra` instance with storage
-(`new Mastra({ agents: { support }, storage })`, then `mastra.getAgent("support")`;
-`InMemoryStore` from `@mastra/core/storage` for tests, a durable store in production), or
-resuming fails with "snapshot not found". The example configures no storage, so it ends
-the turn with `stopWhen` instead and leaves the run open.
+approval service has decided, `agent.resumeGenerate({ approved: true }, { runId })` runs
+`execute` again (with `context.agent.resumeData` set), which re-sends the identical
+governed call. It completes only if the approval was granted and cannot apply twice; if
+it was not, it pauses again and the refusal is what the model reads (hence the
+`resumeData` check). Suspension needs the agent registered on a `Mastra` instance with
+storage (`new Mastra({ agents: { support: agent }, storage })`; `InMemoryStore` from
+`@mastra/core/storage` for tests, a durable store in production), or resuming fails
+with "snapshot not found". A `suspendSchema` and `resumeSchema` on the tool validate the
+payloads. `./examples/frameworks/run.sh mastra --approval` runs this loop:
+
+```ts
+new Mastra({ agents: { support: agent }, storage: new InMemoryStore() });   // registers the agent with storage
+let result = await agent.generate(goal, options);
+while (result.finishReason === "suspended") {
+  await askReviewer(suspended);                 // the pause the tool suspended on; decided in the approval service
+  result = await agent.resumeGenerate({ approved: true }, { ...options, runId: result.runId });
+}
+```
+
+In a high-value run the gate covers every call of the run, so the lookup suspends as
+well; give read-only tools a derived key and call id so their re-send redeems too.
+Without storage, end the turn with `stopWhen` instead and leave the run open.
 
 | Outcome | Mapping |
 |---|---|

@@ -32,6 +32,42 @@ run completed
 evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
 ```
 
+## Approval
+
+```sh
+./examples/frameworks/run.sh claude-agent-sdk --approval
+```
+
+With `--approval` the run is admitted for a refund above the pack's 3,000 threshold, so
+the gateway gates every call of the run, the lookup included, on an exact approval. The
+tool handler is the human-in-the-loop seam: the agent loop awaits it, so the call waits
+there while `approve(paused)` plays the reviewer in the development approval service.
+The handler then re-sends the identical call (same arguments, same operation key),
+which redeems the approval, and returns the real result. No extra model turn is spent,
+and the repeat refund is still refused:
+
+```
+admitted run_claude_agent_sdk_1792552005968 (executor generation 2)
+no ANTHROPIC_API_KEY: scripted path, the same hook and tool handlers without a model
+model turn 1 calls mcp__contextos__lookup_order {"order_id": "ord_881"}
+  paused for approval: dev_approval:d34e9c30e196
+reviewer approved dev_approval:d34e9c30e196
+  resumed: re-sending the same call
+  result: {"amount_minor": 120000, "currency": "INR", "customer_id": "cus_77", "order_id": "ord_881", "refundable": true, "status": "delivered_damaged"}
+model turn 2 calls mcp__contextos__issue_refund {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 120000}
+  paused for approval: dev_approval:db3dd48816dc
+reviewer approved dev_approval:db3dd48816dc
+  resumed: re-sending the same call
+  result: {"refund_id": "rf_ord_881"}
+model turn 3 calls mcp__contextos__issue_refund {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 120000}
+  error: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
+model turn 4: Refunded ord_881 in full; the repeated refund was refused, so it was not issued twice.
+model turns reserved: 4
+decision decision_01a15c6cf17f7727a36989a9dd5a6ca9 (refunded)
+run completed
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+```
+
 ## What is governed
 
 - **Tools.** `create_sdk_mcp_server` exposes `lookup_order` and `issue_refund`. Their
@@ -51,7 +87,8 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
   background session-title request is turned off (`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`),
   because no hook sees it.
 - **Outcomes.** A `ToolOutcome` becomes `is_error: True` with `refusal()` text. A pause
-  for approval (`paused.kind == "approval"`) is also kept for a human, never retried.
+  for approval (`paused.kind == "approval"`) waits in the handler for the reviewer and
+  is then re-sent unchanged (see Approval).
 - **Decision.** `finish()` records the DecisionRecord (the gateway verifies its tool
   lineage), completes the run and reads its evidence.
 

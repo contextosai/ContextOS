@@ -160,7 +160,8 @@ success result), not in what the model claims.
 
 Use the workflow's [human-in-the-loop](https://developers.llamaindex.ai/python/framework/understanding/agent/human_in_the_loop/)
 events. The approval decision itself is made in the ContextOS approval service, bound
-to the action digest; the human response only tells the tool to re-send the call.
+to the action digest; the human response only resumes the step. This is what
+`./examples/frameworks/run.sh llamaindex --approval` runs.
 
 ```python
 from llama_index.core.workflow import HumanResponseEvent, InputRequiredEvent
@@ -168,27 +169,33 @@ from llama_index.core.workflow import HumanResponseEvent, InputRequiredEvent
 except ToolPaused as paused:
     if paused.kind != "approval":
         return not_done(paused)
-    answer = await ctx.wait_for_event(
+    pending[paused.operation_id] = paused
+    await ctx.wait_for_event(
         HumanResponseEvent, waiter_id=paused.operation_id,
+        requirements={"operation_id": paused.operation_id},
         waiter_event=InputRequiredEvent(prefix="approve refund?", operation_id=paused.operation_id))
-    if answer.response != "approved":
-        return not_done(paused)
-    return json.dumps(await asyncio.to_thread(refund, order_id, customer_id, amount_minor))
+    return not_done(paused)       # reached only if the replayed call paused again
 ```
 
 ```python
 handler = agent.run(user_msg=goal)
 async for event in handler.stream_events():
     if isinstance(event, InputRequiredEvent):
-        handler.ctx.send_event(HumanResponseEvent(response=await ask_reviewer(event)))
+        paused = pending.pop(event.operation_id)
+        await ask_reviewer(paused)      # the reviewer decides in the approval service
+        handler.ctx.send_event(HumanResponseEvent(response="approved", operation_id=event.operation_id))
 result = await handler
 ```
 
-`wait_for_event` pauses by raising and replays the whole tool call when the response
-arrives, so the governed call before it runs twice. That is safe only because the
-idempotency key is derived from the arguments: the replay is the same operation. The
-re-sent call after approval is governed end to end again; if the approval was not
-granted, it pauses again and the model is told so.
+`wait_for_event` pauses by raising and replays the whole tool step when the response
+arrives, so the governed call before it runs again: that replay is the re-send. It
+redeems the approval only because it is identical (same arguments, and the idempotency
+key and tool call id are derived from them), and it is governed end to end again; if
+the approval was not granted, it pauses again and the model is told so. Filter the
+wait with `requirements` on the operation id: every waiting step listens for
+`HumanResponseEvent`, and an unfiltered response would replay an earlier one too. In a
+high-value run the gate covers every call of the run, so the lookup pauses as well;
+give read-only tools a derived key and call id so their re-send redeems too.
 
 ### Unknown outcomes
 

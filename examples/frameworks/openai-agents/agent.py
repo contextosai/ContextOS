@@ -7,17 +7,21 @@
 - A refusal reaches the model as ``refusal()`` text ("NOT DONE", or "ALREADY
   REQUESTED" for a repeat) through ``failure_error_function``; the SDK's default would
   tell the model "Please try again". A pause for approval, input or an unknown outcome
-  is not text: it stops the run, to wait for approval or reconcile.
-- The refund needs a human's approval in the SDK too (``needs_approval``); the paused
+  is not text: it stops the run.
+- The refund needs a human's approval in the SDK too (``needs_approval``); the approved
   ``RunState`` is checkpointed in ContextOS before the run resumes.
+- When the gateway pauses any call for an exact approval (``--approval``), the tool
+  call waits for the reviewer (``approve``) and then re-sends the identical call,
+  which redeems that approval (``awaiting_reviewer``).
 
 Without OPENAI_API_KEY a scripted model (the SDK's ``agents.testing.ScriptedModel``)
 drives the same loop: look up, refund, refund again (refused), answer.
 
-Run with: ./examples/frameworks/run.sh openai-agents
+Run with: ./examples/frameworks/run.sh openai-agents [--approval]
 """
 import ast
 import asyncio
+import functools
 import json
 import os
 import sys
@@ -26,7 +30,7 @@ from agents import Agent, Model, ModelProvider, ModelSettings, RunConfig, RunHoo
 from agents.models.multi_provider import MultiProvider
 from agents.testing import ModelStep, ScriptedModel, assistant_message, function_call
 
-from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline, refusal, tools
+from demo import GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline, refusal, tools
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-6.1-sol")
 
@@ -115,13 +119,34 @@ class Trace(RunHooks):
             self.refunded = True
 
 
+def awaiting_reviewer(function):
+    """A gateway pause for approval waits here, in the tool call, while a reviewer
+    decides; then the identical call (same arguments, same operation key) is re-sent and
+    redeems that exact approval. The gateway decides only when the call arrives, after
+    the SDK's own approval point, and a running tool cannot raise an SDK interruption."""
+
+    @functools.wraps(function)
+    def call(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except ToolPaused as paused:
+            if paused.kind != "approval":
+                raise
+            print(f"paused for approval: {paused.report['approval_request_id']}")
+            approve(paused)  # a reviewer decides in your approval service
+            print(f"resumed: re-sending the same {function.__name__} call")
+            return function(*args, **kwargs)
+
+    return call
+
+
 async def needs_approval(ctx, params: dict, call_id: str) -> bool:
     return True  # every refund is shown to a human first; the gateway still decides
 
 
 async def main() -> int:
     client, run = admit("openai_agents")
-    lookup_order, issue_refund = tools(run)
+    lookup_order, issue_refund = map(awaiting_reviewer, tools(run))
     agent = Agent(
         name="support",
         instructions=INSTRUCTIONS,

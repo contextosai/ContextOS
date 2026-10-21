@@ -127,6 +127,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 49 Independent audit verification | done — published audit keys, `ctx audit-verify` (digests, hashes, signatures, linkage from genesis) |
 | 50+ Audit, keys, feedback | done — independent and incremental audit verification, key rotation with windows and recorded rotations, KMS signing, multi-replica load test on PostgreSQL, operator feedback as replay obligations |
 | 51 Framework integrations | done — guides and runnable examples for LangGraph, OpenAI Agents SDK (Python, TypeScript), Google ADK, Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Vercel AI SDK and Mastra, each on the framework's own loop with scripted models offline; `ToolPaused.kind`, `governed_tool` call ids, MCP result ids and effect-aware refusal text |
+| 52 Approvals end to end | done — the development approval service records requests and grants exact approvals for a reviewer; `--approval` runs every framework example through its own human-in-the-loop path (pause, approve, identical re-send redeems once), plain and approval runs of all eleven in CI |
 | Next | next |
 
 ## Non-negotiables carried from the spec

@@ -161,19 +161,29 @@ A `function_approval_request` set as the middleware's result is passed through t
 caller as one of `response.user_input_requests`, the framework's
 [tool approval](https://learn.microsoft.com/en-us/agent-framework/agents/tools/tool-approval)
 flow. Use the call's occurrence id as the request id (another id is a deprecated
-binding). The caller answers with the same `AgentSession`:
+binding), and keep the pause under it (`PENDING[occurrence] = paused` in the
+middleware) so the caller can show the reviewer the bound action. The caller answers
+with the same `AgentSession`; `./examples/frameworks/run.sh microsoft-agent-framework
+--approval` runs exactly this:
 
 ```python
 session = agent.create_session()
 response = await agent.run(goal, session=session)
 while response.user_input_requests:
-    answers = [r.to_function_approval_response(await ask_reviewer(r)) for r in response.user_input_requests]
+    answers = []
+    for request in response.user_input_requests:
+        approved = await ask_reviewer(PENDING.pop(request.id))   # decided in the approval service
+        answers.append(request.to_function_approval_response(approved))
     response = await agent.run(Message(role="user", contents=answers), session=session)
 ```
 
-On approval the framework replays the call through the middleware with
-`context.metadata["approval_response"]` set; the same idempotency key makes it the same
-operation, governed end to end again. The decision that counts is made in the ContextOS
+On approval the framework re-invokes the call through the middleware with
+`context.metadata["approval_response"]` set and the same arguments; the idempotency key
+derived from them makes it the same operation, which redeems the exact approval and is
+governed end to end again. Each `agent.run` returns only its own messages, so collect
+tool results across runs. In a high-value run the gate covers every call of the run,
+so the lookup pauses as well; give read-only tools a derived key and call id so their
+re-send redeems too. The decision that counts is made in the ContextOS
 approval service, bound to the action digest: if it has not approved, the replay
 pauses again and the middleware reports "not done" instead of asking twice. A rejected
 request never reaches the tool.

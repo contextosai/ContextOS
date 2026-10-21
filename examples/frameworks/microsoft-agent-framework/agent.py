@@ -13,7 +13,9 @@ Without OPENAI_API_KEY the agent runs on a scripted chat client built on
 ``BaseChatClient`` that emits the tool calls a model would, including a repeated
 refund the gateway refuses.
 
-Run with: ./examples/frameworks/run.sh microsoft-agent-framework
+Run with: ./examples/frameworks/run.sh microsoft-agent-framework [--approval]
+(``--approval``: each call pauses for an exact approval; a scripted reviewer grants it
+and the session is resumed with the framework's function approval response.)
 """
 import asyncio
 import json
@@ -24,7 +26,8 @@ from agent_framework import (Agent, BaseChatClient, ChatContext, ChatMiddlewareL
                              chat_middleware, function_middleware, tool)
 from contextos.client import ContextOSHTTPError
 
-from demo import GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, finish, offline, refusal, tools
+from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, finish, offline,
+                  refusal, tools)
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
@@ -81,6 +84,9 @@ def budget(run):
     return reserve_model_call
 
 
+PENDING: dict = {}  # approval request id (framework) -> the ContextOS pause it stands for
+
+
 @function_middleware
 async def governed_outcomes(context: FunctionInvocationContext, call_next) -> None:
     """What the model sees when the gateway did not complete a call."""
@@ -89,12 +95,13 @@ async def governed_outcomes(context: FunctionInvocationContext, call_next) -> No
     except ToolPaused as paused:
         if paused.kind == "approval" and "approval_response" not in context.metadata:
             # Surface the pause as the framework's approval request. When the caller
-            # approves, the framework replays this call through the middleware, and the
-            # same idempotency key makes it the same operation, governed again.
+            # approves, the framework re-invokes this call through the middleware with
+            # the same arguments and idempotency key, which redeems the exact approval.
             call_id = context.metadata["call_id"]
             occurrence = context.metadata.get("function_call_occurrence_id") or call_id
             call = Content.from_function_call(call_id=call_id, name=context.function.name,
                                               arguments=dict(context.arguments), id=occurrence)
+            PENDING[occurrence] = paused
             context.result = Content.from_function_approval_request(
                 id=occurrence, function_call=call, additional_properties={"operation_id": paused.operation_id})
         else:
@@ -116,24 +123,35 @@ async def main() -> None:
                   tools=[tool(lookup_order), tool(issue_refund)], middleware=[budget(run), governed_outcomes])
 
     session = agent.create_session()
-    response = await agent.run(GOAL, session=session)
-    while response.user_input_requests:
-        # A real deployment shows these to a reviewer; the decision itself is made in
-        # ContextOS's approval service, and the replayed call is governed again.
-        approved = os.environ.get("APPROVAL") == "approved"
-        answers = [request.to_function_approval_response(approved) for request in response.user_input_requests]
-        for request in response.user_input_requests:
-            print(f"approval needed: {request.function_call.name} -> {'approved' if approved else 'denied'}")
-        response = await agent.run(Message(role="user", contents=answers), session=session)
+    calls, refunded = {}, False
 
-    refunded = False
-    for message in response.messages:
-        for content in message.contents:
-            if content.type == "function_call":
-                print(f"{content.name}({content.arguments})", end=" -> ")
-            elif content.type == "function_result":
-                print(content.result)
-                refunded = refunded or str(content.result).startswith('{"refund_id"')
+    def show(response) -> None:
+        """Prints each completed call as its result arrives; tracks a successful refund."""
+        nonlocal refunded
+        for message in response.messages:
+            for content in message.contents:
+                if content.type == "function_call":
+                    calls[content.call_id] = content
+                elif content.type == "function_result":
+                    call = calls[content.call_id]
+                    print(f"{call.name}({call.arguments}) -> {content.result}")
+                    refunded = refunded or str(content.result).startswith('{"refund_id"')
+
+    response = await agent.run(GOAL, session=session)
+    show(response)
+    while response.user_input_requests:
+        # The framework's approval requests. A real deployment shows the bound action to
+        # a reviewer, who decides in ContextOS's approval service; `approve` plays them.
+        answers = []
+        for request in response.user_input_requests:
+            paused = PENDING.pop(request.id)
+            print(f"paused for approval: {paused.report['approval_request_id']} ({request.function_call.name})")
+            approve(paused)
+            answers.append(request.to_function_approval_response(True))
+        print("resuming the session with the approval response")
+        response = await agent.run(Message(role="user", contents=answers), session=session)
+        show(response)
+
     print(f"agent: {response.text}")
     finish(client, run, refunded, response.text)
 

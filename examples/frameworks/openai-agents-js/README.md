@@ -29,6 +29,42 @@ run completed
 evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 12 signed audit entries
 ```
 
+## Approval
+
+```sh
+./examples/frameworks/run.sh openai-agents-js --approval
+```
+
+With `--approval` the run is admitted for a refund above the pack's 3,000 threshold, so
+the gateway gates every call of the run, the lookup included, on an exact approval. The
+gateway decides only when a call arrives, after the SDK's own `needsApproval` point,
+and a running tool cannot raise an SDK interruption. So the pause waits inside the tool
+call (`awaitingReviewer`): `approve(paused)` plays the reviewer in the development
+approval service, then the identical call (same arguments, same operation key) is
+re-sent and redeems that approval. The model never sees the pause; the SDK's
+interruption and checkpoint for the refund are unchanged:
+
+```
+admitted run_openai_agents_js_1792552003266 (executor generation 2)
+paused for approval: dev_approval:6a3c17af6d67
+reviewer approved dev_approval:6a3c17af6d67
+resumed: re-sending the same lookup_order call
+tool lookup_order -> {"amount_minor":120000,"currency":"INR","customer_id":"cus_77","order_id":"ord_881","refundable":true,"status":"delivered_damaged"}
+approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+approved; checkpoint revision 1
+paused for approval: dev_approval:bdbf1e9020d0
+reviewer approved dev_approval:bdbf1e9020d0
+resumed: re-sending the same issue_refund call
+tool issue_refund -> {"refund_id":"rf_ord_881"}
+approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+approved; checkpoint revision 2
+tool issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
+agent: Refunded ord_881 in full. The repeat refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
+decision decision_01a15c6ce71272728c853a1aeb6dc393 (refunded)
+run completed
+evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 14 signed audit entries
+```
+
 ## What is governed
 
 - **Tools.** `tool({ execute })` calls the shared `governedTool` functions; nothing runs
@@ -39,7 +75,8 @@ evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2
 - **Outcomes.** `errorFunction: governedFailure` returns `refusal()` text for refusals
   and a paused repeat (`kind` `"duplicate"`), instead of the SDK's default "Please try
   again"; it rethrows a pause whose `kind` is `approval`, `input` or `unknown_outcome`,
-  which stops the run.
+  which stops the run. An approval pause first waits in the tool call for the reviewer
+  (see Approval).
 - **Approval and checkpoint.** `needsApproval: true` interrupts before each refund; the
   approved `result.state` (`state.toString()`) is saved as the run's checkpoint and the
   run resumes with `runner.run(agent, state)`. The gateway still decides.

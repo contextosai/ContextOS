@@ -212,17 +212,34 @@ what counts.
 | `ToolBlocked`, `ToolRejected`, `ToolFailed` | `is_error` text: not done, why, do not retry | nothing; the model explains |
 | `ToolPaused`, `kind == "duplicate"` | `is_error` text: already requested, not repeated | nothing; the earlier call stands |
 | `ToolPaused`, `kind == "unknown_outcome"` | `is_error` text: outcome unknown, do not retry | reconcile the operation (`run.reconcile`), never resend it |
-| `ToolPaused`, `kind == "approval"` | `is_error` text: awaiting approval | record it, end the turn, ask a human |
+| `ToolPaused`, `kind == "approval"` | nothing yet: the call waits in the handler | a reviewer decides, then the handler re-sends the same call |
 
-For an approval, keep the paused outcome in the handler. Add a `PostToolUse` hook that
-returns `{"continue_": False, "stopReason": "awaiting approval"}`, so the model does not
-improvise around the pause. Checkpoint the session id and the operation, then resolve
-the approval out of band. Once it is approved, resume the session
-(`resume=session_id`) with "approved, continue". The handler sends the same governed
-call with the same operation key, so it runs once. Do not use `can_use_tool` as the
-approval. It runs only for calls that no rule already approved, and it is a UI
-confirmation, not authority. A human "allow" there still goes to the gateway, which
-decides. A `PreToolUse` `permissionDecision: "defer"` (the turn ends with
+For an approval, the handler is the human-in-the-loop seam. The agent loop awaits the
+handler, so the tool call simply waits while a reviewer decides in your approval
+service. Then the handler re-sends the identical call (same arguments, same operation
+key), which redeems that exact approval and returns the real result. This is what the
+example does, exercised end to end by
+`./examples/frameworks/run.sh claude-agent-sdk --approval`:
+
+```python
+try:
+    output = await asyncio.to_thread(issue_refund, **args)
+except ToolPaused as paused:
+    if paused.kind != "approval":
+        raise                                         # mapped by the table above
+    await wait_for_reviewer(paused.report["approval_request_id"])
+    output = await asyncio.to_thread(issue_refund, **args)   # the same call, redeemed
+```
+
+If the wait can outlast the MCP tool timeout (`MCP_TOOL_TIMEOUT`) or the process,
+return `is_error` text ("awaiting approval") instead, stop the agent with a
+`PostToolUse` hook (`{"continue_": False, "stopReason": "awaiting approval"}`),
+checkpoint the session id (section 8), and once approved resume the session
+(`resume=session_id`) with "approved, continue"; the re-issued call redeems the
+approval the same way. That route is not exercised by the example. Do not use
+`can_use_tool` or a `PreToolUse` `ask` as the approval: they run before the call
+reaches the gateway, which has not decided yet, and they are a UI confirmation, not
+authority. A `PreToolUse` `permissionDecision: "defer"` (the turn ends with
 `stop_reason: "tool_deferred"`) is the SDK's way to hold a call for later, before it is
 sent.
 

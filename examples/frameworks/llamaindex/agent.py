@@ -11,7 +11,9 @@
 Without OPENAI_API_KEY the agent runs on a scripted ``MockFunctionCallingLLM`` that
 emits the tool calls a model would, including a repeated refund the gateway refuses.
 
-Run with: ./examples/frameworks/run.sh llamaindex
+Run with: ./examples/frameworks/run.sh llamaindex [--approval]
+(``--approval``: each call pauses for an exact approval; a scripted reviewer grants it
+through the workflow's human-in-the-loop events and the replayed step re-sends the call.)
 """
 import asyncio
 import json
@@ -27,8 +29,8 @@ from llama_index.core.llms.mock import MockFunctionCallingLLM
 from llama_index.core.tools import FunctionTool
 from llama_index.core.workflow import Context, HumanResponseEvent, InputRequiredEvent
 
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline, refusal,
-                  tools)
+from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline,
+                  refusal, tools)
 
 
 class BudgetedLLM(FunctionCallingLLM):
@@ -117,7 +119,7 @@ def scripted(messages: Sequence[ChatMessage], **_: Any) -> ChatMessage:
                        content=f"Refunded ord_881 in full. The repeated refund was refused: {results[-1]}")
 
 
-def governed_tools(run, state: dict) -> list:
+def governed_tools(run, state: dict, pending: dict) -> list:
     """The governed functions as LlamaIndex tools. Each runs off the event loop (the
     client is synchronous) and turns every outcome into what the model should see."""
     lookup, refund = tools(run)
@@ -130,18 +132,16 @@ def governed_tools(run, state: dict) -> list:
                 # An unknown outcome, input request or duplicate: never retry blindly.
                 return refusal(paused)
             # Approval pending: hand it to a human through the workflow. The step is
-            # replayed when the answer arrives, and the same idempotency key makes the
-            # re-sent call the same operation, governed again.
+            # replayed when the answer arrives, and the replay re-sends the identical
+            # call (same arguments, same idempotency key), which redeems the approval.
+            pending[paused.operation_id] = paused
             answer = await ctx.wait_for_event(
-                HumanResponseEvent, waiter_id=paused.operation_id,
+                HumanResponseEvent, waiter_id=paused.operation_id, requirements={"operation_id": paused.operation_id},
                 waiter_event=InputRequiredEvent(prefix=f"approve {fn.__name__}{args}?",
                                                 operation_id=paused.operation_id))
-            if answer.response != "approved":
-                return refusal(paused)
-            try:
-                return json.dumps(await asyncio.to_thread(fn, **args))
-            except ToolOutcome as outcome:
-                return refusal(outcome)
+            # Reached only when the replayed call paused again: not approved.
+            print(f"still paused after the reviewer answered {answer.response!r}")
+            return refusal(paused)
         except ToolOutcome as outcome:
             return refusal(outcome)
 
@@ -164,8 +164,8 @@ async def main() -> None:
     else:
         from llama_index.llms.openai import OpenAI
         model = OpenAI(model=os.environ.get("OPENAI_MODEL", "gpt-6.1-sol"))
-    state = {"refunded": False}
-    agent = FunctionAgent(tools=governed_tools(run, state), llm=BudgetedLLM(model, run),
+    state, pending = {"refunded": False}, {}
+    agent = FunctionAgent(tools=governed_tools(run, state, pending), llm=BudgetedLLM(model, run),
                           system_prompt=INSTRUCTIONS, allow_parallel_tool_calls=False)
 
     handler = agent.run(user_msg=GOAL)
@@ -173,10 +173,13 @@ async def main() -> None:
         if isinstance(event, ToolCallResult):
             print(f"{event.tool_name}({event.tool_kwargs}) -> {event.tool_output.content}")
         elif isinstance(event, InputRequiredEvent):
-            # A real deployment shows this to a reviewer; the decision itself is made in
-            # ContextOS's approval service, and the re-sent call is governed again.
-            print(f"approval needed: {event.prefix}")
-            handler.ctx.send_event(HumanResponseEvent(response=os.environ.get("APPROVAL", "denied")))
+            # The human-in-the-loop step. A real deployment shows the bound action to a
+            # reviewer, who decides in ContextOS's approval service; `approve` plays them.
+            paused = pending.pop(event.operation_id)
+            print(f"paused for approval: {paused.report['approval_request_id']} ({event.prefix})")
+            approve(paused)
+            print(f"resuming: re-sending the identical call ({paused.operation_id})")
+            handler.ctx.send_event(HumanResponseEvent(response="approved", operation_id=paused.operation_id))
     response = await handler
     print(f"agent: {response}")
     finish(client, run, state["refunded"], str(response))

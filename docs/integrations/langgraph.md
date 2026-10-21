@@ -104,8 +104,8 @@ class ContextOS(AgentMiddleware):
         except ToolPaused as paused:
             if paused.kind != "approval":
                 return self.error(call, refusal(paused))     # duplicate, unknown outcome, ...
-            answer = interrupt({"tool": call["name"], "args": call["args"],
-                                "reason_codes": paused.reason_codes})
+            answer = interrupt({"approval_request_id": paused.report["approval_request_id"],
+                                "tool": call["name"], "args": call["args"]})
             return self.error(call, f"{refusal(paused)} Reviewer: {answer}")
         except (ToolBlocked, ToolRejected, ToolFailed) as outcome:
             return self.error(call, refusal(outcome))
@@ -151,15 +151,16 @@ and `run.fail()` or `run.complete()`; do not catch it inside the graph.
 
 The interrupt reaches the caller as `result["__interrupt__"]`. Approval itself happens
 in your approval service, bound to the action digest; LangGraph only waits. Resume the
-same thread when the approver has decided:
+same thread when the approver has decided (the example exercises this with
+`./examples/frameworks/run.sh langgraph --approval`):
 
 ```python
 from langgraph.types import Command
 
 result = agent.invoke({"messages": [{"role": "user", "content": goal}]}, config)
-if result.get("__interrupt__"):
-    notify_reviewer(result["__interrupt__"][0].value)
-    # ... later, after the approval service has decided:
+while result.get("__interrupt__"):
+    request = result["__interrupt__"][0].value
+    wait_for_decision(request["approval_request_id"])   # your approval service
     result = agent.invoke(Command(resume="approved"), config)
 ```
 

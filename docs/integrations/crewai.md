@@ -176,16 +176,16 @@ the agent loop are neither budgeted nor settled.
 | `rejected` (malformed, unsurfaced, key reuse) | `ToolRejected` | `ToolFailure`; fix the call, not retry it |
 | `failed` (provider did not apply it) | `ToolFailed` | `ToolFailure`; a different action may be tried |
 | `paused`, `kind == "duplicate"` (`retry_unsafe`) | `ToolPaused` | `ToolFailure`; the operation already exists |
-| `paused`, `kind == "approval"` | `ToolPaused` | stop the crew; resume after the approval |
+| `paused`, `kind == "approval"` | `ToolPaused` | `ToolFailure` "awaiting approval"; the reviewer decides at CrewAI's human input step |
 | `paused`, `kind == "input"` | `ToolPaused` | stop the crew; answer with `run.provide_input` |
 | `paused`, `kind == "unknown_outcome"` | `ToolPaused` | stop the crew; `run.reconcile(operation_id)` |
 | `paused`, `kind == "other"` (e.g. `operation_in_flight`) | `ToolPaused` | `ToolFailure`; not done |
 
-A pause that needs a human must stop the crew, not become another turn the model can talk
-its way through. Record it from the tool and abort the next model call:
+A pause for input or reconciliation must stop the crew, not become another turn the
+model can talk its way through. Record it from the tool and abort the next model call:
 
 ```python
-STOP = {"approval", "input", "unknown_outcome"}
+STOP = {"input", "unknown_outcome"}
 stopped = []
 
 def on_outcome(outcome):
@@ -203,13 +203,38 @@ except HookAborted:
     ...                                         # checkpoint (section 6), wait, then resume
 ```
 
-Approval is granted by your authority broker, not by the crew. After it is granted, a new
-`kickoff()` lets the model make the same call again with the same idempotency key; the
-gateway runs it once. Never retry it blindly in a loop. For an unknown outcome, ask the
-provider (`run.reconcile(pause.operation_id)`) or have an operator assert it with
-evidence; the operation's budget stays reserved and retries are refused until it is
-resolved. `Task(human_input=True)` is not an approval: it asks a person to review the
-agent's final answer after its tools have already run.
+An approval pause goes through CrewAI's human input instead, so the crew keeps its
+conversation. Give the task `human_input=True` and install a `HumanInputProvider`: after
+the agent answers that the call awaits approval, CrewAI calls the provider, which waits
+for the decision of record and appends it as feedback; CrewAI runs the agent loop again
+and the model re-sends the same call with the same idempotency key, which the gateway
+redeems once. `run.sh crewai --approval` exercises this:
+
+```python
+from crewai.core.providers.human_input import SyncHumanInputProvider, set_provider
+
+awaiting = []                                  # the tool appends each approval pause here
+
+class Reviewer(SyncHumanInputProvider):
+    def handle_feedback(self, answer, context):
+        while awaiting:
+            paused = awaiting.pop()
+            wait_for_decision(paused.report["approval_request_id"])   # your approval service
+            context.messages.append(context._format_feedback_message(
+                "Approved. Re-send the call that was awaiting approval, unchanged."))
+            answer = context._invoke_loop()
+        context.ask_for_human_input = False
+        return answer
+
+set_provider(Reviewer())
+task = Task(description=goal, expected_output="...", agent=agent, human_input=True)
+```
+
+The approval itself is granted in your approval service, bound to the action digest;
+the feedback only lets the model re-send. Never retry it blindly in a loop. For an
+unknown outcome, ask the provider (`run.reconcile(pause.operation_id)`) or have an
+operator assert it with evidence; the operation's budget stays reserved and retries are refused until it is
+resolved.
 
 A `duplicate` pause (`retry_unsafe`) means the operation was requested earlier. The
 refusal text says it was already requested and not repeated; the run's evidence says

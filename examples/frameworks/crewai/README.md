@@ -27,6 +27,47 @@ run completed
 evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
 ```
 
+## Approval
+
+```sh
+./examples/frameworks/run.sh crewai --approval
+```
+
+With `--approval` the run is admitted for a refund above the pack's 3,000 threshold, so
+every governed call needs an exact approval. The tool returns an `AWAITING APPROVAL`
+`ToolFailure`, the agent answers that it is waiting, and CrewAI's human input step
+(`Task(human_input=True)`, served by the `Reviewer` provider) hands the pause to the
+reviewer: `approve()` grants it in the development approval service, and the approval is
+appended as feedback to the same conversation. CrewAI runs the agent loop again, the
+model re-sends the identical call (same arguments, same operation key) and the gateway
+redeems the approval. The model's later steps run as before:
+
+```
+admitted run_crewai_1792551963060 (executor generation 2)
+model: scripted
+lookup_order({'order_id': 'ord_881'}) -> awaiting approval dev_approval:0bae4d3fb807
+paused for approval: dev_approval:0bae4d3fb807
+reviewer approved dev_approval:0bae4d3fb807
+resuming the agent loop with the reviewer's decision
+lookup_order({'order_id': 'ord_881'}) -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
+issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000}) -> awaiting approval dev_approval:8fa1623d2ee5
+paused for approval: dev_approval:8fa1623d2ee5
+reviewer approved dev_approval:8fa1623d2ee5
+resuming the agent loop with the reviewer's decision
+issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000}) -> {'refund_id': 'rf_ord_881'}
+issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000}) -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
+crew answer: Refunded order ord_881 (120000 minor units) to cus_77. A repeated refund was refused by the gateway: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated. (code: paused)
+crewai recorded a failed call: lookup_order {'order_id': 'ord_881'} (paused)
+crewai recorded a failed call: issue_refund {'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000} (paused)
+crewai recorded a failed call: issue_refund {'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000} (paused)
+decision decision_01a15c6c4a0b76c79cbd418fe648454c (refunded)
+run completed
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 8000, 'tool_calls': 2}, 12 signed audit entries
+```
+
+Eight model calls reserved 8,000 tokens: the agent answers once per pause (that it is
+waiting) before CrewAI asks for human input, and re-sends each call once approved.
+
 ## What is governed
 
 - **Tools.** `lookup_order` and `issue_refund` are `governed_tool` functions turned into
@@ -39,8 +80,9 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
   the model reads what happened (not done, or already requested) and CrewAI records the failed call
   (`TaskOutput.tool_failures`). Raising would not help: CrewAI's text-based loop retries
   a tool that raised, and its native loop gives the model a bare `Error executing tool`
-  string. A pause for approval, input or reconciliation also stops
-  the crew: the next model call is aborted, so the agent cannot argue past it.
+  string. A pause for input or reconciliation also stops the crew: the next model call
+  is aborted, so the agent cannot argue past it. A pause for approval waits for the
+  reviewer at CrewAI's human input step (see Approval above).
 - **No cached results.** The crew runs with `cache=False`, and each tool's
   `cache_function` refuses caching. With crew caching on, CrewAI answers a repeated
   identical call from its cache: the second refund would never reach the gateway and the

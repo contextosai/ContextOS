@@ -14,6 +14,8 @@ export const INSTRUCTIONS =
   "You are a support agent. Look the order up before acting. Refund only a refundable order, " +
   "for at most its amount_minor. If a tool reports that an action was refused or paused, " +
   "do not retry it: explain what happened.";
+// `--approval`: the pack's high-value rule requires an approval above 3,000 (see demo.py).
+export const APPROVAL = process.argv.slice(2).includes("--approval");
 // A model call reserves at least `[guards] model_call_min_tokens` (1,000 by default).
 export const MODEL_CALL_TOKENS = 1000;
 export { ToolOutcome, ToolPaused, ToolBlocked, ToolRejected, ToolFailed };
@@ -28,6 +30,7 @@ export async function admit(name) {
   const body = JSON.parse(readFileSync(new URL("run.json", REQUESTS), "utf8"));
   body.run_context.run_id = body.contract.run_id = runId;
   body.contract.contract_id = `contract_${runId}`;
+  if (APPROVAL) body.request.input.context.refund_amount = 5000;
   const run = await client.admit(body);
   console.log(`admitted ${run.runId} (executor generation ${run.executorGeneration})`);
   return { client, run };
@@ -36,7 +39,11 @@ export async function admit(name) {
 /** The run's two governed tools as async functions of named arguments. */
 export function tools(run) {
   return {
-    lookupOrder: governedTool(run, "adp_orders.lookup"),
+    // With --approval every call of the run is gated, reads included; keying the lookup
+    // makes its re-sent call the same operation, which redeems the approval (see demo.py).
+    lookupOrder: governedTool(run, "adp_orders.lookup", APPROVAL
+      ? { idempotencyKey: (a) => `lookup:${a.order_id}`, toolCallId: (a) => `tc_lookup_${a.order_id}` }
+      : {}),
     issueRefund: governedTool(run, "adp_payments.issue_refund", {
       approvalMode: "destructive",
       idempotencyKey: (a) => `refund:${a.order_id}`,
@@ -67,6 +74,19 @@ export function refusal(outcome) {
     return `OUTCOME UNKNOWN (${reasons}): the action may have happened and is being reconciled; do not retry it.`;
   }
   return `NOT DONE (${outcome.status}: ${reasons}). The action did not take effect; do not retry it.`;
+}
+
+/** Plays the reviewer: approves the paused call's exact action in the development
+ * approval service (see demo.py). */
+export async function approve(paused) {
+  const requestId = paused.report.approval_request_id;
+  const port = process.env.CONTEXTOS_DEV_PORTS.split(",")[2];
+  const response = await fetch(`http://127.0.0.1:${port}/`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ op: "approve", approval_request_id: requestId }),
+  });
+  if (!response.ok) throw new Error(`approval service: ${response.status}`);
+  console.log(`reviewer approved ${requestId}`);
 }
 
 /** Records the decision, completes the run and prints its evidence. */

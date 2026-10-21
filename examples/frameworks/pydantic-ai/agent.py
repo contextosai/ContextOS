@@ -13,7 +13,10 @@ Pydantic AI runs its own agent loop; ContextOS governs what the loop can do:
 
 Without OPENAI_API_KEY or ANTHROPIC_API_KEY a scripted ``FunctionModel`` drives the real
 loop: it looks the order up, refunds it, then tries the refund again, which the gateway
-refuses. Run with ``./examples/frameworks/run.sh pydantic-ai``.
+refuses. With ``--approval`` the refund needs an exact approval: the run ends with
+``DeferredToolRequests``, ``approve`` plays the reviewer, and a second run over the same
+message history with ``DeferredToolResults`` approvals re-sends the identical call.
+Run with ``./examples/frameworks/run.sh pydantic-ai [--approval]``.
 """
 import os
 
@@ -24,10 +27,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from contextos.client import ContextOSHTTPError
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, budgeted, finish, offline, refusal,
-                  tools)
-from pydantic_ai import (Agent, ApprovalRequired, CallDeferred, DeferredToolRequests, FunctionToolset,
-                         ModelResponse, TextPart, ToolCallPart, ToolFailed, ToolReturnPart, UsageLimits,
+from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, budgeted, finish, offline,
+                  refusal, tools)
+from pydantic_ai import (Agent, ApprovalRequired, CallDeferred, DeferredToolRequests, DeferredToolResults,
+                         FunctionToolset, ModelResponse, TextPart, ToolCallPart, ToolFailed, ToolReturnPart, UsageLimits,
                          WrapperToolset)
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -39,14 +42,16 @@ class ContextOSToolset(WrapperToolset):
     """Maps every governed call's outcome onto Pydantic AI's tool semantics."""
 
     completed: set = field(default_factory=set)
+    paused: dict = field(default_factory=dict)  # tool_call_id -> the approval pause, for the reviewer
 
     async def call_tool(self, name, tool_args, ctx, tool):
         try:
             result = await super().call_tool(name, tool_args, ctx, tool)
         except ToolPaused as paused:
             meta = {"operation_id": paused.operation_id, "reason_codes": paused.reason_codes}
-            if paused.kind == "approval":
+            if paused.kind == "approval" and not ctx.tool_call_approved:  # approved yet pending: refuse
                 print(f"tool {name}: awaiting approval")
+                self.paused[ctx.tool_call_id] = paused
                 raise ApprovalRequired(metadata=meta)  # a human decides; resume with DeferredToolResults
             if paused.kind in ("unknown_outcome", "input"):
                 print(f"tool {name}: deferred ({paused.kind})")
@@ -120,7 +125,21 @@ def main() -> None:
     agent = Agent(BudgetedModel(model(), run), instructions=INSTRUCTIONS, toolsets=[toolset],
                   output_type=[str, DeferredToolRequests])
     # A local backstop only; the run's budget in contextosd is the limit that holds.
-    result = agent.run_sync(GOAL, usage_limits=UsageLimits(request_limit=8))
+    limits = UsageLimits(request_limit=8)
+    result = agent.run_sync(GOAL, usage_limits=limits)
+    while isinstance(result.output, DeferredToolRequests) and result.output.approvals and not result.output.calls:
+        # In production: persist result.all_messages() and resume when the approval
+        # service has decided. Approving here only lets the call be re-sent; the gateway
+        # still checks the approval of record for that exact action.
+        approvals = {}
+        for call in result.output.approvals:
+            paused = toolset.paused.pop(call.tool_call_id)
+            print(f"paused for approval: {paused.report['approval_request_id']} ({call.tool_name} {call.args})")
+            approve(paused)
+            approvals[call.tool_call_id] = True
+        print("resuming with DeferredToolResults")
+        result = agent.run_sync(message_history=result.all_messages(), usage_limits=limits,
+                                deferred_tool_results=DeferredToolResults(approvals=approvals))
     if isinstance(result.output, DeferredToolRequests):
         # In production: persist result.all_messages(), wait for the approval or the
         # reconciliation, then resume with message_history= and deferred_tool_results=.

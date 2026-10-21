@@ -4,11 +4,18 @@
 // before every provider call.
 //
 //   ./examples/frameworks/run.sh mastra      (OPENAI_API_KEY set: a real model)
+//   ./examples/frameworks/run.sh mastra --approval
+// With --approval the gateway pauses calls for an exact approval; the tool suspends the
+// agent (context.agent.suspend), a scripted reviewer approves, and resumeGenerate re-runs
+// the tool, which re-sends the identical call and redeems the approval.
+import { Mastra } from "@mastra/core";
 import { Agent } from "@mastra/core/agent";
+import { InMemoryStore } from "@mastra/core/storage";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import {
-  GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, finish, offline, refusal, tools,
+  APPROVAL, GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, finish, offline, refusal,
+  tools,
 } from "../_shared/demo.mjs";
 
 const { client, run } = await admit("mastra");
@@ -30,19 +37,26 @@ const budget = {
 };
 
 // A non-success outcome becomes a tool result the model reads, saying it did not complete.
-// A pause that waits on someone else (an approver, requested input, an unknown effect to
-// reconcile) also ends the agent's turn: resolve it out of band, then re-send the same
-// call, which continues the same operation and cannot apply twice.
+// An approval pause suspends the agent (Mastra's suspend/resume) until a reviewer has
+// decided; the resumed tool re-sends the identical call. Any other pause that waits on
+// someone else (requested input, an unknown effect to reconcile) ends the agent's turn:
+// resolve it out of band, then re-send the same call, which cannot apply twice.
 const WAITS = ["approval", "input", "unknown_outcome"];
 let refunded = false;
 const paused: ToolPaused[] = [];
-async function governed(name: string, fn: (args: any) => Promise<unknown>, args: any) {
+let suspended: ToolPaused | undefined; // the approval pause the agent is suspended on
+async function governed(name: string, fn: (args: any) => Promise<unknown>, args: any, context: any) {
   try {
     const output = await fn(args);
     console.log(`${name} -> ${JSON.stringify(output)}`);
     return output;
   } catch (error) {
     if (!(error instanceof ToolOutcome)) throw error;
+    if (error instanceof ToolPaused && error.kind === "approval" && context?.agent?.suspend && !context.agent.resumeData) {
+      suspended = error;
+      console.log(`${name} -> paused for approval: ${error.report.approval_request_id}`);
+      return context.agent.suspend({ approval_request_id: error.report.approval_request_id });
+    }
     if (error instanceof ToolPaused && WAITS.includes(error.kind)) paused.push(error);
     console.log(`${name} -> ${refusal(error)}`);
     return refusal(error);
@@ -53,15 +67,15 @@ const lookupOrderTool = createTool({
   id: "lookupOrder",
   description: "Look an order up by id.",
   inputSchema: z.object({ order_id: z.string() }),
-  execute: (input) => governed("lookupOrder", lookupOrder, input),
+  execute: (input, context) => governed("lookupOrder", lookupOrder, input, context),
 });
 const issueRefundTool = createTool({
   id: "issueRefund",
   description: "Refund an order to its customer, in minor units.",
   inputSchema: z.object({ order_id: z.string(), customer_id: z.string(), amount_minor: z.number().int().min(1) }),
-  execute: async (input) => {
-    const output = await governed("issueRefund", issueRefund, input);
-    if (typeof output !== "string") refunded = true;
+  execute: async (input, context) => {
+    const output = await governed("issueRefund", issueRefund, input, context);
+    if (output && typeof output === "object") refunded = true;
     return output;
   },
 });
@@ -74,14 +88,26 @@ const agent = new Agent({
   inputProcessors: [budget],
   tools: { lookupOrder: lookupOrderTool, issueRefund: issueRefundTool },
 });
-const result = await agent.generate(GOAL, {
+// Suspend/resume persists the suspended run, so approval mode registers a storage.
+if (APPROVAL) new Mastra({ agents: { support: agent }, storage: new InMemoryStore(), logger: false });
+const options = {
   maxSteps: 8,
   toolCallConcurrency: 1, // effectful calls in one step run in order, not racing
   stopWhen: () => paused.length > 0,
-}).catch(async (error) => {
+};
+const failed = async (error: unknown) => {
   await run.fail(); // the loop itself failed (model error, budget refused): close the run
   throw error;
-});
+};
+let result = await agent.generate(GOAL, options).catch(failed);
+while (result.finishReason === "suspended" && suspended) {
+  // A real deployment shows the bound action to a reviewer, who decides in ContextOS's
+  // approval service; `approve` plays them. Resuming re-runs the suspended tool.
+  await approve(suspended);
+  suspended = undefined;
+  console.log(`resuming run ${result.runId}`);
+  result = await agent.resumeGenerate({ approved: true }, { ...options, runId: result.runId }).catch(failed);
+}
 if (paused.length > 0) {
   // Leave the run open: approve it (or reconcile the effect) and resume this executor.
   console.log(`paused on ${paused.map((p) => `${p.operationId} (${p.kind}: ${p.obligations.join(", ")})`).join("; ")}`);

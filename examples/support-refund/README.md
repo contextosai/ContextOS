@@ -37,6 +37,9 @@ What happened:
 Try: change `amount_minor` in `requests/tool_call.json` while keeping the idempotency
 key — the gateway rejects it as incompatible reuse. Raise `refund_amount` in
 `requests/run.json` above 3000 — the pack's high-value rule pins `require_approval` and
-dispatch pauses for approval.
+dispatch pauses for approval. Approving the request in the development approval service
+(`{"op": "approve", "approval_request_id": …}` to its port) and re-sending the identical
+call redeems the approval once; `./examples/frameworks/run.sh <framework> --approval`
+does this through each framework's human-in-the-loop path.
 
 `dev_services.py` vouches for anything and is for local development only.

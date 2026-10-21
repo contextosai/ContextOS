@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Runs one framework example against a local contextosd. Run from the repo root:
-#   ./examples/frameworks/run.sh langgraph
+#   ./examples/frameworks/run.sh langgraph [--approval]
 # Each example gets its own environment (Python: .venv via uv; Node: node_modules) on
 # first use. Without a provider API key an example uses a scripted model, so the
 # governed path runs anywhere; set the key its README names to use a real model.
+# --approval makes the refund wait for an exact approval, which a scripted reviewer
+# grants through the framework's human-in-the-loop path.
 set -euo pipefail
 NAME="${1:?usage: examples/frameworks/run.sh <framework>}"
 DIR="examples/frameworks/$NAME"
@@ -17,4 +19,4 @@ else
   CMD=(node --experimental-strip-types --no-warnings "$DIR/$(cd "$DIR" && ls agent.* | head -1)")
 fi
 source examples/dev-env.sh
-CONTEXTOS_TOKEN="$KEY" PYTHONPATH="bindings/python:examples/frameworks/_shared" "${CMD[@]}"
+CONTEXTOS_TOKEN="$KEY" PYTHONPATH="bindings/python:examples/frameworks/_shared" "${CMD[@]}" "${@:2}"

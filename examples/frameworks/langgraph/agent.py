@@ -10,7 +10,11 @@ The agent loop is LangGraph's own; ContextOS enters through one middleware:
 Without ANTHROPIC_API_KEY a scripted fake chat model drives the same loop: it looks
 the order up, refunds it, then tries the refund again, which the gateway refuses.
 
-Run with: ./examples/frameworks/run.sh langgraph
+With ``--approval`` the refund needs an exact approval: the run stops at the interrupt,
+``approve`` plays the reviewer, and ``Command(resume=...)`` on the same thread re-sends
+the identical call, which the gateway now lets through once.
+
+Run with: ./examples/frameworks/run.sh langgraph [--approval]
 """
 import ast
 import json
@@ -24,10 +28,10 @@ from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 
-from demo import (GOAL, INSTRUCTIONS, ToolBlocked, ToolFailed, ToolPaused, ToolRejected, admit, budgeted,
-                  finish, offline, refusal, tools)
+from demo import (GOAL, INSTRUCTIONS, ToolBlocked, ToolFailed, ToolPaused, ToolRejected, admit, approve,
+                  budgeted, finish, offline, refusal, tools)
 
 MODEL = os.environ.get("LANGGRAPH_MODEL", "anthropic:claude-sonnet-5-5")
 
@@ -36,6 +40,7 @@ class ContextOS(AgentMiddleware):
     def __init__(self, run):
         super().__init__()
         self.run = run
+        self.paused = {}  # approval_request_id -> the pause, for the reviewer
 
     def wrap_model_call(self, request, handler):
         with budgeted(self.run):
@@ -52,8 +57,10 @@ class ContextOS(AgentMiddleware):
                 return self._error(call, refusal(paused))
             # On resume LangGraph re-runs this node, which re-sends the same governed call
             # (same operation key): approved, it runs once; still pending, we get here again.
-            answer = interrupt({"tool": call["name"], "args": call["args"], "reason_codes": paused.reason_codes,
-                                "obligations": paused.obligations})
+            request_id = paused.report["approval_request_id"]
+            self.paused[request_id] = paused
+            answer = interrupt({"approval_request_id": request_id, "tool": call["name"], "args": call["args"],
+                                "reason_codes": paused.reason_codes})
             return self._error(call, f"{refusal(paused)} Reviewer: {answer}")
         except (ToolBlocked, ToolRejected, ToolFailed) as outcome:
             return self._error(call, refusal(outcome))
@@ -100,7 +107,8 @@ def parse(content: str) -> dict:
 def main() -> int:
     client, run = admit("langgraph")
     model = ScriptedModel() if offline("ANTHROPIC_API_KEY") else MODEL
-    agent = create_agent(model, tools=list(tools(run)), system_prompt=INSTRUCTIONS, middleware=[ContextOS(run)],
+    contextos = ContextOS(run)
+    agent = create_agent(model, tools=list(tools(run)), system_prompt=INSTRUCTIONS, middleware=[contextos],
                          checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": run.run_id}}
     # LangGraph's checkpointer holds the conversation; the ContextOS checkpoint holds what
@@ -108,10 +116,14 @@ def main() -> int:
     revision = run.checkpoint({"thread_id": run.run_id}, 0)["revision"]
     print(f"checkpoint revision {revision}: thread {run.run_id}")
     state = agent.invoke({"messages": [{"role": "user", "content": GOAL}]}, config)
-    if state.get("__interrupt__"):
-        # A real deployment surfaces this to a reviewer and resumes with Command(resume=...).
-        print(f"paused for approval: {state['__interrupt__'][0].value}")
-        return 0
+    while state.get("__interrupt__"):
+        # The graph is checkpointed at the interrupt. A real deployment shows the request to
+        # a reviewer and resumes the same thread once the approval service has decided.
+        request = state["__interrupt__"][0].value
+        print(f"paused for approval: {request['approval_request_id']} ({request['tool']} {request['args']})")
+        approve(contextos.paused.pop(request["approval_request_id"]))
+        print(f"resuming thread {run.run_id}")
+        state = agent.invoke(Command(resume="approved"), config)
     refunded = False
     for message in state["messages"]:
         if isinstance(message, ToolMessage):

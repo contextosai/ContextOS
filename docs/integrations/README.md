@@ -49,8 +49,24 @@ run completed
 evidence: budget used {… 'tokens': 4000, 'tool_calls': 2}, 11 signed audit entries
 ```
 
+With `--approval`, the run is admitted for a refund above the pack's 3,000 threshold,
+so its calls wait for an exact approval. Each example surfaces the pause through the
+framework's human-in-the-loop mechanism, a scripted reviewer approves the bound action
+in the development approval service, and the framework re-sends the identical call,
+which redeems the approval once:
+
+```sh
+./examples/frameworks/run.sh langgraph --approval
+```
+
+The pack's rule applies to the run's intent, so in such a run every governed call,
+the read-only lookup included, needs its own approval. An approval binds one
+operation, so a call that will be re-sent after approval needs a stable operation key
+(the examples key the lookup in this mode); an unkeyed read is a new operation on every
+call and would open a new request each time.
+
 The shared setup (admission, the two governed tools, the model-call budget, the
-refusal text and the closing decision) is in
+refusal text, the scripted reviewer and the closing decision) is in
 [`examples/frameworks/_shared`](../../examples/frameworks/_shared), so each example
 shows only what its framework adds.
 

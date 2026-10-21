@@ -14,7 +14,11 @@ ADK's own Runner drives the agent loop; ContextOS governs what the loop does:
 Without GOOGLE_API_KEY (or Vertex AI settings) a scripted ``BaseLlm`` plays the model,
 including a second refund attempt that the gateway refuses.
 
-Run with: ./examples/frameworks/run.sh google-adk
+With ``--approval`` the refund needs an exact approval: the invocation ends at ADK's
+``adk_request_confirmation`` call, ``approve`` plays the reviewer, and the confirmation
+response makes ADK run the same tool call again, which the gateway now lets through.
+
+Run with: ./examples/frameworks/run.sh google-adk [--approval]
 """
 import asyncio
 import json
@@ -28,7 +32,7 @@ from google.adk.tools import FunctionTool
 from google.genai import types
 
 from contextos.client import ContextOSHTTPError
-from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, finish, offline, refusal, tools)
+from demo import (GOAL, INSTRUCTIONS, ToolOutcome, ToolPaused, admit, approve, finish, offline, refusal, tools)
 
 MODEL_CALL_TOKENS = 1000
 warnings.filterwarnings("ignore", message=r"\[EXPERIMENTAL\]")
@@ -104,6 +108,8 @@ def budget_callbacks(run):
 
 
 UNKNOWN: list = []  # operations whose effect must be reconciled before the run completes
+PAUSED: dict = {}   # function call id -> the approval pause, for the reviewer
+CONFIRMATION = "adk_request_confirmation"
 
 
 def on_tool_error(tool, args, tool_context, error):
@@ -116,11 +122,17 @@ def on_tool_error(tool, args, tool_context, error):
         # refusal() says so.
         UNKNOWN.append(error.operation_id)
     elif kind == "approval":
-        # Hand the pause to ADK's confirmation flow. The approval itself is decided by
-        # the approval service; when the confirmation returns, ADK runs the same call
-        # again with the same operation key and the gateway checks that approval.
-        tool_context.request_confirmation(hint=f"{tool.name} is waiting for approval in ContextOS.",
-                                          payload={"approval_request_id": error.report.get("approval_request_id")})
+        # Hand the pause to ADK's confirmation flow and end the turn there (no model call).
+        # The approval itself is decided by the approval service; when the confirmation
+        # returns, ADK runs the same call again with the same operation key and the
+        # gateway checks that approval.
+        if tool_context.tool_confirmation is None:
+            PAUSED[tool_context.function_call_id] = error
+            tool_context.request_confirmation(hint=f"{tool.name} is waiting for approval in ContextOS.",
+                                              payload={"approval_request_id": error.report["approval_request_id"]})
+            tool_context.actions.skip_summarization = True
+            print(f"tool {tool.name}: awaiting approval")
+            return {"error": "Awaiting approval; the call has not run."}
     result = {"error": refusal(error)}
     print(f"tool {tool.name}: {result['error']}")
     return result
@@ -156,11 +168,26 @@ async def main() -> None:
 
     runner = InMemoryRunner(agent=agent, app_name="contextos_support")
     session = await runner.session_service.create_session(app_name="contextos_support", user_id="cus_77")
-    summary = ""
-    async for event in runner.run_async(user_id="cus_77", session_id=session.id,
-                                        new_message=types.Content(role="user", parts=[types.Part(text=GOAL)])):
-        if event.is_final_response() and event.content and event.content.parts:
-            summary = "".join(part.text or "" for part in event.content.parts)
+    summary, message = "", types.Content(role="user", parts=[types.Part(text=GOAL)])
+    while message:
+        confirmations = []
+        async for event in runner.run_async(user_id="cus_77", session_id=session.id, new_message=message):
+            confirmations += [call for call in event.get_function_calls() if call.name == CONFIRMATION]
+            if event.is_final_response() and event.content and event.content.parts:
+                summary = "".join(part.text or "" for part in event.content.parts)
+        # Each confirmation request is ADK pausing for a person. A real deployment shows
+        # it to a reviewer and sends the response once the approval service has decided.
+        responses = []
+        for call in confirmations:
+            original = call.args["originalFunctionCall"]
+            paused = PAUSED.pop(original["id"])
+            print(f"paused for approval: {paused.report['approval_request_id']} ({original['name']} {original['args']})")
+            approve(paused)
+            responses.append(types.Part(function_response=types.FunctionResponse(
+                id=call.id, name=CONFIRMATION, response={"confirmed": True})))
+        message = types.Content(role="user", parts=responses) if responses else None
+        if message:
+            print("resuming with the confirmation response")
     print(f"agent: {summary}")
     await runner.close()
     for operation_id in UNKNOWN:
