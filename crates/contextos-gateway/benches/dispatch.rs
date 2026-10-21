@@ -270,6 +270,11 @@ fn setup<S: DocumentStore + 'static, L: AppendLog + 'static>(store: Arc<S>, log:
         behavior: Behavior::Confirm,
     });
     let mut gateway = Gateway::new(store.clone(), audit, ports);
+    // contextosd's default guards; CONTEXTOS_BENCH_GUARDS=off measures without them.
+    if std::env::var("CONTEXTOS_BENCH_GUARDS").as_deref() != Ok("off") {
+        gateway.set_loop_limit(Some(5));
+        gateway.set_refuse_repeated_effects(true);
+    }
     gateway.register_adapter("adp_payments", adapter);
     gateway.pin_capability(manifest()).unwrap();
     Setup {
@@ -325,10 +330,11 @@ async fn admit<S: DocumentStore + 'static>(store: &S) -> RunAdmission {
     .unwrap()
 }
 
-fn call(run_id: &str, id: &str, idempotency_key: &str) -> Value {
+/// The `n`th refund of a run: a distinct amount each, so it is a distinct effect.
+fn call(run_id: &str, id: &str, idempotency_key: &str, n: u64) -> Value {
     json!({"envelope_version": "contextos.tool_call.v1", "tool_call_id": id, "run_id": run_id,
         "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "capability_id": "adp_payments.issue_refund",
-        "args": {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 420_000},
+        "args": {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": 420_000 + n},
         "principal_chain": [{"kind": "agent", "id": "agt_support"}],
         "approval_mode_requested": "destructive", "approval_mode_effective": "destructive", "approval_mode_highest": "destructive",
         "evidence_refs": ["kg:order:ord_881#snapshot_kg_2026_05_03_T0930"], "idempotency_key": idempotency_key})
@@ -342,7 +348,7 @@ async fn sequential<S: DocumentStore + 'static, L: AppendLog + 'static>(s: &Setu
         let admission = admit(s.store.as_ref()).await;
         let batch = (iterations - done).min(50);
         for i in 0..batch {
-            let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"));
+            let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"), i);
             let started = Instant::now();
             let out = s.gateway.dispatch(&admission, &envelope).await.unwrap();
             total += started.elapsed();
@@ -370,7 +376,7 @@ async fn concurrent<S: DocumentStore + 'static, L: AppendLog + 'static>(s: &Setu
         let gateway = s.gateway.clone();
         tasks.push(tokio::spawn(async move {
             for i in 0..EFFECTS_PER_RUN {
-                let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"));
+                let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"), i);
                 let out = gateway.dispatch(&admission, &envelope).await.unwrap();
                 assert_eq!(out.result["status"], "completed");
             }

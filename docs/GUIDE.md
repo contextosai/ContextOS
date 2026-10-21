@@ -123,8 +123,8 @@ and the host's own call id, if it has one, in `_meta["io.contextos/toolCallId"]`
 result names the call and its operation in `_meta` (`io.contextos/toolCallId`,
 `io.contextos/operationId`), which is what a DecisionRecord cites. Keep one effect on
 one route: a call keyed explicitly and a call keyed by derivation are different
-operations. Once one has applied the effect, the gateway refuses the other
-(`effect_repeated`, see the loop guard below), but calls racing in parallel can both pass.
+operations, but the gateway sends only one of them; it refuses the other
+(`effect_repeated`, see "Repeated effects" below), even when the two race.
 A tool's `input_required` is passed through with `requestState`, and the host's retry
 with `inputResponses` continues the same operation.
 
@@ -613,10 +613,12 @@ identical (same capability and canonical arguments) to one the run already appli
 may have applied, is refused with `effect_repeated` and the obligation
 `reconcile_existing_operation`, naming the operation that applied it. This covers a host
 that retries a call under a fresh idempotency key, and one effect sent both as a keyed
-tool call and as a derived-key MCP call. An effect the provider definitively did not
-apply is not recorded, so it may be attempted again under a new key; an unknown outcome
-is recorded, because it may have happened. Calls racing in parallel can both pass: the
-guard closes the sequential case. Capabilities whose identical calls are distinct
+tool call and as a derived-key MCP call. The first operation claims the effect
+atomically after its own claim and before dispatch, so of identical effects racing in
+parallel exactly one is sent. An effect the provider definitively did not apply releases
+its claim, so it may be attempted again under a new key; an unknown outcome keeps it,
+because the effect may have happened. If the guard's state cannot be written, the
+effect is not sent (`effect_guard_unavailable`). Capabilities whose identical calls are distinct
 effects (two equal top-ups) set `"repeatable": true` in their manifest; `[guards]
 refuse_repeated_effects = false` turns the guard off. A run records at most 1,024
 distinct effects; past that, new ones are refused (`effect_guard_saturated`).

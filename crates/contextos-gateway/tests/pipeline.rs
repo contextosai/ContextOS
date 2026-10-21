@@ -2373,3 +2373,45 @@ async fn an_effect_the_provider_did_not_apply_may_be_attempted_again() {
         "a definitive non-application records nothing"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn identical_effects_racing_under_different_keys_dispatch_once() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_refuse_repeated_effects(true);
+    let calls: Vec<Value> = (0..8)
+        .map(|i| call(&format!("tc_{i}"), Some(&format!("refund_race_{i}"))))
+        .collect();
+    let g = &h.gateway;
+    let a = &h.admission;
+    let outcomes = tokio::join!(
+        g.dispatch(a, &calls[0]),
+        g.dispatch(a, &calls[1]),
+        g.dispatch(a, &calls[2]),
+        g.dispatch(a, &calls[3]),
+        g.dispatch(a, &calls[4]),
+        g.dispatch(a, &calls[5]),
+        g.dispatch(a, &calls[6]),
+        g.dispatch(a, &calls[7]),
+    );
+    let outcomes = [
+        outcomes.0, outcomes.1, outcomes.2, outcomes.3, outcomes.4, outcomes.5, outcomes.6, outcomes.7,
+    ];
+    let statuses: Vec<String> = outcomes
+        .iter()
+        .map(|o| o.as_ref().unwrap().result["status"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(statuses.iter().filter(|s| *s == "completed").count(), 1, "{statuses:?}");
+    assert!(
+        outcomes
+            .iter()
+            .map(|o| o.as_ref().unwrap())
+            .filter(|o| o.result["status"] != "completed")
+            .all(|o| o.report.reason_codes == ["effect_repeated"]),
+        "{statuses:?}"
+    );
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        1,
+        "exactly one reaches the provider"
+    );
+}

@@ -132,6 +132,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 54 Repeated effects | done — a new operation repeating an effect the run already applied (same capability and canonical arguments, any key or route) is refused with `effect_repeated`, naming the applying operation; definitive non-application is not recorded; `repeatable` manifests and `[guards] refuse_repeated_effects` opt out |
 | 55 Metered model usage | done — `ContextOS-Run-Id` / `ContextOS-Usage-Reservation` headers, `metering_headers` and `budgeted_model_call(metered=True)` in both clients, a reference metering proxy for OpenAI and Anthropic APIs (streamed or not) settling measured tokens and cost with the `meter` scope; tested end to end in CI |
 | 56 MCP tool names | done — the MCP endpoint lists capabilities under names model APIs accept (`[A-Za-z0-9_-]{1,64}`, digest-suffixed on collision or length), with the capability id in `title` and `_meta`; calls take either name and dispatch the resolved capability |
+| 57 Race-free repeated effects | done — an effect's signature is claimed by compare-and-swap after the operation claim and before dispatch, so of identical effects racing under different keys exactly one is sent (the rest withheld, budget released); released on definitive non-application; fails closed when the guard cannot write |
 | Next | next |
 
 ## Non-negotiables carried from the spec

@@ -76,7 +76,12 @@ equals UTF-16 order.
 | Measure | Result |
 |---|---|
 | One run, sequential effects (average over 50 effects) | ~0.36 ms per effect |
-| 32 runs of one tenant in parallel, 50 effects each | ~94 µs per effect (~10,600 effects/s) |
+| 32 runs of one tenant in parallel, 50 effects each | ~98 µs per effect (~10,200 effects/s) |
+
+The benchmark runs with contextosd's default guards (loop guard, repeated-effect
+guard), and each effect of a run is a distinct refund. The repeated-effect guard claims
+each new effect's signature with one compare-and-swap before dispatch, which costs
+~4% (`CONTEXTOS_BENCH_GUARDS=off`: ~0.35 ms sequential, ~95 µs per effect in parallel).
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:

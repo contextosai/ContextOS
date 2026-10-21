@@ -1270,6 +1270,64 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "The executor lost ownership of this run.",
             ));
         }
+        // The effect's signature is claimed after the operation claim and before dispatch:
+        // of identical effects racing under different keys, exactly one is sent. The
+        // check at authorization only refuses the sequential case early.
+        if guards_effect && new_operation {
+            let claimed_effect =
+                loop_guard::claim_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await;
+            let refusal = match claimed_effect {
+                Ok(loop_guard::EffectClaim::Claimed) => None,
+                Ok(loop_guard::EffectClaim::Held(holder)) => Some((
+                    "effect_repeated",
+                    Some(holder.clone()),
+                    format!("An identical effect was already requested in this run as operation {holder}."),
+                )),
+                Ok(loop_guard::EffectClaim::Saturated) => Some((
+                    "effect_guard_saturated",
+                    None,
+                    "The run has recorded too many distinct effects to guard another.".to_owned(),
+                )),
+                Err(error) => {
+                    tracing::warn!(%error, "repeated-effect guard unavailable");
+                    Some((
+                        "effect_guard_unavailable",
+                        None,
+                        "The repeated-effect guard is unavailable; the effect was not sent.".to_owned(),
+                    ))
+                }
+            };
+            if let Some((reason, holder, message)) = refusal {
+                self.withhold_dispatch(
+                    admission,
+                    &operations_key,
+                    &operation_id,
+                    &attempt_id,
+                    &action_digest,
+                    &now,
+                    reason,
+                )
+                .await?;
+                self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                    .await?;
+                let entry = self
+                    .audit
+                    .append(
+                        &admission.tenant_id,
+                        "repeated_effect_refusal",
+                        json!({"run_id": admission.run_id, "operation_id": operation_id,
+                            "capability_id": manifest.capability_id, "call_signature": call_signature,
+                            "applied_operation_id": holder, "reason_codes": [reason]}),
+                        &now,
+                    )
+                    .await?;
+                p.report.audit_sequences.push(entry.sequence);
+                if holder.is_some() {
+                    p.report.obligations.push("reconcile_existing_operation".into());
+                }
+                return Ok(p.stop("blocked", vec![reason.into()], &message));
+            }
+        }
         if let (Some(continuation), Some((_, digest))) = (continuation, &adapter_input) {
             let entry = self
                 .audit
@@ -1316,25 +1374,25 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             },
         );
         let response = response.unwrap_or_else(|_| AdapterResponse::unknown());
-        // Every effect that may have applied is recorded; one the provider definitively
-        // did not apply may be attempted again under a new key.
-        let may_have_applied = !(response.definitive
+        // The claim stays for every effect that may have applied; one the provider
+        // definitively did not apply is released, so it may be attempted again.
+        let not_applied = response.definitive
             && matches!(
                 response.outcome,
                 EffectOutcome::NotApplied | EffectOutcome::NotDispatched
-            ));
+            );
         if guards_effect
             && new_operation
-            && may_have_applied
+            && not_applied
             && let Err(error) =
-                loop_guard::note_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await
+                loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await
         {
-            // An unrecorded effect weakens the guard; make it visible in the evidence.
-            tracing::warn!(%error, "repeated-effect guard not recorded");
+            // Still claimed: a new attempt of this effect is refused (fails closed).
+            tracing::warn!(%error, "repeated-effect claim not released");
             self.audit
                 .append(
                     &admission.tenant_id,
-                    "effect_guard_record_lost",
+                    "effect_guard_release_lost",
                     json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
                     &now,
                 )

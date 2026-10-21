@@ -8,11 +8,13 @@
 //! serial latency; identical calls racing in parallel may overshoot the limit by their
 //! concurrency, which bounds a loop rather than enforcing an exact quota.
 //!
-//! The same document records, per signature, the first operation whose effect may have
-//! applied (`effects`), so a second identical effect under another operation key is
-//! refused (`effect_repeated`): a host that retries under a new key, or sends one
-//! effect through two routes, cannot apply it twice. Calls racing in parallel can
-//! still both pass; the guard closes the sequential case, the one retries produce.
+//! The same document holds, per signature, the operation that claimed an effect
+//! (`effects`), so a second identical effect under another operation key is refused
+//! (`effect_repeated`): a host that retries under a new key, or sends one effect
+//! through two routes, cannot apply it twice. The claim is a compare-and-swap made
+//! after the operation claim and before dispatch, so of identical effects racing in
+//! parallel exactly one reaches the provider; it is released only if the provider
+//! definitively did not apply the effect.
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{DocKey, DocKind, DocumentStore, StoreError};
@@ -61,29 +63,71 @@ pub(crate) fn effects_saturated(state: Option<&Value>, signature: &str) -> bool 
         .is_some_and(|e| e.len() >= MAX_SIGNATURES && !e.contains_key(signature))
 }
 
-/// Records that `operation_id` may have applied the effect with `signature`; the first
-/// operation recorded for a signature is kept.
-pub(crate) async fn note_effect<S: DocumentStore>(
+/// The outcome of claiming an effect's signature for an operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EffectClaim {
+    /// This operation holds the signature (newly, or already).
+    Claimed,
+    /// Another operation holds it.
+    Held(String),
+    /// The table is full: no new effect can be guarded.
+    Saturated,
+}
+
+/// Claims the effect with `signature` for `operation_id`, atomically: of operations
+/// racing for one signature, exactly one gets [`EffectClaim::Claimed`].
+pub(crate) async fn claim_effect<S: DocumentStore>(
+    store: &S,
+    key: &DocKey,
+    signature: &str,
+    operation_id: &str,
+) -> Result<EffectClaim, StoreError> {
+    let outcome = std::sync::Mutex::new(EffectClaim::Claimed);
+    update(store, key, |state| {
+        let effects = effects_mut(state)?;
+        let (result, write) = match effects.get(signature).and_then(Value::as_str) {
+            Some(holder) if holder == operation_id => (EffectClaim::Claimed, false),
+            Some(holder) => (EffectClaim::Held(holder.to_owned()), false),
+            None if effects.len() >= MAX_SIGNATURES => (EffectClaim::Saturated, false),
+            None => {
+                effects.insert(signature.to_owned(), json!(operation_id));
+                (EffectClaim::Claimed, true)
+            }
+        };
+        *outcome.lock().map_err(|_| StoreError::Integrity)? = result;
+        Ok(write)
+    })
+    .await?;
+    outcome.into_inner().map_err(|_| StoreError::Integrity)
+}
+
+/// Releases `operation_id`'s claim on `signature` (the provider definitively did not
+/// apply the effect), so the effect may be attempted again.
+pub(crate) async fn release_effect<S: DocumentStore>(
     store: &S,
     key: &DocKey,
     signature: &str,
     operation_id: &str,
 ) -> Result<(), StoreError> {
     update(store, key, |state| {
-        let effects = state
-            .as_object_mut()
-            .ok_or(StoreError::Integrity)?
-            .entry("effects")
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .ok_or(StoreError::Integrity)?;
-        if effects.contains_key(signature) || effects.len() >= MAX_SIGNATURES {
+        let effects = effects_mut(state)?;
+        if effects.get(signature).and_then(Value::as_str) != Some(operation_id) {
             return Ok(false);
         }
-        effects.insert(signature.to_owned(), json!(operation_id));
+        effects.remove(signature);
         Ok(true)
     })
     .await
+}
+
+fn effects_mut(state: &mut Value) -> Result<&mut serde_json::Map<String, Value>, StoreError> {
+    state
+        .as_object_mut()
+        .ok_or(StoreError::Integrity)?
+        .entry("effects")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or(StoreError::Integrity)
 }
 
 /// Counts one more new operation with `signature`.

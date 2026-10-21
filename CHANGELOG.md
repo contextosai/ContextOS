@@ -186,8 +186,9 @@ First release candidate of the ContextOS runtime.
   `reconcile_existing_operation`), whatever its idempotency key or route, so a host
   retrying under a fresh key or mixing keyed calls with derived-key MCP calls cannot
   apply an effect twice. Capabilities marked `repeatable` and `[guards]
-  refuse_repeated_effects = false` opt out. **Behavior change:** identical effects
-  under different keys in one run were previously each applied.
+  refuse_repeated_effects = false` opt out. The effect is claimed atomically before
+  dispatch, so identical effects racing in parallel are sent once. **Behavior change:**
+  identical effects under different keys in one run were previously each applied.
 
 ### Framework integrations
 - Implementation guides (`docs/integrations/`) and runnable examples
