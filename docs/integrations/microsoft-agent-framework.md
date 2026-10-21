@@ -105,8 +105,21 @@ Setting `context.result` without calling `call_next` skips the provider; raising
 `MiddlewareTermination` in chat middleware does not carry a result, so set it on the
 context. In a streaming run the example re-raises instead, so the run fails closed.
 Reserve at least `[guards] model_call_min_tokens` (1,000 by default). Settling as the
-executor charges the whole reservation; to charge measured tokens, pass the
-reservation id to an LLM gateway holding the `meter` scope (GUIDE §6).
+executor charges the whole reservation. To charge measured tokens, send
+`run.metering_headers(reservation)` on the request through an LLM gateway holding the
+`meter` scope, which settles with what the provider reported
+([examples/metering-proxy](../../examples/metering-proxy) is a reference; GUIDE §6). `context.kwargs` reach the
+chat client, and the OpenAI clients (`OpenAIChatClient(base_url="https://llm-gateway.internal/v1")`)
+send `extra_headers` with the request, so add them before `call_next`:
+
+```python
+        context.kwargs["extra_headers"] = {**context.kwargs.get("extra_headers", {}),
+                                           **run.metering_headers(reservation)}
+```
+
+Then settle only when `call_next` raises, ignoring a 404 (the gateway settled first): a
+failed call the gateway did not settle is charged in full. One reservation covers one
+call.
 
 ## Map outcomes: function middleware
 

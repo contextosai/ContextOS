@@ -159,10 +159,16 @@ Three CrewAI behaviors shape this:
 - **Listeners run on a thread pool.** Call `crewai_event_bus.flush()` after `kickoff()`
   and before recording the decision, so every reservation is settled.
 
-The executor settling is charged the whole reservation. To charge measured usage, pass
-the reservation id to an LLM gateway that holds the `meter` scope (for example a proxy
-at the `LLM`'s `base_url` that reads it from a request header) and let it settle
-(GUIDE.md section 6). A custom `BaseLLM` must do what providers do: call
+The executor settling is charged the whole reservation. To charge measured usage, each
+model request must carry `run.metering_headers(reservation)` (`ContextOS-Run-Id`,
+`ContextOS-Usage-Reservation`) to an LLM gateway at the `LLM`'s `base_url` that holds the
+`meter` scope ([examples/metering-proxy](../../examples/metering-proxy) is a reference; GUIDE.md section 6).
+CrewAI's providers take no per-request headers (`default_headers` on the OpenAI provider
+is fixed for the `LLM`), and a `before_llm_call` hook cannot add one. So meter through a
+custom `BaseLLM` whose call reserves with `run.budgeted_model_call(tokens=…, metered=True)`
+and sends the headers on its own request, and leave its calls out of `reserve` and
+`settle` above. If the call raises, a reservation the gateway did not settle is settled
+there, charging all of it; one reservation covers one call. A custom `BaseLLM` must do what providers do: call
 `self._invoke_before_llm_call_hooks(messages, from_agent)` and emit the call's
 started and completed or failed events inside `llm_call_context()`, or its calls outside
 the agent loop are neither budgeted nor settled.

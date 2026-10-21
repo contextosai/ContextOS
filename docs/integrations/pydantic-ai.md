@@ -187,9 +187,23 @@ class BudgetedModel(WrapperModel):
 agent = Agent(BudgetedModel("anthropic:claude-sonnet-5-5", AsyncRun(run)), ...)
 ```
 
-Settling as the executor charges the whole reservation. To charge measured usage, pass
-the reservation id to your LLM gateway (for example as a request header through the
-provider's HTTP client) and let it settle with the `meter` scope; see
+Settling as the executor charges the whole reservation. To charge measured usage, make
+`_budget` reserve with `metered=True` and yield the reservation, and send
+`run.metering_headers(reservation)` as the request's `extra_headers` setting, through an
+LLM gateway holding the `meter` scope
+(`AnthropicModel("claude-sonnet-5-5", provider=AnthropicProvider(base_url="https://llm-gateway.internal"))`;
+[examples/metering-proxy](../../examples/metering-proxy) is a reference):
+
+```python
+    async def request(self, messages, settings, params):
+        async with self._budget() as reservation:
+            headers = {**(settings or {}).get("extra_headers", {}), **self.run.metering_headers(reservation)}
+            return await super().request(messages, {**(settings or {}), "extra_headers": headers}, params)
+```
+
+`request_stream` is the same. The gateway settles what the provider reported; if the
+request raises, a reservation it did not settle is settled here, charging all of it.
+One reservation covers one request; see
 [GUIDE section 6](../GUIDE.md#6-budget-model-calls-and-replans).
 
 [`UsageLimits`](https://pydantic.dev/docs/ai/core-concepts/agent/#usage-limits) is

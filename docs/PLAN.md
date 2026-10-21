@@ -130,6 +130,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 52 Approvals end to end | done — the development approval service records requests and grants exact approvals for a reviewer; `--approval` runs every framework example through its own human-in-the-loop path (pause, approve, identical re-send redeems once), plain and approval runs of all eleven in CI |
 | 53 Async client and budget errors | done — `contextos.aio` (`AsyncClient`/`AsyncRun`, async `governed_tool`, async audit paging), `BudgetExhausted` in both clients, `budgeted_model_call` / `budgetedModelCall`; the async framework examples use them |
 | 54 Repeated effects | done — a new operation repeating an effect the run already applied (same capability and canonical arguments, any key or route) is refused with `effect_repeated`, naming the applying operation; definitive non-application is not recorded; `repeatable` manifests and `[guards] refuse_repeated_effects` opt out |
+| 55 Metered model usage | done — `ContextOS-Run-Id` / `ContextOS-Usage-Reservation` headers, `metering_headers` and `budgeted_model_call(metered=True)` in both clients, a reference metering proxy for OpenAI and Anthropic APIs (streamed or not) settling measured tokens and cost with the `meter` scope; tested end to end in CI |
 | Next | next |
 
 ## Non-negotiables carried from the spec

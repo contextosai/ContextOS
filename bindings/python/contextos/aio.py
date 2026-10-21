@@ -100,14 +100,20 @@ class AsyncRun(_Async):
     async def call_tool(self, capability_id: str, args: dict, **options: Any) -> dict:
         return await self._call(self._target.call_tool, capability_id, args, **options)
 
+    def metering_headers(self, reservation_id: str) -> dict:
+        return self._target.metering_headers(reservation_id)
+
     @contextlib.asynccontextmanager
-    async def budgeted_model_call(self, *, tokens: int, cost_cents: int = 0) -> AsyncIterator[str]:
-        """Reserves budget for one model call and settles it afterwards, even if the call
-        raises. Raises ``BudgetExhausted`` before the call when the run cannot afford it.
-        Settling here charges the whole reservation; to charge measured usage, hand the
-        reservation id to your metering gateway and settle there instead."""
+    async def budgeted_model_call(self, *, tokens: int, cost_cents: int = 0,
+                                  metered: bool = False) -> AsyncIterator[str]:
+        """As ``Run.budgeted_model_call``: reserves before one model call and settles
+        after it; ``metered=True`` leaves settlement to a metering LLM gateway."""
         reservation = await self._call(self._target.reserve_usage, "model_call", tokens=tokens, cost_cents=cost_cents)
+        settle = self._target._settle_open if metered else self._target.settle_usage
         try:
             yield reservation
-        finally:
-            await self._call(self._target.settle_usage, reservation)
+        except BaseException:
+            await self._call(settle, reservation)
+            raise
+        if not metered:
+            await self._call(settle, reservation)

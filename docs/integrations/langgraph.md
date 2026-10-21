@@ -116,9 +116,23 @@ agent = create_agent("anthropic:claude-sonnet-5-5", tools=[lookup_order, issue_r
                      system_prompt=INSTRUCTIONS, middleware=[ContextOS(run)], checkpointer=checkpointer)
 ```
 
-Executor settlement charges the whole reservation. In production, pass the reservation id
-to the LLM gateway that meters the call (`meter` scope) instead of calling
-`settle_usage` yourself; it settles what was measured and releases the rest.
+Executor settlement charges the whole reservation. To charge measured usage, reserve with
+`metered=True` and send `run.metering_headers(reservation)` on the model request, through
+an LLM gateway holding the `meter` scope ([examples/metering-proxy](../../examples/metering-proxy) is a reference).
+`model_settings` reach the provider call, and `ChatAnthropic` and `ChatOpenAI` pass
+`extra_headers` to their SDK; point the model at the gateway with
+`init_chat_model("anthropic:claude-sonnet-5-5", base_url="https://llm-gateway.internal")`:
+
+```python
+    def wrap_model_call(self, request, handler):
+        with self.run.budgeted_model_call(tokens=self.tokens, metered=True) as reservation:
+            headers = self.run.metering_headers(reservation)
+            return handler(request.override(model_settings={**request.model_settings, "extra_headers": headers}))
+```
+
+The gateway settles what the provider reported; if the call raises, `budgeted_model_call`
+settles a reservation the gateway did not, charging all of it. One reservation covers one
+call.
 
 For `agent.ainvoke` and async tools (MCP tools are async-only), also implement
 `awrap_model_call` and `awrap_tool_call` (the same mapping, awaiting `handler`), with

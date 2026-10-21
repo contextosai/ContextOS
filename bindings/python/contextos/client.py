@@ -45,6 +45,10 @@ import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
+# On a model request, these tell a metering LLM gateway which reservation to settle
+# with the usage it measures (see examples/metering-proxy).
+RUN_HEADER = "ContextOS-Run-Id"
+RESERVATION_HEADER = "ContextOS-Usage-Reservation"
 
 
 class ContextOSHTTPError(Exception):
@@ -343,15 +347,38 @@ class Run:
         the reservation id to your metering gateway instead to settle measured usage."""
         return self._post("/usage/settle", {"reservation_id": reservation_id})
 
+    def metering_headers(self, reservation_id: str) -> Dict[str, str]:
+        """Headers for a model request that a metering LLM gateway settles with the
+        usage it measures (``budgeted_model_call(..., metered=True)``)."""
+        return {RUN_HEADER: self.run_id, RESERVATION_HEADER: reservation_id}
+
     @contextlib.contextmanager
-    def budgeted_model_call(self, *, tokens: int, cost_cents: int = 0) -> Iterator[str]:
+    def budgeted_model_call(self, *, tokens: int, cost_cents: int = 0, metered: bool = False) -> Iterator[str]:
         """Reserves budget for one model call and settles it afterwards, even if the call
-        raises. Raises ``BudgetExhausted`` before the call when the run cannot afford it."""
+        raises. Raises ``BudgetExhausted`` before the call when the run cannot afford it.
+
+        ``metered=True`` leaves settlement to a metering LLM gateway (send
+        ``metering_headers(reservation)`` with the model request), which charges what it
+        measured. If the call raises, a reservation the gateway did not settle is settled
+        here, charging all of it: unknown usage is never free."""
         reservation = self.reserve_usage("model_call", tokens=tokens, cost_cents=cost_cents)
         try:
             yield reservation
-        finally:
+        except BaseException:
+            if metered:
+                self._settle_open(reservation)
+            else:
+                self.settle_usage(reservation)
+            raise
+        if not metered:
             self.settle_usage(reservation)
+
+    def _settle_open(self, reservation_id: str) -> None:
+        try:
+            self.settle_usage(reservation_id)
+        except ContextOSHTTPError as error:
+            if error.status != 404:  # 404: already settled by the gateway
+                raise
 
     def status(self) -> dict:
         return self.client.request("GET", self._path())

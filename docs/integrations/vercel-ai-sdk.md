@@ -98,11 +98,27 @@ const model = wrapLanguageModel({ model: openai("gpt-6.1-sol"), middleware: budg
 
 A reservation that does not fit throws `BudgetExhausted` (from the client) before the
 provider is contacted, so the loop stops whatever the model wants. The
-executor settling charges the whole reservation; to charge measured usage, route the
-provider through your LLM gateway with the `meter` scope and hand it the reservation id
-— in `wrapGenerate`, reserve with `run.reserveUsage`, call `model.doGenerate({ ...params, headers: { ...params.headers, "x-usage-reservation": reservation } })`
-instead of `doGenerate()`, and let the gateway settle
-([GUIDE §6](../GUIDE.md#6-budget-model-calls-and-replans)).
+executor settling charges the whole reservation. To charge measured usage, route the
+provider through an LLM gateway holding the `meter` scope
+(`createOpenAI({ baseURL: "https://llm-gateway.internal/v1" })`;
+[examples/metering-proxy](../../examples/metering-proxy) is a reference), reserve with
+`metered: true`, and send `run.meteringHeaders(reservation)` as the call's `headers`
+([GUIDE §6](../GUIDE.md#6-budget-model-calls-and-replans)):
+
+```ts
+const withMeter = (params, reservation) => ({ ...params, headers: { ...params.headers, ...run.meteringHeaders(reservation) } });
+const metered: LanguageModelMiddleware = {
+  specificationVersion: "v4",
+  wrapGenerate: ({ model, params }) =>
+    run.budgetedModelCall((r) => model.doGenerate(withMeter(params, r)), { tokens: 4000, metered: true }),
+  wrapStream: ({ model, params }) =>
+    run.budgetedModelCall((r) => model.doStream(withMeter(params, r)), { tokens: 4000, metered: true }),
+};
+```
+
+Use it in place of `budget`. The gateway settles what the provider reported, a stream
+when it ends; if the call throws, a reservation the gateway did not settle is settled
+here, charging all of it. One reservation covers one call.
 
 ## 5. Map outcomes
 

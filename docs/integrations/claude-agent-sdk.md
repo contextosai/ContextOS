@@ -201,13 +201,26 @@ made when the second reservation was the last one that fit. Limits to know:
   accounting, not evidence.
 
 The executor settling its own reservation is charged the whole reservation. To charge
-measured usage, route the model through an LLM gateway that holds the `meter` scope:
-`ANTHROPIC_BASE_URL=https://llm-gateway.internal`. The SDK cannot put a header on each
-model request. `ANTHROPIC_CUSTOM_HEADERS` is fixed for the CLI process, and each
-request carries `X-Claude-Code-Session-Id`. So hand the gateway the reservation another
-way: register the pending reservation id under the session id or run id, or reserve one
-block per `query()` and pass it in `ANTHROPIC_CUSTOM_HEADERS`. The gateway then settles
-what it measured. `ResultMessage.usage` (main loop) and `model_usage` (whole tree,
+measured usage, the model request must carry `run.metering_headers(reservation)` to an
+LLM gateway that holds the `meter` scope, which settles with what the provider reported
+([examples/metering-proxy](../../examples/metering-proxy) is a reference). The SDK cannot put a header on each
+model request: `ANTHROPIC_BASE_URL` and `ANTHROPIC_CUSTOM_HEADERS` (newline-separated
+`Name: value` lines) are fixed for the CLI process of one `query()`, and one reservation
+covers one call (the reference gateway refuses a reused one). So meter per query, for a
+query that makes one model request (no tools, `max_turns=1`, the extra requests above
+switched off):
+
+```python
+async with run.budgeted_model_call(tokens=1000, metered=True) as reservation:
+    headers = "\n".join(f"{k}: {v}" for k, v in run.metering_headers(reservation).items())
+    options.env |= {"ANTHROPIC_BASE_URL": "https://llm-gateway.internal", "ANTHROPIC_CUSTOM_HEADERS": headers}
+    async for message in query(prompt=goal, options=options):
+        ...
+```
+
+If the query raises, `budgeted_model_call` settles a reservation the gateway did not,
+charging all of it. A multi-turn query keeps the per-turn reservations above, settled
+by the executor. `ResultMessage.usage` (main loop) and `model_usage` (whole tree,
 subagents included) are for reports and reconciliation. The gateway's settlement is
 what counts.
 

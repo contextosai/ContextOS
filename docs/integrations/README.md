@@ -149,6 +149,8 @@ plainly whether anything happened.
   `[guards] model_call_min_tokens` (1,000 by default); size the run budget for the
   number of turns you expect.
 - **Measured usage needs a metering gateway.** An executor settling its own reservation
-  is charged the whole reservation. To charge measured usage, pass the reservation id
-  to your LLM gateway, which settles it with the `meter` scope (see
-  [GUIDE.md §6](../GUIDE.md#6-budget-model-calls-and-replans)).
+  is charged the whole reservation. To charge measured usage, reserve with
+  `budgeted_model_call(tokens=…, metered=True)` and send `run.metering_headers(reservation)`
+  on the model request through an LLM gateway holding the `meter` scope, which settles
+  with the usage the provider reported ([GUIDE.md §6](../GUIDE.md#6-budget-model-calls-and-replans);
+  reference gateway: [examples/metering-proxy](../../examples/metering-proxy)).

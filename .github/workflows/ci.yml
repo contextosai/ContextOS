@@ -69,6 +69,7 @@ jobs:
         run: |
           ./examples/support-refund/run.sh
           ./examples/agent-loop/run.sh
+          ./examples/metering-proxy/run.sh
       - name: Node HTTP client against contextosd
         run: |
           node bindings/node/test_client.mjs

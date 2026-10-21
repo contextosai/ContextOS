@@ -132,8 +132,27 @@ Why not `RunHooks.on_llm_start`/`on_llm_end`: they fire once per turn, `on_llm_e
 not fire when the call raises (the reservation would stay held), and the SDK's model
 retries happen between them unbudgeted. The wrapper sits under the retry loop, so every
 attempt reserves and every reservation settles. Settling as the executor charges the
-whole reservation; pass the reservation id to an LLM gateway with the `meter` scope to
-charge measured usage instead (GUIDE section 6).
+whole reservation. To charge measured usage, reserve with `metered=True` and put
+`run.metering_headers(reservation)` in `ModelSettings.extra_headers`, with the default
+client pointed at an LLM gateway holding the `meter` scope
+(`set_default_openai_client(AsyncOpenAI(base_url="https://llm-gateway.internal/v1"))`;
+[examples/metering-proxy](../../examples/metering-proxy) is a reference). The gateway settles what the provider
+reported; if the call raises, a reservation it did not settle is settled here, charging
+all of it. One reservation covers one call (GUIDE section 6):
+
+```python
+from dataclasses import replace
+
+    async def get_response(self, system_instructions, input, model_settings, *args, **kwargs):
+        async with self.run.budgeted_model_call(tokens=self.tokens, metered=True) as reservation:
+            headers = {**(model_settings.extra_headers or {}), **self.run.metering_headers(reservation)}
+            return await self.inner.get_response(system_instructions, input,
+                                                 replace(model_settings, extra_headers=headers), *args, **kwargs)
+```
+
+`stream_response` is the same. In TypeScript, use `budgetedModelCall(fn, { tokens, metered: true })`
+and pass `run.meteringHeaders(reservation)` as `request.modelSettings.providerData.extraHeaders`
+(the Responses model sends them with the request).
 
 The provider applies only to agents whose `model` is a name (or unset). An agent built
 with a `Model` instance bypasses `RunConfig.model_provider`; wrap that instance in

@@ -55,6 +55,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Run the quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
+- Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
 - Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)

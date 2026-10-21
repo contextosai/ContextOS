@@ -98,9 +98,16 @@ accepts AI SDK v4-specification models): a wrapper whose `doGenerate` runs insid
 the stream's `flush`/`cancel`, as in
 [the AI SDK guide](vercel-ai-sdk.md#4-budget-every-model-call).
 
-The executor settling charges the whole reservation; to charge measured usage, have
-your LLM gateway (holding the `meter` scope) settle it, passing it the reservation id
-([GUIDE §6](../GUIDE.md#6-budget-model-calls-and-replans)).
+The executor settling charges the whole reservation. To charge measured usage, each
+model request must carry `run.meteringHeaders(reservation)` to an LLM gateway holding
+the `meter` scope, which settles with what the provider reported
+([examples/metering-proxy](../../examples/metering-proxy) is a reference;
+[GUIDE §6](../GUIDE.md#6-budget-model-calls-and-replans)). A processor cannot set request
+headers (`processLLMRequest` rewrites only the prompt), so meter below Mastra: wrap the
+AI SDK model (provider `baseURL` at the gateway) with the metered middleware in
+[the AI SDK guide](vercel-ai-sdk.md#4-budget-every-model-call), which reserves with
+`budgetedModelCall(fn, { tokens, metered: true })` and adds the headers per call, and
+drop the `budget` processor so each call is reserved once.
 
 ## 5. Map outcomes
 

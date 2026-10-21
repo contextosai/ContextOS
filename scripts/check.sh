@@ -13,4 +13,5 @@ step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_clie
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
 step quickstart; bash examples/support-refund/run.sh >/dev/null 2>&1    || fail quickstart
 step agent-loop; bash examples/agent-loop/run.sh 2>&1 | grep -q "run completed" || fail "agent loop"
+step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
 echo "ALL CHECKS PASSED"

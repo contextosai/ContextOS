@@ -12,6 +12,10 @@
 // ToolFailed. Only requests the server did not process (429, 503) are retried.
 
 export const GENERATION_HEADER = "ContextOS-Executor-Generation";
+// On a model request, these tell a metering LLM gateway which reservation to settle with
+// the usage it measures (see examples/metering-proxy).
+export const RUN_HEADER = "ContextOS-Run-Id";
+export const RESERVATION_HEADER = "ContextOS-Usage-Reservation";
 
 export class ContextOSHTTPError extends Error {
   constructor(status, code, message, detail) {
@@ -304,15 +308,35 @@ export class Run {
     return this.#post("/usage/settle", { reservation_id: reservationId });
   }
 
+  /** Headers for a model request that a metering LLM gateway settles with the usage it
+   * measures (`budgetedModelCall(fn, { metered: true })`). */
+  meteringHeaders(reservationId) {
+    return { [RUN_HEADER]: this.runId, [RESERVATION_HEADER]: reservationId };
+  }
+
   /** Reserves budget for one model call around `fn(reservationId)` and settles it
    * afterwards, even if `fn` throws. Throws BudgetExhausted before calling `fn` when the
-   * run cannot afford it. */
-  async budgetedModelCall(fn, { tokens, costCents = 0 }) {
+   * run cannot afford it. `metered: true` leaves settlement to a metering LLM gateway
+   * (send `meteringHeaders(id)`); if `fn` throws, a reservation the gateway did not
+   * settle is settled here, charging all of it. */
+  async budgetedModelCall(fn, { tokens, costCents = 0, metered = false }) {
     const reservation = await this.reserveUsage("model_call", { tokens, costCents });
+    let result;
     try {
-      return await fn(reservation);
-    } finally {
-      await this.settleUsage(reservation);
+      result = await fn(reservation);
+    } catch (error) {
+      await (metered ? this.#settleOpen(reservation) : this.settleUsage(reservation));
+      throw error;
+    }
+    if (!metered) await this.settleUsage(reservation);
+    return result;
+  }
+
+  async #settleOpen(reservationId) {
+    try {
+      await this.settleUsage(reservationId);
+    } catch (error) {
+      if (!(error instanceof ContextOSHTTPError && error.status === 404)) throw error; // settled by the gateway
     }
   }
 

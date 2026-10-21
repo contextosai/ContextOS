@@ -533,9 +533,25 @@ metering service holding the `meter` scope (and neither `admit` nor `dispatch`) 
 the usage it measured and releases the rest (usage above the reservation is charged as
 audited overage, up to the run's remaining capacity), while the run's own executor
 settling is charged the whole reservation, because self-reported usage is not evidence.
-The principal that admitted the run cannot meter it. Pass the
-reservation id to your model gateway (for example in a request header) so it can meter
-the call.
+The principal that admitted the run cannot meter it.
+
+To charge measured usage, send each model request through an LLM gateway that holds
+the `meter` scope, with the run and reservation in two headers, `ContextOS-Run-Id` and
+`ContextOS-Usage-Reservation`. The clients produce them and leave settlement to the
+gateway:
+
+```python
+with run.budgeted_model_call(tokens=4000, metered=True) as reservation:
+    response = model.generate(..., extra_headers=run.metering_headers(reservation))
+```
+
+The gateway forwards the request without those headers, reads the usage the provider
+reported, and settles the reservation with it. If the call raises before the gateway
+settles, the client settles it in full; if the gateway sees no usage in a successful
+response it leaves the reservation, which stays reserved until the executor settles it
+in full, because unknown usage is never free. One reservation covers one call.
+[`examples/metering-proxy`](../examples/metering-proxy) is a reference gateway for
+OpenAI Chat Completions and Responses and Anthropic Messages, streamed or not.
 
 ### Checkpoint the orchestrator
 

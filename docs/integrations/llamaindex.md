@@ -119,9 +119,21 @@ class BudgetedLLM(FunctionCallingLLM):
 call through the reservation. A refused reservation raises `BudgetExhausted`
 (`.reasons` names the limit) out of `agent.run`; stop there and fail or complete the run,
 do not catch and continue. Reserve at least `[guards] model_call_min_tokens` (1,000 by
-default). Settling as the executor charges the whole reservation; to charge measured
-tokens, pass the reservation id to an LLM gateway holding the `meter` scope and let it
-settle (GUIDE §6).
+default). Settling as the executor charges the whole reservation. To charge measured
+tokens, reserve with `metered=True` and send `run.metering_headers(reservation)` on the
+request through an LLM gateway holding the `meter` scope, which settles with what the
+provider reported ([examples/metering-proxy](../../examples/metering-proxy) is a reference; GUIDE §6). With
+`llama_index.llms.openai.OpenAI(..., api_base="https://llm-gateway.internal/v1")` as
+`inner`, call keyword arguments reach the SDK's `create`, so `extra_headers` works:
+
+```python
+    async def achat(self, messages, **kw):
+        async with self._run.budgeted_model_call(tokens=4000, metered=True) as reservation:
+            return await self.inner.achat(messages, extra_headers=self._run.metering_headers(reservation), **kw)
+```
+
+In `astream_chat`, pass the same headers and settle only if the stream raises, ignoring a
+404 (the gateway settled first). One reservation covers one call.
 
 ## Map outcomes
 

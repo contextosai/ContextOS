@@ -93,6 +93,15 @@ try {
   await assert.rejects(run.budgetedModelCall(async () => assert.fail("the model call ran"), { tokens: 1_000_000 }),
     (error) => error instanceof BudgetExhausted && error.status === 409 && error.reasons.length > 0);
   assert.equal(await run.budgetedModelCall(async (id) => id.startsWith("usage:"), { tokens: 1000 }), true);
+  // Metered: the headers name the reservation for the gateway; a call that throws first
+  // is settled here, so a second settlement finds nothing open.
+  let metered;
+  await assert.rejects(run.budgetedModelCall(async (id) => {
+    metered = id;
+    assert.deepEqual(run.meteringHeaders(id), { "ContextOS-Run-Id": run.runId, "ContextOS-Usage-Reservation": id });
+    throw new Error("model unreachable");
+  }, { tokens: 1000, metered: true }), /model unreachable/);
+  await assert.rejects(run.settleUsage(metered), (error) => error instanceof ContextOSHTTPError && error.status === 404);
 
   // An independent evaluator scores the decision; the executor's key cannot.
   const scores = { evaluatorRef: "evaluator.refund_quality@3", policy: 1, utility: 0.9, safety: 1 };

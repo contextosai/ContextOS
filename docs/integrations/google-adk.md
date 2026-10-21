@@ -122,10 +122,22 @@ they are set on. A reservation is at least `[guards] model_call_min_tokens` (1,0
 default).
 
 When the executor settles, the whole reservation is charged, because self-reported
-usage is not evidence. To charge measured usage, send the reservation id to an LLM
-gateway that holds the `meter` scope, and let it settle. For example, add the id to
-`llm_request.config.http_options.headers` in `before_model`, and skip `settle` in this
-process. ADK's `RunConfig.max_llm_calls` still applies, but it counts calls in one
+usage is not evidence. To charge measured usage, send `run.metering_headers(reservation)`
+with the request to an LLM gateway that holds the `meter` scope
+(`Gemini(model=..., base_url="https://llm-gateway.internal")`), and let it settle with what
+the provider reported. ADK merges `llm_request.config.http_options.headers` into the
+request, so add them in `before_model`:
+
+```python
+    http = llm_request.config.http_options = llm_request.config.http_options or types.HttpOptions()
+    http.headers = {**(http.headers or {}), **run.metering_headers(reservations[key])}
+```
+
+Then `after_model` only drops the reservation, and `on_model_error` settles it, ignoring
+a 404 (`ContextOSHTTPError.status`: the gateway settled first): a failed call the
+gateway did not settle is charged in full. One reservation covers one call.
+[examples/metering-proxy](../../examples/metering-proxy) is a reference gateway; it reads OpenAI and Anthropic
+usage, so a Gemini gateway must read `usageMetadata` the same way. ADK's `RunConfig.max_llm_calls` still applies, but it counts calls in one
 process only. The ContextOS budget holds across processes, lanes and takeovers.
 
 ## Map governed outcomes

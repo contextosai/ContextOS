@@ -63,3 +63,11 @@ key_sha256 = "sha256:93a97c917366b95209ee98b66dfa87597d8b960ad13a8ef0fac1776d37c
 tenant_id = "tenant_acme_prod"
 principal_id = "svc_oncall"
 scopes = ["control"]
+
+# Development LLM gateway, key "dev-meter-0123456789abcdef0123456789abcd": holds only
+# `meter`, so the usage it reports settles as measured (examples/metering-proxy).
+[[api_keys]]
+key_sha256 = "sha256:cbbf550b2bf8a9846c146c2367578d000be6526bfe3cff8ed8264ae595d314fd"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_llm_gateway"
+scopes = ["meter"]

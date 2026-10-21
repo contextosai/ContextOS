@@ -20,6 +20,9 @@ export interface DispatchReport {
   audit_sequences: number[];
 }
 
+export declare const RUN_HEADER: string;
+export declare const RESERVATION_HEADER: string;
+
 export declare class ContextOSHTTPError extends Error {
   readonly status: number;
   readonly code: string;
@@ -125,8 +128,16 @@ export declare class Run {
   latestCheckpoint(): Promise<{ revision: number; digest: string; state: Json; executor_generation: number; saved_at: string }>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
   settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
-  /** Reserves budget around one model call and settles it afterwards; throws BudgetExhausted first if it cannot fit. */
-  budgetedModelCall<T>(fn: (reservationId: string) => Promise<T>, options: { tokens: number; costCents?: number }): Promise<T>;
+  /** Headers for a model request that a metering LLM gateway settles with the usage it measures. */
+  meteringHeaders(reservationId: string): Record<string, string>;
+  /**
+   * Reserves budget around one model call and settles it afterwards; throws BudgetExhausted first if it
+   * cannot fit. `metered` leaves settlement to a metering LLM gateway unless the call throws.
+   */
+  budgetedModelCall<T>(
+    fn: (reservationId: string) => Promise<T>,
+    options: { tokens: number; costCents?: number; metered?: boolean },
+  ): Promise<T>;
   status(): Promise<{ run_id: string; status: string; executor_generation: number }>;
   takeOver(): Promise<Run>;
   complete(): Promise<any>;

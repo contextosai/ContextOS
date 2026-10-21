@@ -170,6 +170,16 @@ First release candidate of the ContextOS runtime.
   fencing handled, and a `governed_tool` decorator for agent frameworks.
 - `ctx` command line; Python, Node and WebAssembly bindings over one JSON facade.
 
+### Metered model usage
+- A model request carries its run and reservation in `ContextOS-Run-Id` and
+  `ContextOS-Usage-Reservation`; `metering_headers` / `meteringHeaders` produce them and
+  `budgeted_model_call(..., metered=True)` leaves settlement to the metering gateway
+  (settling in full only if the call fails before the gateway did).
+- `examples/metering-proxy`: a reference metering gateway for OpenAI Chat Completions
+  and Responses and Anthropic Messages, streamed or not, that settles each reservation
+  with the reported tokens (and cost, given prices) under the `meter` scope and fails
+  closed on missing or reused reservations and missing usage.
+
 ### Repeated effects
 - A new operation whose effect is identical to one the run already applied, or may
   have applied, is refused with `effect_repeated` (obligation
