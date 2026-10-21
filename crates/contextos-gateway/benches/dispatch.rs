@@ -437,17 +437,27 @@ impl DocumentStore for Counting {
 /// `CONTEXTOS_BENCH_COUNT=1`: store reads and writes per sequential effect (round trips
 /// on PostgreSQL, besides the audit batch), instead of timings.
 fn count_round_trips(runtime: &tokio::runtime::Runtime) {
-    let store = Arc::new(Counting { inner: MemoryStore::new(), reads: AtomicU64::new(0), writes: AtomicU64::new(0) });
+    let store = Arc::new(Counting {
+        inner: MemoryStore::new(),
+        reads: AtomicU64::new(0),
+        writes: AtomicU64::new(0),
+    });
     let s = setup(store.clone(), MemoryLog::new());
     runtime.block_on(async {
         let admission = admit(s.store.as_ref()).await;
         // The first effect creates the run's ledgers; count the steady state.
         let first = call(&admission.run_id, "tc_first", "op_first", 100);
         s.gateway.dispatch(&admission, &first).await.unwrap();
-        let (reads, writes) = (store.reads.load(Ordering::Relaxed), store.writes.load(Ordering::Relaxed));
+        let (reads, writes) = (
+            store.reads.load(Ordering::Relaxed),
+            store.writes.load(Ordering::Relaxed),
+        );
         for i in 0..10 {
             let envelope = call(&admission.run_id, &format!("tc_{i}"), &format!("op_{i}"), i);
-            assert_eq!(s.gateway.dispatch(&admission, &envelope).await.unwrap().result["status"], "completed");
+            assert_eq!(
+                s.gateway.dispatch(&admission, &envelope).await.unwrap().result["status"],
+                "completed"
+            );
         }
         let per = |now: u64, then: u64| (now - then) as f64 / 10.0;
         println!(
