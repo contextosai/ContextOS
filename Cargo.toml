@@ -29,13 +29,13 @@ icu_collator = "2"
 proptest = "1"
 flate2 = "1"
 url = "2"
-ed25519-dalek = { version = "2", features = ["zeroize"] }
-base64 = "0.22"
+ed25519-dalek = { version = "3", features = ["zeroize"] }
+base64 = "0.23"
 zeroize = "1"
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 axum = "0.8"
-tower-http = { version = "0.6", features = ["limit", "timeout", "trace", "request-id", "catch-panic", "set-header"] }
+tower-http = { version = "0.7", features = ["limit", "timeout", "trace", "request-id", "catch-panic", "set-header"] }
 tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
@@ -46,13 +46,14 @@ tracing-opentelemetry = { version = "0.34", default-features = false }
 opentelemetry-http = { version = "0.33", default-features = false }
 http = "1"
 bytes = "1"
-toml = "0.8"
+toml = "1"
 uuid = { version = "1", features = ["v7"] }
 clap = { version = "4", features = ["derive"] }
-jsonwebtoken = "9"
+# jsonwebtoken needs a crypto backend; rust_crypto would pull rsa (RUSTSEC-2023-0071).
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 ring = "0.17"
 mimalloc = { version = "0.1", default-features = false }
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
 jsonschema = { version = "0.59", default-features = false }
