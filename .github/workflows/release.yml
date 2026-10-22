@@ -27,7 +27,8 @@ jobs:
         run: |
           dir="contextos-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dir"
-          cp target/${{ matrix.target }}/release/contextosd target/${{ matrix.target }}/release/ctx README.md SECURITY.md "$dir"/
+          cp target/${{ matrix.target }}/release/contextosd target/${{ matrix.target }}/release/ctx \
+            README.md SECURITY.md LICENSE LICENSE-docs NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.txt "$dir"/
           tar czf "$dir.tar.gz" "$dir"
           shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
       - uses: actions/attest-build-provenance@v2

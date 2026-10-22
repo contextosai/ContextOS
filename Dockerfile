@@ -18,6 +18,7 @@ COPY --from=build /src/target/release/contextosd /usr/local/bin/contextosd
 # The governance plane: run the same image with --entrypoint /usr/local/bin/towerd.
 COPY --from=build /src/target/release/towerd /usr/local/bin/towerd
 COPY --from=console /src/tower/dist /usr/share/contextos/tower
+COPY LICENSE LICENSE-docs NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.txt /usr/share/licenses/contextos/
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/contextosd", "--config", "/etc/contextos/contextosd.toml"]

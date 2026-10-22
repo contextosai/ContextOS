@@ -18,3 +18,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /tower
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /examples/frameworks/openai-agents-js
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /examples/frameworks/vercel-ai-sdk
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /examples/frameworks/mastra
+    schedule:
+      interval: weekly
