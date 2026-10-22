@@ -65,6 +65,12 @@ pub enum DocKind {
     AppliedEffects,
     /// The governance plane's records (declarations, reviews, guardrails, waivers).
     Governance,
+    /// A tenant's pinned semantic definition of a shared business guarantee.
+    GuaranteeDefinition,
+    /// Conserved exposure shared across independent runs for one business resource.
+    SharedExposure,
+    /// Immutable action-to-resource binding used for crash recovery.
+    ExposureLink,
 }
 
 impl DocKind {
@@ -94,6 +100,9 @@ impl DocKind {
             DocKind::MemoryKey => "memory_key",
             DocKind::AppliedEffects => "applied_effects",
             DocKind::Governance => "governance",
+            DocKind::GuaranteeDefinition => "guarantee_definition",
+            DocKind::SharedExposure => "shared_exposure",
+            DocKind::ExposureLink => "exposure_link",
         }
     }
 }

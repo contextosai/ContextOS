@@ -30,6 +30,7 @@ step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/
 step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
 step quickstart; bash examples/support-refund/run.sh >/dev/null 2>&1    || fail quickstart
+step shared-guarantees; check_example examples/shared-guarantees/run.sh "Offline audit verification:" || fail "shared guarantees"
 step agent-loop; check_example examples/agent-loop/run.sh "run completed" || fail "agent loop"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
 step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || fail "tower example"

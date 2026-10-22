@@ -1,11 +1,30 @@
-# ContextOS Runtime
+# ContextOS
 
 [![CI](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml/badge.svg)](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-An open-source Rust runtime and governance plane for AI agents, implementing the [ContextOS](https://contextosai.com) contract: bounded context, authorized effects, typed outcomes, and verifiable audit trails.
+**Shared business limits for AI agents.**
 
-This repository implements the spec. The spec's TypeScript module is a conformance reference; this runtime reproduces its decisions exactly (checked against generated golden vectors) and adds what the reference leaves to implementers: protected stores, fencing, adapters, a gateway and a server.
+ContextOS coordinates the limits your agents share, enforces them before tools act,
+and records signed evidence of confirmed and unresolved effects. Keep your agent
+framework, identity provider and observability stack; place consequential tools
+behind the ContextOS gateway.
+
+Two agents can each be authorized to refund INR 800 while the order's shared ceiling
+is INR 1,000. ContextOS reserves capacity atomically across their independent runs,
+so only one effect reaches the provider. A pending effect continues to consume its
+reservation until reconciled. New run IDs and server replicas do not reset capacity
+when they share the same tenant and protected store.
+
+The first implementation supports configured numeric ceilings per resource. Its
+Rust runtime and Tower governance plane build on the [ContextOS](https://contextosai.com)
+contract: bounded context, authorized effects, typed outcomes, and verifiable audit trails.
+
+The normative spec's TypeScript module remains the conformance reference. This
+runtime reproduces its decisions against golden vectors and adds protected stores,
+fencing, adapters and shared business guarantees as an opt-in runtime extension.
+The [research and strategy](docs/research/2026-10-22-value-proposition.md) explain the
+chosen opportunity, competing approaches and unvalidated assumptions.
 
 > Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
@@ -18,13 +37,17 @@ synthetic data; it needs no model API key or external payment account.
 ```sh
 git clone https://github.com/contextosai/ContextOS.git
 cd ContextOS
-./examples/support-refund/run.sh
+./examples/shared-guarantees/run.sh
 ```
 
-The script builds the server and CLI, starts services on loopback addresses, admits a
-run, dispatches one simulated refund, refuses a duplicate, and verifies the audit
-chain. Expect `status: completed`, then `retry_unsafe`, and a final `verified: true`.
-See the [full quickstart](examples/support-refund/README.md) for sample output.
+The script builds the server and CLI, starts synthetic services on loopback addresses,
+races two agents against one order ceiling, shows how pending exposure blocks another
+effect, reconciles it by provider query, and verifies the exported audit offline.
+See the [shared guarantees demo](examples/shared-guarantees/README.md) and
+[configuration and recovery guide](docs/SHARED_GUARANTEES.md).
+
+For the original authorization and duplicate-operation walkthrough, run
+`./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).
 
 For the governance console, install Node.js 24 and run
 `./examples/tower/run.sh --serve`; follow the [Tower guide](docs/tower/README.md).
@@ -57,6 +80,10 @@ for vulnerabilities.
 
 ## What it governs
 
+- **Shared business exposure**: configured resource ceilings across independent runs,
+  agents and replicas on one protected store; unknown and partial outcomes retain
+  capacity; exact-attempt dispatch activation, conservative recovery and read-only
+  operator inspection. This extension is opt-in and covers mediated tools only.
 - **Every effect**: authority chain, policy, constraints, exact approvals, data flow and
   the execution boundary are checked for one bound action before anything is claimed;
   MCP hosts can use it as a governed tool server (`/v1/runs/{id}/mcp`).
@@ -94,7 +121,8 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 
 ## Start
 
-- Run the quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
+- Coordinate two agents against one business ceiling: [examples/shared-guarantees](examples/shared-guarantees/README.md) (`./examples/shared-guarantees/run.sh`)
+- Follow the original authorization quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)

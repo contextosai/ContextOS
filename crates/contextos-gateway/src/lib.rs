@@ -36,6 +36,7 @@ pub mod ports;
 mod reconcile;
 mod revocations;
 mod scores;
+mod shared_guarantees;
 mod usage;
 
 use std::collections::HashMap;
@@ -77,6 +78,7 @@ pub use ports::{
 pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
+pub use shared_guarantees::SharedGuarantee;
 pub use usage::{UsageKind, UsageRefusal};
 
 /// Receipts at which the run's budget ledger is compacted before the next
@@ -160,6 +162,8 @@ impl std::fmt::Debug for Ports {
 
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayError {
+    #[error("shared guarantee: {0}")]
+    Guarantee(String),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -212,6 +216,7 @@ pub struct Gateway<S, L> {
     /// Refuse delegations that name no registered result schema, even before any is
     /// registered (production).
     require_result_schemas: bool,
+    shared_guarantees: Vec<SharedGuarantee>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -340,6 +345,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             model_call_floor: 0,
             completion_floor: None,
             require_result_schemas: false,
+            shared_guarantees: Vec::new(),
         }
     }
 
@@ -1086,6 +1092,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .flatten()
                 .find(|op| op["intent"]["operation_id"] == operation_id.as_str());
             if let Some(op) = existing {
+                if op["outcome"] == "unknown" && self.has_shared_guarantee(&manifest.capability_id) {
+                    p.report.obligations.push("reconcile_existing_operation".into());
+                    return Ok(p.stop(
+                        "paused",
+                        vec!["shared_guarantee_unresolved".into()],
+                        "Reconcile the shared exposure before retrying this operation.",
+                    ));
+                }
                 let in_flight = op["attempts"]
                     .as_array()
                     .and_then(|a| a.last())
@@ -1203,6 +1217,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             &operations_key,
             claim_seed,
             |ledger| {
+                if self.has_shared_guarantee(&manifest.capability_id)
+                    && ledger["operations"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|op| op["intent"]["operation_id"] == operation_id && op["outcome"] == "unknown")
+                {
+                    return TransitionResult::rejected(ledger.clone(), "shared_guarantee_unresolved");
+                }
                 claim_operation(
                     ledger,
                     &claim,
@@ -1217,10 +1240,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Commit::Rejected { reason_codes } => {
                 self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
                     .await?;
-                let status = if reason_codes
-                    .iter()
-                    .any(|r| matches!(r.as_str(), "retry_unsafe" | "operation_in_flight" | "retry_not_due"))
-                {
+                let status = if reason_codes.iter().any(|r| {
+                    matches!(
+                        r.as_str(),
+                        "retry_unsafe" | "operation_in_flight" | "retry_not_due" | "shared_guarantee_unresolved"
+                    )
+                }) {
                     p.report.obligations.push("reconcile_existing_operation".into());
                     "paused"
                 } else {
@@ -1349,6 +1374,80 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             p.report.audit_sequences.push(entry.sequence);
         }
 
+        // Shared business capacity is conserved across independent runs and agents.
+        // Keep this after all existing gates, immediately before the provider call.
+        match self
+            .reserve_shared_exposure(
+                admission,
+                &manifest.capability_id,
+                &envelope["args"],
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+            )
+            .await?
+        {
+            Ok(sequences) => {
+                p.report.audit_sequences.extend(sequences);
+                if self.has_shared_guarantee(&manifest.capability_id)
+                    && let Err(reasons) = self
+                        .transition_shared_dispatch(admission, &operation_id, &attempt_id, "start")
+                        .await?
+                {
+                    self.withhold_dispatch(
+                        admission,
+                        &operations_key,
+                        &operation_id,
+                        &attempt_id,
+                        &action_digest,
+                        &now,
+                        "shared_guarantee_dispatch_closed",
+                    )
+                    .await?;
+                    self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                        .await?;
+                    if guards_effect && new_operation {
+                        loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id)
+                            .await?;
+                    }
+                    return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
+                }
+            }
+            Err(reason) => {
+                self.withhold_dispatch(
+                    admission,
+                    &operations_key,
+                    &operation_id,
+                    &attempt_id,
+                    &action_digest,
+                    &now,
+                    reason,
+                )
+                .await?;
+                self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                    .await?;
+                if guards_effect && new_operation {
+                    loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
+                }
+                let entry = self
+                    .audit
+                    .append(
+                        &admission.tenant_id,
+                        "shared_guarantee_refused",
+                        json!({"run_id":admission.run_id,"operation_id":operation_id,"attempt_id":attempt_id,
+                        "action_digest":action_digest,"capability_id":manifest.capability_id,"reason_codes":[reason]}),
+                        &now,
+                    )
+                    .await?;
+                p.report.audit_sequences.push(entry.sequence);
+                return Ok(p.stop(
+                    "blocked",
+                    vec![reason.into()],
+                    "The shared business guarantee withheld this effect.",
+                ));
+            }
+        }
+
         // 6. Dispatch.
         let deadline = add_contract_seconds(&now, manifest.timeout_ms.div_ceil(1000))
             .unwrap_or_else(|| admission.deadline.clone());
@@ -1464,10 +1563,23 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.store.as_ref(),
             &operations_key,
             claimed,
-            |ledger| record_effect_observation(ledger, &observation, &ledger["revision"]),
+            |ledger| {
+                if self.has_shared_guarantee(&manifest.capability_id) {
+                    shared_guarantees::record_shared_observation(ledger, &observation)
+                } else {
+                    record_effect_observation(ledger, &observation, &ledger["revision"])
+                }
+            },
             |_| false,
         )
         .await?;
+        if matches!(&commit, Commit::Rejected { .. }) && self.has_shared_guarantee(&manifest.capability_id) {
+            if let Commit::Rejected { reason_codes } = &commit {
+                self.shared_observation_refused(admission, &observation, reason_codes)
+                    .await?;
+            }
+            return Err(GatewayError::Guarantee("shared_guarantee_observation_rejected".into()));
+        }
         if let Commit::Written { obligations, .. } | Commit::Unchanged { obligations } = commit {
             p.report.obligations.extend(obligations);
         }
@@ -1511,6 +1623,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         );
         p.report.audit_sequences.push(entry?.sequence);
         settled?;
+        if self.has_shared_guarantee(&manifest.capability_id) {
+            p.report
+                .audit_sequences
+                .extend(self.settle_shared_exposure(admission, &operation_id).await?);
+        }
 
         // 8. Result.
         let mutations = if matches!(response.outcome, EffectOutcome::Confirmed | EffectOutcome::Partial) {
@@ -1678,10 +1795,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "verification_status": "verified", "observer": admission.gateway_observer, "observed_at": observed_at,
             "valid_until": valid_until, "evaluation_time": observed_at,
         });
-        transact(self.store.as_ref(), operations_key, |ledger| {
-            record_effect_observation(ledger, &observation, &ledger["revision"])
+        let shared = !self.shared_guarantees.is_empty() && self.has_exposure_link(admission, operation_id).await?;
+        let commit = transact(self.store.as_ref(), operations_key, |ledger| {
+            if shared {
+                shared_guarantees::record_shared_observation(ledger, &observation)
+            } else {
+                record_effect_observation(ledger, &observation, &ledger["revision"])
+            }
         })
         .await?;
+        if let Commit::Rejected { reason_codes } = commit {
+            if shared {
+                self.shared_observation_refused(admission, &observation, &reason_codes)
+                    .await?;
+            }
+            return Ok(());
+        }
         self.audit
             .append(&admission.tenant_id, "effect_observation", observation, &observed_at)
             .await?;

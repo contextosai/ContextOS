@@ -3283,6 +3283,188 @@
         ],
         "x-contextos-scope": "control"
       }
+    },
+    "/v1/guarantees": {
+      "get": {
+        "operationId": "listGuarantees",
+        "summary": "List configured shared business guarantees",
+        "description": "Read-only. Resource digest is SHA-256 of the RFC 8785 canonical JSON resource string. Capacity covers only mediated calls sharing the tenant and store. Unknown exposure never expires.",
+        "x-contextos-scope": "audit:read",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current protected view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "guarantees"
+                  ],
+                  "properties": {
+                    "guarantees": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "capability_ids",
+                          "resource_pointer",
+                          "amount_pointer",
+                          "limit",
+                          "unit"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "capability_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "resource_pointer": {
+                            "type": "string"
+                          },
+                          "amount_pointer": {
+                            "type": "string"
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "unit": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/guarantees/{id}/resources/{resource_digest}": {
+      "get": {
+        "operationId": "getSharedExposure",
+        "summary": "Inspect tenant-bound shared business exposure",
+        "description": "Read-only. Resource digest is SHA-256 of the RFC 8785 canonical JSON resource string. Capacity covers only mediated calls sharing the tenant and store. Unknown exposure never expires.",
+        "x-contextos-scope": "audit:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource_digest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current protected view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "guarantee_id",
+                    "definition_digest",
+                    "resource_digest",
+                    "unit",
+                    "limit",
+                    "committed",
+                    "held",
+                    "available",
+                    "receipt_count"
+                  ],
+                  "properties": {
+                    "guarantee_id": {
+                      "type": "string"
+                    },
+                    "definition_digest": {
+                      "type": "string"
+                    },
+                    "resource_digest": {
+                      "type": "string"
+                    },
+                    "unit": {
+                      "type": "string"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "committed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "held": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "available": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "receipt_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {

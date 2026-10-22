@@ -7,6 +7,18 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Shared business guarantees
+- Reposition ContextOS around numeric business-resource limits shared by independent
+  agent runs. Research records current alternatives and the differentiation hypothesis.
+- Add opt-in `[[guarantees]]`, protected resource exposure and stable definition pins;
+  reserve and activate exact attempts before dispatch, retain unknown/partial
+  exposure, seal definitive observations and audit contradictory/stale refusals.
+- Add conservative settlement recovery, current-generation reconciliation after
+  terminal runs, and `audit:read` guarantee/exposure inspection endpoints with OpenAPI.
+- Add a synthetic multi-agent example and regression coverage for cross-replica
+  contention, dispatch/recovery races and store/audit interruptions. Static ceilings,
+  1,024 receipts per resource and orphaned active-dispatch recovery limits are explicit.
+
 ### Public release preparation
 - The commit gate checks each example's exit status before accepting its success
   message; regression tests cover failing examples and output after the message.

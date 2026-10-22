@@ -108,6 +108,7 @@ pub fn deployment_summary(config: &Config) -> Value {
             config::StoreConfig::Postgres { .. } => "postgres",
         },
         "dispatch": config.providers.is_some(),
+        "guarantees": config.guarantees,
         "providers": providers,
         "adapters": adapters,
         "guards": {
@@ -144,6 +145,9 @@ where
     S: contextos_store::DocumentStore + 'static,
     L: contextos_store::AppendLog + 'static,
 {
+    if !config.guarantees.is_empty() && dispatch.is_none() {
+        return Err("shared guarantees require an active dispatch gateway".into());
+    }
     let mut keys = KeyRing::new();
     keys.insert(signer.kid(), signer.verifying_key());
     for retired in &config.audit.retired_keys {

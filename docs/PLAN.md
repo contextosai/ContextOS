@@ -137,7 +137,8 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 59 Admission audit and governance reads | done — `run_admitted` audit entry (agent, pack, contract, controls, surfaced capabilities, release refs); `GET /v1/deployment`, `GET /v1/packs`, audit page `head` |
 | 60 Configuration review | done — `config` scope (not with `admit`/`dispatch`); running configuration with effective values and posture; dry-run validation with every change classified tightens/loosens/changes, for CI |
 | 61 Tower governance plane | done — `towerd`: verified multi-runtime ingest, agent inventory and declarations, authority graph and required control profiles, findings, guardrails (JsonLogic over agent facts), waivers, reviews and drift, anomalies, fleet kill switch, signed journal, roles with separation of duties; intelligence (Claude): Ask Tower with checked citations, guardrail drafting with inventory checks, intake review drafts, anomaly briefs, run explanations; Tower UI; `examples/tower` |
-| Next | next |
+| 62 Shared business guarantees | opt-in runtime extension — conserved resource exposure across independent runs and replicas; exact-attempt dispatch activation/abort; retained unknown/partial exposure; signed settlement and observation refusals; recovery and tenant-scoped inspection; local multi-agent demo. See [strategy](research/2026-10-22-value-proposition.md) and [guide](SHARED_GUARANTEES.md). |
+| Next | Validate the shared-resource opportunity with design partners; trusted dynamic balances, accounted ledger rollover, Tower exposure views and PostgreSQL contention measurements remain proposed. |
 
 ## Non-negotiables carried from the spec
 

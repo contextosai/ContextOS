@@ -1,5 +1,762 @@
 //! End-to-end governance through the gateway with deterministic fake ports.
 
+#[tokio::test]
+async fn shared_guarantee_invalid_resolution_or_unresolvable_query_does_not_abort_dispatch() {
+    for invalid_assertion in [true, false] {
+        let h = harness("allow", Behavior::Confirm).await;
+        let pause = Arc::new(ExposurePause {
+            armed: true.into(),
+            on_read: false,
+            before_commit: false,
+            entered: tokio::sync::Semaphore::new(0),
+            resume: tokio::sync::Semaphore::new(0),
+        });
+        let store = Arc::new(ExposureFaultStore {
+            inner: h.store.clone(),
+            fail_reserve: false.into(),
+            fail_settle: false.into(),
+            pause: Some(pause.clone()),
+        });
+        let gateway = Arc::new(shared_replica(&h, store));
+        let original = gateway.clone();
+        let admission = h.admission.clone();
+        let pending = tokio::spawn(async move {
+            original
+                .dispatch(&admission, &shared_call(&admission, "invalid_resolution", 420_000))
+                .await
+        });
+        pause.entered.acquire().await.unwrap().forget();
+        let recovery = shared_replica(&h, h.store.clone());
+        let resolution = if invalid_assertion {
+            Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: json!({}),
+                principal_id: "oncall".into(),
+            }
+        } else {
+            Resolution::Query
+        };
+        let out = recovery
+            .reconcile(&h.admission, "invalid_resolution", resolution)
+            .await
+            .unwrap();
+        assert_eq!(out.status, "rejected");
+        assert_eq!(
+            out.reason_codes,
+            if invalid_assertion {
+                vec!["reconcile_assertion_invalid"]
+            } else {
+                vec!["reconcile_requires_operator"]
+            }
+        );
+        pause.resume.add_permits(1);
+        assert_eq!(pending.await.unwrap().unwrap().result["status"], "completed");
+        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
+async fn shared_guarantee_confirming_an_active_effect_charges_the_full_run_reservation() {
+    let h = harness("allow", Behavior::Hang).await;
+    let gateway = Arc::new(shared_replica(&h, h.store.clone()));
+    let original = gateway.clone();
+    let admission = h.admission.clone();
+    let pending = tokio::spawn(async move {
+        original
+            .dispatch(&admission, &shared_call(&admission, "active_confirmed", 420_000))
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while h.adapter.calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let out = gateway
+        .reconcile(
+            &h.admission,
+            "active_confirmed",
+            Resolution::Assert {
+                outcome: EffectOutcome::Confirmed,
+                evidence_ref: artifact("provider_ledger", "confirmed_active"),
+                principal_id: "oncall".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.status, "resolved");
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["used"]["tool_calls"], 1);
+    assert_eq!(budget["used"]["cost_units"], 100);
+    assert_eq!(budget["reserved"]["tool_calls"], 0);
+    assert!(
+        pending.await.unwrap().is_err(),
+        "late original observation must be sealed out"
+    );
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["used"]["tool_calls"], 1);
+}
+
+#[tokio::test]
+async fn shared_guarantee_unknown_is_checked_again_at_the_authoritative_operation_claim() {
+    let mut h = harness("allow", Behavior::Task).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    let pause = Arc::new(ExposurePause {
+        armed: true.into(),
+        on_read: true,
+        before_commit: false,
+        entered: tokio::sync::Semaphore::new(0),
+        resume: tokio::sync::Semaphore::new(0),
+    });
+    let store = Arc::new(ExposureFaultStore {
+        inner: h.store.clone(),
+        fail_reserve: false.into(),
+        fail_settle: false.into(),
+        pause: Some(pause.clone()),
+    });
+    let gateway = Arc::new(shared_replica(&h, store));
+    let original = gateway.clone();
+    let admission = h.admission.clone();
+    let raced = tokio::spawn(async move {
+        original
+            .dispatch(&admission, &shared_call(&admission, "claim_race", 420_000))
+            .await
+    });
+    pause.entered.acquire().await.unwrap().forget();
+    let first = h
+        .gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "claim_race", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(first.result["status"], "paused");
+    pause.resume.add_permits(1);
+    let out = raced.await.unwrap().unwrap();
+    assert_eq!(out.report.reason_codes, ["shared_guarantee_unresolved"]);
+    let key = operation_ledger_key(&h.admission, "claim_race");
+    let state = h.store.get(&key).await.unwrap().unwrap().body;
+    assert_eq!(state["operations"][0]["attempts"].as_array().unwrap().len(), 1);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn shared_guarantee_stale_contradictory_resolution_is_refused_and_audited() {
+    let mut h = harness("allow", Behavior::Task).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    h.gateway
+        .dispatch(
+            &h.admission,
+            &shared_call(&h.admission, "concurrent_resolution", 420_000),
+        )
+        .await
+        .unwrap();
+    let pause = Arc::new(ExposurePause {
+        armed: true.into(),
+        on_read: true,
+        before_commit: false,
+        entered: tokio::sync::Semaphore::new(0),
+        resume: tokio::sync::Semaphore::new(0),
+    });
+    let store = Arc::new(ExposureFaultStore {
+        inner: h.store.clone(),
+        fail_reserve: false.into(),
+        fail_settle: false.into(),
+        pause: Some(pause.clone()),
+    });
+    let stale = Arc::new(shared_replica(&h, store));
+    let admission = h.admission.clone();
+    let gateway = stale.clone();
+    let pending = tokio::spawn(async move {
+        gateway
+            .reconcile(
+                &admission,
+                "concurrent_resolution",
+                Resolution::Assert {
+                    outcome: EffectOutcome::Confirmed,
+                    evidence_ref: artifact("incident", "stale_confirmed"),
+                    principal_id: "oncall_b".into(),
+                },
+            )
+            .await
+    });
+    pause.entered.acquire().await.unwrap().forget();
+    h.gateway
+        .reconcile(
+            &h.admission,
+            "concurrent_resolution",
+            Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: artifact("provider", "final_absent"),
+                principal_id: "oncall_a".into(),
+            },
+        )
+        .await
+        .unwrap();
+    pause.resume.add_permits(1);
+    let out = pending.await.unwrap().unwrap();
+    assert_eq!(out.status, "rejected");
+    assert_eq!(out.reason_codes, ["shared_guarantee_attempt_sealed"]);
+    let key = operation_ledger_key(&h.admission, "concurrent_resolution");
+    let state = h.store.get(&key).await.unwrap().unwrap().body;
+    assert_eq!(state["operations"][0]["conflict"], false);
+    assert_eq!(state["operations"][0]["outcome"], "not_applied");
+    assert!(
+        !out.audit_sequences.is_empty(),
+        "contradictory evidence must leave signed refusal"
+    );
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_guarantee_reconciliation_aborts_a_reserved_dispatch_before_it_can_start() {
+    for before_commit in [true, false] {
+        let h = harness("allow", Behavior::Confirm).await;
+        let pause = Arc::new(ExposurePause {
+            armed: true.into(),
+            on_read: false,
+            before_commit,
+            entered: tokio::sync::Semaphore::new(0),
+            resume: tokio::sync::Semaphore::new(0),
+        });
+        let store = Arc::new(ExposureFaultStore {
+            inner: h.store.clone(),
+            fail_reserve: false.into(),
+            fail_settle: false.into(),
+            pause: Some(pause.clone()),
+        });
+        let gateway = Arc::new(shared_replica(&h, store));
+        let original = gateway.clone();
+        let admission = h.admission.clone();
+        let first = tokio::spawn(async move {
+            original
+                .dispatch(&admission, &shared_call(&admission, "paused_before_dispatch", 420_000))
+                .await
+        });
+        pause.entered.acquire().await.unwrap().forget();
+        let recovery = shared_replica(&h, h.store.clone());
+        let result = recovery
+            .reconcile(
+                &h.admission,
+                "paused_before_dispatch",
+                Resolution::Assert {
+                    outcome: EffectOutcome::NotApplied,
+                    evidence_ref: artifact("incident", "not_yet_sent"),
+                    principal_id: "oncall".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.status, "resolved");
+        let other = independent_run(&h, "run_after_abort").await;
+        let second = recovery
+            .dispatch(&other, &shared_call(&other, "after_abort", 420_000))
+            .await
+            .unwrap();
+        assert_eq!(second.result["status"], "completed");
+        pause.resume.add_permits(1);
+        let first = first.await.unwrap().unwrap();
+        assert_ne!(first.result["status"], "completed");
+        assert_eq!(
+            h.adapter.calls.load(Ordering::SeqCst),
+            1,
+            "aborted dispatch must never invoke later"
+        );
+    }
+}
+
+#[derive(Debug)]
+struct ExposureFaultLog {
+    inner: MemoryLog,
+    fail: std::sync::atomic::AtomicBool,
+    event: &'static str,
+}
+impl contextos_store::AppendLog for ExposureFaultLog {
+    async fn head(&self, t: &str) -> Result<Option<contextos_store::LogRow>, contextos_store::StoreError> {
+        contextos_store::AppendLog::head(&self.inner, t).await
+    }
+    async fn append_batch(
+        &self,
+        t: &str,
+        rows: &[contextos_store::AppendRow],
+    ) -> Result<(), contextos_store::StoreError> {
+        if self.fail.load(Ordering::SeqCst) && rows.iter().any(|r| r.text.contains(self.event)) {
+            return Err(contextos_store::StoreError::Backend("injected audit failure".into()));
+        }
+        contextos_store::AppendLog::append_batch(&self.inner, t, rows).await
+    }
+    async fn range(
+        &self,
+        t: &str,
+        f: u64,
+        l: usize,
+    ) -> Result<Vec<contextos_store::LogRow>, contextos_store::StoreError> {
+        contextos_store::AppendLog::range(&self.inner, t, f, l).await
+    }
+}
+
+#[tokio::test]
+async fn shared_guarantee_audit_failure_preserves_exposure_and_recovery_information() {
+    for event in ["shared_guarantee_reserved", "shared_guarantee_settlement_requested"] {
+        let h = harness("allow", Behavior::Confirm).await;
+        let log = Arc::new(ExposureFaultLog {
+            inner: MemoryLog::new(),
+            fail: true.into(),
+            event,
+        });
+        let audit = Arc::new(AuditWriter::new(log.clone(), AuditSigner::from_seed("gw-1", [3; 32])));
+        let ports = Ports {
+            clock: Arc::new(FixedClock),
+            ids: Arc::new(SeqIds::default()),
+            authority: h.authority.clone(),
+            policy: Arc::new(Policy("allow")),
+            constraints: Arc::new(Constraints),
+            approvals: h.approvals.clone(),
+            idempotency: None,
+            data_flow: None,
+            boundary: None,
+            memory: None,
+        };
+        let mut gateway = Gateway::new(h.store.clone(), audit.clone(), ports);
+        gateway.register_adapter("adp_payments", h.adapter.clone());
+        gateway.pin_capability(manifest()).unwrap();
+        gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+        assert!(
+            gateway
+                .dispatch(&h.admission, &shared_call(&h.admission, "audit_interrupted", 420_000))
+                .await
+                .is_err()
+        );
+        let expected = usize::from(event == "shared_guarantee_settlement_requested");
+        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), expected);
+        let digest = sha256_canonical(&json!("ord_881")).unwrap();
+        assert_eq!(
+            gateway
+                .shared_exposure(TENANT, "refunds", &digest)
+                .await
+                .unwrap()
+                .unwrap()["held"],
+            420_000
+        );
+        log.fail.store(false, Ordering::SeqCst);
+        let resolution = if expected == 0 {
+            Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: artifact("incident", "reserved_but_never_sent"),
+                principal_id: "oncall".into(),
+            }
+        } else {
+            Resolution::Query
+        };
+        gateway
+            .reconcile(&h.admission, "audit_interrupted", resolution)
+            .await
+            .unwrap();
+        let view = gateway
+            .shared_exposure(TENANT, "refunds", &digest)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(view["held"], 0);
+        assert_eq!(view["committed"], if expected == 0 { 0 } else { 420_000 });
+        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), expected);
+        verify_tenant_chain(audit.log(), TENANT, &keys()).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn shared_guarantee_partial_effect_remains_held() {
+    let mut h = harness("allow", Behavior::Partial).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    h.gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "partial", 420_000))
+        .await
+        .unwrap();
+    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+    let view = h
+        .gateway
+        .shared_exposure(TENANT, "refunds", &digest)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view["held"], 420_000);
+    assert_eq!(view["committed"], 0);
+    h.gateway
+        .reconcile(&h.admission, "partial", Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(
+        h.gateway
+            .shared_exposure(TENANT, "refunds", &digest)
+            .await
+            .unwrap()
+            .unwrap()["held"],
+        420_000
+    );
+}
+
+fn shared_call(admission: &RunAdmission, operation: &str, amount: u64) -> Value {
+    let mut v = call(operation, Some(operation));
+    v["run_id"] = json!(admission.run_id);
+    v["principal_chain"][0]["id"] = admission.actor["principal_id"].clone();
+    v["args"]["amount_minor"] = json!(amount);
+    v
+}
+
+#[tokio::test]
+async fn shared_guarantee_unknown_holds_until_evidenced_resolution() {
+    let mut h = harness("allow", Behavior::Task).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    let first = h
+        .gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "unknown_refund", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(first.result["status"], "paused");
+    let retry = h
+        .gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "unknown_refund", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(retry.report.reason_codes, ["shared_guarantee_unresolved"]);
+    let other = independent_run(&h, "run_after_timeout").await;
+    let blocked = h
+        .gateway
+        .dispatch(&other, &shared_call(&other, "another_refund", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(blocked.report.reason_codes, ["shared_guarantee_exceeded"]);
+    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+    assert_eq!(
+        h.gateway
+            .shared_exposure(TENANT, "refunds", &digest)
+            .await
+            .unwrap()
+            .unwrap()["held"],
+        420_000
+    );
+    let result = h
+        .gateway
+        .reconcile(
+            &h.admission,
+            "unknown_refund",
+            Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: artifact("provider_ledger", "absent_refund"),
+                principal_id: "oncall".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.status, "resolved");
+    let empty = h
+        .gateway
+        .shared_exposure(TENANT, "refunds", &digest)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(empty["held"], 0);
+    assert_eq!(empty["available"], 500_000);
+    h.gateway
+        .reconcile(&h.admission, "unknown_refund", Resolution::Query)
+        .await
+        .unwrap();
+    assert_eq!(
+        h.gateway
+            .shared_exposure(TENANT, "refunds", &digest)
+            .await
+            .unwrap()
+            .unwrap()["available"],
+        500_000
+    );
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        1,
+        "query/repair never invoke the effect"
+    );
+}
+
+#[tokio::test]
+async fn shared_guarantee_definitive_absence_releases_and_committed_exposure_survives_a_replica() {
+    let mut absent = harness("allow", Behavior::RefuseInjected).await;
+    absent.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    absent
+        .gateway
+        .dispatch(&absent.admission, &shared_call(&absent.admission, "absent", 420_000))
+        .await
+        .unwrap();
+    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+    let view = absent
+        .gateway
+        .shared_exposure(TENANT, "refunds", &digest)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view["available"], 500_000);
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    h.gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "confirmed", 420_000))
+        .await
+        .unwrap();
+    let replica = shared_replica(&h, h.store.clone());
+    let other = independent_run(&h, "run_on_new_replica").await;
+    let blocked = replica
+        .dispatch(&other, &shared_call(&other, "new_identity", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(blocked.report.reason_codes, ["shared_guarantee_exceeded"]);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    assert!(
+        replica
+            .shared_exposure("tenant_other", "refunds", &digest)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+fn shared_replica<S: DocumentStore + 'static>(h: &Harness, store: Arc<S>) -> Gateway<S, MemoryLog> {
+    let ports = Ports {
+        clock: Arc::new(FixedClock),
+        ids: Arc::new(SeqIds(AtomicU64::new(10_000))),
+        authority: h.authority.clone(),
+        policy: Arc::new(Policy("allow")),
+        constraints: Arc::new(Constraints),
+        approvals: h.approvals.clone(),
+        idempotency: None,
+        data_flow: None,
+        boundary: None,
+        memory: None,
+    };
+    let mut g = Gateway::new(store, h.audit.clone(), ports);
+    g.register_adapter("adp_payments", h.adapter.clone());
+    g.pin_capability(manifest()).unwrap();
+    g.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    g
+}
+
+#[tokio::test]
+async fn shared_guarantee_definition_pin_prevents_new_resource_reset_after_a_pointer_change() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    h.gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "first", 420_000))
+        .await
+        .unwrap();
+    let mut changed = shared_replica(&h, h.store.clone());
+    let mut rule = shared_rule();
+    rule.resource_pointer = "/customer_id".into();
+    changed.set_shared_guarantees(vec![rule]).unwrap();
+    let other = independent_run(&h, "run_changed_definition").await;
+    let out = changed
+        .dispatch(&other, &shared_call(&other, "second", 1))
+        .await
+        .unwrap();
+    assert_eq!(out.report.reason_codes, ["shared_guarantee_definition_mismatch"]);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+}
+
+#[derive(Debug)]
+struct ExposureFaultStore {
+    inner: Arc<MemoryStore>,
+    fail_reserve: std::sync::atomic::AtomicBool,
+    fail_settle: std::sync::atomic::AtomicBool,
+    pause: Option<Arc<ExposurePause>>,
+}
+
+#[derive(Debug)]
+struct ExposurePause {
+    armed: std::sync::atomic::AtomicBool,
+    on_read: bool,
+    before_commit: bool,
+    entered: tokio::sync::Semaphore,
+    resume: tokio::sync::Semaphore,
+}
+impl ExposureFaultStore {
+    fn rejects(&self, key: &DocKey, body: &Value) -> bool {
+        key.kind == DocKind::SharedExposure
+            && (self.fail_reserve.load(Ordering::SeqCst) && body["held"].as_u64().is_some_and(|n| n > 0)
+                || self.fail_settle.load(Ordering::SeqCst) && body["committed"].as_u64().is_some_and(|n| n > 0))
+    }
+}
+impl DocumentStore for ExposureFaultStore {
+    async fn get(&self, k: &DocKey) -> Result<Option<contextos_store::Versioned>, contextos_store::StoreError> {
+        let read = self.inner.get(k).await?;
+        if k.kind == DocKind::OperationLedger
+            && let Some(p) = &self.pause
+            && p.on_read
+            && p.armed.swap(false, Ordering::SeqCst)
+        {
+            p.entered.add_permits(1);
+            p.resume.acquire().await.unwrap().forget();
+        }
+        Ok(read)
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.inner.create(k, b).await
+    }
+    async fn compare_and_swap(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: &Value,
+    ) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        if self.rejects(k, b) {
+            return Err(contextos_store::StoreError::Backend(
+                "injected exposure write failure".into(),
+            ));
+        }
+        self.inner.compare_and_swap(k, r, b).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, contextos_store::StoreError> {
+        if self.rejects(k, &b) {
+            return Err(contextos_store::StoreError::Backend(
+                "injected exposure write failure".into(),
+            ));
+        }
+        let pause = k.kind == DocKind::SharedExposure && b["held"].as_u64().is_some_and(|n| n > 0);
+        if pause
+            && let Some(p) = &self.pause
+            && !p.on_read
+            && p.before_commit
+            && p.armed.swap(false, Ordering::SeqCst)
+        {
+            p.entered.add_permits(1);
+            p.resume.acquire().await.unwrap().forget();
+        }
+        let revision = self.inner.compare_and_swap_encoded(k, r, b, e).await?;
+        if pause
+            && let Some(p) = &self.pause
+            && !p.on_read
+            && !p.before_commit
+            && p.armed.swap(false, Ordering::SeqCst)
+        {
+            p.entered.add_permits(1);
+            p.resume.acquire().await.unwrap().forget();
+        }
+        Ok(revision)
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&contextos_store::ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<contextos_store::ScanCursor>, contextos_store::StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+#[tokio::test]
+async fn shared_guarantee_terminal_settlement_is_repairable_after_a_store_failure() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let store = Arc::new(ExposureFaultStore {
+        inner: h.store.clone(),
+        fail_reserve: false.into(),
+        fail_settle: true.into(),
+        pause: None,
+    });
+    let gateway = shared_replica(&h, store.clone());
+    assert!(
+        gateway
+            .dispatch(&h.admission, &shared_call(&h.admission, "interrupted", 420_000))
+            .await
+            .is_err()
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+    assert_eq!(
+        gateway
+            .shared_exposure(TENANT, "refunds", &digest)
+            .await
+            .unwrap()
+            .unwrap()["held"],
+        420_000
+    );
+    store.fail_settle.store(false, Ordering::SeqCst);
+    gateway
+        .reconcile(&h.admission, "interrupted", Resolution::Query)
+        .await
+        .unwrap();
+    let view = gateway
+        .shared_exposure(TENANT, "refunds", &digest)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view["committed"], 420_000);
+    assert_eq!(view["held"], 0);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn shared_guarantee_store_failure_never_dispatches_and_claimed_attempt_can_be_reconciled() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let store = Arc::new(ExposureFaultStore {
+        inner: h.store.clone(),
+        fail_reserve: true.into(),
+        fail_settle: false.into(),
+        pause: None,
+    });
+    let gateway = shared_replica(&h, store.clone());
+    assert!(
+        gateway
+            .dispatch(&h.admission, &shared_call(&h.admission, "not_sent", 420_000))
+            .await
+            .is_err()
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+    store.fail_reserve.store(false, Ordering::SeqCst);
+    let resolved = gateway
+        .reconcile(
+            &h.admission,
+            "not_sent",
+            Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: artifact("incident", "dispatch_was_withheld"),
+                principal_id: "oncall".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.status, "resolved");
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn shared_guarantee_validates_shape_coverage_and_resource_binding() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    for mutate in [
+        |r: &mut SharedGuarantee| r.limit = 0,
+        |r: &mut SharedGuarantee| r.resource_pointer = "/bad~9".into(),
+        |r: &mut SharedGuarantee| r.capability_ids = vec!["unregistered".into()],
+    ] {
+        let mut rule = shared_rule();
+        mutate(&mut rule);
+        assert!(h.gateway.set_shared_guarantees(vec![rule]).is_err());
+    }
+    assert!(
+        h.gateway
+            .set_shared_guarantees(vec![shared_rule(), shared_rule()])
+            .is_err()
+    );
+    let mut rule = shared_rule();
+    rule.resource_pointer = "/missing".into();
+    h.gateway.set_shared_guarantees(vec![rule]).unwrap();
+    let out = h
+        .gateway
+        .dispatch(&h.admission, &shared_call(&h.admission, "missing", 420_000))
+        .await
+        .unwrap();
+    assert_eq!(out.report.reason_codes, ["shared_guarantee_resource_invalid"]);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0);
+}
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -233,6 +990,7 @@ impl ApprovalProvider for Approvals {
 #[derive(Clone, Copy)]
 enum Behavior {
     Confirm,
+    Partial,
     Hang,
     /// Returns an MCP-style task handle; the task completes on the second query.
     Task,
@@ -254,6 +1012,8 @@ impl Adapter for Payments {
     async fn invoke(&self, _: &CapabilityManifest, call: &AdapterCall) -> AdapterResponse {
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.behavior {
+            Behavior::Partial => AdapterResponse { outcome: EffectOutcome::Partial, definitive: true,
+                output:serde_json::Map::default(),external_ref:Some("partial_refund".into()),cost_units:Some(40) },
             Behavior::Confirm => AdapterResponse {
                 outcome: EffectOutcome::Confirmed,
                 definitive: true,
@@ -490,6 +1250,112 @@ fn keys() -> KeyRing {
     let mut ring = KeyRing::new();
     ring.insert("gw-1", AuditSigner::from_seed("gw-1", [3; 32]).verifying_key());
     ring
+}
+
+fn shared_rule() -> SharedGuarantee {
+    serde_json::from_value(json!({"id":"refunds", "capability_ids":["adp_payments.issue_refund"],
+        "resource_pointer":"/order_id", "amount_pointer":"/amount_minor", "limit":500_000,"unit":"INR_minor"}))
+    .unwrap()
+}
+
+async fn independent_run(h: &Harness, id: &str) -> RunAdmission {
+    let (_, compiler, mut request, mut run) = compiled();
+    run.run_id = id.into();
+    run.agent.agent_id = "agt_independent".into();
+    request.agent.agent_id = run.agent.agent_id.clone();
+    let vectors: Value = serde_json::from_str(
+        &std::fs::read_to_string(format!(
+            "{}/../../conformance/vectors/compiler.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let case = vectors["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "grid:support.refund:true:4200:support_agent")
+        .unwrap();
+    let deps = CompileDeps {
+        evidence: case["deps"]["evidence"].as_array().unwrap().clone(),
+        ..CompileDeps::default()
+    };
+    let compiled = compiler.compile(&request, &run, &deps).unwrap();
+    let registry = &*STANDARD_PROFILE_REGISTRY;
+    let contract = json!({"envelope_version":"contextos.execution_contract.v1","contract_id":format!("contract_{id}"),
+        "run_id":id,"trace_id":run.trace_id,"tenant_id":TENANT,
+        "profiles":[{"profile_id":"contextos.core","profile_version":"1"}],"required_controls":[],"optional_controls":[],
+        "release_refs":[artifact("release","runtime@0.1.0")]});
+    let support = json!({"implementation_id":"contextos-rs","implementation_version":"0.1.0",
+        "supported_profiles":registry.profiles.iter().map(|p| &p.profile).collect::<Vec<_>>(),
+        "supported_controls":registry.controls.iter().map(|c| &c.control).collect::<Vec<_>>()});
+    admit_run(
+        h.store.as_ref(),
+        AdmissionRequest {
+            contract: &contract,
+            support: &support,
+            registry,
+            features: WorkflowFeatureSet {
+                external_effects: true,
+                ..WorkflowFeatureSet::default()
+            },
+            compiled: &compiled,
+            compiler: &compiler,
+            request: &request,
+            run_context: &run,
+            actor: principal("agt_independent"),
+            gateway_observer: principal("gateway"),
+            deadline: "2026-10-20T11:00:00Z".into(),
+            admitted_at: NOW.into(),
+            admitted_by: "other_orchestrator".into(),
+            executor_generation: 1,
+            limits: BudgetLimits {
+                tokens: 10_000,
+                tool_calls: 8,
+                replans: 2,
+                cost_cents: 25.0,
+            },
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn shared_guarantee_caps_independent_runs_before_the_provider() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    let other = independent_run(&h, "run_independent").await;
+    let a = call("tc_a", Some("refund_a"));
+    let mut b = call("tc_b", Some("refund_b"));
+    b["run_id"] = json!(other.run_id);
+    b["principal_chain"][0]["id"] = json!("agt_independent");
+    let (a, b) = tokio::join!(h.gateway.dispatch(&h.admission, &a), h.gateway.dispatch(&other, &b));
+    let outcomes = [a.unwrap(), b.unwrap()];
+    assert_eq!(
+        outcomes.iter().filter(|o| o.result["status"] == "completed").count(),
+        1,
+        "{outcomes:?}"
+    );
+    assert!(
+        outcomes
+            .iter()
+            .any(|o| o.report.reason_codes == ["shared_guarantee_exceeded"]),
+        "{outcomes:?}"
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+    let exposure = h
+        .gateway
+        .shared_exposure(TENANT, "refunds", &digest)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exposure["committed"], 420_000);
+    assert_eq!(exposure["held"], 0);
+    assert_eq!(exposure["available"], 80_000);
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }
 
 #[tokio::test]
