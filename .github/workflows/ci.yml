@@ -97,7 +97,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       - run: ./examples/frameworks/run.sh ${{ matrix.example }}
       - run: ./examples/frameworks/run.sh ${{ matrix.example }} --approval
   tower:
