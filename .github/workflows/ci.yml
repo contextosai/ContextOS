@@ -26,6 +26,10 @@ jobs:
           --health-cmd "pg_isready -U contextos" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       CONTEXTOS_TEST_DATABASE_URL: postgres://contextos:contextos@localhost:5432/contextos_test
+      # Fit Clippy plus every test target on the hosted runner's disk.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.1
