@@ -71,3 +71,26 @@ key_sha256 = "sha256:cbbf550b2bf8a9846c146c2367578d000be6526bfe3cff8ed8264ae595d
 tenant_id = "tenant_acme_prod"
 principal_id = "svc_llm_gateway"
 scopes = ["meter"]
+
+# Development configuration administrators, keys "dev-admin-0123456789abcdef0123456789abcd"
+# and "dev-review-0123456789abcdef0123456789abc": review and propose configuration in
+# Tower (`config`); one proposes, the other approves.
+[[api_keys]]
+key_sha256 = "sha256:8141bad4fc7d50f4044d4ad37fcca19fbab6bb9a9f1a4ffc975256f5104e091f"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_config_admin"
+scopes = ["config"]
+
+[[api_keys]]
+key_sha256 = "sha256:be9dc99f2b6a2b2e9c9522a0a4bfcf725f8b198211b77752f0fee426f85bf957"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_config_reviewer"
+scopes = ["config"]
+
+# Development governance plane (examples/tower), key "dev-tower-0123456789abcdef0123456789abcd":
+# read-only, so Tower can observe this tenant but never act through this key.
+[[api_keys]]
+key_sha256 = "sha256:b3c99ec06e51b358c1372b5ab8cd3bd2f590f7a613b509754078ea5c912f5c04"
+tenant_id = "tenant_acme_prod"
+principal_id = "svc_tower"
+scopes = ["audit:read"]

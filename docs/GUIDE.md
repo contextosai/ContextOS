@@ -888,3 +888,68 @@ Production refuses runs without `user.role` (see the threat model's residual ris
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).
+
+## 13. Govern every agent with Tower
+
+`towerd` is the organisation's governance plane over its ContextOS runtimes. The full
+developer documentation (architecture, flows, governance model, intelligence, API,
+security, a step-by-step guide and operations) is in [docs/tower](tower/README.md). Each
+runtime keeps deciding effects; Tower reads every runtime tenant through its API with a
+read-only `audit:read` key, verifies each audit entry (digest, hash link, Ed25519
+signature) before using it, and answers the organisation's questions: which agents
+exist and who owns them, what each can do, which controls that requires and where they
+are missing, what changed, and what is going wrong.
+
+```toml
+[[sources]]
+id = "eu-support"
+url = "https://contextosd.eu.internal"
+token_env = "TOWER_EU_SUPPORT_AUDIT_KEY"          # audit:read for that tenant
+control_token_env = "TOWER_EU_SUPPORT_CONTROL_KEY"  # optional: fleet kill switch
+business_unit = "Customer Operations"
+```
+
+- **Inventory and accountability.** Agents are discovered from `run_admitted` (which
+  agent ran under which pack, contract, controls and model); owners declare purpose,
+  users served, lifecycle and regulatory context. An undeclared agent is a finding.
+- **Required controls from what an agent can do.** Each agent's authority graph is the
+  capabilities of its packs with their ActionRisk; the control profiles it needs follow
+  from it (external effects need enterprise, irreversible or physical effects and
+  restricted data need high-assurance, delegation needs durable-delegated), and Tower
+  reports which required controls each runtime does not declare.
+- **Findings, guardrails, waivers.** Built-in checks plus organisation guardrails
+  (JsonLogic over agent facts, evaluated by the kernel's evaluator). Waivers are
+  time-boxed and decided by someone other than the requester.
+- **Reviews and drift.** A risk review approves an agent's current authority; any
+  capability added later is drift until reviewed again.
+- **Anomalies and the fleet kill switch.** Each agent's last hour against its own week;
+  operators revoke an agent or capability on every runtime at once.
+- **Intelligence (optional).** With `[intelligence] provider = "anthropic"` and
+  `ANTHROPIC_API_KEY`, Claude answers questions about the fleet from read-only tools
+  with checked citations, drafts guardrails from plain language (checked against the
+  inventory before anyone can save them), drafts intake reviews, briefs anomalies and
+  explains runs. It never acts or approves; every use is journalled.
+- **Evidence.** Every governance decision is in Tower's signed journal
+  (`GET /api/journal`, keys at `/api/journal/keys`), verifiable with `ctx audit-verify`.
+
+Roles: `viewer`, `owner` (their teams' agents), `risk`, `operator`, `admin`. Try it:
+`./examples/tower/run.sh --serve`, then open `http://127.0.0.1:8090/tower/`.
+
+### Check configuration changes in CI
+
+The configuration file stays the source of truth and is reviewed like code. The
+`config` scope (deployment administrators; never together with `admit` or `dispatch`)
+reads the running configuration (`GET /v1/config`: text, digest, effective values with
+defaults resolved, posture findings) and dry-runs a proposed one (`POST
+/v1/config/validate`): the startup parser and checks, then every effective change
+classified as `tightens`, `loosens` or `changes`. Call it from CI on a pull request and
+require an approver for any loosening:
+
+```sh
+jq -Rs '{toml: .}' contextosd.toml | curl -sf -H "authorization: Bearer $CONFIG_KEY" \
+  -H 'content-type: application/json' -d @- "$CONTEXTOS_URL/v1/config/validate" \
+  | jq -e '.valid and (.loosening | length == 0)'
+```
+
+Files and environment variables a configuration names are checked only when a server
+starts with it.

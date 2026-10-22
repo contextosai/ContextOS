@@ -2663,6 +2663,200 @@
         "x-contextos-scope": "public"
       }
     },
+    "/v1/deployment": {
+      "get": {
+        "operationId": "deployment",
+        "summary": "The caller's identity and scopes, and what this deployment enforces",
+        "description": "For operator consoles: mode, support declaration, store, which fact services and adapters are wired (names only: no endpoint, credential or environment variable), resolved guards, audit signing and retention, plus the caller's tenant, principal and scopes and the tenant's loaded packs. Any authenticated caller.",
+        "responses": {
+          "200": {
+            "description": "The deployment summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-contextos-scope": "authenticated"
+      }
+    },
+    "/v1/packs": {
+      "get": {
+        "operationId": "list_packs",
+        "summary": "The caller tenant's loaded Context Packs",
+        "description": "Every Context Pack this deployment pinned for the caller's tenant, in full, by pack reference.",
+        "responses": {
+          "200": {
+            "description": "Packs, ordered by reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "packs"
+                  ],
+                  "properties": {
+                    "packs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "pack_ref",
+                          "pack"
+                        ],
+                        "properties": {
+                          "pack_ref": {
+                            "type": "string"
+                          },
+                          "pack": {
+                            "$ref": "https://contextosai.com/schemas/context-pack.v2.schema.json"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/config": {
+      "get": {
+        "operationId": "running_config",
+        "summary": "The configuration this replica runs",
+        "description": "Its TOML text, the digest of that text, the effective configuration with defaults and mode-dependent values resolved, and posture findings. The file holds no secrets by design; `config` is a deployment-administration scope.",
+        "responses": {
+          "200": {
+            "description": "The running configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningConfig"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "config"
+            ]
+          }
+        ],
+        "x-contextos-scope": "config"
+      }
+    },
+    "/v1/config/validate": {
+      "post": {
+        "operationId": "validate_config",
+        "summary": "Dry-run a proposed configuration",
+        "description": "Parsed and checked exactly as at startup (files and environment variables it names are checked only when a server starts with it), then diffed against the running configuration with each change classified as `tightens`, `loosens` or `changes`. Nothing is stored or audited: run it in CI against a pull request and require approval of any loosening.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "toml"
+                ],
+                "properties": {
+                  "toml": {
+                    "type": "string",
+                    "maxLength": 262144
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The analysis (`valid` false with `errors` when it does not validate)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "config"
+            ]
+          }
+        ],
+        "x-contextos-scope": "config"
+      }
+    },
     "/v1/runs/{run_id}/feedback": {
       "post": {
         "operationId": "file_feedback",
@@ -3096,7 +3290,7 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only), control (operators: kill switch, rollouts, erasure), meter (usage metering, e.g. an LLM gateway)."
+        "description": "An API key (configured as its SHA-256 hash) or an OIDC JWT. Scopes: compile, admit, dispatch, reconcile, audit:read, evaluate (independent evaluators only), control (operators: kill switch, rollouts, erasure), meter (usage metering, e.g. an LLM gateway), config (deployment administrators: review and propose configuration; never with admit or dispatch)."
       }
     },
     "parameters": {
@@ -3558,7 +3752,8 @@
         "type": "object",
         "required": [
           "entries",
-          "next"
+          "next",
+          "head"
         ],
         "properties": {
           "entries": {
@@ -3572,6 +3767,11 @@
               "integer",
               "null"
             ]
+          },
+          "head": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The chain's current head sequence (0 when empty), so a reader can start from the tail"
           }
         }
       },
@@ -4462,6 +4662,297 @@
               "at": {
                 "type": "string"
               }
+            }
+          }
+        }
+      },
+      "Deployment": {
+        "type": "object",
+        "required": [
+          "mode",
+          "caller",
+          "packs",
+          "replicas",
+          "support",
+          "store",
+          "dispatch",
+          "providers",
+          "adapters",
+          "guards",
+          "audit",
+          "authentication",
+          "retention"
+        ],
+        "properties": {
+          "mode": {
+            "enum": [
+              "production",
+              "development"
+            ]
+          },
+          "caller": {
+            "type": "object",
+            "required": [
+              "tenant_id",
+              "principal_id",
+              "scopes"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string"
+              },
+              "principal_id": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Pack references loaded for the caller's tenant"
+          },
+          "replicas": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "support": {
+            "type": "object",
+            "description": "The RuntimeSupportDeclaration"
+          },
+          "store": {
+            "enum": [
+              "memory",
+              "postgres"
+            ]
+          },
+          "dispatch": {
+            "type": "boolean",
+            "description": "Whether governed dispatch is enabled (fact providers configured)"
+          },
+          "providers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "adapters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "mcp",
+                    "http"
+                  ]
+                }
+              }
+            }
+          },
+          "guards": {
+            "type": "object"
+          },
+          "audit": {
+            "type": "object",
+            "required": [
+              "key_id",
+              "signer",
+              "retired_key_ids"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string"
+              },
+              "signer": {
+                "enum": [
+                  "local",
+                  "kms"
+                ]
+              },
+              "retired_key_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "authentication": {
+            "type": "object",
+            "properties": {
+              "api_keys": {
+                "type": "boolean"
+              },
+              "oidc_issuers": {
+                "type": "integer"
+              }
+            }
+          },
+          "retention": {
+            "type": "object",
+            "properties": {
+              "run_content_days": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "RunningConfig": {
+        "type": "object",
+        "required": [
+          "digest",
+          "source",
+          "effective",
+          "findings"
+        ],
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "object"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "message"
+              ],
+              "properties": {
+                "severity": {
+                  "enum": [
+                    "critical",
+                    "warning",
+                    "notice"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ConfigReview": {
+        "type": "object",
+        "required": [
+          "valid",
+          "errors"
+        ],
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "digest": {
+            "type": "string"
+          },
+          "base_digest": {
+            "type": "string"
+          },
+          "identical": {
+            "type": "boolean"
+          },
+          "effective": {
+            "type": "object"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "from",
+                "to",
+                "effect"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "from": {},
+                "to": {},
+                "effect": {
+                  "enum": [
+                    "tightens",
+                    "loosens",
+                    "changes"
+                  ]
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "loosening": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "message"
+              ],
+              "properties": {
+                "severity": {
+                  "enum": [
+                    "critical",
+                    "warning",
+                    "notice"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }

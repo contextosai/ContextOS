@@ -63,6 +63,8 @@ pub enum DocKind {
     MemoryKey,
     /// A run's applied effects, for the completion score gate.
     AppliedEffects,
+    /// The governance plane's records (declarations, reviews, guardrails, waivers).
+    Governance,
 }
 
 impl DocKind {
@@ -91,6 +93,7 @@ impl DocKind {
             DocKind::Escalation => "escalation",
             DocKind::MemoryKey => "memory_key",
             DocKind::AppliedEffects => "applied_effects",
+            DocKind::Governance => "governance",
         }
     }
 }

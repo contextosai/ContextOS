@@ -65,11 +65,12 @@ jobs:
         run: |
           cargo build --release -p contextosd
           PYTHONPATH=bindings/python python bindings/python/tests/test_client.py
-      - name: Examples (quickstart and governed agent loop)
+      - name: Examples (quickstart, governed agent loop, metering, Tower)
         run: |
           ./examples/support-refund/run.sh
           ./examples/agent-loop/run.sh
           ./examples/metering-proxy/run.sh
+          ./examples/tower/run.sh
       - name: Node HTTP client against contextosd
         run: |
           node bindings/node/test_client.mjs
@@ -93,6 +94,20 @@ jobs:
       - uses: astral-sh/setup-uv@v10
       - run: ./examples/frameworks/run.sh ${{ matrix.example }}
       - run: ./examples/frameworks/run.sh ${{ matrix.example }} --approval
+  tower:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tower
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-fund
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+      - run: npm test
   supply-chain:
     runs-on: ubuntu-24.04
     steps:

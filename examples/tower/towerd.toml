@@ -1,0 +1,60 @@
+# Development Tower over the quickstart runtime (examples/tower/run.sh fills in the URL).
+[server]
+listen = "127.0.0.1:8090"
+development = true
+
+[journal]
+signing_seed_env = "TOWER_JOURNAL_SEED"
+key_id = "dev-tower-journal"
+
+[[sources]]
+id = "acme-support-eu"
+url = "http://127.0.0.1:RUNTIME_PORT"
+token_env = "TOWER_SOURCE_TOKEN"            # audit:read only
+control_token_env = "TOWER_CONTROL_TOKEN"   # control, for the fleet kill switch
+business_unit = "Customer Operations"
+region = "eu-west-1"
+environment = "production"
+
+[intelligence]
+# "anthropic" with ANTHROPIC_API_KEY set turns on Ask Tower, guardrail drafting,
+# intake review drafts, anomaly briefs and run explanations.
+provider = "off"
+
+[collector]
+poll_ms = 1000
+
+[tower]
+dir = "tower/dist"
+
+# Development people (published keys, refused unless development = true):
+#   dev-ciso-0123456789abcdef0123456789abcde    ciso       viewer
+#   dev-owner-0123456789abcdef0123456789abcd    maya       owner of team support-ai
+#   dev-risk-a-0123456789abcdef0123456789abc    risk-a     risk reviewer
+#   dev-risk-b-0123456789abcdef0123456789abc    risk-b     risk reviewer
+#   dev-oncall-0123456789abcdef0123456789abc    oncall     operator
+[[api_keys]]
+key_sha256 = "sha256:2223e986da99346c989762a8f41411b826d6bd3e300809eb15384da0fa68ddde"
+principal_id = "ciso"
+roles = ["viewer"]
+
+[[api_keys]]
+key_sha256 = "sha256:4770e5254c7934240287432b10c4f37c1405ac0a7a9b80e4c68f1d73dc30d6d3"
+principal_id = "maya"
+roles = ["owner"]
+teams = ["support-ai"]
+
+[[api_keys]]
+key_sha256 = "sha256:08b35c76ab648b3bff99c540fa1cfb2a16b2dc861eafa9df5a0fd4e7a3bc76f4"
+principal_id = "risk-a"
+roles = ["risk"]
+
+[[api_keys]]
+key_sha256 = "sha256:81fa1857b598d37b421f13c3fea0ee76d9f12d7be000fe752b1d66249f12e795"
+principal_id = "risk-b"
+roles = ["risk"]
+
+[[api_keys]]
+key_sha256 = "sha256:16d0923063f0c1bdfe300ef9e5ffacf253134f8ac6743d0285d1fa2fe3e56282"
+principal_id = "oncall"
+roles = ["operator"]

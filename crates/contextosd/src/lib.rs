@@ -4,6 +4,7 @@ pub mod app;
 pub mod attest;
 pub mod auth;
 pub mod config;
+pub mod configs;
 pub mod feedback;
 pub mod kms;
 pub mod limits;
@@ -64,6 +65,68 @@ pub fn support_declaration(config: &Config) -> Value {
         "implementation_version": config.support.implementation_version,
         "supported_profiles": profiles,
         "supported_controls": controls,
+    })
+}
+
+/// What this deployment enforces, for operators (`GET /v1/deployment`): mode, support,
+/// resolved guards, which fact services and adapters are wired, and how audit is
+/// signed. Names only: no endpoint, credential or environment variable is included.
+pub fn deployment_summary(config: &Config) -> Value {
+    let providers = config.providers.as_ref().map(|p| {
+        json!({
+            "authority": true,
+            "constraints": true,
+            "approvals": true,
+            "idempotency": p.idempotency.is_some(),
+            "data_flow": p.data_flow.is_some(),
+            "boundary": p.boundary.is_some(),
+            "memory": p.memory.is_some(),
+        })
+    });
+    let adapters: Vec<Value> = config
+        .adapters
+        .iter()
+        .map(|a| {
+            let kind = match a.kind {
+                config::AdapterKind::Mcp => "mcp",
+                config::AdapterKind::Http => "http",
+            };
+            json!({"id": a.id, "kind": kind})
+        })
+        .collect();
+    let floors = config
+        .completion_score_floors()
+        .map(|f| json!({"policy_floor": f.policy_floor, "safety_floor": f.safety_floor}));
+    json!({
+        "mode": match config.server.mode {
+            config::Mode::Production => "production",
+            config::Mode::Development => "development",
+        },
+        "support": support_declaration(config),
+        "store": match config.store {
+            config::StoreConfig::Memory => "memory",
+            config::StoreConfig::Postgres { .. } => "postgres",
+        },
+        "dispatch": config.providers.is_some(),
+        "providers": providers,
+        "adapters": adapters,
+        "guards": {
+            "identical_tool_calls": config.guards.identical_tool_calls,
+            "refuse_repeated_effects": config.guards.refuse_repeated_effects,
+            "model_call_min_tokens": config.guards.model_call_min_tokens,
+            "required_release_refs": config.required_release_refs(),
+            "require_user_role": config.require_user_role(),
+            "trust_supplied_memory": config.server.mode == config::Mode::Development || config.guards.trust_supplied_memory,
+            "require_tool_schemas": config.guards.require_tool_schemas,
+            "completion_requires_scores": floors,
+        },
+        "audit": {
+            "key_id": config.audit.key_id,
+            "signer": if config.audit.kms.is_some() { "kms" } else { "local" },
+            "retired_key_ids": config.audit.retired_keys.iter().map(|k| k.kid.clone()).collect::<Vec<_>>(),
+        },
+        "authentication": {"api_keys": !config.api_keys.is_empty(), "oidc_issuers": config.oidc.len()},
+        "retention": {"run_content_days": config.retention.run_content_days},
     })
 }
 
@@ -137,6 +200,8 @@ where
         metrics: Arc::default(),
         packs,
         support: support_declaration(config),
+        deployment: deployment_summary(config),
+        running: Arc::new(configs::Running::of(config)),
         max_body_bytes: config.server.max_body_bytes,
         gateway,
         trust_domain,

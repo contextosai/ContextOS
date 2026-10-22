@@ -7,6 +7,29 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Tower: the governance plane
+- `towerd` governs an organisation's agents across ContextOS runtimes: it reads each
+  runtime tenant with a read-only key, verifies every audit entry before using it, and
+  maintains the agent inventory (with owner declarations), each agent's authority graph
+  and the control profiles it requires, findings with fixes, organisation guardrails
+  (JsonLogic over agent facts), time-boxed waivers, risk reviews with drift detection,
+  anomalies against each agent's own baseline, and a fleet-wide kill switch. Roles
+  (viewer, owner, risk, operator, admin) with separation of duties; every decision in a
+  signed journal verifiable with `ctx audit-verify`.
+- Optional intelligence with Claude: Ask Tower (read-only tools, checked citations),
+  guardrail drafting checked against the inventory, intake review drafts, anomaly
+  briefs and run explanations. Advisory only; every use is journalled.
+- The Tower UI (`tower/`), served by `towerd`; `examples/tower`.
+- Developer documentation in `docs/tower/`: concepts, architecture and flow diagrams, the
+  governance model, intelligence, API, security, a step-by-step build guide and operations.
+- Runtime: a `run_admitted` audit entry attributes each run to its agent, pack,
+  contract, required controls, surfaced capabilities and release references;
+  `GET /v1/deployment`, `GET /v1/packs`, and `head` on audit pages.
+- Configuration review: a `config` scope (never with `admit` or `dispatch`),
+  `GET /v1/config` and `POST /v1/config/validate`, which classifies every effective
+  change as tightening, loosening or neutral for CI. Production refuses the published
+  development keys.
+
 ### Licensing
 - Code is licensed under Apache-2.0 and documentation prose under CC BY 4.0; the
   name and logo are covered by a separate trademark policy (`TRADEMARKS.md`).

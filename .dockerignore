@@ -1,3 +1,5 @@
 target
 .git
 conformance/generator/node_modules
+tower/node_modules
+tower/dist

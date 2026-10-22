@@ -17,13 +17,13 @@ use std::time::{Duration, Instant};
 
 use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::auth::Caller;
 
 /// Scopes a token may grant; anything else in the scope claim is ignored.
-pub const KNOWN_SCOPES: [&str; 8] = [
+pub const KNOWN_SCOPES: [&str; 9] = [
     "compile",
     "admit",
     "dispatch",
@@ -32,13 +32,14 @@ pub const KNOWN_SCOPES: [&str; 8] = [
     "evaluate",
     "control",
     "meter",
+    "config",
 ];
 
 const MAX_JWKS_BYTES: usize = 1024 * 1024;
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OidcConfig {
     /// Exact `iss` value.

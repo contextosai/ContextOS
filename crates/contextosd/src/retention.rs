@@ -14,12 +14,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use contextos_gateway::{ErasureError, Gateway, RunAdmission};
 use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, ScanCursor};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The principal recorded on retention erasures.
 pub const RETENTION_PRINCIPAL: &str = "contextos.retention";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionConfig {
     /// Erase a run's personal content this many days after admission; unset keeps it.

@@ -10,6 +10,10 @@
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
+//! | `GET /v1/deployment` | – (authenticated) | the caller's identity and scopes, and what this deployment enforces |
+//! | `GET /v1/packs` | `audit:read` | the caller tenant's loaded Context Packs |
+//! | `GET /v1/config` | `config` | the configuration this replica runs: text, digest, effective values, posture |
+//! | `POST /v1/config/validate` | `config` | dry-run a proposed configuration: errors, effective values, classified changes |
 //! | `POST /v1/runs/{run_id}/checkpoint` | `dispatch` | save the orchestrator's checkpoint (current executor; optimistic on revision) |
 //! | `GET /v1/runs/{run_id}/checkpoint` | `dispatch` | the latest checkpoint, for the executor that takes over |
 //! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
@@ -28,7 +32,7 @@
 //! | `GET /v1/revocations` | `control` | the tenant's revoked targets (kill switch) |
 //! | `POST /v1/revocations` | `control` | revoke a `tenant`, `pack`, `agent`, `adapter` or `capability`: refused at the next dispatch and admission |
 //! | `POST /v1/revocations/restore` | `control` | restore a revoked target |
-//! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out |
+//! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out (with the chain's `head`) |
 //! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
 //! | `POST /v1/runs/{run_id}/decisions/{record_id}/scores` | `evaluate` (without `admit`/`dispatch`) | an independent evaluator's score of a decision, signed into the audit chain |
 //! | `GET /v1/runs/{run_id}/replay-case` | `audit:read` | the run's admission inputs as a release-gate case (`ctx gate`) |
@@ -117,6 +121,10 @@ pub struct AppState<S, L> {
     pub require_user_role: bool,
     /// Whether recalled memory without a memory-governance service is admitted.
     pub trust_supplied_memory: bool,
+    /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
+    pub deployment: Value,
+    /// The configuration this replica runs (see [`crate::configs`]).
+    pub running: Arc<crate::configs::Running>,
 }
 
 impl<S, L> std::fmt::Debug for AppState<S, L> {
@@ -746,6 +754,38 @@ where
             "The store is unavailable.",
         )
     })?;
+    // Which agent runs under which pack, contract and controls, signed before the run
+    // starts: what an organisation-wide control plane attributes runs to. Identifiers
+    // and references only; no user identity or content.
+    let profiles: Vec<&Value> = admission.contract["profiles"]
+        .as_array()
+        .map(|ps| ps.iter().map(|p| &p["profile_id"]).collect())
+        .unwrap_or_default();
+    let mut surfaced: Vec<&String> = admission.surfaced_capabilities.iter().collect();
+    surfaced.sort_unstable();
+    state
+        .audit
+        .append(
+            &caller.tenant_id,
+            "run_admitted",
+            json!({"run_id": admission.run_id, "trace_id": admission.trace_id, "contract_id": admission.contract_id,
+                "agent_id": run_context.agent.agent_id, "agent_urn": run_context.agent.agent_urn,
+                "workload_identity": run_context.agent.workload_identity, "agent_role": run_context.agent.role,
+                "intent": run_context.intent, "pack_ref": selected, "requested_pack_ref": requested,
+                "profiles": profiles, "required_controls": admission.required_controls,
+                "release_refs": admission.release_refs, "surfaced_capabilities": surfaced,
+                "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
+                "compiled_context_hash": admission.compiled_context_hash}),
+            &admission.admitted_at,
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audit_unavailable",
+                "The audit log is unavailable.",
+            )
+        })?;
     let generation = match gateway.open_run(&admission).await {
         Ok(Ownership::Current(generation)) => generation,
         Ok(Ownership::Refused(reason)) => {
@@ -2827,8 +2867,85 @@ async fn audit_entries<S, L: AppendLog>(
             )
         })?;
     let next = rows.last().map(|r| r.sequence + 1).filter(|_| rows.len() == limit);
+    // The head lets a reader start from the tail (an operator console) without
+    // verifying or paging the whole chain; read after the page, so it is never behind it.
+    let head = state
+        .audit
+        .log()
+        .head(&caller.tenant_id)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                "The store is unavailable.",
+            )
+        })?
+        .map_or(0, |r| r.sequence);
     let entries: Vec<Value> = rows.into_iter().map(|r| r.body).collect();
-    Ok(axum::Json(json!({"entries": entries, "next": next})).into_response())
+    Ok(axum::Json(json!({"entries": entries, "next": next, "head": head})).into_response())
+}
+
+/// The caller's identity and what this deployment enforces (see
+/// [`crate::deployment_summary`]): any authenticated caller, so a console can show
+/// which actions the caller's scopes allow before offering them.
+async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+    let caller = authorize(&state, &headers, None)?;
+    let mut packs: Vec<&str> = state
+        .packs
+        .iter()
+        .filter(|(_, p)| p.tenant_id == caller.tenant_id)
+        .map(|(r, _)| r.as_str())
+        .collect();
+    packs.sort_unstable();
+    let mut body = state.deployment.clone();
+    body["caller"] =
+        json!({"tenant_id": caller.tenant_id, "principal_id": caller.principal_id, "scopes": caller.scopes});
+    body["packs"] = json!(packs);
+    body["replicas"] = json!(state.limits.replicas());
+    Ok(axum::Json(body).into_response())
+}
+
+/// The configuration this replica runs: its text, digest, effective values and
+/// posture (see [`crate::configs`]).
+async fn running_config<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+    authorize(&state, &headers, Some("config"))?;
+    let running = &state.running;
+    Ok(axum::Json(
+        json!({"digest": running.digest, "source": running.source, "effective": running.effective,
+        "findings": running.findings}),
+    )
+    .into_response())
+}
+
+/// Dry-run validation of a proposed configuration, diffed against the running one.
+async fn validate_config<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult {
+    authorize(&state, &headers, Some("config"))?;
+    let request: crate::configs::ValidateBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Expected {\"toml\": string}.",
+        )
+        .with_detail(json!(e.to_string()))
+    })?;
+    Ok(axum::Json(crate::configs::review(&state.running, &request.toml)).into_response())
+}
+
+/// The caller tenant's loaded Context Packs, in full.
+async fn list_packs<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let mut packs: Vec<(&String, &LoadedPack)> = state
+        .packs
+        .iter()
+        .filter(|(_, p)| p.tenant_id == caller.tenant_id)
+        .collect();
+    packs.sort_unstable_by_key(|(r, _)| r.as_str());
+    let packs: Vec<Value> = packs
+        .into_iter()
+        .map(|(r, p)| json!({"pack_ref": r, "pack": p.compiler.pack()}))
+        .collect();
+    Ok(axum::Json(json!({"packs": packs})).into_response())
 }
 
 /// MCP gateway mode for one run (see [`crate::mcp`]).
@@ -3005,6 +3122,10 @@ where
         .route("/v1/audit/verify", get(audit_verify::<S, L>))
         .route("/v1/audit/entries", get(audit_entries::<S, L>))
         .route("/v1/audit/keys", get(audit_keys::<S, L>))
+        .route("/v1/deployment", get(deployment::<S, L>))
+        .route("/v1/packs", get(list_packs::<S, L>))
+        .route("/v1/config", get(running_config::<S, L>))
+        .route("/v1/config/validate", post(validate_config::<S, L>))
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
         .route("/v1/revocations/restore", post(restore::<S, L>))
         .route("/v1/conformance/assess", post(assess_conformance::<S, L>))

@@ -16,7 +16,7 @@
 use base64::Engine as _;
 use contextos_contract::canonical::sha256_canonical;
 use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const REPORT_DOMAIN: &str = "contextos.conformance_report_attestation.v1";
@@ -24,7 +24,7 @@ pub const VERIFICATION_DOMAIN: &str = "contextos.conformance_verification_attest
 pub const OBSERVATION_DOMAIN: &str = "contextos.control_evidence_attestation.v1";
 
 /// A trusted principal and the Ed25519 key its attestations are signed with.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedSigner {
     pub principal: Value,

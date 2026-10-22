@@ -4,9 +4,9 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     #[default]
@@ -15,7 +15,7 @@ pub enum Mode {
     Development,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     pub listen: SocketAddr,
@@ -35,7 +35,7 @@ fn default_timeout() -> u64 {
     15_000
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum StoreConfig {
     Memory,
@@ -51,7 +51,7 @@ fn default_connections() -> u32 {
     32
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditConfig {
     /// Environment variable holding the 32-byte ed25519 seed as hex (development, or
@@ -69,7 +69,7 @@ pub struct AuditConfig {
     pub retired_keys: Vec<RetiredKey>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetiredKey {
     pub kid: String,
@@ -91,7 +91,7 @@ impl RetiredKey {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiKey {
     /// `sha256:<hex>` of the raw key.
@@ -101,7 +101,7 @@ pub struct ApiKey {
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupportConfig {
     pub implementation_id: String,
@@ -113,7 +113,7 @@ pub struct SupportConfig {
 }
 
 /// Guards on agent behaviour.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardsConfig {
     /// Identical tool calls (same capability and arguments, new operation) a run may
@@ -159,7 +159,7 @@ pub struct GuardsConfig {
 }
 
 /// `[guards] completion_requires_scores`: on or off, or explicit floors.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum CompletionScores {
     Enabled(bool),
@@ -173,7 +173,7 @@ pub const DEFAULT_SCORE_FLOORS: ScoreFloors = ScoreFloors {
 };
 
 /// Score floors for [`GuardsConfig::completion_requires_scores`], each in 0..=1.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScoreFloors {
     pub policy_floor: f64,
@@ -211,7 +211,7 @@ impl Default for GuardsConfig {
 /// with the Ed25519 keys their attestations are signed with (see [`crate::attest`]).
 /// Each principal names its tenant; an assessment uses those of the caller's tenant
 /// only. The caller of an assessment never supplies these.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConformanceConfig {
     #[serde(default)]
@@ -220,7 +220,7 @@ pub struct ConformanceConfig {
     pub trusted_evidence_observers: Vec<crate::attest::TrustedSigner>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityConfig {
     /// Trust domain of agent principals admitted by this deployment.
@@ -229,7 +229,7 @@ pub struct IdentityConfig {
     pub gateway_principal_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProvider {
     pub url: String,
@@ -244,7 +244,7 @@ fn default_provider_timeout() -> u64 {
     2_000
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProvidersConfig {
     pub authority: RemoteProvider,
@@ -265,14 +265,14 @@ pub struct ProvidersConfig {
     pub memory: Option<RemoteProvider>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdapterKind {
     Mcp,
     Http,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdapterConfig {
     pub id: String,
@@ -284,7 +284,7 @@ pub struct AdapterConfig {
 }
 
 /// One registered result schema.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResultSchemaConfig {
     #[serde(rename = "ref")]
@@ -292,7 +292,7 @@ pub struct ResultSchemaConfig {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: ServerConfig,
@@ -333,6 +333,9 @@ pub struct Config {
     pub providers: Option<ProvidersConfig>,
     #[serde(default)]
     pub adapters: Vec<AdapterConfig>,
+    /// The TOML text this configuration was parsed from (served by `GET /v1/config`).
+    #[serde(skip)]
+    pub source: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -380,8 +383,9 @@ impl Config {
     }
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        let config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
+        text.clone_into(&mut config.source);
         Ok(config)
     }
 
@@ -422,10 +426,13 @@ impl Config {
         }
         // The example keys are published; a production deployment must not accept them.
         if self.server.mode == Mode::Production {
-            const PUBLISHED: [&str; 3] = [
+            const PUBLISHED: [&str; 6] = [
                 "dev-key-0123456789abcdef0123456789abcdef",
                 "dev-judge-0123456789abcdef0123456789abcd",
                 "dev-ops-0123456789abcdef0123456789abcdef",
+                "dev-admin-0123456789abcdef0123456789abcd",
+                "dev-review-0123456789abcdef0123456789abc",
+                "dev-tower-0123456789abcdef0123456789abcd",
             ];
             if let Some(key) = self.api_keys.iter().find(|k| {
                 PUBLISHED
@@ -452,6 +459,17 @@ impl Config {
         {
             return Err(ConfigError::Invalid(format!(
                 "principal {} cannot both evaluate or meter and admit or dispatch",
+                key.principal_id
+            )));
+        }
+        // Whoever proposes or approves configuration does not also run agents under it.
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "config") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both hold config and admit or dispatch",
                 key.principal_id
             )));
         }

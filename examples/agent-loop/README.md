@@ -32,7 +32,7 @@ critic: accept (damaged delivery, refund within order amount); checkpoint revisi
 refund issued: {'refund_id': 'rf_ord_881'}
 decision decision_… signed at audit hash sha256:…
 run completed
-evidence: 1 decision(s), budget used {… 'tokens': 2000, 'tool_calls': 2}, 15 signed audit entries
+evidence: 1 decision(s), budget used {… 'tokens': 2000, 'tool_calls': 2}, 17 signed audit entries
 ```
 
 To use a real model, replace `plan()` and `critic()`; keep tool execution on

@@ -404,8 +404,26 @@ async fn admitted_run_dispatches_governed_effects() {
         .json()
         .await
         .unwrap();
-    // run start, authorization decision, operation claim, effect observation
-    assert_eq!(audit, json!({"verified": true, "entries": 4}));
+    // run admitted, run start, authorization decision, operation claim, effect observation
+    assert_eq!(audit, json!({"verified": true, "entries": 5}));
+    let page: Value = http
+        .get(format!("{}/v1/audit/entries?from=1&limit=1", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let admitted = &page["entries"][0];
+    assert_eq!(admitted["kind"], "run_admitted");
+    assert_eq!(admitted["payload"]["profiles"], json!(["contextos.core"]));
+    assert!(admitted["payload"]["agent_id"].is_string() && admitted["payload"]["pack_ref"].is_string());
+    assert!(
+        admitted["payload"]["surfaced_capabilities"]
+            .as_array()
+            .is_some_and(|c| !c.is_empty())
+    );
     let metrics = http
         .get(format!("{}/metrics", w.base))
         .send()

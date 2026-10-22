@@ -20,10 +20,10 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use contextos_audit::{AuditSigner, RemoteSigner};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct KmsConfig {
     /// `vault_transit`.
