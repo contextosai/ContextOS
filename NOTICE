@@ -5,6 +5,8 @@ This product includes software developed as part of the ContextOS project
 (https://github.com/contextosai/ContextOS), licensed under the Apache License,
 Version 2.0 (see LICENSE).
 
+Third-party dependency licenses and attribution are in THIRD_PARTY_NOTICES.txt.
+
 Documentation prose in docs/ and the Markdown guides is licensed under the
 Creative Commons Attribution 4.0 International license (see LICENSE-docs);
 code examples within it are licensed under Apache-2.0.

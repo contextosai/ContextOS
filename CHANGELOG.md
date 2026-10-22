@@ -7,6 +7,13 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Public release preparation
+- The commit gate checks each example's exit status before accepting its success
+  message; regression tests cover failing examples and output after the message.
+- Release archives and the container carry the project's licenses, attribution and
+  trademark notices, plus reproducible Rust and Tower dependency license texts.
+- Alpha setup, support, contribution and private reporting guidance is explicit.
+
 ### Tower: the governance plane
 - `towerd` governs an organisation's agents across ContextOS runtimes: it reads each
   runtime tenant with a read-only key, verifies every audit entry before using it, and

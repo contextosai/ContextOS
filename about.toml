@@ -1,0 +1,10 @@
+# License choices for the notice bundle; cargo-deny remains the acceptance gate.
+accepted = [
+    "Apache-2.0", "MIT", "MIT-0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause",
+    "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "CDLA-Permissive-2.0",
+    "Unlicense", "BSL-1.0", "0BSD",
+]
+ignore-dev-dependencies = true
+ignore-build-dependencies = false
+ignore-transitive-dependencies = false
+private = { ignore = true }

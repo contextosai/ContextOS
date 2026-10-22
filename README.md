@@ -1,10 +1,52 @@
 # ContextOS Runtime
 
-The production runtime for [ContextOS](https://contextosai.com), an open contract for reliable agent harnesses: bounded context, authorized effects, typed outcomes, and the evidence needed to evaluate and replay agent work.
+[![CI](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml/badge.svg)](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+An open-source Rust runtime and governance plane for AI agents, implementing the [ContextOS](https://contextosai.com) contract: bounded context, authorized effects, typed outcomes, and verifiable audit trails.
 
 This repository implements the spec. The spec's TypeScript module is a conformance reference; this runtime reproduces its decisions exactly (checked against generated golden vectors) and adds what the reference leaves to implementers: protected stores, fencing, adapters, a gateway and a server.
 
-> Status: pre-release, private. Kernel, stores, audit, gateway, adapters, server, CLI and bindings are implemented; hardening and performance work continue. See [docs/PLAN.md](docs/PLAN.md).
+> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
+
+## Quickstart
+
+Install the Rust toolchain specified in [rust-toolchain.toml](rust-toolchain.toml),
+Python 3.9 or newer, Bash and curl. The example uses local development services and
+synthetic data; it needs no model API key or external payment account.
+
+```sh
+git clone https://github.com/contextosai/ContextOS.git
+cd ContextOS
+./examples/support-refund/run.sh
+```
+
+The script builds the server and CLI, starts services on loopback addresses, admits a
+run, dispatches one simulated refund, refuses a duplicate, and verifies the audit
+chain. Expect `status: completed`, then `retry_unsafe`, and a final `verified: true`.
+See the [full quickstart](examples/support-refund/README.md) for sample output.
+
+For the governance console, install Node.js 24 and run
+`./examples/tower/run.sh --serve`; follow the [Tower guide](docs/tower/README.md).
+Framework examples have their own prerequisites in [examples/frameworks](examples/frameworks/README.md).
+
+## Project boundaries and support
+
+- **Specification:** the [published contract](https://contextosai.com/docs/implementation/execution-contract)
+  defines portable behavior. [Conformance provenance](conformance/README.md) identifies
+  the source revision used for this runtime's schemas and reference vectors.
+- **Runtime:** embed the deterministic kernel, run `contextosd` as a gateway, or use
+  Python, Node.js and WebAssembly bindings. Durable execution requires the protected
+  stores and gateway, beyond the embedded decision kernel.
+- **Tower:** `towerd` and the web console review evidence across runtimes. Its optional
+  AI assistance requires a provider key; deterministic governance and the local demo
+  run without one.
+
+Alpha support covers `main` only and carries no support SLA. Breaking changes are
+recorded in [CHANGELOG.md](CHANGELOG.md). Contributions are welcome; use
+[GitHub Discussions](https://github.com/contextosai/ContextOS/discussions) for questions,
+the issue forms for bugs and proposals, and the [private security channel](SECURITY.md)
+for vulnerabilities.
 
 ## Design
 
@@ -59,6 +101,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
 - Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
+- Public release checklist: [docs/PUBLIC_RELEASE.md](docs/PUBLIC_RELEASE.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - Contributing and governance: [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [CHANGELOG.md](CHANGELOG.md)
 
@@ -67,7 +110,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+RUST_LOG=info cargo test --workspace
 ```
 
 Parity vectors live in `conformance/vectors/` and are regenerated from the spec repo (see [conformance/README.md](conformance/README.md)). Passing them shows these semantics match the reference; it is not deployed conformance of any workflow.

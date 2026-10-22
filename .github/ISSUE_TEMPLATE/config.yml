@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/contextosai/ContextOS/security/advisories/new
+    url: https://github.com/contextosai/ContextOS/blob/main/SECURITY.md
     about: Never report vulnerabilities in public issues.
   - name: Specification questions
     url: https://contextosai.com
     about: Questions about the ContextOS specification itself.
+  - name: Usage questions and discussions
+    url: https://github.com/contextosai/ContextOS/discussions
+    about: Ask about adopting, integrating or operating the runtime.

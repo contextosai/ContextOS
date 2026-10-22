@@ -35,10 +35,10 @@ with `maturin` and Node.js 20+.
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+RUST_LOG=info cargo test --workspace
 # PostgreSQL store, audit and benchmark paths (no Docker needed:
 # `eval "$(scripts/dev-postgres.sh)"` starts a disposable server and exports the URLs)
-CONTEXTOS_TEST_DATABASE_URL=postgres://… cargo test --workspace
+CONTEXTOS_TEST_DATABASE_URL=postgres://… RUST_LOG=info cargo test --workspace
 CONTEXTOS_BENCH_DATABASE_URL=postgres://… cargo bench -p contextos-gateway --bench dispatch -- postgres
 # Property fuzzing of every kernel entry point
 CONTEXTOS_FUZZ_CASES=20000 cargo test -p contextos-embed --test fuzz --release
@@ -46,12 +46,19 @@ CONTEXTOS_FUZZ_CASES=20000 cargo test -p contextos-embed --test fuzz --release
 cargo deny check
 ```
 
-Regenerate parity vectors from a checkout of the spec repository:
+When changing `Cargo.lock` or Tower's production dependencies, regenerate the bundled
+dependency notices and include them in the change:
 
 ```sh
-CONTEXTOS_SPEC=/path/to/spec /path/to/spec/node_modules/.bin/vitest run \
-  --config conformance/generator/vitest.config.mts
+cargo install --locked --features cli cargo-about@0.9.2
+npm ci --prefix tower --ignore-scripts
+bash scripts/generate-notices.sh
 ```
+
+CI regenerates the notices and rejects missing or stale attribution.
+
+Regenerate parity vectors from the exact source revision recorded in
+`conformance/source.json`, following [conformance/README.md](conformance/README.md).
 
 ## Changes
 

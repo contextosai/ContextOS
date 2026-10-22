@@ -4,12 +4,14 @@
 
 - **Maintainers** review and merge changes, cut releases and handle security reports.
   They are listed in `.github/CODEOWNERS`.
-- **Contributors** propose changes through pull requests once outside contributions
-  open (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+- **Contributors** are welcome to propose changes through pull requests
+  (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Decisions
 
-- Routine changes merge with one maintainer's approval and passing CI.
+- Routine changes merge through a pull request with passing CI. A second maintainer
+  reviews when available; the sole maintainer may merge their own pull request after
+  completing the same checks. Maintainer access does not waive verification.
 - Changes to protocols, decision semantics, storage or audit formats, public APIs, the
   threat model or the dependency policy need an ADR in `docs/adr/`, open for comment
   for at least five working days, and approval from two maintainers when there are two
