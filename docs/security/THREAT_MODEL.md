@@ -49,6 +49,28 @@ budgets, and the integrity of the evidence record.
 
 ## Review log
 
+Shared business guarantees extend the enforcement domain to a tenant/guarantee/resource
+on one protected store. Trusted configuration pins exact resource/amount pointers,
+unit and numeric limit. Provider resource canonicalization and accepted finality
+observations remain trust assumptions. Hashes are correlation identifiers, not
+anonymization. Guarantee state retains amounts and hashed resource/action identities
+for conservation and replay protection; it is not erased with run content.
+
+| Threat | Control | Regression evidence |
+|---|---|---|
+| Unrelated runs collectively exceed one resource ceiling | CAS conservation of committed plus held exposure, independent of run/agent identity | kernel shared_exposure tests; gateway cross-run and server cross-replica tests |
+| Changed rule/pointer or restart resets capacity | Stable tenant/guarantee definition pin before resource extraction; durable resource ledger; reviewed config changes | definition-pin and replica tests |
+| Recovery releases capacity while a delayed worker later invokes | Exact-attempt activation competes with durable abort/tombstones on the resource receipt; active/unobserved absence release refused | deterministic pauses before/after reserve CAS; activation/abort kernel tests |
+| Contradictory concurrent resolutions invalidate an already released balance | Shared latest-attempt first-definitive CAS seal; signed refusals for later/stale facts; pre-existing conflicts retain exposure | delayed stale-confirmation test and audit verification |
+| Crash, timeout, partial effect or failed audit/write silently restores capacity | Unknown/partial holds never expire; immutable recovery link; signed settlement before CAS; repair from protected operation evidence | injected store/audit failures, pending/partial and terminal HTTP recovery tests |
+
+An orphaned started dispatch without a recorded observation remains conservatively
+held. A confirmed assertion may commit the full exposure; externally fenced absence
+recovery is not implemented. Deleting protected state, deploying a replica without
+the guarantee, bypassing the gateway, unaccounted prior spend and upstream identifier
+aliases are outside this numeric guarantee. There is no claim of universal safety,
+external outcome proof or regulatory certification.
+
 - 2026-10-20: adversarial review of MCP mode, delegation, failover, lifecycle,
   reconciliation, decisions, OIDC, limits and the PostgreSQL/audit changes. Fixed: a
   replayed delegation could release a live child's budget (critical); the ownership

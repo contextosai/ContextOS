@@ -310,6 +310,9 @@ pub struct Config {
     /// Runtime guards on agent behaviour.
     #[serde(default)]
     pub guards: GuardsConfig,
+    /// Trusted business-resource limits shared by unrelated agent runs.
+    #[serde(default)]
+    pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
     /// Trust anchors for conformance assessment (`POST /v1/conformance/assess`).
     #[serde(default)]
     pub conformance: ConformanceConfig,
@@ -390,6 +393,18 @@ impl Config {
     }
 
     fn check(&self) -> Result<(), ConfigError> {
+        let (mut ids, mut capabilities) = (std::collections::HashSet::new(), std::collections::HashSet::new());
+        if self.guarantees.len() > 128 {
+            return Err(ConfigError::Invalid("too many shared guarantees".into()));
+        }
+        for rule in &self.guarantees {
+            rule.validate().map_err(ConfigError::Invalid)?;
+            if !ids.insert(&rule.id) || rule.capability_ids.iter().any(|c| !capabilities.insert(c)) {
+                return Err(ConfigError::Invalid(
+                    "shared guarantee ids and capability coverage must be unique".into(),
+                ));
+            }
+        }
         if let Some(CompletionScores::Floors(floors)) = self.guards.completion_requires_scores
             && ![floors.policy_floor, floors.safety_floor]
                 .iter()

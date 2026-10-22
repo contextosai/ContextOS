@@ -173,6 +173,7 @@ fn element_key(path: &str, item: &Value) -> Option<String> {
             ));
         }
         "adapters" => "id",
+        "guarantees" => "id",
         "oidc" => "issuer",
         "limits.tenants" => "tenant_id",
         "result_schemas" => "ref",
@@ -274,6 +275,16 @@ fn classify(path: &str, from: &Value, to: &Value) -> (&'static str, Option<&'sta
         }
     };
     let leaf = path.rsplit('.').next().unwrap_or(path);
+    if path.starts_with("guarantees[") {
+        let note = Some("shared exposure is durable; binding changes require an accounted migration");
+        return if leaf == "limit" {
+            (if more() == Some(false) { "tightens" } else { "loosens" }, note)
+        } else if from.is_null() {
+            ("tightens", note)
+        } else {
+            ("loosens", note)
+        };
+    }
     match path {
         "server.mode" => (
             if to == "development" { "loosens" } else { "tightens" },
@@ -456,6 +467,27 @@ mod tests {
         assert!(changes("", "").is_empty());
         // Spelling out a default is not a change of the effective configuration.
         assert!(changes("", "[guards]\nrefuse_repeated_effects = true").is_empty());
+    }
+
+    #[test]
+    fn shared_guarantee_changes_surface_weakened_or_changed_protection() {
+        let rule = "[[guarantees]]\nid='refunds'\ncapability_ids=['payments.refund']\nresource_pointer='/order'\namount_pointer='/amount'\nlimit=100\nunit='USD_minor'";
+        assert!(changes(rule, "").iter().any(|c| c.effect == "loosens"));
+        assert!(
+            changes(rule, &rule.replace("limit=100", "limit=200"))
+                .iter()
+                .any(|c| c.effect == "loosens")
+        );
+        assert!(
+            changes(rule, &rule.replace("/order", "/customer"))
+                .iter()
+                .any(|c| c.effect == "loosens")
+        );
+        assert!(
+            changes(rule, &rule.replace("limit=100", "limit=50"))
+                .iter()
+                .any(|c| c.effect == "tightens")
+        );
     }
 
     #[test]

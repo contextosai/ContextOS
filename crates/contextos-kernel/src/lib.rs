@@ -20,6 +20,7 @@ pub mod profiles;
 pub mod release_gate;
 pub mod run_state;
 pub mod scorecard_gate;
+pub mod shared_exposure;
 mod support;
 
 pub use support::TransitionResult;

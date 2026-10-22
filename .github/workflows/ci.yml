@@ -78,6 +78,7 @@ jobs:
       - name: Examples (quickstart, governed agent loop, metering, Tower)
         run: |
           ./examples/support-refund/run.sh
+          ./examples/shared-guarantees/run.sh
           ./examples/agent-loop/run.sh
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh

@@ -52,6 +52,7 @@ pub struct DispatchSetup {
     pub completion_floor: Option<(f64, f64)>,
     /// Production: every delegation names a registered result schema.
     pub require_result_schemas: bool,
+    pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -88,6 +89,7 @@ where
     gateway.set_model_call_floor(setup.model_call_floor);
     gateway.set_completion_floor(setup.completion_floor);
     gateway.require_result_schemas(setup.require_result_schemas);
+    gateway.set_shared_guarantees(setup.guarantees)?;
     Ok(gateway)
 }
 
@@ -165,6 +167,9 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         RemoteIdempotency, TransportPolicy,
     };
     let Some(providers) = &config.providers else {
+        if !config.guarantees.is_empty() {
+            return Err("shared guarantees require configured dispatch providers".into());
+        }
         return Ok(None);
     };
     let identity = config
@@ -265,5 +270,6 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .completion_score_floors()
             .map(|f| (f.policy_floor, f.safety_floor)),
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
+        guarantees: config.guarantees.clone(),
     }))
 }

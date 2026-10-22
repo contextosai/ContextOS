@@ -9,7 +9,7 @@ import unittest
 
 
 class CheckScriptTests(unittest.TestCase):
-    def run_gate(self, *, agent_exit=0, tower_exit=0, marker=True, large_output=False):
+    def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, marker=True, large_output=False):
         with tempfile.TemporaryDirectory(prefix="contextos-check-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -21,10 +21,12 @@ class CheckScriptTests(unittest.TestCase):
                 tool = tools / name
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
-            for name in ("support-refund", "metering-proxy", "agent-loop", "tower"):
+            for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
+                if name == "shared-guarantees":
+                    text += f"echo 'Offline audit verification:'\nexit {guarantee_exit}\n"
                 if name in ("agent-loop", "tower"):
                     if marker:
                         text += "echo 'run completed'\n" if name == "agent-loop" else "echo 'tower sees the fleet'\n"
@@ -44,6 +46,12 @@ class CheckScriptTests(unittest.TestCase):
         result = self.run_gate(agent_exit=7)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("FAILED: agent loop", result.stdout)
+        self.assertNotIn("ALL CHECKS PASSED", result.stdout)
+
+    def test_guarantee_failure_after_verification_message_fails_gate(self):
+        result = self.run_gate(guarantee_exit=7)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("FAILED: shared guarantees", result.stdout)
         self.assertNotIn("ALL CHECKS PASSED", result.stdout)
 
     def test_tower_failure_after_success_message_fails_gate(self):

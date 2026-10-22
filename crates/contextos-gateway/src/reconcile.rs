@@ -118,7 +118,40 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(out.rejected("operation_not_found"));
         };
         out.outcome = op["outcome"].as_str().map(str::to_owned);
-        if op["outcome"] != "unknown" || op["conflict"] == true {
+        let shared = self.has_exposure_link(admission, operation_id).await?;
+        if shared {
+            out.audit_sequences
+                .extend(self.settle_shared_exposure(admission, operation_id).await?);
+        }
+        let claimed_without_fact = shared
+            && op["attempts"].as_array().and_then(|a| a.last()).is_some_and(|a| {
+                a["dispatch_state"] == "claimed"
+                    && !op["observations"].as_array().into_iter().flatten().any(|o| {
+                        o["attempt_id"] == a["attempt_id"] && o["finality"] == "definitive" && o["outcome"] != "unknown"
+                    })
+            });
+        if (op["outcome"] != "unknown" && !claimed_without_fact) || op["conflict"] == true {
+            if shared
+                && let Resolution::Assert {
+                    outcome,
+                    evidence_ref,
+                    principal_id,
+                } = &resolution
+                && op["outcome"].as_str() != Some(outcome.as_str())
+            {
+                out.status = "rejected".into();
+                out.reason_codes.push("shared_guarantee_attempt_sealed".into());
+                out.audit_sequences.push(
+                    self.shared_observation_refused(
+                        admission,
+                        &json!({"operation_id":operation_id,
+                    "outcome":outcome.as_str(),"evidence_ref":evidence_ref,"principal_id":principal_id}),
+                        &out.reason_codes,
+                    )
+                    .await?,
+                );
+                return Ok(out);
+            }
             // Only unknown outcomes are reconciled here; conflicts and partial effects
             // need human escalation, and settled outcomes need nothing.
             if op["conflict"] == true {
@@ -212,6 +245,40 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(out);
         }
 
+        // A rejected assertion/query must not abort a live dispatch. At this point
+        // the resolving response and operator evidence have been validated.
+        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed {
+            let request = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "shared_guarantee_abort_requested",
+                    json!({"run_id":admission.run_id,"operation_id":operation_id,"attempt_id":attempt_id,
+                    "source":source,"principal_id":principal,"outcome":response.outcome.as_str(),
+                    "evidence_ref":response.output.get("evidence_ref")}),
+                    &now,
+                )
+                .await?;
+            out.audit_sequences.push(request.sequence);
+            if let Err(reasons) = self
+                .transition_shared_dispatch(admission, operation_id, &attempt_id, "abort")
+                .await?
+            {
+                out.status = "rejected".into();
+                out.reason_codes = reasons;
+                out.audit_sequences.push(
+                    self.shared_observation_refused(
+                        admission,
+                        &json!({"operation_id":operation_id,
+                    "attempt_id":attempt_id,"kind":"pre_dispatch_resolution"}),
+                        &out.reason_codes,
+                    )
+                    .await?,
+                );
+                return Ok(out);
+            }
+        }
+
         // Record the fact against the original attempt.
         let observed_at = later(now, attempt["started_at"].as_str().unwrap_or_default());
         let valid_until =
@@ -231,11 +298,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "observed_at": observed_at, "valid_until": valid_until, "evaluation_time": observed_at,
         });
         let commit = transact(self.store.as_ref(), &key, |ledger| {
-            record_effect_observation(ledger, &observation, &ledger["revision"])
+            if shared {
+                crate::shared_guarantees::record_shared_observation(ledger, &observation)
+            } else {
+                record_effect_observation(ledger, &observation, &ledger["revision"])
+            }
         })
         .await?;
         match commit {
             Commit::Rejected { reason_codes } => {
+                if shared {
+                    out.audit_sequences.push(
+                        self.shared_observation_refused(admission, &observation, &reason_codes)
+                            .await?,
+                    );
+                }
                 out.status = "rejected".into();
                 out.reason_codes = reason_codes;
                 return Ok(out);
@@ -264,8 +341,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         out.audit_sequences.push(entry.sequence);
+        out.audit_sequences
+            .extend(self.settle_shared_exposure(admission, operation_id).await?);
 
-        // Settle the held reservation at what it has already charged.
+        // A confirmed claim without a provider observation has no measured usage.
+        // Charge its protected original allocation conservatively; an original
+        // response sealed out by recovery must not turn this call into free usage.
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
         let reservation_id = format!("reservation:{attempt_id}");
         let held = self.store.get(&budget_key).await?.and_then(|r| {
@@ -274,7 +355,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .into_iter()
                 .flatten()
                 .find(|res| res["reservation_id"] == reservation_id.as_str() && res["status"] != "settled")
-                .map(|res| res["used"].clone())
+                .map(|res| {
+                    if claimed_without_fact && response.outcome == EffectOutcome::Confirmed {
+                        res["allocation"].clone()
+                    } else {
+                        res["used"].clone()
+                    }
+                })
         });
         if let Some(used) = held {
             self.settle(

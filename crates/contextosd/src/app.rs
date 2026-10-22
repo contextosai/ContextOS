@@ -997,7 +997,24 @@ where
         },
     };
     let admission = load_admission(&state, &caller, &run_id).await?;
-    require_owner(gateway, &admission, &headers).await?;
+    // Reconciliation creates no new effect. Terminal runs still need to resolve
+    // retained exposure; fence against their current generation without requiring
+    // a running lifecycle status.
+    let generation = executor_generation(&headers)?;
+    let current = gateway.run_state(&admission).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            "The store is unavailable.",
+        )
+    })?;
+    if current.as_ref().and_then(|s| s["executor_generation"].as_u64()) != Some(generation) {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "executor_stale",
+            "Use the run's current executor generation.",
+        ));
+    }
     let outcome = gateway
         .reconcile(&admission, &operation_id, resolution)
         .await
@@ -2906,6 +2923,42 @@ async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: Hea
     Ok(axum::Json(body).into_response())
 }
 
+async fn list_guarantees<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+    authorize(&state, &headers, Some("audit:read"))?;
+    Ok(axum::Json(json!({"guarantees":state.deployment["guarantees"]})).into_response())
+}
+
+async fn shared_exposure<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((id, resource_digest)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("audit:read"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let view = gateway
+        .shared_exposure(&caller.tenant_id, &id, &resource_digest)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "shared_guarantee_unavailable",
+                "The shared exposure is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "shared_exposure_not_found",
+                "No shared exposure for this resource.",
+            )
+        })?;
+    Ok(axum::Json(view).into_response())
+}
+
 /// The configuration this replica runs: its text, digest, effective values and
 /// posture (see [`crate::configs`]).
 async fn running_config<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
@@ -3124,6 +3177,11 @@ where
         .route("/v1/audit/keys", get(audit_keys::<S, L>))
         .route("/v1/deployment", get(deployment::<S, L>))
         .route("/v1/packs", get(list_packs::<S, L>))
+        .route("/v1/guarantees", get(list_guarantees::<S, L>))
+        .route(
+            "/v1/guarantees/{id}/resources/{resource_digest}",
+            get(shared_exposure::<S, L>),
+        )
         .route("/v1/config", get(running_config::<S, L>))
         .route("/v1/config/validate", post(validate_config::<S, L>))
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
