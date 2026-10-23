@@ -150,4 +150,4 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 
 ## Open decisions for the maintainers
 
-- **License.** Decided for this runtime: Apache-2.0 for code, CC BY 4.0 for prose, the name and logo under `TRADEMARKS.md`. The spec repository and website still say "All rights reserved" and need the matching change there. Crates stay `publish = false` until a release is cut.
+- **License.** Decided for this runtime: Apache-2.0 for code, CC BY 4.0 for prose, the name and logo under `TRADEMARKS.md`. The spec repository matched it on 2026-10-22 (CC BY 4.0 prose, Apache-2.0 reference code, schemas and fixtures) but is not yet public. Crates stay `publish = false` until a release is cut.

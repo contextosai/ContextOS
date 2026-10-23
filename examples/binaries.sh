@@ -1,0 +1,34 @@
+# Sourced by the examples: `contextos_binaries <profile> <binary>...` exports
+# CONTEXTOS_BIN, the directory holding those binaries. A release archive ships them in
+# bin/, so its examples need no Rust toolchain; CONTEXTOS_BIN may also name your own
+# directory. Otherwise they are built from source with cargo. Run from the repo or
+# archive root.
+contextos_binaries() {
+  local profile="$1" binary
+  shift
+  if [ -z "${CONTEXTOS_BIN:-}" ]; then
+    if [ -x bin/contextosd ]; then
+      CONTEXTOS_BIN="$PWD/bin"
+    else
+      CONTEXTOS_BUILD_PROFILE="$profile"
+      CONTEXTOS_BIN="$PWD/target/$profile"
+    fi
+  fi
+  # Once building, later calls build what they need into the same profile.
+  if [ -n "${CONTEXTOS_BUILD_PROFILE:-}" ]; then
+    local packages=()
+    for binary in "$@"; do packages+=(-p "$binary"); done
+    if [ "$CONTEXTOS_BUILD_PROFILE" = release ]; then
+      cargo build --release -q "${packages[@]}"
+    else
+      cargo build -q "${packages[@]}"
+    fi
+  fi
+  for binary in "$@"; do
+    if [ ! -x "$CONTEXTOS_BIN/$binary" ]; then
+      echo "$binary not found in $CONTEXTOS_BIN (set CONTEXTOS_BIN or use a release archive)" >&2
+      exit 1
+    fi
+  done
+  export CONTEXTOS_BIN
+}

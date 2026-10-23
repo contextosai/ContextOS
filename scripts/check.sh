@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The full pre-commit gate: formatting, lint, every test suite, the Tower UI, both HTTP
-# clients end to end and the examples (including Tower over a live runtime). Each step stops the script on failure.
+# clients end to end, the examples (including Tower over a live runtime) and a release
+# archive run on its own. Each step stops the script on failure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 step() { echo "== $1"; }
@@ -25,7 +26,7 @@ step fmt;     cargo fmt --all --check                                   || fail 
 step clippy;  cargo clippy --workspace --all-targets -- -D warnings     || fail clippy
 # The OTLP integration test observes INFO request spans, independently of shell logging preferences.
 step tests;   RUST_LOG=info cargo test -q --workspace                    || fail tests
-step build;   cargo build --release -q -p contextosd -p ctx             || fail build
+step build;   cargo build --release -q -p contextosd -p ctx -p towerd   || fail build
 step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/dev/null && npm test -s >/dev/null) || fail "tower console"
 step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
@@ -34,4 +35,5 @@ step shared-guarantees; check_example examples/shared-guarantees/run.sh "Offline
 step agent-loop; check_example examples/agent-loop/run.sh "run completed" || fail "agent loop"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
 step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || fail "tower example"
+step archive;    check_example scripts/check-archive.sh "Offline audit verification:" || fail "release archive"
 echo "ALL CHECKS PASSED"

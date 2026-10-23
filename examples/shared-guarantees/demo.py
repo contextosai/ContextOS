@@ -17,6 +17,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
+# Set by run.sh: a release archive's bin/ or a fresh cargo build.
+BIN = Path(os.environ.get("CONTEXTOS_BIN", ROOT / "target/debug"))
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
 
 
@@ -97,7 +99,7 @@ unit = "INR_minor"
             (tmp / "runtime.toml").write_text(config)
             with (tmp / "server.log").open("w") as log:
                 process = subprocess.Popen(
-                    [str(ROOT / "target/debug/contextosd"), "--config", str(tmp / "runtime.toml")],
+                    [str(BIN / "contextosd"), "--config", str(tmp / "runtime.toml")],
                     cwd=ROOT, stdout=log, stderr=log,
                     env={**os.environ, "CONTEXTOS_AUDIT_SEED": "11" * 32, "RUST_LOG": "warn"})
 
@@ -193,7 +195,7 @@ unit = "INR_minor"
                 (tmp / "entries.json").write_text(json.dumps(entries))
                 (tmp / "keys.json").write_text(json.dumps(keys))
                 verified = subprocess.run(
-                    [str(ROOT / "target/debug/ctx"), "audit-verify", "--entries", str(tmp / "entries.json"),
+                    [str(BIN / "ctx"), "audit-verify", "--entries", str(tmp / "entries.json"),
                      "--keys", str(tmp / "keys.json")], check=True, capture_output=True, text=True)
                 proof = json.loads(verified.stdout)
                 assert proof["verified"] is True, proof

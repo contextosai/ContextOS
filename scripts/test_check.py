@@ -9,11 +9,15 @@ import unittest
 
 
 class CheckScriptTests(unittest.TestCase):
-    def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, marker=True, large_output=False):
+    def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, archive_exit=0, marker=True,
+                 large_output=False):
         with tempfile.TemporaryDirectory(prefix="contextos-check-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
             shutil.copyfile(Path(__file__).with_name("check.sh"), root / "scripts/check.sh")
+            (root / "scripts/check-archive.sh").write_text(
+                f"#!/usr/bin/env bash\necho 'Offline audit verification:'\nexit {archive_exit}\n"
+            )
             (root / "tower").mkdir()
             tools = root / "bin"
             tools.mkdir()
@@ -58,6 +62,12 @@ class CheckScriptTests(unittest.TestCase):
         result = self.run_gate(tower_exit=9)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("FAILED: tower example", result.stdout)
+        self.assertNotIn("ALL CHECKS PASSED", result.stdout)
+
+    def test_archive_failure_fails_gate(self):
+        result = self.run_gate(archive_exit=3)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("FAILED: release archive", result.stdout)
         self.assertNotIn("ALL CHECKS PASSED", result.stdout)
 
     def test_missing_success_message_fails_gate(self):

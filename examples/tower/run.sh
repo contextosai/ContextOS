@@ -5,7 +5,7 @@
 # and sign in with a key from examples/tower/towerd.toml. Run from the repo root.
 set -euo pipefail
 source examples/dev-env.sh
-cargo build --release -q -p towerd
+contextos_binaries release towerd
 [ -f tower/dist/index.html ] || (cd tower && npm ci --no-audit --no-fund -s && npm run -s build)
 OPS="dev-ops-0123456789abcdef0123456789abcdef"
 api() { curl -sS -H 'content-type: application/json' "$@"; }
@@ -25,7 +25,7 @@ export TOWER_JOURNAL_SEED="$(python3 -c 'print("22"*32)')"   # development seed 
 export TOWER_SOURCE_TOKEN="dev-tower-0123456789abcdef0123456789abcd"
 export TOWER_CONTROL_TOKEN="$OPS"
 TOWER_LOG="$(mktemp)"
-./target/release/towerd --config "$TOWER_CONFIG" > "$TOWER_LOG" 2>&1 & TOWER=$!
+"$CONTEXTOS_BIN/towerd" --config "$TOWER_CONFIG" > "$TOWER_LOG" 2>&1 & TOWER=$!
 trap 'exec 2>/dev/null; kill $TOWER $SERVICES $SERVER; wait; rm -f "$CONFIG" "$LOG" "$TOWER_CONFIG" "$TOWER_LOG"' EXIT
 CISO="dev-ciso-0123456789abcdef0123456789abcde"
 for _ in $(seq 100); do

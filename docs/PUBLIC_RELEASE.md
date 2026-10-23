@@ -57,4 +57,6 @@ email reporting route in `SECURITY.md` works independently of the GitHub form.
   reproduce that bundle from the locked Rust and Tower dependency graphs.
 - Verify the emitted SBOMs, artifact provenance and signed container as described by
   the release workflow; test the download and source-build instructions independently.
+  The workflow runs the shared-guarantees demo from each unpacked archive without
+  cargo; also try the support-refund and Tower demos from a downloaded archive.
 - Publish the draft release only after every gate passes.

@@ -25,6 +25,11 @@ First release candidate of the ContextOS runtime.
 - Release archives and the container carry the project's licenses, attribution and
   trademark notices, plus reproducible Rust and Tower dependency license texts.
 - Alpha setup, support, contribution and private reporting guidance is explicit.
+- Release archives are self-contained: `ctx`, `contextosd` and `towerd` in `bin/`, the
+  Tower UI in `tower/dist`, the Python HTTP client, the runnable examples and the docs
+  (`scripts/package-release.sh`). Examples use `bin/` (or `CONTEXTOS_BIN`) before
+  building with cargo, so they run with Python, Bash and curl alone; the release
+  workflow runs the shared-guarantees demo from each unpacked archive.
 
 ### Tower: the governance plane
 - `towerd` governs an organisation's agents across ContextOS runtimes: it reads each
@@ -63,6 +68,10 @@ First release candidate of the ContextOS runtime.
   `json-logic-js` semantics and fail-visible errors.
 
 ### Runtime
+- Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
+  provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
+  persisted and reused on retry; MCP adapters may select the lossless
+  `result_projection = "mcp_result_v1"` (`flat` stays the default).
 - Compare-and-swap document stores and an append-only log (in-memory and PostgreSQL).
 - Ed25519-signed, hash-chained audit with DecisionRecords and replay packets; group
   commit for parallel appends.
