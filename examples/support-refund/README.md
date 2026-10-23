@@ -13,11 +13,13 @@ Expected output:
 == admit run
 {'run_id': 'run_demo_1', 'executor_generation': 2, 'features': {… 'external_effects': True, 'sensitive_data': True …}}
 == dispatch refund
-{'status': 'completed', 'output': {'refund_id': 'rf_ord_881'}, 'audit': [2, 3, 4]}
+{'status': 'completed', 'output': {'refund_id': 'rf_ord_881'}, 'audit': [3, 4, 5]}
 == replay the same operation (must not refund twice)
 {'status': 'paused', 'reasons': ['retry_unsafe']}
+== refund four times what the user asked (must not run)
+{'status': 'blocked', 'reasons': ['guardrail_denied', 'outside_task_authorization', 'task_scope_amount']}
 == verify audit chain
-{"entries":5,"verified":true}
+{"entries":7,"verified":true}
 ```
 
 What happened:
@@ -33,6 +35,11 @@ What happened:
    tool, recorded the outcome and settled the budget — appending three signed audit
    entries.
 3. **Replay** of the same operation was refused before reaching the provider.
+4. **Over-reach** was refused: the run carries what the user asked for (refund ord_881
+   to cus_77, up to INR 1200) as a task authorization, and a refund of INR 4800 falls
+   outside it, whatever the broker would grant. It never reached the provider, and the
+   pack's approval rule — which reads the amount the request *stated* — could not be
+   sidestepped by sending a larger one.
 
 Try: change `amount_minor` in `requests/tool_call.json` while keeping the idempotency
 key — the gateway rejects it as incompatible reuse. Raise `refund_amount` in

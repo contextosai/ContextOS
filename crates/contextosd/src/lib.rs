@@ -120,6 +120,7 @@ pub fn deployment_summary(config: &Config) -> Value {
             "trust_supplied_memory": config.server.mode == config::Mode::Development || config.guards.trust_supplied_memory,
             "require_tool_schemas": config.guards.require_tool_schemas,
             "completion_requires_scores": floors,
+            "require_task_authorization": config.guards.require_task_authorization,
         },
         "audit": {
             "key_id": config.audit.key_id,
@@ -215,6 +216,7 @@ where
         shadow_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         required_release_refs: config.required_release_refs(),
         require_user_role: config.require_user_role(),
+        require_task_authorization: config.guards.require_task_authorization,
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
     }))
 }

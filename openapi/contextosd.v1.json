@@ -3654,6 +3654,9 @@
           },
           "delegation": {
             "$ref": "https://contextosai.com/schemas/agent-delegation.v1.schema.json"
+          },
+          "task_authorization": {
+            "$ref": "#/components/schemas/TaskAuthorization"
           }
         }
       },
@@ -5136,6 +5139,50 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "TaskAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issued_by",
+          "scopes"
+        ],
+        "description": "What the run's principal authorized for this task, fixed at admission. Every effect must fall inside one of the scopes (checked on the actual action binding with the AuthorityGrant scope rules); it only narrows broker grants. A delegated run keeps its parent's.",
+        "properties": {
+          "issued_by": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/PrincipalRef"
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/AuthorityGrant/properties/scope"
+            },
+            "description": "AuthorityGrant scopes; root_run_id must be the run's root run."
+          },
+          "out_of_scope": {
+            "type": "string",
+            "enum": [
+              "deny",
+              "ask"
+            ],
+            "default": "deny",
+            "description": "`deny` refuses an action outside the scopes (`outside_task_authorization`); `ask` requires an exact approval of that action first (obligation `confirm_with_principal`)."
+          },
+          "read_only": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "scoped"
+            ],
+            "default": "allow",
+            "description": "Whether read-only capabilities must fall inside a scope too."
+          },
+          "confirmation_ref": {
+            "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/ArtifactRef"
           }
         }
       }

@@ -156,3 +156,29 @@ export declare function governedTool<A extends Record<string, Json>>(
     toolCallId?: (args: A) => string;
   },
 ): (args: A) => Promise<Record<string, Json>>;
+
+export interface PrincipalRef {
+  principal_id: string;
+  principal_type: "person" | "workload" | "agent";
+  trust_domain: string;
+  tenant_id: string;
+}
+
+export declare function taskScope(
+  rootRunId: string,
+  purposeId: string,
+  capabilityId: string,
+  options?: {
+    resources?: string[];
+    destinations?: string[];
+    classification?: string;
+    amount?: [number, string];
+    argumentConstraints?: Json[];
+  },
+): Json;
+
+export declare function taskAuthorization(
+  issuedBy: PrincipalRef,
+  scopes: Json[],
+  options?: { outOfScope?: "deny" | "ask"; readOnly?: "allow" | "scoped"; confirmationRef?: Json },
+): Json;

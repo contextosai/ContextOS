@@ -115,6 +115,7 @@ pub struct SupportConfig {
 /// Guards on agent behaviour.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GuardsConfig {
     /// Identical tool calls (same capability and arguments, new operation) a run may
     /// make before the next is refused with `loop_detected`; 0 disables the guard.
@@ -156,6 +157,11 @@ pub struct GuardsConfig {
     /// those floors, `false` opts out explicitly, a table sets them.
     #[serde(default)]
     pub completion_requires_scores: Option<CompletionScores>,
+    /// Refuse runs that can apply effects unless they state what their principal
+    /// authorized (`task_authorization`), so no effect relies on the agent's own reading
+    /// of the request.
+    #[serde(default)]
+    pub require_task_authorization: bool,
 }
 
 /// `[guards] completion_requires_scores`: on or off, or explicit floors.
@@ -203,6 +209,7 @@ impl Default for GuardsConfig {
             trust_supplied_memory: false,
             require_tool_schemas: false,
             completion_requires_scores: None,
+            require_task_authorization: false,
         }
     }
 }

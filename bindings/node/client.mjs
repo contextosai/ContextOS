@@ -370,3 +370,31 @@ export function governedTool(run, capabilityId, { approvalMode = "read_only", id
     toolCallId: toolCallId ? toolCallId(args) : undefined,
   });
 }
+
+/**
+ * One `AuthorityGrant` scope for a task authorization: this capability, on these
+ * resources, to these destinations, up to `amount` = `[minorUnits, currency]`.
+ */
+export function taskScope(rootRunId, purposeId, capabilityId, {
+  resources = [], destinations = [], classification = "CONFIDENTIAL", amount, argumentConstraints = [],
+} = {}) {
+  const scope = {
+    root_run_id: rootRunId, purpose_ids: [purposeId], capability_ids: [capabilityId],
+    resource_ids: [...resources], destination_ids: [...destinations], classification_labels: [classification],
+    argument_constraints: [...argumentConstraints],
+  };
+  if (amount) scope.amount_ceiling = { minor_units: amount[0], currency: amount[1] };
+  return scope;
+}
+
+/**
+ * What the principal authorized for a run, for `admit(body)` as
+ * `body.task_authorization`. Effects outside every scope are refused
+ * (`outOfScope: "deny"`) or wait for an exact approval (`"ask"`, thrown as
+ * `ToolPaused` with `kind === "approval"`).
+ */
+export function taskAuthorization(issuedBy, scopes, { outOfScope = "deny", readOnly = "allow", confirmationRef } = {}) {
+  const task = { issued_by: issuedBy, scopes, out_of_scope: outOfScope, read_only: readOnly };
+  if (confirmationRef) task.confirmation_ref = confirmationRef;
+  return task;
+}

@@ -98,6 +98,14 @@ First release candidate of the ContextOS runtime.
   `recovery.completion` (status endpoint, state pointer, confirmed/partial/not-applied
   states); unlisted states, missing jobs and failed lookups stay unknown. HTTP tool
   names `.` and `..` are no longer dispatched.
+- Task authorization: a run may be admitted with what its principal asked for
+  (`task_authorization`, `AuthorityGrant` scopes bound to the root run). Every effect
+  must fall inside it, checked on the actual binding; outside, the action is denied
+  or (`out_of_scope = "ask"`) waits for an exact approval first. Decisions,
+  approvals and attestations bind its pinned reference, delegations inherit it, and
+  `[guards] require_task_authorization` refuses effectful runs without one. The
+  kernel exposes `scope_mismatch` and `valid_authority_scope`; the Python and Node
+  clients add builders.
 
 ### Server and tools
 - `contextosd`: compile, contract negotiation, schema validation, run admission,

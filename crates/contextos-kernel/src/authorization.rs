@@ -486,26 +486,54 @@ fn contains(list: &Value, item: &Value) -> bool {
 }
 
 fn in_scope(binding: &Value, scope: &Value) -> bool {
-    contains(&scope["purpose_ids"], &binding["purpose_id"])
-        && contains(&scope["capability_ids"], &binding["capability_id"])
-        && subset(&binding["resource_ids"], &scope["resource_ids"])
-        && subset(&binding["destination_ids"], &scope["destination_ids"])
-        && contains(&scope["classification_labels"], &binding["action_risk"]["data_scope"])
-        && scope["argument_constraints"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .all(|constraint| {
-                pointer_value(&binding["arguments"], s(&constraint["pointer"]))
-                    .is_some_and(|v| satisfies(&v, constraint))
-            })
-        && match binding.get("amount") {
-            None => true,
-            Some(amount) => scope.get("amount_ceiling").is_some_and(|ceiling| {
-                amount["currency"] == ceiling["currency"]
-                    && as_safe_integer(&amount["minor_units"]) <= as_safe_integer(&ceiling["minor_units"])
-            }),
-        }
+    scope_mismatch(binding, scope).is_none()
+}
+
+/// Whether `value` is a well-formed `AuthorityGrant` scope.
+pub fn valid_authority_scope(value: &Value) -> bool {
+    valid_scope(value)
+}
+
+/// The first dimension in which an action binding falls outside a grant scope
+/// (`purpose`, `capability`, `resource`, `destination`, `classification`, `argument`
+/// or `amount`), or `None` when the scope covers it.
+pub fn scope_mismatch(binding: &Value, scope: &Value) -> Option<&'static str> {
+    if !contains(&scope["purpose_ids"], &binding["purpose_id"]) {
+        return Some("purpose");
+    }
+    if !contains(&scope["capability_ids"], &binding["capability_id"]) {
+        return Some("capability");
+    }
+    if !subset(&binding["resource_ids"], &scope["resource_ids"]) {
+        return Some("resource");
+    }
+    if !subset(&binding["destination_ids"], &scope["destination_ids"]) {
+        return Some("destination");
+    }
+    if !contains(&scope["classification_labels"], &binding["action_risk"]["data_scope"]) {
+        return Some("classification");
+    }
+    let arguments_hold = scope["argument_constraints"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .all(|constraint| {
+            pointer_value(&binding["arguments"], s(&constraint["pointer"])).is_some_and(|v| satisfies(&v, constraint))
+        });
+    if !arguments_hold {
+        return Some("argument");
+    }
+    let amount_holds = match binding.get("amount") {
+        None => true,
+        Some(amount) => scope.get("amount_ceiling").is_some_and(|ceiling| {
+            amount["currency"] == ceiling["currency"]
+                && as_safe_integer(&amount["minor_units"]) <= as_safe_integer(&ceiling["minor_units"])
+        }),
+    };
+    if !amount_holds {
+        return Some("amount");
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

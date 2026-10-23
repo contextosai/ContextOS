@@ -37,6 +37,7 @@ mod reconcile;
 mod revocations;
 mod scores;
 mod shared_guarantees;
+pub mod task_authorization;
 mod usage;
 
 use std::collections::HashMap;
@@ -79,6 +80,7 @@ pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::SharedGuarantee;
+pub use task_authorization::{OutOfScope, ReadOnly, TaskAuthorization};
 pub use usage::{UsageKind, UsageRefusal};
 
 /// Receipts at which the run's budget ledger is compacted before the next
@@ -737,7 +739,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "authority_refs": [], "purpose_id": manifest.purpose_id, "capability_id": manifest.capability_id,
             "capability_version": manifest.capability_version, "arguments": arguments,
             "resource_ids": resource_ids, "destination_ids": destination_ids, "evidence_refs": evidence_refs,
-            "policy_refs": admission.policy_refs, "profile_refs": admission.profile_refs,
+            "policy_refs": admission.binding_policy_refs(), "profile_refs": admission.profile_refs,
             "release_refs": admission.release_refs, "action_risk": manifest.action_risk,
         });
         if let Some(amount) = &manifest.amount {
@@ -900,10 +902,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
         let new_operation = existing_ledger.is_none();
-        let policy_outcomes = match policy_outcomes {
+        let mut policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
             Err(e) => return Ok(p.stop("blocked", vec!["policy_unavailable".into()], &e.to_string())),
         };
+        // What the principal authorized, checked on the actual binding: an action
+        // outside it is denied or needs an exact approval, whatever the request stated.
+        let mut outside_task = Vec::new();
+        for task in &admission.task_authorizations {
+            let checked = task.check(&admission.run_id, &binding, manifest.action_risk.effect);
+            policy_outcomes.push(checked.outcome);
+            for code in checked.reason_codes {
+                if !outside_task.contains(&code) {
+                    outside_task.push(code);
+                }
+            }
+        }
         let constraint_observations = match constraint_observations {
             Ok(observations) => observations,
             Err(e) => return Ok(p.stop("blocked", vec!["constraints_unavailable".into()], &e.to_string())),
@@ -963,6 +977,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         p.report.audit_sequences.push(entry.sequence);
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
+        p.report.reason_codes.extend(outside_task);
         // Policy obligations go back to the orchestrator whatever the verdict; they are
         // discharged independently of it.
         p.report
