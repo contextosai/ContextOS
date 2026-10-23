@@ -131,6 +131,90 @@ async fn mcp_success_carries_protocol_meta_and_scoped_credentials() {
     assert_eq!(body["params"]["arguments"]["amount_minor"], 420_000);
 }
 
+async fn mcp_v1(url: &str, effect: &str) -> contextos_gateway::AdapterResponse {
+    McpAdapter::new(url, policy(), Arc::new(Broker), "contextos-test")
+        .unwrap()
+        .with_projection(ResultProjection::McpResultV1)
+        .invoke(&manifest(effect), &call())
+        .await
+}
+
+#[tokio::test]
+async fn mcp_flat_projection_is_unchanged_by_default() {
+    let (url, _) = server(|r| {
+        rpc_result(
+            r,
+            json!({"content": [{"type": "text", "text": "shown"}], "structuredContent": {"content": "business"}}),
+        )
+    })
+    .await;
+    // The original mapping: presentation replaces a structured member named `content`.
+    assert_eq!(
+        mcp(&url, "external_state").await.output["content"],
+        json!([{"type": "text", "text": "shown"}])
+    );
+}
+
+#[tokio::test]
+async fn mcp_result_v1_preserves_structured_content_and_presentation() {
+    let presentation =
+        json!([{"type": "text", "text": "shown"}, {"type": "image", "data": "AA==", "mimeType": "image/png"}]);
+    let (url, _) = server(|r| {
+        rpc_result(
+            r,
+            json!({"content": [{"type": "text", "text": "shown"}, {"type": "image", "data": "AA==", "mimeType": "image/png"}],
+                   "structuredContent": {"content": "business", "is_error": "provider field"}}),
+        )
+    })
+    .await;
+    let response = mcp_v1(&url, "external_state").await;
+    assert_eq!(response.outcome, EffectOutcome::Confirmed);
+    assert_eq!(
+        Value::Object(response.output),
+        json!({"mcp_result": {
+            "structured_content_present": true,
+            "structured_content": {"content": "business", "is_error": "provider field"},
+            "content": presentation, "is_error": false,
+        }})
+    );
+
+    for (structured, present) in [
+        (Some(json!([1, 2])), true),
+        (Some(json!("scalar")), true),
+        (Some(json!(7)), true),
+        (Some(Value::Null), true),
+        (None, false),
+    ] {
+        let result = match &structured {
+            Some(v) => json!({"content": [], "structuredContent": v}),
+            None => json!({"content": []}),
+        };
+        let router = Router::new().fallback(post(move |body: String| {
+            let result = result.clone();
+            async move { rpc_result(&serde_json::from_str(&body).unwrap(), result) }
+        }));
+        let url = serve(router).await;
+        let mapped = &mcp_v1(&url, "external_state").await.output["mcp_result"];
+        assert_eq!(mapped["structured_content_present"], present, "{structured:?}");
+        assert_eq!(mapped["structured_content"], structured.unwrap_or(Value::Null));
+    }
+}
+
+#[tokio::test]
+async fn mcp_result_v1_tool_error_after_possible_write_stays_unknown() {
+    let (url, _) = server(|r| {
+        rpc_result(
+            r,
+            json!({"isError": true, "content": [{"type": "text", "text": "timeout"}], "structuredContent": {"refund_id": "rf_1"}}),
+        )
+    })
+    .await;
+    let response = mcp_v1(&url, "external_state").await;
+    assert_eq!((response.outcome, response.definitive), (EffectOutcome::Unknown, false));
+    assert_eq!(response.output["mcp_result"]["is_error"], true);
+    assert_eq!(response.output["mcp_result"]["structured_content"]["refund_id"], "rf_1");
+}
+
 #[tokio::test]
 async fn mcp_tool_errors_depend_on_effect() {
     let (url, _) = server(|r| rpc_result(r, json!({"content": [], "isError": true}))).await;
@@ -287,6 +371,25 @@ async fn http_status_mapping_and_headers() {
             expected,
             "{status}"
         );
+    }
+    // Acceptance is not completion: a queued or partial response leaves the effect
+    // unknown and keeps the provider's job id for reconciliation.
+    for status in [202, 206, 207] {
+        let router = Router::new().fallback(post(move || async move {
+            (
+                StatusCode::from_u16(status).unwrap(),
+                json_response(json!({"id": "job_4", "state": "pending"})),
+            )
+        }));
+        let url = serve(router).await;
+        let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
+        let response = adapter.invoke(&manifest("external_state"), &call()).await;
+        assert_eq!(
+            (response.outcome, response.definitive, response.external_ref.as_deref()),
+            (EffectOutcome::Unknown, false, Some("job_4")),
+            "{status}"
+        );
+        assert_eq!(response.output["state"], "pending");
     }
     let mut traversal = manifest("external_state");
     traversal.protocol_tool = "../admin".into();

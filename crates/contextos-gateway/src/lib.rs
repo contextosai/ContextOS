@@ -294,11 +294,28 @@ impl Pipeline<'_> {
     }
 }
 
+/// The provider idempotency key for a new operation. Operation ids are unique only
+/// within a run, so the key is a domain-separated digest of tenant, run and operation:
+/// distinct operations stay independent in a provider namespace shared across runs and
+/// tenants, and the key exposes none of those identifiers. The `v1` label versions the
+/// derivation; retries reuse the key persisted with the operation instead.
+pub fn provider_idempotency_key(tenant_id: &str, run_id: &str, operation_id: &str) -> String {
+    use contextos_contract::canonical::{quote, sha256_text};
+    // JSON strings are self-delimiting, so no identifier can shift a field boundary.
+    let digest = sha256_text(&format!(
+        "[\"contextos.provider-key.v1\",{},{},{}]",
+        quote(tenant_id),
+        quote(run_id),
+        quote(operation_id)
+    ));
+    format!("ctxos:v1:{}", &digest[7..])
+}
+
 /// Each operation has its own ledger document, so per-effect cost is independent of
 /// how many effects the run has made and parallel operations never contend. The
 /// kernel evaluates the projection holding just this operation; the cross-operation
 /// checks it would otherwise perform hold by construction here: attempt ids are
-/// fresh, provider idempotency keys derive from the operation id, and compensation
+/// fresh, provider idempotency keys derive from the run-scoped operation identity, and compensation
 /// is not dispatched through this path.
 pub fn operation_ledger_key(admission: &RunAdmission, operation_id: &str) -> DocKey {
     let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id));
@@ -1081,6 +1098,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Remote stores seed the claim from this read instead of reading again.
         let seed_transitions = !self.store.reads_are_cheap();
         let ledger_exists = existing_ledger.is_some();
+        // A retry recovers the provider key persisted with its operation unchanged, so a
+        // derivation change can never mint a second key for an unresolved operation.
+        let mut persisted_key = None;
         let mut claim_seed = existing_ledger
             .as_ref()
             .filter(|_| seed_transitions)
@@ -1092,6 +1112,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .flatten()
                 .find(|op| op["intent"]["operation_id"] == operation_id.as_str());
             if let Some(op) = existing {
+                persisted_key = op["intent"]["idempotency_key"].as_str().map(str::to_owned);
                 if op["outcome"] == "unknown" && self.has_shared_guarantee(&manifest.capability_id) {
                     p.report.obligations.push("reconcile_existing_operation".into());
                     return Ok(p.stop(
@@ -1175,7 +1196,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
         // 5. Claim.
         let idempotency = manifest.recovery.idempotency.as_ref();
-        let provider_key = idempotency.map(|_| format!("ctxos:{operation_id}"));
+        let provider_key = idempotency.map(|_| {
+            persisted_key
+                .unwrap_or_else(|| provider_idempotency_key(&admission.tenant_id, &admission.run_id, &operation_id))
+        });
         let proof = match (&self.ports.idempotency, &provider_key) {
             (Some(provider), Some(key)) => match provider.proof(manifest, &operation_id, &action_digest, key).await {
                 Ok(proof) => proof.unwrap_or(Value::Null),

@@ -3281,3 +3281,18 @@ async fn identical_effects_racing_under_different_keys_dispatch_once() {
         "exactly one reaches the provider"
     );
 }
+
+#[test]
+fn provider_keys_separate_runs_and_tenants_reusing_an_operation_id() {
+    let key = provider_idempotency_key(TENANT, "run_1", "refund:ord_881");
+    assert_eq!(key, provider_idempotency_key(TENANT, "run_1", "refund:ord_881"));
+    assert_ne!(key, provider_idempotency_key(TENANT, "run_2", "refund:ord_881"));
+    assert_ne!(key, provider_idempotency_key("tenant_other", "run_1", "refund:ord_881"));
+    // Field boundaries are unambiguous, and no identifier leaks into the key.
+    assert_ne!(
+        provider_idempotency_key("a", "b\u{0}c", "d"),
+        provider_idempotency_key("a\u{0}b", "c", "d")
+    );
+    assert!(key.starts_with("ctxos:v1:") && key.len() == "ctxos:v1:".len() + 64);
+    assert!(!key.contains("ord_881") && !key.contains("run_1"));
+}
