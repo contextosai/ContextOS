@@ -12,6 +12,11 @@
 //! | anything else (3xx, 408, 409, 429, 5xx), lost or oversized response | unknown |
 //! | connection never established | not dispatched (definitive) |
 //!
+//! Reconciliation queries an accepted job only when the pinned manifest declares the
+//! provider's completion contract (`recovery.completion`): `GET
+//! {endpoint}/{status_tool}/{external_ref}`, mapping the reported state to the listed
+//! outcome. An unlisted state, a missing job (404) or a failed lookup stays unknown.
+//!
 //! Acceptance is not completion (RFC 9110 §15.3.3): a 202 says the provider queued the
 //! work, not that the effect's postcondition holds, so the outcome stays unknown until
 //! reconciliation establishes it.
@@ -20,7 +25,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
-use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome};
+use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome, is_path_segment};
 use serde_json::{Map, Value};
 use url::Url;
 
@@ -83,12 +88,7 @@ pub(crate) fn object(value: Value) -> Map<String, Value> {
 impl Adapter for HttpAdapter {
     async fn invoke(&self, manifest: &CapabilityManifest, call: &AdapterCall) -> AdapterResponse {
         // Tool names are path segments only; they cannot address another origin or path.
-        if manifest.protocol_tool.is_empty()
-            || !manifest
-                .protocol_tool
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-        {
+        if !is_path_segment(&manifest.protocol_tool) {
             return not_dispatched();
         }
         let Ok(url) = self.endpoint.join(&manifest.protocol_tool) else {
@@ -148,6 +148,80 @@ impl Adapter for HttpAdapter {
                     },
                 }
             }
+        }
+    }
+
+    /// Looks up an accepted job when the manifest declares how; otherwise only an
+    /// operator can reconcile.
+    async fn query(
+        &self,
+        manifest: &CapabilityManifest,
+        call: &AdapterCall,
+        external_ref: &str,
+    ) -> Option<AdapterResponse> {
+        let check = manifest.recovery.completion.as_ref()?;
+        Some(self.completion(manifest, call, check, external_ref).await)
+    }
+}
+
+impl HttpAdapter {
+    /// `GET {endpoint}/{status_tool}/{external_ref}` under the declared completion contract.
+    async fn completion(
+        &self,
+        manifest: &CapabilityManifest,
+        call: &AdapterCall,
+        check: &contextos_gateway::CompletionCheck,
+        external_ref: &str,
+    ) -> AdapterResponse {
+        if !is_path_segment(&check.status_tool) {
+            return AdapterResponse::unknown();
+        }
+        let Ok(mut url) = self.endpoint.join(&format!("{}/", check.status_tool)) else {
+            return AdapterResponse::unknown();
+        };
+        // The reference is percent-encoded as one segment: it cannot add path or query.
+        if let Ok(mut segments) = url.path_segments_mut() {
+            segments.pop_if_empty().push(external_ref);
+        } else {
+            return AdapterResponse::unknown();
+        }
+        let Ok(credential) = self.credentials.credential(manifest, call).await else {
+            return AdapterResponse::unknown();
+        };
+        let request = self
+            .client
+            .get(url)
+            .headers(governance_headers(call, credential.as_ref()));
+        let Exchange::Response { status: 200, body, .. } = send(
+            request,
+            Duration::from_millis(manifest.timeout_ms),
+            self.policy.max_response_bytes,
+        )
+        .await
+        else {
+            return AdapterResponse::unknown();
+        };
+        let Ok(value) = parse_strict(&body, self.policy.max_response_bytes) else {
+            return AdapterResponse::unknown();
+        };
+        let outcome = value
+            .pointer(&check.state_pointer)
+            .and_then(Value::as_str)
+            .and_then(|state| check.outcome(state));
+        let output = object(value);
+        match outcome {
+            Some(outcome) => AdapterResponse {
+                outcome,
+                definitive: true,
+                output,
+                external_ref: Some(external_ref.to_owned()),
+                cost_units: None,
+            },
+            None => AdapterResponse {
+                output,
+                external_ref: Some(external_ref.to_owned()),
+                ..AdapterResponse::unknown()
+            },
         }
     }
 }

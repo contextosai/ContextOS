@@ -68,7 +68,7 @@ pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
-pub use manifest::{CapabilityManifest, ManifestError, RecoveryStrategy};
+pub use manifest::{CapabilityManifest, CompletionCheck, ManifestError, RecoveryStrategy, is_path_segment};
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
 pub use ports::{
