@@ -46,6 +46,13 @@ effect, reconciles it by provider query, and verifies the exported audit offline
 See the [shared guarantees demo](examples/shared-guarantees/README.md) and
 [configuration and recovery guide](docs/SHARED_GUARANTEES.md).
 
+Without Rust: download the archive for your platform from a
+[release](https://github.com/contextosai/ContextOS/releases), check it with
+`shasum -a 256 -c` and `gh attestation verify <archive> --repo contextosai/ContextOS`,
+unpack it and run the same script from its directory. The archive carries `ctx`,
+`contextosd`, `towerd`, the Tower UI and the examples below, so it needs only Python,
+Bash and curl.
+
 For the original authorization and duplicate-operation walkthrough, run
 `./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).
 
