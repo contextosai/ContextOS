@@ -164,7 +164,7 @@ fn env_credential(var: Option<&String>) -> Result<Option<contextos_adapters::Cre
 pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<DispatchSetup>, String> {
     use contextos_adapters::{
         HttpAdapter, McpAdapter, NoCredentials, RemoteApprovals, RemoteAuthority, RemoteConstraints, RemoteFacts,
-        RemoteIdempotency, TransportPolicy,
+        RemoteIdempotency, ResultProjection, TransportPolicy,
     };
     let Some(providers) = &config.providers else {
         if !config.guarantees.is_empty() {
@@ -217,10 +217,21 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             Some(credential) => Arc::new(EnvCredential(credential)),
             None => Arc::new(NoCredentials),
         };
+        let projection = match adapter.result_projection {
+            None | Some(crate::config::ResultProjectionConfig::Flat) => ResultProjection::Flat,
+            Some(crate::config::ResultProjectionConfig::McpResultV1) => ResultProjection::McpResultV1,
+        };
+        if adapter.kind != crate::config::AdapterKind::Mcp && adapter.result_projection.is_some() {
+            return Err(format!(
+                "{}: result_projection applies only to mcp adapters",
+                adapter.id
+            ));
+        }
         let built: Arc<dyn Adapter> = match adapter.kind {
             crate::config::AdapterKind::Mcp => Arc::new(
                 McpAdapter::new(&adapter.endpoint, policy.clone(), broker, "contextosd")
-                    .map_err(|e| format!("{}: {e}", adapter.id))?,
+                    .map_err(|e| format!("{}: {e}", adapter.id))?
+                    .with_projection(projection),
             ),
             crate::config::AdapterKind::Http => Arc::new(
                 HttpAdapter::new(&adapter.endpoint, policy.clone(), broker)

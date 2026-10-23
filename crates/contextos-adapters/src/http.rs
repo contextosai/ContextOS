@@ -6,10 +6,15 @@
 //!
 //! | Response | Outcome |
 //! |---|---|
-//! | 2xx | confirmed (definitive) |
+//! | 2xx except 202, 206, 207 | confirmed (definitive) |
+//! | 202, 206, 207 (accepted, partial or multi-status) | unknown; a response `id` becomes the external reference |
 //! | 400, 401, 403, 404, 405, 413, 415, 422 | not applied (definitive; rejected before execution) |
 //! | anything else (3xx, 408, 409, 429, 5xx), lost or oversized response | unknown |
 //! | connection never established | not dispatched (definitive) |
+//!
+//! Acceptance is not completion (RFC 9110 §15.3.3): a 202 says the provider queued the
+//! work, not that the effect's postcondition holds, so the outcome stays unknown until
+//! reconciliation establishes it.
 
 use std::time::Duration;
 
@@ -24,6 +29,9 @@ use crate::transport::{
 };
 
 const REJECTED_BEFORE_EXECUTION: [u16; 8] = [400, 401, 403, 404, 405, 413, 415, 422];
+/// Successful statuses that do not establish the effect: accepted, partial content and
+/// multi-status.
+const UNFINISHED: [u16; 3] = [202, 206, 207];
 
 pub struct HttpAdapter {
     endpoint: Url,
@@ -115,6 +123,11 @@ impl Adapter for HttpAdapter {
                 };
                 let external_ref = output.get("id").and_then(Value::as_str).map(str::to_owned);
                 match status {
+                    s if UNFINISHED.contains(&s) => AdapterResponse {
+                        output,
+                        external_ref,
+                        ..AdapterResponse::unknown()
+                    },
                     200..=299 => AdapterResponse {
                         outcome: EffectOutcome::Confirmed,
                         definitive: true,

@@ -281,6 +281,17 @@ pub struct AdapterConfig {
     /// Environment variable holding the provider credential issued by your broker.
     #[serde(default)]
     pub token_env: Option<String>,
+    /// MCP only: how a tool result becomes the tool output. `flat` (the default) is the
+    /// original mapping; `mcp_result_v1` preserves structured content losslessly.
+    #[serde(default)]
+    pub result_projection: Option<ResultProjectionConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultProjectionConfig {
+    Flat,
+    McpResultV1,
 }
 
 /// One registered result schema.

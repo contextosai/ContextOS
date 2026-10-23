@@ -304,8 +304,8 @@ round. The responder and a digest of the answers are audited, not the answers.
 ### Reconciling unknown effects
 
 A `paused` result with `reconcile_effect_before_retry` means the effect may or may not
-have happened (lost response, timeout, an effectful tool error, or an MCP task still
-running). The operation's budget stays reserved and retries are refused until it is
+have happened (lost response, timeout, an effectful tool error, an MCP task still
+running, or an HTTP `202`/`206`/`207`: acceptance is not completion). The operation's budget stays reserved and retries are refused until it is
 resolved:
 
 ```sh
@@ -379,6 +379,29 @@ minimal, development-only implementation):
 Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); protocol
 discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
 HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
+
+Under `idempotent_retry`, the provider key (`Idempotency-Key`, MCP
+`io.contextos/idempotencyKey`) is `ctxos:v1:<sha256>` over tenant, run and operation id,
+so runs reusing an `idempotency_key` never alias at a provider shared across runs or
+tenants; it is persisted with the operation and reused unchanged on every retry
+(operations claimed before this format keep their original `ctxos:<operation_id>` key).
+
+An MCP adapter maps a finished tool result into the tool output with a selectable
+projection. `flat` (the default, for existing output schemas) puts `structuredContent`
+members at the top level and presentation under `content`, so a structured member named
+`content` is lost and absent and `null` structured content look alike. New capabilities
+should select the lossless projection, and existing ones migrate their output schemas
+when they switch:
+
+```toml
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"
+endpoint = "https://payments.internal/mcp"
+result_projection = "mcp_result_v1"
+# output: {"mcp_result": {"structured_content_present", "structured_content",
+#          "content", "is_error"}}
+```
 
 ## 5. Gate Context Pack releases
 

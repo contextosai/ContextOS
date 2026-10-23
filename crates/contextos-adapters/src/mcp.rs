@@ -23,6 +23,11 @@
 //! | JSON-RPC error -32700/-32600/-32601/-32602, incl. unsupported protocol version | not applied (definitive) |
 //! | other errors, id mismatch, malformed or lost response | unknown |
 //! | connection never established | not dispatched (definitive) |
+//!
+//! A finished result maps into the object-only tool output through a selected
+//! [`ResultProjection`]. `Flat` is the original mapping and stays the default so
+//! existing output schemas keep validating; `McpResultV1` preserves the result
+//! losslessly and is what new capabilities should select.
 
 use std::time::Duration;
 
@@ -43,12 +48,28 @@ use crate::transport::{
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
 const PRE_EXECUTION_ERRORS: [i64; 4] = [-32700, -32600, -32601, -32602];
 
+/// How a finished `CallToolResult` becomes the tool output object.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ResultProjection {
+    /// The original mapping: `structuredContent` members at the top level (a non-object
+    /// value under `value`) and presentation under `content`. Lossy: a structured
+    /// member named `content` is overwritten, and absent and `null` structured content
+    /// are indistinguishable.
+    #[default]
+    Flat,
+    /// `{"mcp_result": {...}}`: structured content kept whole (any JSON value) beside
+    /// its presence flag, presentation content and the tool's error flag, so provider
+    /// data and adapter fields never share a namespace.
+    McpResultV1,
+}
+
 pub struct McpAdapter {
     endpoint: Url,
     policy: TransportPolicy,
     client: reqwest::Client,
     credentials: std::sync::Arc<dyn CredentialBroker>,
     client_name: String,
+    projection: ResultProjection,
 }
 
 impl std::fmt::Debug for McpAdapter {
@@ -72,7 +93,16 @@ impl McpAdapter {
             policy,
             credentials,
             client_name: client_name.into(),
+            projection: ResultProjection::Flat,
         })
+    }
+
+    /// Selects the result projection. Changing it changes the output shape consumers
+    /// and capability output schemas see, so it is a mapping revision, not a default.
+    #[must_use]
+    pub fn with_projection(mut self, projection: ResultProjection) -> Self {
+        self.projection = projection;
+        self
     }
 }
 
@@ -187,12 +217,32 @@ impl McpAdapter {
 }
 
 /// Maps a finished `CallToolResult`.
-fn tool_result(manifest: &CapabilityManifest, result: &Value) -> AdapterResponse {
-    let mut output = object(result.get("structuredContent").cloned().unwrap_or_else(|| json!({})));
-    if let Some(content) = result.get("content") {
-        output.insert("content".into(), content.clone());
-    }
-    if result["isError"] == true {
+fn tool_result(projection: ResultProjection, manifest: &CapabilityManifest, result: &Value) -> AdapterResponse {
+    let is_error = result["isError"] == true;
+    let output = match projection {
+        ResultProjection::Flat => {
+            let mut output = object(result.get("structuredContent").cloned().unwrap_or_else(|| json!({})));
+            if let Some(content) = result.get("content") {
+                output.insert("content".into(), content.clone());
+            }
+            output
+        }
+        ResultProjection::McpResultV1 => {
+            let structured = result.get("structuredContent");
+            let mut output = Map::new();
+            output.insert(
+                "mcp_result".into(),
+                json!({
+                    "structured_content_present": structured.is_some(),
+                    "structured_content": structured.cloned().unwrap_or(Value::Null),
+                    "content": result.get("content").cloned().unwrap_or(Value::Null),
+                    "is_error": is_error,
+                }),
+            );
+            output
+        }
+    };
+    if is_error {
         // An effectful tool that reports an error may still have partially acted.
         let read_only = manifest.action_risk.effect == ActionEffect::None;
         return AdapterResponse {
@@ -267,7 +317,7 @@ impl Adapter for McpAdapter {
                 ..AdapterResponse::unknown()
             };
         }
-        tool_result(manifest, result)
+        tool_result(self.projection, manifest, result)
     }
 
     /// `tasks/get` for a task handle. Unfinished tasks stay unknown; `failed` and
@@ -295,14 +345,17 @@ impl Adapter for McpAdapter {
         let status = task["status"].as_str().unwrap_or_default();
         let mut mapped = match status {
             "completed" => tool_result(
+                self.projection,
                 manifest,
                 task.get("result")
                     .or_else(|| result.get("result"))
                     .unwrap_or(&Value::Null),
             ),
-            "failed" | "cancelled" => {
-                tool_result(manifest, &json!({"isError": true, "content": task["statusMessage"]}))
-            }
+            "failed" | "cancelled" => tool_result(
+                self.projection,
+                manifest,
+                &json!({"isError": true, "content": task["statusMessage"]}),
+            ),
             _ => AdapterResponse::unknown(),
         };
         mapped.output.insert("task_status".into(), json!(status));
