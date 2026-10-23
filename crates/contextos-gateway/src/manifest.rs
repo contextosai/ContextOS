@@ -53,6 +53,32 @@ pub struct Recovery {
     pub retry_delays_seconds: Vec<u64>,
     #[serde(default)]
     pub idempotency: Option<ProviderIdempotency>,
+    /// How to look up an accepted, unfinished effect at the provider, for adapters
+    /// that have no protocol-level task status (HTTP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion: Option<CompletionCheck>,
+}
+
+/// The provider's reviewed completion contract for an accepted job: the status
+/// endpoint, where the job state is in its response and which states are final.
+/// Only listed states settle the effect; any other state, a missing job or a failed
+/// lookup leaves it unknown, since absence does not prove the effect was not applied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionCheck {
+    /// Path segment of the status endpoint, queried as `{status_tool}/{external_ref}`.
+    pub status_tool: String,
+    /// JSON Pointer to the job state (a string) in the status response.
+    pub state_pointer: String,
+    /// States in which the declared effect holds.
+    pub confirmed: Vec<String>,
+    /// States in which the effect holds in part.
+    #[serde(default)]
+    pub partial: Vec<String>,
+    /// Terminal states in which the provider guarantees the job did not and will not
+    /// apply the effect.
+    #[serde(default)]
+    pub not_applied: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,6 +167,54 @@ pub enum ManifestError {
     InputSchema(String, String),
     #[error("capability {0} output_schema does not compile: {1}")]
     OutputSchema(String, String),
+    #[error("capability {0} completion check is invalid: {1}")]
+    Completion(String, &'static str),
+}
+
+impl CompletionCheck {
+    fn validate(&self) -> Result<(), &'static str> {
+        if !is_path_segment(&self.status_tool) {
+            return Err("status_tool must be a path segment of letters, digits, '.', '_' or '-'");
+        }
+        if !self.state_pointer.starts_with('/') {
+            return Err("state_pointer must be a JSON Pointer");
+        }
+        if self.confirmed.is_empty() {
+            return Err("confirmed must list at least one state");
+        }
+        let states = [&self.confirmed, &self.partial, &self.not_applied];
+        let mut seen = std::collections::HashSet::new();
+        if states
+            .iter()
+            .flat_map(|s| s.iter())
+            .any(|s| s.is_empty() || !seen.insert(s))
+        {
+            return Err("states must be non-empty and listed once");
+        }
+        Ok(())
+    }
+
+    /// The outcome a provider-reported job state establishes, if any.
+    pub fn outcome(&self, state: &str) -> Option<crate::EffectOutcome> {
+        let listed = |states: &[String]| states.iter().any(|s| s == state);
+        if listed(&self.confirmed) {
+            Some(crate::EffectOutcome::Confirmed)
+        } else if listed(&self.partial) {
+            Some(crate::EffectOutcome::Partial)
+        } else if listed(&self.not_applied) {
+            Some(crate::EffectOutcome::NotApplied)
+        } else {
+            None
+        }
+    }
+}
+
+/// A tool or endpoint name usable as one URL path segment.
+pub fn is_path_segment(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
 impl CapabilityManifest {
@@ -163,6 +237,11 @@ impl CapabilityManifest {
         }
         if self.recovery.strategy == RecoveryStrategy::IdempotentRetry && self.recovery.idempotency.is_none() {
             return Err(ManifestError::MissingIdempotency(id.clone()));
+        }
+        if let Some(completion) = &self.recovery.completion {
+            completion
+                .validate()
+                .map_err(|reason| ManifestError::Completion(id.clone(), reason))?;
         }
         if self.timeout_ms == 0 || self.timeout_ms > 600_000 {
             return Err(ManifestError::Timeout(id.clone()));

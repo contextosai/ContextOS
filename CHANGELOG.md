@@ -85,6 +85,10 @@ First release candidate of the ContextOS runtime.
 - MCP `2026-07-28` (stateless) and HTTP adapters with pinned HTTPS endpoints, no
   redirects and brokered credentials; remote authority, constraint and approval
   providers.
+- Accepted HTTP jobs can be reconciled by provider query when the manifest declares
+  `recovery.completion` (status endpoint, state pointer, confirmed/partial/not-applied
+  states); unlisted states, missing jobs and failed lookups stay unknown. HTTP tool
+  names `.` and `..` are no longer dispatched.
 
 ### Server and tools
 - `contextosd`: compile, contract negotiation, schema validation, run admission,

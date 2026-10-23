@@ -425,3 +425,107 @@ fn endpoints_are_pinned_and_secure() {
     assert!(McpAdapter::new("https://example.com/mcp", strict, Arc::new(NoCredentials), "t").is_ok());
     assert!(McpAdapter::new("http://example.com/mcp", policy(), Arc::new(NoCredentials), "t").is_err());
 }
+
+fn with_completion(mut manifest: CapabilityManifest) -> CapabilityManifest {
+    manifest.recovery.completion = Some(
+        serde_json::from_value(json!({"status_tool": "refund_status", "state_pointer": "/job/state",
+            "confirmed": ["succeeded"], "partial": ["partially_refunded"], "not_applied": ["canceled"]}))
+        .unwrap(),
+    );
+    manifest.validate().unwrap();
+    manifest
+}
+
+/// A status endpoint reporting `state` for every job, recording the requested paths.
+async fn status_server(state: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    let paths: Arc<Mutex<Vec<String>>> = Arc::default();
+    let log = paths.clone();
+    let router = Router::new().fallback(axum::routing::get(move |uri: axum::http::Uri| {
+        let log = log.clone();
+        async move {
+            log.lock().unwrap().push(uri.path().to_owned());
+            if state == "missing" {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+            json_response(json!({"job": {"id": "job_4", "state": state}}))
+        }
+    }));
+    (serve(router).await, paths)
+}
+
+#[tokio::test]
+async fn http_completion_check_settles_only_listed_states() {
+    for (state, expected) in [
+        ("succeeded", Some((EffectOutcome::Confirmed, true))),
+        ("partially_refunded", Some((EffectOutcome::Partial, true))),
+        ("canceled", Some((EffectOutcome::NotApplied, true))),
+        ("processing", Some((EffectOutcome::Unknown, false))),
+        // A missing job is not proof that the effect was not applied.
+        ("missing", Some((EffectOutcome::Unknown, false))),
+    ] {
+        let (url, paths) = status_server(state).await;
+        let adapter = HttpAdapter::new(&format!("{url}/api"), policy(), Arc::new(Broker)).unwrap();
+        let response = adapter
+            .query(&with_completion(manifest("external_state")), &call(), "job_4")
+            .await
+            .map(|r| (r.outcome, r.definitive));
+        assert_eq!(response, expected, "{state}");
+        assert_eq!(paths.lock().unwrap().as_slice(), ["/api/refund_status/job_4"]);
+    }
+}
+
+#[tokio::test]
+async fn http_completion_check_is_declared_and_confined() {
+    let (url, paths) = status_server("succeeded").await;
+    let adapter = HttpAdapter::new(&url, policy(), Arc::new(Broker)).unwrap();
+    // Without a declared contract the provider is not queried: only an operator reconciles.
+    assert!(
+        adapter
+            .query(&manifest("external_state"), &call(), "job_4")
+            .await
+            .is_none()
+    );
+    // A provider-chosen reference stays one encoded segment.
+    let response = adapter
+        .query(&with_completion(manifest("external_state")), &call(), "../admin?x=1")
+        .await
+        .unwrap();
+    assert_eq!(response.outcome, EffectOutcome::Confirmed);
+    assert_eq!(paths.lock().unwrap().as_slice(), ["/refund_status/..%2Fadmin%3Fx=1"]);
+    let mut dot = manifest("external_state");
+    dot.protocol_tool = "..".into();
+    assert_eq!(
+        adapter.invoke(&dot, &call()).await.outcome,
+        EffectOutcome::NotDispatched
+    );
+}
+
+#[test]
+fn completion_checks_are_reviewed() {
+    for (check, why) in [
+        (
+            json!({"status_tool": "..", "state_pointer": "/s", "confirmed": ["ok"]}),
+            "dot segment",
+        ),
+        (
+            json!({"status_tool": "a/b", "state_pointer": "/s", "confirmed": ["ok"]}),
+            "slash",
+        ),
+        (
+            json!({"status_tool": "st", "state_pointer": "s", "confirmed": ["ok"]}),
+            "pointer",
+        ),
+        (
+            json!({"status_tool": "st", "state_pointer": "/s", "confirmed": []}),
+            "no confirmed state",
+        ),
+        (
+            json!({"status_tool": "st", "state_pointer": "/s", "confirmed": ["ok"], "not_applied": ["ok"]}),
+            "overlap",
+        ),
+    ] {
+        let mut m = manifest("external_state");
+        m.recovery.completion = Some(serde_json::from_value(check).unwrap());
+        assert!(m.validate().is_err(), "{why}");
+    }
+}

@@ -726,6 +726,102 @@ async fn long_running_mcp_tasks_are_reconciled() {
 }
 
 #[tokio::test]
+async fn accepted_http_jobs_are_reconciled_through_the_declared_completion_check() {
+    // The provider accepts the refund (202) and reports the job's state on a status
+    // endpoint: processing on the first lookup, succeeded afterwards.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let (invoked, looked_up) = (calls.clone(), lookups.clone());
+    let provider = serve(
+        Router::new()
+            .route(
+                "/issue_refund",
+                post(move || {
+                    let invoked = invoked.clone();
+                    async move {
+                        invoked.fetch_add(1, Ordering::SeqCst);
+                        (axum::http::StatusCode::ACCEPTED, axum::Json(json!({"id": "job_e2e"})))
+                    }
+                }),
+            )
+            .route(
+                "/refund_status/{job}",
+                axum::routing::get(move |axum::extract::Path(job): axum::extract::Path<String>| {
+                    let looked_up = looked_up.clone();
+                    async move {
+                        let state = if looked_up.fetch_add(1, Ordering::SeqCst) == 0 {
+                            "processing"
+                        } else {
+                            "succeeded"
+                        };
+                        axum::Json(json!({"id": job, "state": state, "refund_id": "rf_async"}))
+                    }
+                }),
+            ),
+    )
+    .await;
+    let w = world_with(&ALL_CONTROLS, 1, |config| {
+        let path = &config.capabilities[0];
+        let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        manifest["recovery"] = json!({"strategy": "query", "max_attempts": 1, "retry_delays_seconds": [],
+            "completion": {"status_tool": "refund_status", "state_pointer": "/state",
+                "confirmed": ["succeeded"], "not_applied": ["canceled"]}});
+        let async_path = path.with_extension("async.json");
+        std::fs::write(&async_path, manifest.to_string()).unwrap();
+        config.capabilities[0] = async_path;
+        config.adapters[0].kind = contextosd::config::AdapterKind::Http;
+        config.adapters[0].endpoint.clone_from(&provider);
+    })
+    .await;
+    let http = executor_client(2);
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_async", 1200))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_async/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_async", "tc_1", 300))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    // Accepted is not applied: the effect stays unknown until the provider says so.
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    let operation_id = out["report"]["operation_id"].as_str().unwrap().to_owned();
+    let url = format!("{}/v1/runs/run_async/operations/{operation_id}/reconcile", w.base);
+    let reconcile = || async {
+        http.post(&url)
+            .bearer_auth("acme-key")
+            .json(&json!({"source": "provider"}))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap()
+    };
+    let pending = reconcile().await;
+    assert_eq!(pending["status"], "pending", "{pending}");
+    let resolved = reconcile().await;
+    assert_eq!(resolved["status"], "resolved", "{resolved}");
+    assert_eq!(resolved["outcome"], "confirmed");
+    assert_eq!(resolved["output"]["refund_id"], "rf_async");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "looking up the job never re-invokes the tool"
+    );
+    assert_eq!(lookups.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn tools_that_need_input_continue_the_same_operation() {
     let w = world(&ALL_CONTROLS).await;
     let http = executor_client(2);

@@ -309,13 +309,29 @@ running, or an HTTP `202`/`206`/`207`: acceptance is not completion). The operat
 resolved:
 
 ```sh
-# Ask the provider (MCP tasks/get on the task handle the attempt returned)
+# Ask the provider (MCP tasks/get on the task handle, or the HTTP status endpoint below)
 curl -X POST …/v1/runs/$RUN/operations/$OP/reconcile -d '{"source":"provider"}'
 # Or assert the outcome you verified, citing the evidence (recorded with your identity)
 curl -X POST …/v1/runs/$RUN/operations/$OP/reconcile -d '{"source":"operator",
   "outcome":"not_applied","evidence_ref":{"artifact_type":"provider_ledger_extract",
   "artifact_id":"payments-2026-10-20","version":"1","sha256":"sha256:…"}}'
 ```
+
+An HTTP provider that answers `202` can be queried too when the capability's reviewed
+manifest declares its completion contract. The adapter then sends
+`GET {endpoint}/{status_tool}/{id}`, where `id` is the `id` from the `202` body, and
+reads the job state at `state_pointer`:
+
+```json
+"recovery": {"strategy": "query", "max_attempts": 1, "retry_delays_seconds": [],
+  "completion": {"status_tool": "refund_status", "state_pointer": "/state",
+    "confirmed": ["succeeded"], "partial": ["partially_refunded"], "not_applied": ["canceled"]}}
+```
+
+Only listed states settle the effect. List under `not_applied` only terminal states in
+which the provider guarantees the job will never apply. Any other state, a missing job
+(`404`) or a failed lookup stays unknown, because absence is not proof of
+non-application.
 
 `status` is `resolved`, `pending` (still running), `no_change` (nothing unknown to
 resolve; conflicting facts need escalation) or `rejected` with reasons such as
