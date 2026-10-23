@@ -1,10 +1,11 @@
 //! What the principal authorized for this run.
 //!
 //! Broker grants say what an agent *may* do; a task authorization says what its
-//! principal asked for in this run ("refund order ord_881 for INR 1200"). It is fixed
-//! at admission, before the agent acts, as `AuthorityGrant` scopes, and every effect
-//! must also fall inside one of them: the kernel's own grant-scope check decides, on
-//! the actual action binding rather than on what the request stated. It only narrows
+//! principal asked for in this run ("refund order ord_881 for INR 1200"). It is set
+//! at admission, before the agent acts, as `AuthorityGrant` scopes, and changes only
+//! through an audited amendment ([`TaskAuthorization::change_from`] classifies it).
+//! Every effect must also fall inside one of them: the kernel's own grant-scope check
+//! decides, on the actual action binding rather than on what the request stated. It only narrows
 //! authority, so whoever supplies it cannot widen what the broker grants.
 //!
 //! Every decision of the run composes a guardrail policy outcome citing it: `allow`
@@ -15,7 +16,9 @@
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::types::ActionEffect;
-use contextos_kernel::authorization::{scope_mismatch, valid_authority_scope, valid_principal};
+use contextos_kernel::authorization::{
+    authority_scope_narrows, scope_mismatch, valid_authority_scope, valid_principal,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -60,6 +63,16 @@ pub struct TaskAuthorization {
     pub confirmation_ref: Option<Value>,
 }
 
+/// How an amendment changes a run's task authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Change {
+    /// It permits nothing the current one did not: anyone running the task may make it.
+    Narrowed,
+    /// It permits something new: it needs the principal's confirmation.
+    Widened,
+}
+
 /// The task authorization's verdict on one action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskCheck {
@@ -94,6 +107,25 @@ impl TaskAuthorization {
             return Err("confirmation_ref must be an artifact reference");
         }
         Ok(())
+    }
+
+    /// Whether this permits nothing `current` does not: each scope narrows one of
+    /// `current`'s, reads are no less scoped, and actions outside are no less strictly
+    /// handled (`ask` is wider than `deny`).
+    pub fn narrows(&self, current: &TaskAuthorization) -> bool {
+        self.scopes
+            .iter()
+            .all(|scope| current.scopes.iter().any(|c| authority_scope_narrows(scope, c)))
+            && (self.read_only == ReadOnly::Scoped || current.read_only == ReadOnly::Allow)
+            && (self.out_of_scope == OutOfScope::Deny || current.out_of_scope == OutOfScope::Ask)
+    }
+
+    /// The change from `current` (the run's own authorization, if any) to this one.
+    pub fn change_from(&self, current: Option<&TaskAuthorization>) -> Change {
+        match current {
+            Some(current) if !self.narrows(current) => Change::Widened,
+            _ => Change::Narrowed,
+        }
     }
 
     /// The pinned reference policy outcomes cite.
@@ -231,6 +263,54 @@ mod tests {
             ReadOnly::Scoped,
         );
         assert_eq!(verdict(&scoped.check("run_1", &read, ActionEffect::None)), "deny");
+    }
+
+    #[test]
+    fn amendments_are_classified() {
+        let current = task(
+            vec![scope("pay.refund", "ord_1", 500)],
+            OutOfScope::Deny,
+            ReadOnly::Allow,
+        );
+        let lower = task(
+            vec![scope("pay.refund", "ord_1", 100)],
+            OutOfScope::Deny,
+            ReadOnly::Allow,
+        );
+        assert_eq!(lower.change_from(Some(&current)), Change::Narrowed);
+        assert_eq!(current.change_from(Some(&lower)), Change::Widened, "a higher ceiling");
+        let other_order = task(
+            vec![scope("pay.refund", "ord_2", 100)],
+            OutOfScope::Deny,
+            ReadOnly::Allow,
+        );
+        assert_eq!(
+            other_order.change_from(Some(&current)),
+            Change::Widened,
+            "a revised resource"
+        );
+        let asks = task(
+            vec![scope("pay.refund", "ord_1", 100)],
+            OutOfScope::Ask,
+            ReadOnly::Allow,
+        );
+        assert_eq!(
+            asks.change_from(Some(&current)),
+            Change::Widened,
+            "ask permits approved actions"
+        );
+        let reads = task(
+            vec![scope("pay.refund", "ord_1", 500)],
+            OutOfScope::Deny,
+            ReadOnly::Scoped,
+        );
+        assert_eq!(reads.change_from(Some(&current)), Change::Narrowed);
+        assert_eq!(current.change_from(Some(&reads)), Change::Widened);
+        assert_eq!(
+            current.change_from(None),
+            Change::Narrowed,
+            "a first authorization only restricts"
+        );
     }
 
     #[test]

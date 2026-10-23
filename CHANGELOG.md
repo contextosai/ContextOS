@@ -106,6 +106,14 @@ First release candidate of the ContextOS runtime.
   `[guards] require_task_authorization` refuses effectful runs without one. The
   kernel exposes `scope_mismatch` and `valid_authority_scope`; the Python and Node
   clients add builders.
+- Task corrections mid-run: `PUT /v1/runs/{run_id}/task-authorization` replaces the
+  run's own task authorization under a revision fence. The executor may narrow it;
+  widening needs the new `authorize` scope (refused alongside `admit`/`dispatch`),
+  the principal's `confirmation_ref` and the same issuer. Every later action digest
+  changes, so earlier approvals and claims cannot be redeemed; amendments are audited
+  (`task_authorization_amended`) and counted
+  (`contextos_task_authorization_amendments_total`). Clients add
+  `amend_task_authorization`/`amendTaskAuthorization`.
 
 ### Server and tools
 - `contextosd`: compile, contract negotiation, schema validation, run admission,

@@ -447,6 +447,11 @@ async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>) {
         principal_id = "svc_oncall"
         scopes = ["control"]
         [[api_keys]]
+        key_sha256 = "{app}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_support_app"
+        scopes = ["authorize"]
+        [[api_keys]]
         key_sha256 = "{meter}"
         tenant_id = "{TENANT}"
         principal_id = "svc_llm_gateway"
@@ -457,7 +462,8 @@ async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>) {
         evaluator = hash_api_key("judge-key"),
         agent_judge = hash_api_key("agent-judge-key"),
         operator = hash_api_key("ops-key"),
-        meter = hash_api_key("meter-key")
+        meter = hash_api_key("meter-key"),
+        app = hash_api_key("app-key")
     ))
     .unwrap();
     (config, provider_calls)
@@ -973,6 +979,19 @@ async fn delegated_children_are_admitted_narrowed_and_closed() {
         stored["task_authorizations"][0]["scopes"][0]["root_run_id"],
         "run_parent"
     );
+    // The child may restrict itself; what it inherited stays.
+    let mut own = task_authorization("run_parent", "deny", 1_000);
+    own["issued_by"]["principal_id"] = json!("usr_other");
+    let (status, amended) = amend(&w, "acme-key", "run_child", 0, &own).await;
+    assert_eq!(
+        (status, amended["change"].as_str()),
+        (200, Some("narrowed")),
+        "{amended}"
+    );
+    assert_eq!(
+        amended["policy_refs"].as_array().unwrap().len(),
+        stored_policy_refs(&w, "run_parent").await + 1
+    );
 
     // read_only: the effectful refund is not in the child's lane.
     let out: Value = http
@@ -1139,6 +1158,130 @@ async fn effects_outside_the_task_can_wait_for_the_principal() {
             .contains(&json!("policy_binding_mismatch"))
     );
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 0);
+}
+
+/// How many policy references the run's actions bind.
+async fn stored_policy_refs(w: &World, run_id: &str) -> usize {
+    let stored = w
+        .state
+        .store
+        .get(&contextos_store::DocKey::new(
+            TENANT,
+            contextos_store::DocKind::RunAdmission,
+            run_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    let admission: contextos_gateway::RunAdmission = serde_json::from_value(stored).unwrap();
+    admission.binding_policy_refs().len()
+}
+
+async fn amend(w: &World, key: &str, run_id: &str, expected: u64, task: &Value) -> (u16, Value) {
+    let response = reqwest::Client::new()
+        .put(format!("{}/v1/runs/{run_id}/task-authorization", w.base))
+        .bearer_auth(key)
+        .json(&json!({"expected_revision": expected, "task_authorization": task}))
+        .send()
+        .await
+        .unwrap();
+    (response.status().as_u16(), response.json().await.unwrap())
+}
+
+#[tokio::test]
+async fn principals_correct_the_task_mid_run() {
+    let w = world(&ALL_CONTROLS).await;
+    let mut body = run_body("run_amend", 1200);
+    body["task_authorization"] = task_authorization("run_amend", "deny", 120_000);
+    assert_eq!(admit(&w, &body).await.status(), 201);
+
+    // The user meant another account: the agent cannot just send it there.
+    let revised = refund("run_amend", "op_revised", "ord_881", "cus_88", 120_000);
+    let before = dispatch(&w, "run_amend", &revised).await;
+    assert_eq!(before["result"]["status"], "blocked", "{before}");
+    assert!(
+        before["report"]["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("task_scope_destination"))
+    );
+
+    let mut corrected = task_authorization("run_amend", "deny", 120_000);
+    corrected["scopes"][0]["destination_ids"] = json!(["cus_88"]);
+    // Whoever runs the task cannot widen it, even with the right shape.
+    let (status, refused) = amend(&w, "acme-key", "run_amend", 0, &corrected).await;
+    assert_eq!(
+        (status, refused["error"]["code"].as_str()),
+        (403, Some("task_widening_forbidden"))
+    );
+    // Widening needs the principal's confirmation.
+    let (status, refused) = amend(&w, "app-key", "run_amend", 0, &corrected).await;
+    assert_eq!(
+        (status, refused["error"]["code"].as_str()),
+        (422, Some("task_authorization_invalid"))
+    );
+    corrected["confirmation_ref"] = artifact("principal_confirmation", "chat_msg_42");
+    let (status, amended) = amend(&w, "app-key", "run_amend", 0, &corrected).await;
+    assert_eq!(
+        (status, amended["change"].as_str(), amended["revision"].as_u64()),
+        (200, Some("widened"), Some(1)),
+        "{amended}"
+    );
+    // Concurrent corrections are fenced.
+    let (status, stale) = amend(&w, "app-key", "run_amend", 0, &corrected).await;
+    assert_eq!(
+        (status, stale["error"]["code"].as_str()),
+        (409, Some("task_authorization_conflict"))
+    );
+
+    // The corrected action runs, under a new digest: nothing approved or claimed under
+    // the old authorization carries over.
+    let after = dispatch(&w, "run_amend", &revised).await;
+    assert_eq!(after["result"]["status"], "completed", "{after}");
+    assert_ne!(after["report"]["action_digest"], before["report"]["action_digest"]);
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    // The executor may always restrict its own task.
+    let mut lower = corrected.clone();
+    lower["scopes"][0]["amount_ceiling"]["minor_units"] = json!(50_000);
+    let (status, narrowed) = amend(&w, "acme-key", "run_amend", 1, &lower).await;
+    assert_eq!(
+        (status, narrowed["change"].as_str()),
+        (200, Some("narrowed")),
+        "{narrowed}"
+    );
+    let more = dispatch(
+        &w,
+        "run_amend",
+        &refund("run_amend", "op_more", "ord_881", "cus_88", 60_000),
+    )
+    .await;
+    assert!(
+        more["report"]["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("task_scope_amount")),
+        "{more}"
+    );
+
+    let entries: Value = reqwest::Client::new()
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let changes: Vec<&Value> = entries["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "task_authorization_amended")
+        .map(|e| &e["payload"]["change"])
+        .collect();
+    assert_eq!(changes, [&json!("widened"), &json!("narrowed")]);
 }
 
 #[tokio::test]

@@ -30,9 +30,17 @@ specification has no place for it.
 > An admission MAY carry one or more task authorizations. A task authorization names
 > the principal who issued it (`PrincipalRef`) and lists one or more `AuthorityGrant`
 > scopes whose `root_run_id` is the run's root run; it MAY cite the principal's
-> confirmation as an `ArtifactRef`. It is fixed at admission and MUST NOT change for
-> the life of the run. A delegated run MUST carry every task authorization of its
-> parent and MAY add others.
+> confirmation as an `ArtifactRef`. A delegated run MUST carry every task
+> authorization of its parent unchanged and MAY add its own.
+>
+> A run's own task authorization MAY be replaced during the run (a principal's
+> correction). A replacement *narrows* when every scope narrows one of the current
+> scopes under the delegation rule, read-only actions are no less restricted and
+> out-of-scope actions are no less strictly handled; otherwise it *widens*. A
+> widening replacement MUST be made by a principal that does not execute the run,
+> MUST cite the issuing principal's confirmation and MUST keep the same issuer.
+> Replacements MUST be totally ordered per run and recorded in the audit with the
+> previous and new references.
 >
 > For each task authorization, the authorization evaluator MUST compose a guardrail
 > policy outcome with `rule_id` `task_authorization` and a `bundle_ref` whose `sha256`
@@ -79,6 +87,9 @@ task. Proposed reason codes are `outside_task_authorization` and `task_scope_<di
 - A scope naming another root run is rejected at admission.
 - A delegated run's binding cites the parent's reference.
 - A binding whose `policy_refs` omit the reference is `policy_binding_mismatch`.
+- A replacement with a lower ceiling narrows; another resource, a higher ceiling or
+  `deny` → `ask` widens; an approval of a digest made before a replacement no longer
+  matches the action after it.
 
 ## Open questions
 

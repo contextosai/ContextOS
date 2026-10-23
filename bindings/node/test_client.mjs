@@ -87,6 +87,13 @@ try {
     scopedRun.callTool(call.capability_id, { ...call.args, amount_minor: 480_000 }, { ...options, idempotencyKey: "refund:more" }),
     (error) => error instanceof ToolBlocked && error.reasonCodes.includes("outside_task_authorization")
       && error.reasonCodes.includes("task_scope_amount"));
+  // The executor may restrict its own task further; widening is not its call.
+  const lower = taskAuthorization(user, [taskScope("run_scoped", "support.refund", call.capability_id, {
+    resources: ["ord_881"], destinations: ["cus_77"], amount: [50_000, "INR"],
+  })]);
+  assert.equal((await client.amendTaskAuthorization("run_scoped", 0, lower)).change, "narrowed");
+  await assert.rejects(client.amendTaskAuthorization("run_scoped", 1, scoped.task_authorization), (error) =>
+    error instanceof ContextOSHTTPError && error.status === 403);
 
   const refund = governedTool(run, call.capability_id, {
     approvalMode: "destructive", evidenceRefs: call.evidence_refs, idempotencyKey: (a) => `refund:${a.order_id}:big`,

@@ -28,6 +28,7 @@ pub struct Metrics {
     refusals: Mutex<BTreeMap<String, u64>>,
     admissions: Mutex<BTreeMap<String, u64>>,
     decisions: Mutex<BTreeMap<String, u64>>,
+    task_amendments: Mutex<BTreeMap<String, u64>>,
 }
 
 /// One labelled counter: label value to count.
@@ -71,6 +72,11 @@ impl Metrics {
     /// Counts an admitted run by the pack it was admitted on.
     pub fn admission(&self, pack: &str) {
         bump(&self.admissions, pack.to_owned());
+    }
+
+    /// Counts an amended task authorization by its change (`narrowed`, `widened`).
+    pub fn task_amendment(&self, change: &str) {
+        bump(&self.task_amendments, change.to_owned());
     }
 
     /// Counts a recorded decision by its status.
@@ -128,7 +134,7 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 3] = [
+        let counters: [(&str, &str, &str, &Counter); 4] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -146,6 +152,12 @@ impl Metrics {
                 "Recorded decisions by status.",
                 "status",
                 &self.decisions,
+            ),
+            (
+                "contextos_task_authorization_amendments_total",
+                "Amended task authorizations by change.",
+                "change",
+                &self.task_amendments,
             ),
         ];
         for (name, help, label, map) in counters {

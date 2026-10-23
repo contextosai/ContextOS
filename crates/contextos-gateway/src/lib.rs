@@ -80,7 +80,7 @@ pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::SharedGuarantee;
-pub use task_authorization::{OutOfScope, ReadOnly, TaskAuthorization};
+pub use task_authorization::{Change, OutOfScope, ReadOnly, TaskAuthorization};
 pub use usage::{UsageKind, UsageRefusal};
 
 /// Receipts at which the run's budget ledger is compacted before the next
