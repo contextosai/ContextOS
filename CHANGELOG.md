@@ -114,6 +114,14 @@ First release candidate of the ContextOS runtime.
   (`task_authorization_amended`) and counted
   (`contextos_task_authorization_amendments_total`). Clients add
   `amend_task_authorization`/`amendTaskAuthorization`.
+- Task limits: a task authorization may bound the task as a whole (`limits`:
+  `max_effects`, `amount_total`), counted across the issuing run and its delegated
+  runs. Each effect is charged with compare-and-swap after its operation is claimed
+  and before dispatch, so parallel effects cannot together exceed a limit; a charge
+  is returned only when the provider definitively did not apply the effect. An
+  effect past a limit is outside the task (`task_scope_extent`). Raising or dropping
+  a limit widens the authorization. Clients take `max_effects`/`amount_total`
+  (`maxEffects`/`amountTotal`).
 
 ### Server and tools
 - `contextosd`: compile, contract negotiation, schema validation, run admission,

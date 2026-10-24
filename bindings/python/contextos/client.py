@@ -42,7 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
 # On a model request, these tell a metering LLM gateway which reservation to settle
@@ -141,15 +141,24 @@ def task_scope(root_run_id: str, purpose_id: str, capability_id: str, *, resourc
 
 
 def task_authorization(issued_by: dict, scopes: List[dict], *, out_of_scope: str = "deny",
-                       read_only: str = "allow", confirmation_ref: Optional[dict] = None) -> dict:
+                       read_only: str = "allow", confirmation_ref: Optional[dict] = None,
+                       max_effects: Optional[int] = None, amount_total: Optional[Tuple[int, str]] = None) -> dict:
     """What the principal authorized for a run, for ``admit(body)`` as
     ``body["task_authorization"]``. Effects outside every scope are refused
     (``out_of_scope="deny"``) or wait for an exact approval (``"ask"``, raised as
-    ``ToolPaused`` with ``kind == "approval"``)."""
+    ``ToolPaused`` with ``kind == "approval"``). ``max_effects`` and ``amount_total``
+    (``(minor_units, currency)``) bound the task as a whole, across all its effects."""
     task: Dict[str, Any] = {"issued_by": issued_by, "scopes": scopes, "out_of_scope": out_of_scope,
                             "read_only": read_only}
     if confirmation_ref is not None:
         task["confirmation_ref"] = confirmation_ref
+    limits: Dict[str, Any] = {}
+    if max_effects is not None:
+        limits["max_effects"] = max_effects
+    if amount_total is not None:
+        limits["amount_total"] = {"minor_units": amount_total[0], "currency": amount_total[1]}
+    if limits:
+        task["limits"] = limits
     return task
 
 

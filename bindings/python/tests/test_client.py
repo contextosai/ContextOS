@@ -109,7 +109,8 @@ def main() -> None:
         # The executor may restrict its own task further; widening is not its call.
         lower = task_authorization(user, [task_scope(
             "run_scoped", "support.refund", call["capability_id"], resources=["ord_881"], destinations=["cus_77"],
-            amount=(50_000, "INR"))])
+            amount=(50_000, "INR"))], max_effects=1, amount_total=(50_000, "INR"))
+        assert lower["limits"] == {"max_effects": 1, "amount_total": {"minor_units": 50_000, "currency": "INR"}}
         assert client.amend_task_authorization("run_scoped", 0, lower)["change"] == "narrowed"
         try:
             client.amend_task_authorization("run_scoped", 1, scoped["task_authorization"])

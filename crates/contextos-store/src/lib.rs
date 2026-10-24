@@ -71,6 +71,9 @@ pub enum DocKind {
     SharedExposure,
     /// Immutable action-to-resource binding used for crash recovery.
     ExposureLink,
+    /// What a task authorization's limits have used, across the issuing run and its
+    /// delegated runs.
+    TaskExposure,
 }
 
 impl DocKind {
@@ -103,6 +106,7 @@ impl DocKind {
             DocKind::GuaranteeDefinition => "guarantee_definition",
             DocKind::SharedExposure => "shared_exposure",
             DocKind::ExposureLink => "exposure_link",
+            DocKind::TaskExposure => "task_exposure",
         }
     }
 }

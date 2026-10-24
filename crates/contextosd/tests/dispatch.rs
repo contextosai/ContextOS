@@ -979,6 +979,8 @@ async fn delegated_children_are_admitted_narrowed_and_closed() {
         stored["task_authorizations"][0]["scopes"][0]["root_run_id"],
         "run_parent"
     );
+    // Its effects count toward the limits of the run that issued the authorization.
+    assert_eq!(stored["task_authorization_origins"], json!(["run_parent"]));
     // The child may restrict itself; what it inherited stays.
     let mut own = task_authorization("run_parent", "deny", 1_000);
     own["issued_by"]["principal_id"] = json!("usr_other");
@@ -1132,6 +1134,88 @@ async fn effects_outside_what_the_principal_authorized_are_refused() {
                 .as_array()
                 .is_some_and(|r| r.contains(task_ref))
     }));
+}
+
+#[tokio::test]
+async fn the_task_as_a_whole_stays_within_its_limits() {
+    let w = world(&ALL_CONTROLS).await;
+    let mut body = run_body("run_total", 1200);
+    let mut task = task_authorization("run_total", "deny", 120_000);
+    task["limits"] = json!({"max_effects": 3, "amount_total": {"minor_units": 120_000, "currency": "INR"}});
+    body["task_authorization"] = task.clone();
+    assert_eq!(admit(&w, &body).await.status(), 201);
+
+    // Each refund is under the per-action ceiling; together they may not exceed the
+    // total the principal asked for.
+    let first = refund("run_total", "op_part_1", "ord_881", "cus_77", 70_000);
+    let out = dispatch(&w, "run_total", &first).await;
+    assert_eq!(out["result"]["status"], "completed", "{out}");
+    let out = dispatch(
+        &w,
+        "run_total",
+        &refund("run_total", "op_part_2", "ord_881", "cus_77", 60_000),
+    )
+    .await;
+    assert_eq!(out["result"]["status"], "blocked", "{out}");
+    let reasons = out["report"]["reason_codes"].as_array().unwrap();
+    for code in ["guardrail_denied", "outside_task_authorization", "task_scope_extent"] {
+        assert!(reasons.contains(&json!(code)), "{out}");
+    }
+    assert!(!reasons.contains(&json!("policy_binding_mismatch")), "{out}");
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    // A retry of an applied refund is not charged again; what is left still fits.
+    let retried = dispatch(&w, "run_total", &first).await;
+    assert_ne!(retried["result"]["status"], "blocked", "{retried}");
+    let out = dispatch(
+        &w,
+        "run_total",
+        &refund("run_total", "op_part_3", "ord_881", "cus_77", 50_000),
+    )
+    .await;
+    assert_eq!(out["result"]["status"], "completed", "{out}");
+    let used = w
+        .state
+        .store
+        .get(&contextos_store::DocKey::new(
+            TENANT,
+            contextos_store::DocKind::TaskExposure,
+            "run_total",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(
+        (used["effects"].clone(), used["amounts"]["INR"].clone()),
+        (json!(2), json!(120_000))
+    );
+
+    // Raising a total is a widening: the agent's executor cannot make it.
+    task["limits"]["amount_total"]["minor_units"] = json!(240_000);
+    let (status, _) = amend(&w, "acme-key", "run_total", 0, &task).await;
+    assert_eq!(status, 403);
+    // Lowering the count is a narrowing it may make, and the count already used stays.
+    task["limits"] = json!({"max_effects": 2, "amount_total": {"minor_units": 120_000, "currency": "INR"}});
+    let (status, amended) = amend(&w, "acme-key", "run_total", 0, &task).await;
+    assert_eq!(
+        (status, amended["change"].as_str()),
+        (200, Some("narrowed")),
+        "{amended}"
+    );
+    let out = dispatch(
+        &w,
+        "run_total",
+        &refund("run_total", "op_part_4", "ord_881", "cus_77", 1),
+    )
+    .await;
+    assert_eq!(out["result"]["status"], "blocked", "{out}");
+    assert!(
+        out["report"]["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("task_scope_extent"))
+    );
 }
 
 #[tokio::test]

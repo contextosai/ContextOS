@@ -90,7 +90,8 @@ try {
   // The executor may restrict its own task further; widening is not its call.
   const lower = taskAuthorization(user, [taskScope("run_scoped", "support.refund", call.capability_id, {
     resources: ["ord_881"], destinations: ["cus_77"], amount: [50_000, "INR"],
-  })]);
+  })], { maxEffects: 1, amountTotal: { minorUnits: 50_000, currency: "INR" } });
+  assert.deepEqual(lower.limits, { max_effects: 1, amount_total: { minor_units: 50_000, currency: "INR" } });
   assert.equal((await client.amendTaskAuthorization("run_scoped", 0, lower)).change, "narrowed");
   await assert.rejects(client.amendTaskAuthorization("run_scoped", 1, scoped.task_authorization), (error) =>
     error instanceof ContextOSHTTPError && error.status === 403);

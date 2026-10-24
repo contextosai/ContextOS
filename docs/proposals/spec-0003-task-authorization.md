@@ -51,6 +51,16 @@ specification has no place for it.
 > authorization says so. The action binding's `policy_refs` MUST include the
 > `bundle_ref`.
 >
+> A task authorization MAY carry `limits`: `max_effects`, the most effects, and
+> `amount_total`, the most the effects may move in total. They count every effect
+> (not read-only actions) of the run that issued the task authorization and of the
+> runs delegated from it. An action whose charge would exceed a limit is outside the
+> task authorization, with dimension `extent`. A runtime MUST charge an effect
+> atomically before dispatching it, so that concurrent effects cannot together exceed
+> a limit, and MUST NOT return a charge unless the effect definitively was not applied.
+> An exact approval of the action permits charging it past a limit. A replacement that
+> raises or drops a limit widens.
+>
 > A task authorization only narrows: it MUST NOT be treated as authority, and an
 > action it covers still requires a covering grant chain.
 
@@ -63,6 +73,7 @@ attestations and audit need no new rules.
 ```ts
 interface TaskAuthorization {
   issued_by: PrincipalRef;
+  limits?: { max_effects?: number; amount_total?: Money };  // the whole task
   scopes: AuthorityGrant["scope"][];          // 1..32, root_run_id = the run's root
   out_of_scope?: "deny" | "ask";               // default "deny"
   read_only?: "allow" | "scoped";              // default "allow"
@@ -71,7 +82,7 @@ interface TaskAuthorization {
 
 // The first dimension outside the scope, or null when it covers the binding:
 // "purpose" | "capability" | "resource" | "destination" | "classification" |
-// "argument" | "amount".
+// "argument" | "amount" ("extent" is reported for limits, which need run state).
 function scopeMismatch(binding: ActionBinding, scope: AuthorityGrant["scope"]): string | null;
 ```
 
@@ -87,15 +98,19 @@ task. Proposed reason codes are `outside_task_authorization` and `task_scope_<di
 - A scope naming another root run is rejected at admission.
 - A delegated run's binding cites the parent's reference.
 - A binding whose `policy_refs` omit the reference is `policy_binding_mismatch`.
+- `amount_total` 1200: effects of 700 then 600 → the second is denied with `extent`;
+  700 then 500 are both allowed; of two concurrent 700s exactly one is dispatched; a
+  definitive not-applied outcome returns its share, an unknown one does not.
 - A replacement with a lower ceiling narrows; another resource, a higher ceiling or
   `deny` → `ask` widens; an approval of a digest made before a replacement no longer
   matches the action after it.
 
 ## Open questions
 
-- **Cumulative limits.** Amount ceilings are per action. A total such as "refund up to
-  INR 1200 across the task" needs conserved per-run exposure, which the shared-guarantee
-  ledger provides at the resource level.
+- **Where limits are counted.** Limits need per-task state, unlike the rest of the
+  check, which is a pure function of the binding. This runtime keeps one document per
+  issuing run; the specification's budget ledger has fixed dimensions and could carry
+  them instead.
 - **Deriving scopes from the instruction.** The specification can define what a task
   authorization is, but not how a deployment derives it from natural language. A
   confirmation step with the principal, recorded as `confirmation_ref`, is the

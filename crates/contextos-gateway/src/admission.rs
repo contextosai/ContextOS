@@ -70,6 +70,10 @@ pub struct RunAdmission {
     /// Amendments made to the run's own task authorization.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub task_authorization_revision: u64,
+    /// For each of `task_authorizations`, the run that issued it (its own, or an
+    /// ancestor's): a task's limits are counted once across all the runs it covers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_authorization_origins: Vec<String>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -89,6 +93,13 @@ impl RunAdmission {
             }
         }
         refs
+    }
+
+    /// The run that issued the `index`th task authorization (this run when unrecorded).
+    pub fn task_authorization_origin(&self, index: usize) -> &str {
+        self.task_authorization_origins
+            .get(index)
+            .map_or(self.run_id.as_str(), String::as_str)
     }
 }
 
@@ -300,6 +311,7 @@ pub async fn admit_run<S: DocumentStore>(
         pack_ref: request.compiled.context_ledger.pack_ref.clone(),
         task_authorizations: Vec::new(),
         inherited_task_authorizations: 0,
+        task_authorization_origins: Vec::new(),
         task_authorization_revision: 0,
         tenant_id,
         run_id,
