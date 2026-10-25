@@ -1,6 +1,7 @@
 # Proposal to the ContextOS specification: one meaning for a missing amount ceiling
 
-Status: draft for the spec maintainers. Found by property AUTH-1
+Status: accepted. Merged into the specification at revision `7e2462f`
+(contextosai/contextosai#67) and implemented by the kernel. Found by property AUTH-1
 ([verified properties](../verification/PROPERTIES.md), SPEC-1).
 
 ## Problem

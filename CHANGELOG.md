@@ -76,6 +76,9 @@ First release candidate of the ContextOS runtime.
   amounts the principal had not authorized. It is now a widening. Found by property
   AUTH-1, which also showed the specification's delegation rule and grant-scope check
   disagree on a missing ceiling (proposal spec-0004; grant chains are unaffected).
+- The kernel follows specification revision `7e2462f`: a child grant scope that adds
+  an `amount_ceiling` its parent lacks is `delegation_scope_expanded` (spec-0004).
+  New reference vectors cover adding, dropping and omitting a ceiling.
 
 ### Runtime
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;

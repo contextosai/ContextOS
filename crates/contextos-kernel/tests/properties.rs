@@ -144,8 +144,6 @@ fn narrowed(parent: &Value, seed: u64) -> Value {
     if let Some(ceiling) = parent.get("amount_ceiling") {
         let max = ceiling["minor_units"].as_u64().unwrap();
         child["amount_ceiling"] = json!({"minor_units": next(max + 1), "currency": ceiling["currency"]});
-    } else if next(2) == 0 {
-        child["amount_ceiling"] = json!({"minor_units": 1, "currency": "INR"});
     }
     child
 }
@@ -216,16 +214,14 @@ fn covers(scope: &Value, binding: &Value) -> bool {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(4096))]
 
-    /// AUTH-1: a scope that narrows another covers no action the other does not,
-    /// except for SPEC-1 (pinned by `spec_1_a_ceiling_where_none_was_narrows`).
+    /// AUTH-1: a scope that narrows another covers no action the other does not.
     #[test]
     fn narrowing_never_admits_more(parent in scope(), other in scope(), seed in any::<u64>(), action in binding()) {
         for child in [narrowed(&parent, seed), other] {
             let action = if seed % 4 == 0 { action.clone() } else { fit(&action, &child, seed >> 2) };
             if authority_scope_narrows(&child, &parent) && covers(&child, &action) {
                 stat("AUTH-1 child covers the action");
-                let spec_1 = parent.get("amount_ceiling").is_none() && action.get("amount").is_some();
-                prop_assert!(spec_1 || covers(&parent, &action), "child {child} admits {action} beyond parent {parent}");
+                prop_assert!(covers(&parent, &action), "child {child} admits {action} beyond parent {parent}");
             }
         }
     }
@@ -243,23 +239,23 @@ proptest! {
     }
 }
 
-/// SPEC-1, found by AUTH-1: the delegation rule reads a missing `amount_ceiling` as
-/// unlimited, the grant-scope check as "no amount". The kernel follows the reference
-/// on both, so a scope that adds a ceiling "narrows" one it widens. Grant chains are
-/// unaffected (every grant in a chain must cover the action); task authorizations
-/// close it in the gateway. Proposal spec-0004; when the specification changes, this
-/// fails and AUTH-1's exception goes.
+/// SPEC-1, found by AUTH-1: the delegation rule read a missing `amount_ceiling` as
+/// unlimited while the grant-scope check reads it as "no amount", so a scope that
+/// added a ceiling "narrowed" one it widened. The specification now reads it as "no
+/// amount" in both (proposal spec-0004); this pins the corrected rule.
 #[test]
-fn spec_1_a_ceiling_where_none_was_narrows() {
+fn spec_1_a_ceiling_where_none_was_widens() {
     let parent = json!({"root_run_id": "run_root", "purpose_ids": ["p"], "capability_ids": ["c"], "resource_ids": [],
         "destination_ids": [], "classification_labels": ["PUBLIC"], "argument_constraints": []});
     let mut child = parent.clone();
     child["amount_ceiling"] = json!({"minor_units": 100, "currency": "INR"});
     let refund = json!({"purpose_id": "p", "capability_id": "c", "resource_ids": [], "destination_ids": [],
         "action_risk": {"data_scope": "PUBLIC"}, "arguments": {}, "amount": {"minor_units": 100, "currency": "INR"}});
-    assert!(authority_scope_narrows(&child, &parent));
     assert_eq!(scope_mismatch(&refund, &parent), Some("amount"));
     assert_eq!(scope_mismatch(&refund, &child), None);
+    assert!(!authority_scope_narrows(&child, &parent), "adding a ceiling widens");
+    assert!(!authority_scope_narrows(&parent, &child), "dropping one is refused too");
+    assert!(authority_scope_narrows(&parent, &parent));
 }
 
 fn bundle(id: &str) -> Value {

@@ -471,9 +471,11 @@ fn scope_narrows(child: &Value, parent: &Value) -> bool {
                         candidate["pointer"] == required["pointer"] && constraint_narrows(candidate, required)
                     })
             })
+        // A scope without a ceiling admits no amount (`scope_mismatch`): a child may
+        // not add one.
         && match (parent.get("amount_ceiling"), child.get("amount_ceiling")) {
-            (None, _) => true,
-            (Some(_), None) => false,
+            (None, None) => true,
+            (None, Some(_)) | (Some(_), None) => false,
             (Some(p), Some(c)) => {
                 c["currency"] == p["currency"]
                     && as_safe_integer(&c["minor_units"]) <= as_safe_integer(&p["minor_units"])

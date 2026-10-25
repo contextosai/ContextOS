@@ -1,10 +1,10 @@
 {
   "repository": "https://github.com/contextosai/contextosai",
-  "revision": "634518140c07d03d0d5a1d20a9c87b4d9f45845a",
+  "revision": "7e2462fd931a79e3777ede81fb382e0cbf2ff46c",
   "reference_directory": "src/lib/contextos",
   "schema_directory": "public/schemas",
   "fixture_directory": "tests/fixtures",
-  "verification_date": "2026-10-22",
+  "verification_date": "2026-10-25",
   "schema_files_verified": 9,
   "vector_files_verified": 9
 }
