@@ -181,5 +181,13 @@ export declare function taskScope(
 export declare function taskAuthorization(
   issuedBy: PrincipalRef,
   scopes: Json[],
-  options?: { outOfScope?: "deny" | "ask"; readOnly?: "allow" | "scoped"; confirmationRef?: Json },
+  options?: {
+    outOfScope?: "deny" | "ask";
+    readOnly?: "allow" | "scoped";
+    confirmationRef?: Json;
+    /** Most effects the whole task may make. */
+    maxEffects?: number;
+    /** Most the task's effects may move in total. */
+    amountTotal?: { minorUnits: number; currency: string };
+  },
 ): Json;

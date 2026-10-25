@@ -688,6 +688,13 @@ where
         .map(|p| p.task_authorizations.clone())
         .unwrap_or_default();
     let inherited_task_authorizations = task_authorizations.len();
+    // Limits are counted per issuing run, so a delegated run spends from its
+    // ancestors' totals rather than starting its own.
+    let mut task_authorization_origins: Vec<String> = parent.as_ref().map_or_else(Vec::new, |p| {
+        (0..p.task_authorizations.len())
+            .map(|i| p.task_authorization_origin(i).to_owned())
+            .collect()
+    });
     if let Some(task) = input.get("task_authorization").filter(|t| !t.is_null()) {
         let task: TaskAuthorization = serde_json::from_value(task.clone()).map_err(|e| {
             ApiError::new(
@@ -706,6 +713,7 @@ where
             .with_detail(json!(reason))
         })?;
         task_authorizations.push(task);
+        task_authorization_origins.push(run_context.run_id.clone());
     }
     if state.require_task_authorization && features.external_effects && task_authorizations.is_empty() {
         return Err(ApiError::new(
@@ -767,6 +775,7 @@ where
     })?;
     admission.task_authorizations = task_authorizations;
     admission.inherited_task_authorizations = inherited_task_authorizations;
+    admission.task_authorization_origins = task_authorization_origins;
     let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
     state
         .store
@@ -1080,6 +1089,10 @@ where
         }
     }
     let from_ref = current.as_ref().map(|c| c.bundle_ref(&admission.run_id));
+    admission.task_authorization_origins = (0..inherited)
+        .map(|i| admission.task_authorization_origin(i).to_owned())
+        .chain([admission.run_id.clone()])
+        .collect();
     admission.task_authorizations.truncate(inherited);
     admission.task_authorizations.push(task.clone());
     admission.task_authorization_revision += 1;

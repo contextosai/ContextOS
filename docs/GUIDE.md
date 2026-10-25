@@ -283,6 +283,29 @@ binding with the same rules as broker grants.
 - **Delegated runs** keep their parent's task authorizations and may only add narrower
   ones.
 
+**Limits on the task as a whole.** Scopes bound each action; a scope with an INR 1200
+ceiling still admits a refund of 1100 followed by one of 1200. When the principal
+asked for a total ("refund up to INR 1200"), or for a number of actions ("send one
+reply"), add `limits`:
+
+```json
+"limits": {"max_effects": 1, "amount_total": {"minor_units": 120000, "currency": "INR"}}
+```
+
+- **What counts:** every effect of the run that issued the task authorization and of
+  the runs delegated from it, inside the scopes or approved outside them. Reads are not
+  counted. An effect in another currency than `amount_total` exceeds it.
+- **When it is checked:** at authorization (an effect past a limit is outside the task:
+  `task_scope_extent`, denied or, with `ask`, waiting for an exact approval), and again
+  when the effect is charged, after its operation is claimed and before it is sent. The
+  charge is a compare-and-swap, so of parallel effects racing for the last of a limit
+  only one is sent. An approved effect is charged even past the limit.
+- **When it is returned:** only when the provider definitively did not apply the effect.
+  An unknown or partial outcome keeps its charge, even if reconciliation later finds it
+  was not applied. A retry of the same operation is not charged twice.
+- **Corrections:** lowering a limit narrows the authorization; raising or dropping one
+  widens it. What the task already used carries over.
+
 **Corrections mid-run.** When the principal corrects the task (another recipient, a
 lower amount, a goal that changed), replace the run's own task authorization with
 `PUT /v1/runs/{run_id}/task-authorization`, sending
@@ -291,7 +314,7 @@ says whether it `narrowed` or `widened` and gives the new revision.
 
 - **Narrowing** is open to the executor's own key (`dispatch`): an agent may always
   restrict itself. Narrowing means every scope narrows a current one, reads are no
-  less scoped, and `deny` is not replaced by `ask`.
+  less scoped, `deny` is not replaced by `ask`, and every limit is kept and no higher.
 - **Widening** needs a key with the `authorize` scope and neither `admit` nor
   `dispatch`, so whoever runs the task cannot enlarge it. It also needs the
   principal's `confirmation_ref` and the same `issued_by`. Give `authorize` to the
@@ -309,7 +332,7 @@ says whether it `narrowed` or `widened` and gives the new revision.
 
 **Measuring it.** Proposals outside the task show up in
 `contextos_dispatch_refusals_total{reason="outside_task_authorization"}`, broken down
-by `task_scope_*`. Asks that a principal later approved are your over-asking (the
+by `task_scope_*` (`task_scope_extent` when the task's limits are reached). Asks that a principal later approved are your over-asking (the
 "incorrect denials" of an adoption trial). Corrections are counted in
 `contextos_task_authorization_amendments_total{change}`.
 

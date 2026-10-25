@@ -404,8 +404,13 @@ export function taskScope(rootRunId, purposeId, capabilityId, {
  * (`outOfScope: "deny"`) or wait for an exact approval (`"ask"`, thrown as
  * `ToolPaused` with `kind === "approval"`).
  */
-export function taskAuthorization(issuedBy, scopes, { outOfScope = "deny", readOnly = "allow", confirmationRef } = {}) {
+export function taskAuthorization(issuedBy, scopes, { outOfScope = "deny", readOnly = "allow", confirmationRef, maxEffects, amountTotal } = {}) {
   const task = { issued_by: issuedBy, scopes, out_of_scope: outOfScope, read_only: readOnly };
   if (confirmationRef) task.confirmation_ref = confirmationRef;
+  // Bounds on the task as a whole, across all its effects.
+  const limits = {};
+  if (maxEffects !== undefined) limits.max_effects = maxEffects;
+  if (amountTotal) limits.amount_total = { minor_units: amountTotal.minorUnits, currency: amountTotal.currency };
+  if (Object.keys(limits).length) task.limits = limits;
   return task;
 }

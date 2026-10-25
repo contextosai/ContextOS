@@ -80,7 +80,7 @@ pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::SharedGuarantee;
-pub use task_authorization::{Change, OutOfScope, ReadOnly, TaskAuthorization};
+pub use task_authorization::{Amount, Change, OutOfScope, ReadOnly, TaskAuthorization, TaskLimits};
 pub use usage::{UsageKind, UsageRefusal};
 
 /// Receipts at which the run's budget ledger is compacted before the next
@@ -908,9 +908,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         };
         // What the principal authorized, checked on the actual binding: an action
         // outside it is denied or needs an exact approval, whatever the request stated.
+        // A task's limits are read here to refuse the sequential case early; the charge
+        // before dispatch is authoritative.
         let mut outside_task = Vec::new();
-        for task in &admission.task_authorizations {
-            let checked = task.check(&admission.run_id, &binding, manifest.action_risk.effect);
+        let amount = binding.get("amount").cloned();
+        let mut task_limits = Vec::new();
+        for (index, task) in admission.task_authorizations.iter().enumerate() {
+            let mut exceeds = false;
+            if let Some(limits) = &task.limits
+                && manifest.action_risk.effect != ActionEffect::None
+            {
+                let key =
+                    task_authorization::exposure_key(&admission.tenant_id, admission.task_authorization_origin(index));
+                let used = self.store.get(&key).await?;
+                exceeds = limits.exceeded_by(used.as_ref().map(|u| &u.body), &operation_id, amount.as_ref());
+                // Past a limit, only an approval of this exact action (`ask`) may exceed it.
+                task_limits.push((key, limits, exceeds));
+            }
+            let checked = task.check(&admission.run_id, &binding, manifest.action_risk.effect, exceeds);
             policy_outcomes.push(checked.outcome);
             for code in checked.reason_codes {
                 if !outside_task.contains(&code) {
@@ -1077,6 +1092,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return refused(p, flow.reason_codes);
             }
         }
+        let approved = redemption_key.is_some();
         if let Some(key) = redemption_key {
             let approval = approval_input.clone();
             let commit = transact(self.store.as_ref(), &key, |state| {
@@ -1399,6 +1415,70 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return Ok(p.stop("blocked", vec![reason.into()], &message));
             }
         }
+        // The task's limits are charged after the operation claim and before dispatch:
+        // of effects racing for the last of a limit, exactly one is sent.
+        let mut task_charges = Vec::new();
+        for (key, limits, exceeded) in &task_limits {
+            let over_limit = *exceeded && approved;
+            let charged = task_authorization::charge(
+                self.store.as_ref(),
+                key,
+                limits,
+                &operation_id,
+                amount.as_ref(),
+                over_limit,
+            )
+            .await;
+            let reason = match charged {
+                Ok(task_authorization::Charge::Charged) => {
+                    task_charges.push(key.clone());
+                    continue;
+                }
+                Ok(task_authorization::Charge::Exceeded) => "task_scope_extent",
+                Ok(task_authorization::Charge::Saturated) => "task_limits_saturated",
+                Err(error) => {
+                    tracing::warn!(%error, "task limits unavailable");
+                    "task_limits_unavailable"
+                }
+            };
+            self.release_task_charges(&task_charges, &operation_id).await?;
+            self.withhold_dispatch(
+                admission,
+                &operations_key,
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+                &now,
+                reason,
+            )
+            .await?;
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            if guards_effect && new_operation {
+                loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
+            }
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "task_limit_refusal",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "action_digest": action_digest,
+                        "task_exposure_id": key.id, "reason_codes": [reason]}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            let mut reasons = vec![reason.to_owned()];
+            if reason == "task_scope_extent" {
+                reasons.insert(0, "outside_task_authorization".into());
+            }
+            return Ok(p.stop(
+                "blocked",
+                reasons,
+                "The task's limits would be exceeded; this effect was not sent.",
+            ));
+        }
         if let (Some(continuation), Some((_, digest))) = (continuation, &adapter_input) {
             let entry = self
                 .audit
@@ -1449,6 +1529,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id)
                             .await?;
                     }
+                    self.release_task_charges(&task_charges, &operation_id).await?;
                     return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
                 }
             }
@@ -1468,6 +1549,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 if guards_effect && new_operation {
                     loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
                 }
+                self.release_task_charges(&task_charges, &operation_id).await?;
                 let entry = self
                     .audit
                     .append(
@@ -1540,6 +1622,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     &admission.tenant_id,
                     "effect_guard_release_lost",
                     json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
+                    &now,
+                )
+                .await?;
+        }
+        if not_applied && let Err(error) = self.release_task_charges(&task_charges, &operation_id).await {
+            // Still charged: the task's limits stay lower than they need be (fails closed).
+            tracing::warn!(%error, "task limit charge not returned");
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "task_limit_release_lost",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id}),
                     &now,
                 )
                 .await?;
@@ -1806,6 +1900,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Err(e) if e.is_conflict() => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Returns `operation_id`'s charges to the task limits keyed by `keys`.
+    async fn release_task_charges(&self, keys: &[DocKey], operation_id: &str) -> Result<(), GatewayError> {
+        for key in keys {
+            task_authorization::release(self.store.as_ref(), key, operation_id).await?;
+        }
+        Ok(())
     }
 
     /// Records that a claimed attempt was never sent to the provider.
