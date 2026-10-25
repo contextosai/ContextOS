@@ -44,6 +44,7 @@ budgets, and the integrity of the evidence record.
 | T25 | Agent memory widened, retained too long, promoted without review, or deleted without propagation | memory operations governed by kernel `validate_memory_lifecycle` against context from the deployment's memory-governance service (never the caller); records bound to the run; review digest covers the exact record; every decision audited; refused without the service | `memory_operations_are_governed_by_trusted_context`, `memory_operations_need_a_memory_policy_service` |
 | T26 | Governance plane used to steal credentials, act with more authority than intended, show forged history, or let AI drive changes | towerd reads runtimes with read-only `audit:read` keys and acts only through their own scoped endpoints (kill switch: optional `control` key), so every action is also in the runtime's chain; every runtime entry is verified (digest, link, Ed25519) before use and a broken chain stops that source; roles enforced server-side with separation of duties (owners cannot review their agents; guardrails and waivers decided by someone other than their author); AI is advisory only: read-only tools scoped to the asker, tool output wrapped as data, citations checked, drafts validated deterministically, every use journalled; Tower's own decisions in a signed journal; the UI under a strict CSP with tokens in tab session storage only (`towerd`) | `towerd` e2e tests, `jobs.rs` tests (injection text in tool output, refusals, hallucinated fields), `console.rs` tests |
 | T27 | Configuration changed to weaken governance (guards off, new credentials, wider scopes) without anyone noticing | the server never modifies its own configuration; `config` scope cannot hold `admit`/`dispatch`; `POST /v1/config/validate` runs the startup checks and classifies every effective change so CI can require approval of loosenings; published development keys refused in production (`configs`) | `configs` unit tests, `config_review.rs` |
+| T28 | An agent acting beyond what its principal asked (a larger amount, another order or recipient, an unrequested capability) while staying within broker authority, including by stating one amount and sending another | optional per-run `task_authorization` (`AuthorityGrant` scopes fixed at admission, root-run bound, inherited by delegations) checked on the actual action binding with the kernel's grant-scope rules; outside it a guardrail outcome denies or requires an exact approval before the effect; the pinned reference is bound into the action binding, approvals and constraint attestations and recorded in `run_admitted`; `[guards] require_task_authorization` refuses effectful runs without one | `effects_outside_what_the_principal_authorized_are_refused`, `effects_outside_the_task_can_wait_for_the_principal`, `task_authorizations_are_reviewed_at_admission`, `task_authorization.rs` tests |
 | T18 | Forged or misdirected caller tokens | JWTs verified against the issuer's published asymmetric keys only (no `HS*`/`none`, key-declared algorithm enforced); exact `iss`/`aud`; `exp`/`nbf` with bounded leeway; each issuer may assert only its configured tenants; unknown `kid` refresh rate-limited; HTTPS-only, no-redirect, size-limited JWKS fetch | `oidc.rs` tests (audience, issuer, expiry, foreign tenant, wrong key, algorithm confusion, tampering) |
 | T17 | Panics on hostile input | kernel validators are total; facade isolates panics; property fuzzing | `fuzz.rs` |
 
@@ -224,6 +225,16 @@ external outcome proof or regulatory certification.
   admission (`[guards] require_user_role`, on by default there; `user_role_missing`),
   so the default never applies; [spec proposal 0002](../proposals/spec-0002-no-default-role.md)
   removes it from the compiler.
+- **Pack rules read the stated request.** A policy rule over `request.context` (for
+  example "refunds above 3000 need approval") is evaluated on what the request stated
+  at compile time, not on the arguments the agent later sends. Without a task
+  authorization, a call larger than the stated amount is held only by broker grants.
+  Admit effectful runs with a `task_authorization` (`[guards] require_task_authorization`).
+- **A task authorization is as accurate as its source.** The runtime enforces the
+  scopes it is given. Deriving them from the principal's instruction, and confirming
+  them with the principal, is the deployment's job; `confirmation_ref` records that
+  evidence. Amount ceilings apply per action: a total across several effects needs a
+  shared guarantee or a single permitted effect.
 - **Fact providers are trusted after verification.** The kernel checks currency, binding
   and scope of observations; it cannot detect a dishonest provider. Operate identity,
   control-plane and approval services with their own hardening and audit.

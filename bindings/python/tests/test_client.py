@@ -17,7 +17,8 @@ import time
 import urllib.request
 
 from contextos.aio import AsyncClient, AsyncRun
-from contextos.client import BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool
+from contextos.client import (BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool,
+                              task_authorization, task_scope)
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BINARY = ROOT / "target/release/contextosd"
@@ -85,6 +86,26 @@ def main() -> None:
             raise AssertionError("replay must not succeed")
         except ToolPaused as paused:
             assert paused.reason_codes == ["retry_unsafe"], paused.reason_codes
+
+        # A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
+        scoped = json.loads((EXAMPLE / "requests/run.json").read_text())
+        for part in ("run_context", "contract"):
+            scoped[part]["run_id"] = "run_scoped"
+        scoped["contract"]["contract_id"] = "contract_scoped"
+        user = {"principal_id": "usr_771", "principal_type": "person", "trust_domain": "contextos.dev",
+                "tenant_id": "tenant_acme_prod"}
+        scoped["task_authorization"] = task_authorization(user, [task_scope(
+            "run_scoped", "support.refund", call["capability_id"], resources=["ord_881"], destinations=["cus_77"],
+            amount=(120_000, "INR"))])
+        scoped_run = client.admit(scoped)
+        try:
+            scoped_run.call_tool(call["capability_id"], {**call["args"], "amount_minor": 480_000},
+                                 approval_mode="destructive", idempotency_key="refund:more",
+                                 evidence_refs=call["evidence_refs"])
+            raise AssertionError("a refund beyond what the user asked must not run")
+        except ToolBlocked as refused:
+            assert "outside_task_authorization" in refused.reason_codes, refused.reason_codes
+            assert "task_scope_amount" in refused.reason_codes, refused.reason_codes
 
         # A decorated tool: the signature becomes the governed arguments.
         @governed_tool(run, call["capability_id"], approval_mode="destructive",

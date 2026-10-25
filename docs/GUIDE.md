@@ -240,6 +240,53 @@ ingestion; entries verify offline with the published keys.
 
 A run with 128 unresolved effects pauses new dispatch until some are reconciled.
 
+### Bind the run to what the principal asked
+
+Broker grants say what an agent *may* do. They don't say what its principal asked for
+in this run. Pack rules that read `request.context` see what the request *stated*, not
+the arguments the agent later sends. Agents routinely go beyond the request without
+any attack: [AuthorizationBench](https://arxiv.org/abs/2610.27548) measured this in
+19% of trajectories across current models and harnesses, independent of reasoning
+effort. Agents that asked the user often asked only after acting.
+
+Admit the run with a `task_authorization`. It holds `AuthorityGrant` scopes describing
+what was asked, fixed before the agent acts:
+
+```json
+"task_authorization": {
+  "issued_by": {"principal_id": "usr_771", "principal_type": "person",
+                "trust_domain": "contextos.dev", "tenant_id": "tenant_acme_prod"},
+  "out_of_scope": "deny",
+  "scopes": [{"root_run_id": "run_demo_1", "purpose_ids": ["support.refund"],
+    "capability_ids": ["adp_payments.issue_refund"], "resource_ids": ["ord_881"],
+    "destination_ids": ["cus_77"], "classification_labels": ["CONFIDENTIAL"],
+    "argument_constraints": [], "amount_ceiling": {"minor_units": 120000, "currency": "INR"}}]
+}
+```
+
+Every effect must then fall inside one of the scopes, checked on the actual action
+binding with the same rules as broker grants.
+
+- **Outside the scopes:** the action is refused (`outside_task_authorization` plus the
+  dimension, such as `task_scope_amount` or `task_scope_resource`). With
+  `"out_of_scope": "ask"`, it instead pauses for an exact approval of that action
+  (obligations `await_approval` and `confirm_with_principal`), so the principal is
+  asked *before* it happens. The clients surface that pause as an approval, so each
+  framework's human-in-the-loop path handles it.
+- **Read-only capabilities** need no scope unless `"read_only": "scoped"`.
+- **It only narrows.** A task authorization never widens what the broker grants, so
+  whoever supplies it needs no extra trust. Derive it from the principal's confirmed
+  instruction, and cite that confirmation in `confirmation_ref`.
+- **What it is bound to:** every authorization decision composes a `task_authorization`
+  guardrail outcome, and action bindings, approvals and control attestations name its
+  pinned reference (`policy_refs`). `run_admitted` records the references.
+- **Delegated runs** keep their parent's task authorizations and may only add narrower
+  ones.
+
+`[guards] require_task_authorization = true` refuses runs that can apply effects
+without one (`task_authorization_required`). The Python and Node clients build the
+shape with `task_authorization(...)`/`task_scope(...)` (`taskAuthorization`/`taskScope`).
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an

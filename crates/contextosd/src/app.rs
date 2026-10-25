@@ -77,8 +77,8 @@ use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CheckpointRefusal, CloseDecision, Continuation, DecisionRefusal,
     DecisionReport, EffectOutcome, ErasureError, Gateway, MAX_CHECKPOINT_BYTES, Ownership, REVOCATION_KINDS,
-    Resolution, RevocationError, RunAdmission, ScoreRefusal, ScoreReport, UsageKind, UsageRefusal, admit_run,
-    is_erased,
+    Resolution, RevocationError, RunAdmission, ScoreRefusal, ScoreReport, TaskAuthorization, UsageKind, UsageRefusal,
+    admit_run, is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -119,6 +119,8 @@ pub struct AppState<S, L> {
     pub required_release_refs: Vec<String>,
     /// `[guards] require_user_role` (resolved for the mode).
     pub require_user_role: bool,
+    /// `[guards] require_task_authorization`.
+    pub require_task_authorization: bool,
     /// Whether recalled memory without a memory-governance service is admitted.
     pub trust_supplied_memory: bool,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -671,6 +673,46 @@ where
         &input["features"],
     )
     .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "features_invalid", message))?;
+    // What the principal authorized, fixed before the agent acts. A delegated run
+    // keeps its parent's and may only add narrower ones.
+    let root_run_id = parent.as_ref().map_or_else(
+        || run_context.run_id.clone(),
+        |p| {
+            p.lineage
+                .as_ref()
+                .map_or_else(|| p.run_id.clone(), |l| l.root_run_id.clone())
+        },
+    );
+    let mut task_authorizations = parent
+        .as_ref()
+        .map(|p| p.task_authorizations.clone())
+        .unwrap_or_default();
+    if let Some(task) = input.get("task_authorization").filter(|t| !t.is_null()) {
+        let task: TaskAuthorization = serde_json::from_value(task.clone()).map_err(|e| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "task_authorization_invalid",
+                "The task authorization is malformed.",
+            )
+            .with_detail(json!(e.to_string()))
+        })?;
+        task.validate(&root_run_id).map_err(|reason| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "task_authorization_invalid",
+                "The task authorization is invalid.",
+            )
+            .with_detail(json!(reason))
+        })?;
+        task_authorizations.push(task);
+    }
+    if state.require_task_authorization && features.external_effects && task_authorizations.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "task_authorization_required",
+            "A run that can apply effects must state what its principal authorized.",
+        ));
+    }
     let principal = |id: &str, kind: &str| json!({"principal_id": id, "principal_type": kind, "trust_domain": state.trust_domain, "tenant_id": caller.tenant_id});
     let admission_request = AdmissionRequest {
         contract: &input["contract"],
@@ -693,7 +735,7 @@ where
         (Some(parent), Some(envelope)) => gateway.delegate(parent, envelope, admission_request).await,
         _ => admit_run(state.store.as_ref(), admission_request).await,
     };
-    let admission = admitted.map_err(|e| match e {
+    let mut admission = admitted.map_err(|e| match e {
         AdmissionError::Delegation(reasons) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "delegation_rejected",
@@ -722,6 +764,7 @@ where
             )
         }
     })?;
+    admission.task_authorizations = task_authorizations;
     let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
     state
         .store
@@ -775,7 +818,9 @@ where
                 "profiles": profiles, "required_controls": admission.required_controls,
                 "release_refs": admission.release_refs, "surfaced_capabilities": surfaced,
                 "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
-                "compiled_context_hash": admission.compiled_context_hash}),
+                "compiled_context_hash": admission.compiled_context_hash,
+                "task_authorization_refs": admission.task_authorizations.iter()
+                    .map(|t| t.bundle_ref(&admission.run_id)).collect::<Vec<_>>()}),
             &admission.admitted_at,
         )
         .await
@@ -817,7 +862,8 @@ where
             "executor_generation": generation,
             "compiled_context_hash": compiled.context_ledger.compiled_context_hash,
             "required_controls": admission.required_controls,
-            "policy_refs": admission.policy_refs,
+            // What the run's actions are bound to: the pack's and its task authorizations.
+            "policy_refs": admission.binding_policy_refs(),
             "policy_outcomes": admission.policy_outcomes,
             "features": features,
             "pack_ref": selected,

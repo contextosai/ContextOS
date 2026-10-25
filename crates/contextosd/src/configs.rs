@@ -119,6 +119,12 @@ pub fn findings(config: &Config) -> Vec<Finding> {
             "require_tool_schemas is off: some tool results may not be shape-checked",
         ));
     }
+    if !config.guards.require_task_authorization {
+        out.push(finding(
+            "notice",
+            "require_task_authorization is off: effects are bounded by broker grants, not by what the principal asked",
+        ));
+    }
     if config.guards.trust_supplied_memory {
         out.push(finding(
             "warning",
@@ -290,9 +296,10 @@ fn classify(path: &str, from: &Value, to: &Value) -> (&'static str, Option<&'sta
             if to == "development" { "loosens" } else { "tightens" },
             Some("development mode relaxes guards and allows loopback HTTP"),
         ),
-        "guards.refuse_repeated_effects" | "guards.require_user_role" | "guards.require_tool_schemas" => {
-            (flag(false), None)
-        }
+        "guards.refuse_repeated_effects"
+        | "guards.require_user_role"
+        | "guards.require_tool_schemas"
+        | "guards.require_task_authorization" => (flag(false), None),
         "guards.trust_supplied_memory" => (flag(true), Some("unverified recalled memory would be admitted")),
         "guards.identical_tool_calls" => match (from.as_u64(), to.as_u64()) {
             (_, Some(0)) => ("loosens", Some("disables the loop guard")),
@@ -500,7 +507,11 @@ mod tests {
         assert!(effects.contains(&("guards.refuse_repeated_effects", "loosens")));
         assert!(effects.contains(&("guards.identical_tool_calls", "loosens")));
         assert!(effects.contains(&("guards.trust_supplied_memory", "loosens")));
-        let on = changes("", "[guards]\nrequire_tool_schemas = true\nidentical_tool_calls = 3");
+        let on = changes(
+            "",
+            "[guards]\nrequire_tool_schemas = true\nidentical_tool_calls = 3\nrequire_task_authorization = true",
+        );
+        assert_eq!(on.len(), 3, "{on:?}");
         assert!(on.iter().all(|c| c.effect == "tightens"), "{on:?}");
         let scores = changes("", "[guards]\ncompletion_requires_scores = false");
         assert_eq!(scores[0].path, "guards.completion_requires_scores");

@@ -59,6 +59,25 @@ pub struct RunAdmission {
     /// The pinned Context Pack (release tuple) the run was compiled from.
     #[serde(default)]
     pub pack_ref: String,
+    /// What the principal authorized for this task; every effect must fall inside each
+    /// one. A delegated run carries its parent's and may add narrower ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_authorizations: Vec<crate::TaskAuthorization>,
+}
+
+impl RunAdmission {
+    /// The policy references an action binding names: the pack's, then each task
+    /// authorization, whose guardrail outcome every decision composes.
+    pub fn binding_policy_refs(&self) -> Vec<Value> {
+        let mut refs = self.policy_refs.clone();
+        for task in &self.task_authorizations {
+            let task_ref = task.bundle_ref(&self.run_id);
+            if !refs.contains(&task_ref) {
+                refs.push(task_ref);
+            }
+        }
+        refs
+    }
 }
 
 /// Inputs to admission. `features` must be derived by trusted admission from the
@@ -267,6 +286,7 @@ pub async fn admit_run<S: DocumentStore>(
         admitted_at: request.admitted_at,
         admitted_by: request.admitted_by,
         pack_ref: request.compiled.context_ledger.pack_ref.clone(),
+        task_authorizations: Vec::new(),
         tenant_id,
         run_id,
     })

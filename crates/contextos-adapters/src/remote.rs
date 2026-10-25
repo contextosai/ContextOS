@@ -71,8 +71,12 @@ impl RemoteFacts {
 /// lineage, so an authority broker can return the narrowing grant chain to the root.
 fn run_summary(admission: &RunAdmission) -> Value {
     let mut run = json!({"tenant_id": admission.tenant_id, "run_id": admission.run_id, "contract_id": admission.contract_id,
-        "trace_id": admission.trace_id, "actor": admission.actor, "policy_refs": admission.policy_refs,
+        "trace_id": admission.trace_id, "actor": admission.actor, "policy_refs": admission.binding_policy_refs(),
         "root_run_id": admission.run_id});
+    // An approval service routes `ask` approvals to who authorized the task.
+    if !admission.task_authorizations.is_empty() {
+        run["task_authorizations"] = json!(admission.task_authorizations);
+    }
     if let Some(lineage) = &admission.lineage {
         run["root_run_id"] = json!(lineage.root_run_id);
         run["parent_run_id"] = json!(lineage.parent_run_id);

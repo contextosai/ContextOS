@@ -172,7 +172,7 @@ use axum::Router;
 use axum::routing::post;
 use contextos_audit::AuditSigner;
 use contextos_contract::canonical::sha256_canonical;
-use contextos_store::{MemoryLog, MemoryStore};
+use contextos_store::{DocumentStore, MemoryLog, MemoryStore};
 use contextosd::auth::hash_api_key;
 use contextosd::runtime::dispatch_setup_from_config;
 use contextosd::{Config, build_state, load_pack, router};
@@ -905,10 +905,12 @@ async fn tools_that_need_input_continue_the_same_operation() {
 async fn delegated_children_are_admitted_narrowed_and_closed() {
     let w = world(&ALL_CONTROLS).await;
     let http = executor_client(2);
+    let mut parent_body = run_body("run_parent", 1200);
+    parent_body["task_authorization"] = task_authorization("run_parent", "deny", 120_000);
     let parent: Value = http
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
-        .json(&run_body("run_parent", 1200))
+        .json(&parent_body)
         .send()
         .await
         .unwrap()
@@ -954,6 +956,23 @@ async fn delegated_children_are_admitted_narrowed_and_closed() {
         .await
         .unwrap();
     assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
+    // The child keeps what the parent's principal authorized.
+    let stored = w
+        .state
+        .store
+        .get(&contextos_store::DocKey::new(
+            TENANT,
+            contextos_store::DocKind::RunAdmission,
+            "run_child",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(
+        stored["task_authorizations"][0]["scopes"][0]["root_run_id"],
+        "run_parent"
+    );
 
     // read_only: the effectful refund is not in the child's lane.
     let out: Value = http
@@ -986,6 +1005,174 @@ async fn delegated_children_are_admitted_narrowed_and_closed() {
     let closed: Value = closed.json().await.unwrap();
     assert_eq!(closed["usage"]["tool_calls"], 0);
     assert_eq!(close("run_parent").await.status(), 422, "only delegated runs close");
+}
+
+/// What the user asked for: refund order ord_881 to cus_77, at most `ceiling` minor units.
+fn task_authorization(root_run_id: &str, out_of_scope: &str, ceiling: u64) -> Value {
+    json!({"issued_by": {"principal_id": "usr_771", "principal_type": "person", "trust_domain": "contextos.test", "tenant_id": TENANT},
+        "out_of_scope": out_of_scope,
+        "scopes": [{"root_run_id": root_run_id, "purpose_ids": ["support.refund"], "capability_ids": ["adp_payments.issue_refund"],
+            "resource_ids": ["ord_881"], "destination_ids": ["cus_77"], "classification_labels": ["CONFIDENTIAL"],
+            "argument_constraints": [], "amount_ceiling": {"minor_units": ceiling, "currency": "INR"}}]})
+}
+
+fn refund(run_id: &str, key: &str, order: &str, customer: &str, amount: u64) -> Value {
+    let mut call = tool_call(run_id, key, amount);
+    call["args"]["order_id"] = json!(order);
+    call["args"]["customer_id"] = json!(customer);
+    call["evidence_refs"] = json!([]);
+    call["idempotency_key"] = json!(key);
+    call
+}
+
+async fn admit(w: &World, body: &Value) -> reqwest::Response {
+    executor_client(2)
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(body)
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn dispatch(w: &World, run_id: &str, call: &Value) -> Value {
+    executor_client(2)
+        .post(format!("{}/v1/runs/{run_id}/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(call)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn effects_outside_what_the_principal_authorized_are_refused() {
+    let w = world(&ALL_CONTROLS).await;
+    let mut body = run_body("run_scoped", 1200);
+    body["task_authorization"] = task_authorization("run_scoped", "deny", 120_000);
+    let admitted = admit(&w, &body).await;
+    assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
+
+    // The request said INR 1200 for ord_881; the agent's actual calls decide.
+    for (key, order, customer, amount, dimension) in [
+        ("op_4x", "ord_881", "cus_77", 480_000, "task_scope_amount"),
+        ("op_other_order", "ord_999", "cus_77", 120_000, "task_scope_resource"),
+        (
+            "op_other_customer",
+            "ord_881",
+            "cus_attacker",
+            1_000,
+            "task_scope_destination",
+        ),
+    ] {
+        let out = dispatch(&w, "run_scoped", &refund("run_scoped", key, order, customer, amount)).await;
+        assert_eq!(out["result"]["status"], "blocked", "{key}: {out}");
+        let reasons = out["report"]["reason_codes"].as_array().unwrap();
+        for code in ["guardrail_denied", "outside_task_authorization", dimension] {
+            assert!(reasons.contains(&json!(code)), "{key}: {out}");
+        }
+        // A clean policy denial, not an evaluation error.
+        assert!(!reasons.contains(&json!("policy_binding_mismatch")), "{key}: {out}");
+    }
+    assert_eq!(
+        w.provider_calls.load(Ordering::SeqCst),
+        0,
+        "nothing outside the task reached the provider"
+    );
+
+    // What was asked for runs.
+    let out = dispatch(
+        &w,
+        "run_scoped",
+        &refund("run_scoped", "op_asked", "ord_881", "cus_77", 120_000),
+    )
+    .await;
+    assert_eq!(out["result"]["status"], "completed", "{out}");
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
+
+    // The refusal is in the signed decision, citing the pinned task authorization.
+    let entries: Value = reqwest::Client::new()
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = entries["entries"].as_array().unwrap();
+    let admitted = entries.iter().find(|e| e["kind"] == "run_admitted").unwrap();
+    let task_ref = &admitted["payload"]["task_authorization_refs"][0];
+    assert_eq!(task_ref["artifact_type"], "task_authorization");
+    assert!(entries.iter().any(|e| {
+        e["kind"] == "authorization_decision"
+            && e["payload"]["policy_refs"]
+                .as_array()
+                .is_some_and(|r| r.contains(task_ref))
+    }));
+}
+
+#[tokio::test]
+async fn effects_outside_the_task_can_wait_for_the_principal() {
+    let w = world(&ALL_CONTROLS).await;
+    let mut body = run_body("run_ask", 1200);
+    body["task_authorization"] = task_authorization("run_ask", "ask", 120_000);
+    assert_eq!(admit(&w, &body).await.status(), 201);
+    let out = dispatch(
+        &w,
+        "run_ask",
+        &refund("run_ask", "op_more", "ord_881", "cus_77", 480_000),
+    )
+    .await;
+    // Asked before acting, about this exact action.
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    let obligations = out["report"]["obligations"].as_array().unwrap();
+    assert!(obligations.contains(&json!("await_approval")) && obligations.contains(&json!("confirm_with_principal")));
+    assert!(out["report"]["approval_request_id"].is_string());
+    assert!(
+        !out["report"]["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("policy_binding_mismatch"))
+    );
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn task_authorizations_are_reviewed_at_admission() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| c.guards.require_task_authorization = true).await;
+    let refused = admit(&w, &run_body("run_unscoped", 1200)).await;
+    assert_eq!(refused.status(), 422);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["code"], "task_authorization_required");
+
+    for (mutate, why) in [
+        (json!({"scopes": []}), "no scope"),
+        (json!({"out_of_scope": "maybe"}), "unknown mode"),
+        (json!({"issued_by": "usr_771"}), "not a principal"),
+    ] {
+        let mut body = run_body("run_bad", 1200);
+        let mut task = task_authorization("run_bad", "deny", 1);
+        for (k, v) in mutate.as_object().unwrap() {
+            task[k] = v.clone();
+        }
+        body["task_authorization"] = task;
+        let refused = admit(&w, &body).await;
+        assert_eq!(refused.status(), 422, "{why}");
+        let refused: Value = refused.json().await.unwrap();
+        assert_eq!(refused["error"]["code"], "task_authorization_invalid", "{why}");
+    }
+    // A scope written for another task cannot be replayed into this one.
+    let mut body = run_body("run_replayed", 1200);
+    body["task_authorization"] = task_authorization("run_elsewhere", "deny", 120_000);
+    assert_eq!(admit(&w, &body).await.status(), 422);
+
+    let mut body = run_body("run_ok", 1200);
+    body["task_authorization"] = task_authorization("run_ok", "deny", 120_000);
+    assert_eq!(admit(&w, &body).await.status(), 201);
 }
 
 /// A client acting as the executor that holds `generation` (a freshly admitted run

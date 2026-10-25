@@ -8,7 +8,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool } from "./client.mjs";
+import {
+  BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool, taskAuthorization, taskScope,
+} from "./client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const binary = join(root, "target/release/contextosd");
@@ -71,6 +73,20 @@ try {
 
   await assert.rejects(run.callTool(call.capability_id, call.args, options), (error) =>
     error instanceof ToolPaused && error.reasonCodes[0] === "retry_unsafe");
+
+  // A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
+  const scoped = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
+  scoped.run_context.run_id = scoped.contract.run_id = "run_scoped";
+  scoped.contract.contract_id = "contract_scoped";
+  const user = { principal_id: "usr_771", principal_type: "person", trust_domain: "contextos.dev", tenant_id: "tenant_acme_prod" };
+  scoped.task_authorization = taskAuthorization(user, [taskScope("run_scoped", "support.refund", call.capability_id, {
+    resources: ["ord_881"], destinations: ["cus_77"], amount: [120_000, "INR"],
+  })]);
+  const scopedRun = await client.admit(scoped);
+  await assert.rejects(
+    scopedRun.callTool(call.capability_id, { ...call.args, amount_minor: 480_000 }, { ...options, idempotencyKey: "refund:more" }),
+    (error) => error instanceof ToolBlocked && error.reasonCodes.includes("outside_task_authorization")
+      && error.reasonCodes.includes("task_scope_amount"));
 
   const refund = governedTool(run, call.capability_id, {
     approvalMode: "destructive", evidenceRefs: call.evidence_refs, idempotencyKey: (a) => `refund:${a.order_id}:big`,
