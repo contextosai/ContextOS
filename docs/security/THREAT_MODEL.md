@@ -234,11 +234,6 @@ external outcome proof or regulatory certification.
   scopes it is given. Deriving them from the principal's instruction, and confirming
   them with the principal, is the deployment's job; `confirmation_ref` records that
   evidence. Scope ceilings apply per action; totals need the task's `limits`.
-- **The specification's delegation rule reads a missing amount ceiling as unlimited**
-  while its grant-scope check reads it as "no amount" (SPEC-1, proposal spec-0004).
-  Grant chains are safe because every grant must cover the action; anything else that
-  treats the rule as "permits nothing more" must also refuse a ceiling added where
-  none was, as task-authorization amendments do.
 - **Task limits fail closed on unknown outcomes.** An effect whose outcome was unknown
   or partial keeps its charge even when reconciliation later finds it was not applied,
   so a task with many lost responses may stop short of its limits. The limits track at

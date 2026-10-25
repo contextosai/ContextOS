@@ -280,15 +280,6 @@ pub struct TaskCheck {
     pub reason_codes: Vec<String>,
 }
 
-/// The delegation rule, made consistent with the grant-scope check. The rule treats a
-/// scope without `amount_ceiling` as unlimited, but the check admits no action with an
-/// amount under such a scope, so adding a ceiling would permit refunds the current
-/// scope refuses: here it widens (proposal spec-0004, property TASK-1).
-fn scope_narrows(child: &Value, parent: &Value) -> bool {
-    authority_scope_narrows(child, parent)
-        && (parent.get("amount_ceiling").is_some() || child.get("amount_ceiling").is_none())
-}
-
 impl TaskAuthorization {
     /// Structural review at admission. `root_run_id` is the run's root: every scope
     /// must name it, so a scope cannot be replayed into another task.
@@ -324,7 +315,7 @@ impl TaskAuthorization {
     pub fn narrows(&self, current: &TaskAuthorization) -> bool {
         self.scopes
             .iter()
-            .all(|scope| current.scopes.iter().any(|c| scope_narrows(scope, c)))
+            .all(|scope| current.scopes.iter().any(|c| authority_scope_narrows(scope, c)))
             && (self.read_only == ReadOnly::Scoped || current.read_only == ReadOnly::Allow)
             && (self.out_of_scope == OutOfScope::Deny || current.out_of_scope == OutOfScope::Ask)
             && current
@@ -562,7 +553,7 @@ mod tests {
             "a ceiling where none was"
         );
         // The reverse is narrower too, but the delegation rule refuses it: conservative,
-        // it only means asking the principal.
+        // it only means asking the principal (proposal spec-0004).
         assert_eq!(no_amounts.change_from(Some(&current)), Change::Widened);
     }
 

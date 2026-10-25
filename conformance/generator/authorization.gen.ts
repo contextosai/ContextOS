@@ -103,6 +103,10 @@ test("authorization vectors", () => {
     ["run_link_missing", (x: any) => { x.run_links = []; }],
     ["run_link_unverified", (x: any) => { x.run_links[0].verification_status = "invalid"; }],
     ["run_link_wrong_root", (x: any) => { x.run_links[0].root_run_id = "other_root"; }],
+    // A scope without amount_ceiling admits no amount: a child may neither add nor drop one.
+    ["child_adds_ceiling", (x: any) => { delete x.grants[1].scope.amount_ceiling; delete x.binding.amount; }],
+    ["neither_has_ceiling", (x: any) => { delete x.grants[0].scope.amount_ceiling; delete x.grants[1].scope.amount_ceiling; delete x.binding.amount; }],
+    ["child_drops_ceiling", (x: any) => { delete x.grants[0].scope.amount_ceiling; delete x.binding.amount; }],
   ] as const;
   for (const [name, edit] of widen) {
     const x: any = structuredClone(dl); edit(x); refreshGrantObservations(x);
