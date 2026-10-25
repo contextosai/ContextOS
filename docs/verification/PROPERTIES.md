@@ -12,7 +12,7 @@ fails when a listed check is missing, or a check names a property not listed her
 |---|---|---|
 | L1 example | Fixed inputs with expected outputs | the specification's reference vectors (`conformance/vectors`), unit tests |
 | L2 property | A rule checked on thousands of generated inputs, shrunk to a minimal counterexample on failure | `proptest` suites below |
-| L3 exhaustive | Every state or interleaving of a bounded model | the run lifecycle |
+| L3 exhaustive | Every state or interleaving of a bounded model | the run lifecycle; every single-crash point of the real dispatch path |
 | L4 proof | A machine-checked proof for all inputs | none yet |
 
 An L2 property is only as good as how often its premise holds. Run a suite with
@@ -40,15 +40,28 @@ to fail when the code it guards was deliberately broken.
 | CANON-1 | Canonical JSON equals an independent RFC 8785 encoder: members by UTF-16 code units, strings escaped as the reference does | RFC 8785; every execution-contract digest | L2 | `canonical_text_matches_an_independent_encoder` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds; mutation-tested (sorting members by UTF-8 bytes fails) |
 | CANON-2 | The encoding is a fixed point, independent of member insertion order, and different values encode differently | RFC 8785 | L2 | `canonical_text_is_stable_and_distinguishing` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds |
 | CANON-3 | A number's text is ECMAScript's shortest round trip: it reads back as the same double, integral doubles print as integers, `-0` as `0` | RFC 8785 number serialization | L2 | `numbers_read_back_exactly` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds |
+| DISPATCH-1 | The provider is called only under a durable claim: never more calls than recorded attempts | Operation ledger: "claimed before dispatch" | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds at all 150 single-crash points |
+| DISPATCH-2 | After any single crash and a retry, an effect is sent at most once, unless the provider definitively reported it not applied | Durable effects, at-most-once | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-3 | A retry reports `completed` only for a confirmed effect | Tool result semantics | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-4 | Budget, task limits and shared exposure stay conserved across a crash and never charge usage for an effect that was not sent | Conserved accounting | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-5 | The signed audit chain verifies after a crash at any write | Audit integrity | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-6 | A dispatch stranded by a crash before its effect was sent recovers: once an operator records it not applied, the next retry sends it exactly once; after the dispatch gate opened, that assertion is refused | Reconciliation | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds since the dispatch gate (14 recovered, 2 refused as in flight per run). Found failing: outside shared guarantees a claimed attempt without facts could not be reconciled, so a crash between claim and send stranded the operation |
+| DISPATCH-7 | Of an operator recording an attempt as never sent and its live dispatch, exactly one wins: the dispatch sends nothing and releases its holds, or the assertion is refused | Dispatch gate | L1 | `reconciliation_and_a_live_dispatch_race_on_the_dispatch_gate` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | TASK-1 | An amendment classified `narrowed` permits nothing the current task authorization did not, for every action, effect and usage so far | Proposal spec-0003, replacement rule | L2 | `a_narrowed_task_permits_nothing_new` in `crates/contextos-gateway/tests/task_properties.rs` | Holds; mutation-tested (found SPEC-1 within 0.2 s when the narrowing fix was removed) |
 | TASK-2 | Of effects racing for a task's limits, no more are charged than fit; a returned charge frees exactly its share | Proposal spec-0003, limits | L2 | `charges_are_conserved_under_concurrency` in `crates/contextos-gateway/src/task_authorization.rs` | Holds (8 concurrent charges) |
 
 ## Not yet covered
 
-- **The dispatch protocol as a whole** (operation claim, effect claim, task charge,
-  shared exposure, release on every path where an effect is not sent) is checked by
-  integration tests, not by a model. It is the next candidate for L3, as a TLA+ or
-  explicit-state model run in CI.
+- **More than one crash.** DISPATCH-1..6 explore every single crash of one dispatch
+  and one retry; two crashes, concurrent dispatches of one run and crashes inside
+  reconciliation are not explored.
+- **A crash after the dispatch gate opened but before the provider was called** is
+  refused as possibly in flight (DISPATCH-6): it needs the provider's own record, a
+  confirmed assertion, or provider idempotency to resolve. A gate cannot tell "about
+  to send" from "sent".
+- **Recovery under a new operation id.** DISPATCH-6 retries the same operation;
+  whether an orchestrator that retries the stranded effect under a fresh operation id
+  is served is not explored.
 - **Executor generations** in the operation ledger (late facts from an earlier
   generation are recorded but never authorize dispatch) are covered by the reference
   vectors, not by OP-1..4, whose histories use one generation.

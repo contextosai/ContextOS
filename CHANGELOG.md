@@ -86,6 +86,15 @@ First release candidate of the ContextOS runtime.
   New reference vectors cover adding, dropping and omitting a ceiling.
 
 ### Runtime
+- Crash recovery: a crash between an operation's claim and its provider call no longer
+  strands the operation. Outside shared guarantees, a claimed attempt without facts
+  could not be reconciled, and retries were refused as `operation_in_flight` for good.
+  Reconciliation now treats it as unresolved. Each attempt has a dispatch gate, opened
+  immediately before the provider call; recording the attempt as not applied closes
+  it first, so a stranded dispatch that resumes sends nothing (`dispatch_aborted`) and
+  releases its holds. Once the gate opened, the assertion is refused (`dispatch_active`).
+  One more store write per dispatch. Found by exploring every single-crash point of a
+  dispatch (properties DISPATCH-1..7).
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
   provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
   persisted and reused on retry; MCP adapters may select the lossless

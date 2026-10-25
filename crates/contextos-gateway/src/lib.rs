@@ -328,6 +328,20 @@ pub fn operation_ledger_key(admission: &RunAdmission, operation_id: &str) -> Doc
     )
 }
 
+/// An attempt's dispatch gate, created once: `started` by the dispatch immediately
+/// before the provider is called, or `aborted` by a reconciliation recording that an
+/// attempt claimed without any fact was never sent. Of a stranded dispatch resuming
+/// and an operator resolving it, exactly one creates the gate, so the attempt is either
+/// sent or provably not sent.
+pub fn dispatch_gate_key(admission: &RunAdmission, attempt_id: &str) -> DocKey {
+    let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{attempt_id}", admission.run_id));
+    DocKey::new(
+        &admission.tenant_id,
+        DocKind::DispatchGate,
+        format!("gate_{}", &digest[7..39]),
+    )
+}
+
 fn operation_ledger_template(admission: &RunAdmission, ledger_id: &str) -> Value {
     json!({
         "ledger_id": ledger_id, "contract_id": admission.contract_id, "run_id": admission.run_id,
@@ -1566,6 +1580,35 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     vec![reason.into()],
                     "The shared business guarantee withheld this effect.",
                 ));
+            }
+        }
+
+        // The dispatch gate decides once whether this attempt is sent: if reconciliation
+        // already recorded it as never sent, the gate is closed and nothing goes out.
+        // Shared-guarantee operations are gated by their exposure receipt instead.
+        if !self.has_shared_guarantee(&manifest.capability_id) {
+            let gate = dispatch_gate_key(admission, &attempt_id);
+            match self
+                .store
+                .create(&gate, &json!({"state": "started", "operation_id": operation_id}))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {
+                    self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                        .await?;
+                    if guards_effect && new_operation {
+                        loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id)
+                            .await?;
+                    }
+                    self.release_task_charges(&task_charges, &operation_id).await?;
+                    return Ok(p.stop(
+                        "blocked",
+                        vec!["dispatch_aborted".into()],
+                        "Reconciliation recorded this attempt as never sent; it was not sent.",
+                    ));
+                }
+                Err(e) => return Err(e.into()),
             }
         }
 
