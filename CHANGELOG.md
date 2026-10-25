@@ -76,6 +76,11 @@ First release candidate of the ContextOS runtime.
   amounts the principal had not authorized. It is now a widening. Found by property
   AUTH-1, which also showed the specification's delegation rule and grant-scope check
   disagree on a missing ceiling (proposal spec-0004; grant chains are unaffected).
+- Properties of the operation ledger (no new attempt after an applied effect or under
+  conflicting evidence, at most one attempt in flight, applied stays applied) over
+  random histories with late facts, and of canonical JSON (an independent RFC 8785
+  encoder, fixed point, shortest round-trip numbers). Each guard they rest on was
+  mutation-tested.
 - The kernel follows specification revision `7e2462f`: a child grant scope that adds
   an `amount_ceiling` its parent lacks is `delegation_scope_expanded` (spec-0004).
   New reference vectors cover adding, dropping and omitting a ceiling.

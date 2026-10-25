@@ -10,6 +10,7 @@
 
 use contextos_kernel::authorization::{authority_scope_narrows, compose_policy_outcomes, scope_mismatch};
 use contextos_kernel::budget_ledger::{budget_limits_digest, reserve_budget, settle_budget, settlement_intent_digest};
+use contextos_kernel::operation_ledger::{claim_operation, record_effect_observation};
 use contextos_kernel::run_state::next_status;
 use proptest::prelude::*;
 use proptest::sample::subsequence;
@@ -554,6 +555,209 @@ proptest! {
             if let Err(broken) = conserved(&ledger) {
                 return Err(TestCaseError::fail(format!("after step {i} ({step:?}): {broken}")));
             }
+        }
+    }
+}
+
+/// A step of an operation ledger's history, over two operations.
+#[derive(Debug, Clone)]
+enum OpStep {
+    /// Claim a new attempt of operation `op`, or (`again`) the last attempt again.
+    Claim { op: usize, again: bool },
+    /// Record a fact about attempt `back` places before operation `op`'s last (a late
+    /// fact when not 0).
+    Observe {
+        op: usize,
+        back: usize,
+        outcome: u8,
+        definitive: bool,
+    },
+}
+
+fn op_step() -> impl Strategy<Value = OpStep> {
+    prop_oneof![
+        (0_usize..2, any::<bool>()).prop_map(|(op, again)| OpStep::Claim {
+            op,
+            again: again && op == 0
+        }),
+        (0_usize..2, 0_usize..3, 0_u8..5, any::<bool>()).prop_map(|(op, back, outcome, definitive)| OpStep::Observe {
+            op,
+            back,
+            outcome,
+            definitive
+        }),
+    ]
+}
+
+const OUTCOMES: [&str; 5] = ["confirmed", "partial", "not_applied", "not_dispatched", "unknown"];
+const STRATEGIES: [&str; 4] = ["manual_reconcile", "idempotent_retry", "no_retry", "query"];
+
+fn op_templates() -> (Value, Value, Value, Value) {
+    static TEMPLATES: std::sync::OnceLock<(Value, Value, Value, Value)> = std::sync::OnceLock::new();
+    TEMPLATES
+        .get_or_init(|| {
+            let vectors = common::load("durable.json.gz");
+            let case = |name: &str| {
+                vectors["ops"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["name"] == name)
+                    .unwrap()["input"]
+                    .clone()
+            };
+            let fresh = case("fresh_claim");
+            let observe = case("timeout");
+            let proof = case("idem:retry_with_proof")["intent"]["provider_observation"].clone();
+            (
+                fresh["ledger"].clone(),
+                fresh["intent"].clone(),
+                observe["observation"].clone(),
+                proof,
+            )
+        })
+        .clone()
+}
+
+/// `seconds` after the start of the history, as a contract timestamp.
+fn at(seconds: u64) -> String {
+    format!("2026-10-16T08:{:02}:{:02}Z", seconds / 60, seconds % 60)
+}
+
+fn op_of<'a>(ledger: &'a Value, id: &str) -> Option<&'a Value> {
+    ledger["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["intent"]["operation_id"] == id)
+}
+
+fn attempts(op: Option<&Value>) -> Vec<Value> {
+    op.and_then(|o| o["attempts"].as_array().cloned()).unwrap_or_default()
+}
+
+/// Whether any attempt of `op` has a definitive fact that the effect was applied.
+fn applied(op: Option<&Value>) -> bool {
+    op.is_some_and(|o| {
+        o["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["finality"] == "definitive" && matches!(f["outcome"].as_str(), Some("confirmed" | "partial")))
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// OP-1: a new attempt is claimed only when no attempt was definitively applied,
+    /// the evidence does not conflict, the strategy allows retries, and an unknown
+    /// outcome is retried only under a verified idempotency contract. OP-2: at most one
+    /// attempt is in flight, and it is the last. OP-3: once applied, an operation is
+    /// never again `not_applied` or `not_dispatched`; contradicting evidence makes it
+    /// `unknown` with a sticky conflict. OP-4: a rejected transition changes nothing,
+    /// an accepted change advances the revision by one, and attempts never exceed
+    /// `max_attempts`.
+    #[test]
+    fn effects_are_never_applied_twice(
+        strategies in prop::array::uniform2(prop::sample::select(STRATEGIES.to_vec())),
+        steps in prop::collection::vec(op_step(), 1..24),
+    ) {
+        let (mut ledger, intent_template, fact_template, proof_template) = op_templates();
+        let ids = ["op_a", "op_b"];
+        let mut next_attempt = 0;
+        for (i, step) in steps.iter().enumerate() {
+            let now = at(7 * (i as u64 + 1));
+            let before = ledger.clone();
+            let result = match step {
+                OpStep::Claim { op, again } => {
+                    let id = ids[*op];
+                    let existing = attempts(op_of(&ledger, id));
+                    let mut intent = intent_template.clone();
+                    intent["operation_id"] = json!(id);
+                    intent["recovery_strategy"] = json!(strategies[*op]);
+                    intent["max_attempts"] = json!(3);
+                    intent["retry_delays_seconds"] = json!([5, 10]);
+                    if strategies[*op] == "idempotent_retry" {
+                        intent["idempotency_key"] = json!(format!("idem_{id}"));
+                        intent["idempotency_scope"] = json!("payments:tenant_acme_prod");
+                        intent["provider_idempotency_ref"] = proof_template["provider_contract_ref"].clone();
+                        let mut proof = proof_template.clone();
+                        proof["key"] = json!(format!("idem_{id}"));
+                        proof["operation_id"] = json!(id);
+                        intent["provider_observation"] = proof;
+                    }
+                    let attempt = if let (true, Some(last)) = (again, existing.last()) {
+                        last.clone()
+                    } else {
+                        next_attempt += 1;
+                        json!({"attempt_id": format!("attempt_{next_attempt}"), "operation_id": id,
+                            "executor_generation": 3, "started_at": now, "dispatch_state": "claimed",
+                            "last_observation_ref": null})
+                    };
+                    intent["evaluation_time"] = attempt["started_at"].clone();
+                    intent["attempt"] = attempt;
+                    claim_operation(&ledger, &intent, &ledger["revision"], &json!(3))
+                }
+                OpStep::Observe { op, back, outcome, definitive } => {
+                    let id = ids[*op];
+                    let existing = attempts(op_of(&ledger, id));
+                    let Some(attempt) = existing.iter().rev().nth(*back).or(existing.last()) else { continue };
+                    let mut fact = fact_template.clone();
+                    fact["observation_id"] = json!(format!("fact_{i}"));
+                    fact["operation_id"] = json!(id);
+                    fact["attempt_id"] = attempt["attempt_id"].clone();
+                    fact["outcome"] = json!(OUTCOMES[*outcome as usize]);
+                    fact["finality"] = json!(if *definitive { "definitive" } else { "provisional" });
+                    fact["observed_at"] = json!(now);
+                    fact["evaluation_time"] = json!(now);
+                    fact["valid_until"] = json!(at(7 * (i as u64 + 1) + 300));
+                    record_effect_observation(&ledger, &fact, &ledger["revision"])
+                }
+            };
+            if result.status != "accepted" {
+                stat("OP rejected");
+                prop_assert_eq!(&result.state, &before, "OP-4: a rejected transition changed the ledger");
+                continue;
+            }
+            let after = result.state;
+            if after != before {
+                prop_assert_eq!(int(&after["revision"]), int(&before["revision"]) + 1, "OP-4");
+            }
+            for (n, id) in ids.iter().enumerate() {
+                let (was, now_op) = (op_of(&before, id), op_of(&after, id));
+                let (old, new) = (attempts(was), attempts(now_op));
+                if new.len() > old.len() && !old.is_empty() {
+                    stat("OP retry claimed");
+                    let outcome = was.unwrap()["outcome"].as_str().unwrap();
+                    prop_assert!(!applied(was), "OP-1: retried {id} after it was applied");
+                    prop_assert!(was.unwrap()["conflict"] != true, "OP-1: retried {id} on conflicting evidence");
+                    prop_assert!(strategies[n] != "no_retry", "OP-1: retried a no_retry operation");
+                    prop_assert!(outcome != "unknown" || strategies[n] == "idempotent_retry",
+                        "OP-1: retried {id} with an unknown outcome under {}", strategies[n]);
+                    if outcome == "unknown" {
+                        stat("OP unknown retried under idempotency");
+                    }
+                }
+                prop_assert!(new.len() <= 3, "OP-4: attempts exceed max_attempts");
+                let in_flight: Vec<usize> = new.iter().enumerate()
+                    .filter(|(_, a)| a["dispatch_state"] == "claimed").map(|(k, _)| k).collect();
+                prop_assert!(in_flight.len() <= 1 && in_flight.iter().all(|k| *k + 1 == new.len()),
+                    "OP-2: attempts in flight {in_flight:?} of {}", new.len());
+                if let (Some(was), Some(now_op)) = (was, now_op) {
+                    if matches!(was["outcome"].as_str(), Some("confirmed" | "partial")) {
+                        stat("OP applied then observed");
+                        let outcome = now_op["outcome"].as_str().unwrap();
+                        prop_assert!(outcome != "not_applied" && outcome != "not_dispatched",
+                            "OP-3: applied {id} became {outcome}");
+                        prop_assert!(outcome != "unknown" || now_op["conflict"] == true, "OP-3");
+                    }
+                    if was["conflict"] == true {
+                        prop_assert!(now_op["conflict"] == true, "OP-3: a conflict was forgotten");
+                    }
+                }
+            }
+            ledger = after;
         }
     }
 }

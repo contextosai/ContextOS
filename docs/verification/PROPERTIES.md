@@ -33,6 +33,13 @@ to fail when the code it guards was deliberately broken.
 | BUDGET-1 | Used plus reserved never exceeds the ceiling, for any history of reservations, settlements and replays | Conserved budget ledger | L2 | `budgets_are_conserved` in `crates/contextos-kernel/tests/properties.rs` | Holds (about 3100 accepted mutations per run) |
 | BUDGET-2 | What is reserved is exactly what open reservations still hold; what is used is what reservations used | Conserved budget ledger | L2 | `budgets_are_conserved` in `crates/contextos-kernel/tests/properties.rs` | Holds |
 | BUDGET-3 | A rejected mutation changes nothing, an accepted one advances the revision by one, a replay is answered from its receipt | Compare-and-swap mutations, idempotent receipts | L2 | `budgets_are_conserved` in `crates/contextos-kernel/tests/properties.rs` | Holds (about 1550 replays per run) |
+| OP-1 | A new attempt is claimed only when no attempt was definitively applied, the evidence does not conflict, the strategy allows retries, and an unknown outcome only under a verified idempotency contract | Operation ledger: "retried only when it is provably safe" | L2 | `effects_are_never_applied_twice` in `crates/contextos-kernel/tests/properties.rs` | Holds (about 345 retries, 134 after an unknown outcome, per run); mutation-tested (removing the confirmed or the unknown-outcome guard fails within 0.4 s) |
+| OP-2 | At most one attempt of an operation is in flight, and it is the last | Operation ledger: "never while an attempt is in flight" | L2 | `effects_are_never_applied_twice` in `crates/contextos-kernel/tests/properties.rs` | Holds. Removing the in-flight guard does not break it: an attempt in flight has no facts, so `retry_not_due` also refuses the claim |
+| OP-3 | Once applied, an operation is never again `not_applied` or `not_dispatched`; contradicting evidence makes it `unknown` with a conflict that stays | Effect outcomes, late facts | L2 | `effects_are_never_applied_twice` in `crates/contextos-kernel/tests/properties.rs` | Holds (about 1650 observations of applied operations per run, late facts included) |
+| OP-4 | A rejected transition changes nothing, an accepted change advances the revision by one, and attempts never exceed `max_attempts` | Compare-and-swap ledger transitions | L2 | `effects_are_never_applied_twice` in `crates/contextos-kernel/tests/properties.rs` | Holds |
+| CANON-1 | Canonical JSON equals an independent RFC 8785 encoder: members by UTF-16 code units, strings escaped as the reference does | RFC 8785; every execution-contract digest | L2 | `canonical_text_matches_an_independent_encoder` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds; mutation-tested (sorting members by UTF-8 bytes fails) |
+| CANON-2 | The encoding is a fixed point, independent of member insertion order, and different values encode differently | RFC 8785 | L2 | `canonical_text_is_stable_and_distinguishing` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds |
+| CANON-3 | A number's text is ECMAScript's shortest round trip: it reads back as the same double, integral doubles print as integers, `-0` as `0` | RFC 8785 number serialization | L2 | `numbers_read_back_exactly` in `crates/contextos-contract/tests/canonical_properties.rs` | Holds |
 | TASK-1 | An amendment classified `narrowed` permits nothing the current task authorization did not, for every action, effect and usage so far | Proposal spec-0003, replacement rule | L2 | `a_narrowed_task_permits_nothing_new` in `crates/contextos-gateway/tests/task_properties.rs` | Holds; mutation-tested (found SPEC-1 within 0.2 s when the narrowing fix was removed) |
 | TASK-2 | Of effects racing for a task's limits, no more are charged than fit; a returned charge frees exactly its share | Proposal spec-0003, limits | L2 | `charges_are_conserved_under_concurrency` in `crates/contextos-gateway/src/task_authorization.rs` | Holds (8 concurrent charges) |
 
@@ -42,7 +49,6 @@ to fail when the code it guards was deliberately broken.
   shared exposure, release on every path where an effect is not sent) is checked by
   integration tests, not by a model. It is the next candidate for L3, as a TLA+ or
   explicit-state model run in CI.
-- **The operation ledger** (no retry after a confirmed or partial effect, late facts
-  never authorize dispatch) has L1 coverage only.
-- **Canonical JSON and digests** have L1 coverage from the reference; a property that
-  equal values digest equally and canonicalisation is idempotent is cheap to add.
+- **Executor generations** in the operation ledger (late facts from an earlier
+  generation are recorded but never authorize dispatch) are covered by the reference
+  vectors, not by OP-1..4, whose histories use one generation.
