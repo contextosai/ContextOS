@@ -103,6 +103,16 @@ First release candidate of the ContextOS runtime.
   stayed held and the run could not complete. An effect reconciled as not applied now
   also returns its task-limit charge, as a dispatch reported not applied already did.
   Found by exploring every single-crash point of a reconciliation (RECONCILE-1..4).
+- Crash recovery: a crashed dispatch no longer leaves budget held. A crash between the
+  budget reservation and the operation claim left the reservation open for good; a
+  retry now reclaims it once its own claim succeeds, after closing the stranded
+  attempt's dispatch gate so that attempt can never send. A crash after the provider's
+  answer was recorded left the reservation, the shared exposure and the task-limit
+  charge unsettled; the next dispatch of the operation now settles them. Reservation
+  ids name their operation (`reservation:<operation tag>:<attempt_id>`); the earlier
+  `reservation:<attempt_id>` form is still recognized. Shared-guarantee dispatches now
+  open a dispatch gate too (one more store write for them). Found by checking release,
+  not only conservation, at every crash point of a dispatch (DISPATCH-8, DISPATCH-9).
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
   provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
   persisted and reused on retry; MCP adapters may select the lossless

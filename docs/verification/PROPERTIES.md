@@ -47,6 +47,8 @@ to fail when the code it guards was deliberately broken.
 | DISPATCH-5 | The signed audit chain verifies after a crash at any write | Audit integrity | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | DISPATCH-6 | A dispatch stranded by a crash before its effect was sent recovers: once an operator records it not applied, the next retry sends it exactly once; after the dispatch gate opened, that assertion is refused | Reconciliation | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds since the dispatch gate (14 recovered, 2 refused as in flight per run). Found failing: outside shared guarantees a claimed attempt without facts could not be reconciled, so a crash between claim and send stranded the operation |
 | DISPATCH-7 | Of an operator recording an attempt as never sent and its live dispatch, exactly one wins: the dispatch sends nothing and releases its holds, or the assertion is refused | Dispatch gate | L1 | `reconciliation_and_a_live_dispatch_race_on_the_dispatch_gate` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-8 | After any single crash and a retry, nothing stays held for an attempt whose outcome is known: no budget reservation (including one a crash left before its claim), no shared exposure for a confirmed or unapplied effect, no task-limit charge for an effect not applied | Conserved budget ledger; task limits (spec-0003) | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-9 | A retry reclaims the reservation of an attempt that never claimed the operation only after closing that attempt's dispatch gate: if its process was only paused and claims later, it sends nothing | Durable effects; conserved budget ledger | L1 | `a_reclaimed_attempt_never_sends` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | RECONCILE-1 | After any single crash of a reconciliation and a retry, the operation ends with the resolved outcome | Reconciliation: a definitive fact resolves the latest attempt | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | RECONCILE-2 | Nothing stays held for a reconciled operation: no budget reservation, task-limit or shared-exposure hold, no outstanding-effect entry; a confirmed effect is charged exactly once | Conserved budget ledger; task limits (spec-0003); run completion | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | RECONCILE-3 | The signed audit chain verifies after a crash at any write of a reconciliation, and records the reconciliation | Audit integrity | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
@@ -59,9 +61,9 @@ to fail when the code it guards was deliberately broken.
 - **More than one crash.** DISPATCH-1..6 and RECONCILE-1..4 explore every single crash
   of one dispatch or one reconciliation, followed by one retry; two crashes and
   concurrent dispatches of one run are not explored.
-- **A dispatch that crashed after recording its provider's answer** but before
-  settling its budget leaves the reservation held until the operation is reconciled
-  (which now completes it); DISPATCH-4 checks conservation there, not release.
+- **A reclaimed attempt that claims later** (DISPATCH-9) sends nothing, but leaves its
+  claim without facts: the operation is refused as in flight until an operator
+  records that attempt not applied, which its closed gate then allows.
 - **A crash after the dispatch gate opened but before the provider was called** is
   refused as possibly in flight (DISPATCH-6): it needs the provider's own record, a
   confirmed assertion, or provider idempotency to resolve. A gate cannot tell "about

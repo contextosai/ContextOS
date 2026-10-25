@@ -342,6 +342,23 @@ pub fn dispatch_gate_key(admission: &RunAdmission, attempt_id: &str) -> DocKey {
     )
 }
 
+/// The budget reservation of one attempt of an operation. It names the operation, so
+/// a retry can find a reservation that a crash left without its claim.
+pub(crate) fn attempt_reservation_id(admission: &RunAdmission, operation_id: &str, attempt_id: &str) -> String {
+    format!("{}{attempt_id}", reservation_prefix(admission, operation_id))
+}
+
+fn reservation_prefix(admission: &RunAdmission, operation_id: &str) -> String {
+    let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id));
+    format!("reservation:{}:", &digest[7..23])
+}
+
+/// Whether `id` is the reservation of this attempt, including the form used before
+/// reservation ids named their operation (`reservation:<attempt_id>`).
+pub(crate) fn is_attempt_reservation(id: &str, admission: &RunAdmission, operation_id: &str, attempt_id: &str) -> bool {
+    id == attempt_reservation_id(admission, operation_id, attempt_id) || id == format!("reservation:{attempt_id}")
+}
+
 fn operation_ledger_template(admission: &RunAdmission, ledger_id: &str) -> Value {
     json!({
         "ledger_id": ledger_id, "contract_id": admission.contract_id, "run_id": admission.run_id,
@@ -1158,6 +1175,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .find(|op| op["intent"]["operation_id"] == operation_id.as_str());
             if let Some(op) = existing {
                 persisted_key = op["intent"]["idempotency_key"].as_str().map(str::to_owned);
+                // A process that crashed after recording the attempt's outcome left what
+                // it held unsettled: settle it before deciding about this retry.
+                if let Some(sequence) = self.complete_recorded(admission, &operation_id, op).await? {
+                    p.report.audit_sequences.push(sequence);
+                }
+                if op["outcome"] != "unknown" && self.has_shared_guarantee(&manifest.capability_id) {
+                    p.report
+                        .audit_sequences
+                        .extend(self.settle_shared_exposure(admission, &operation_id).await?);
+                }
                 if op["outcome"] == "unknown" && self.has_shared_guarantee(&manifest.capability_id) {
                     p.report.obligations.push("reconcile_existing_operation".into());
                     return Ok(p.stop(
@@ -1203,7 +1230,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let attempt_id = self.ports.ids.new_id("attempt");
         p.report.attempt_id = Some(attempt_id.clone());
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
-        let reservation_id = format!("reservation:{attempt_id}");
+        let reservation_id = attempt_reservation_id(admission, &operation_id, &attempt_id);
         let cost_unit = json!({"currency": "USD", "units_per_cent": 100});
         let reserve_request = json!({
             "ledger_id": admission.budget_ledger_id, "contract_id": admission.contract_id,
@@ -1213,10 +1240,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "deadline": admission.deadline, "expected_revision": 0,
             "executor_generation": admission.executor_generation, "evaluation_time": now,
         });
+        let prefix = reservation_prefix(admission, &operation_id);
+        let mut unclaimed: Vec<String> = Vec::new();
         let (commit, reserved) = transact_state(
             self.store.as_ref(),
             &budget_key,
             |ledger| {
+                // Open reservations of this operation have no live claim yet: a crash
+                // may have left them behind (reclaimed once this attempt is claimed).
+                unclaimed = ledger["reservations"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|r| r["status"] != "settled")
+                    .filter_map(|r| r["reservation_id"].as_str())
+                    .filter_map(|id| id.strip_prefix(prefix.as_str()).map(str::to_owned))
+                    .collect();
                 let mut request = reserve_request.clone();
                 request["expected_revision"] = ledger["revision"].clone();
                 reserve_budget(ledger, &request)
@@ -1325,6 +1364,34 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Commit::Unchanged { obligations } | Commit::Written { obligations, .. } => {
                 p.report.obligations.extend(obligations);
             }
+        }
+        // This attempt now holds the operation's only claim, so another open reservation
+        // of the operation belongs to an attempt that never claimed it: its process
+        // crashed in between. Close that attempt's dispatch gate, so it can never send,
+        // and return its reservation.
+        for orphan in unclaimed {
+            let gate = dispatch_gate_key(admission, &orphan);
+            match self
+                .store
+                .create(&gate, &json!({"state": "aborted", "operation_id": operation_id}))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {
+                    if self
+                        .store
+                        .get(&gate)
+                        .await?
+                        .is_some_and(|g| g.body["state"] == "started")
+                    {
+                        continue;
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+            let id = attempt_reservation_id(admission, &operation_id, &orphan);
+            self.release_reservation(admission, &budget_key, &id, &orphan, &now)
+                .await?;
         }
         let claim_entry = self
             .audit
@@ -1584,9 +1651,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // The dispatch gate decides once whether this attempt is sent: if reconciliation
-        // already recorded it as never sent, the gate is closed and nothing goes out.
-        // Shared-guarantee operations are gated by their exposure receipt instead.
-        if !self.has_shared_guarantee(&manifest.capability_id) {
+        // already recorded it as never sent, or a retry reclaimed its reservation, the
+        // gate is closed and nothing goes out.
+        {
             let gate = dispatch_gate_key(admission, &attempt_id);
             match self
                 .store
@@ -1605,7 +1672,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     return Ok(p.stop(
                         "blocked",
                         vec!["dispatch_aborted".into()],
-                        "Reconciliation recorded this attempt as never sent; it was not sent.",
+                        "This attempt was recorded as never sent; it was not sent.",
                     ));
                 }
                 Err(e) => return Err(e.into()),
