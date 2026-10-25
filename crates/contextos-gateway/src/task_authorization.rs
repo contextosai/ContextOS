@@ -280,6 +280,15 @@ pub struct TaskCheck {
     pub reason_codes: Vec<String>,
 }
 
+/// The delegation rule, made consistent with the grant-scope check. The rule treats a
+/// scope without `amount_ceiling` as unlimited, but the check admits no action with an
+/// amount under such a scope, so adding a ceiling would permit refunds the current
+/// scope refuses: here it widens (proposal spec-0004, property TASK-1).
+fn scope_narrows(child: &Value, parent: &Value) -> bool {
+    authority_scope_narrows(child, parent)
+        && (parent.get("amount_ceiling").is_some() || child.get("amount_ceiling").is_none())
+}
+
 impl TaskAuthorization {
     /// Structural review at admission. `root_run_id` is the run's root: every scope
     /// must name it, so a scope cannot be replayed into another task.
@@ -315,7 +324,7 @@ impl TaskAuthorization {
     pub fn narrows(&self, current: &TaskAuthorization) -> bool {
         self.scopes
             .iter()
-            .all(|scope| current.scopes.iter().any(|c| authority_scope_narrows(scope, c)))
+            .all(|scope| current.scopes.iter().any(|c| scope_narrows(scope, c)))
             && (self.read_only == ReadOnly::Scoped || current.read_only == ReadOnly::Allow)
             && (self.out_of_scope == OutOfScope::Deny || current.out_of_scope == OutOfScope::Ask)
             && current
@@ -535,6 +544,26 @@ mod tests {
             Change::Narrowed,
             "a first authorization only restricts"
         );
+        // A scope without a ceiling admits no amount at all: adding one widens it.
+        let mut no_amounts = current.clone();
+        no_amounts.scopes[0].as_object_mut().unwrap().remove("amount_ceiling");
+        assert_eq!(
+            verdict(&no_amounts.check(
+                "run_1",
+                &binding("pay.refund", "ord_1", 1),
+                ActionEffect::ExternalState,
+                false
+            )),
+            "deny"
+        );
+        assert_eq!(
+            current.change_from(Some(&no_amounts)),
+            Change::Widened,
+            "a ceiling where none was"
+        );
+        // The reverse is narrower too, but the delegation rule refuses it: conservative,
+        // it only means asking the principal.
+        assert_eq!(no_amounts.change_from(Some(&current)), Change::Widened);
     }
 
     fn limits(max_effects: Option<u64>, total: Option<u64>) -> TaskLimits {
@@ -629,6 +658,8 @@ mod tests {
         assert_ne!(current.bundle_ref("run_1"), with(None).bundle_ref("run_1"));
     }
 
+    /// TASK-2: of effects racing for a task's limits, no more are charged than fit,
+    /// and a returned charge frees exactly its share.
     #[tokio::test]
     async fn charges_are_conserved_under_concurrency() {
         let store = std::sync::Arc::new(contextos_store::MemoryStore::new());

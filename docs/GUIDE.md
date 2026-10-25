@@ -315,6 +315,8 @@ says whether it `narrowed` or `widened` and gives the new revision.
 - **Narrowing** is open to the executor's own key (`dispatch`): an agent may always
   restrict itself. Narrowing means every scope narrows a current one, reads are no
   less scoped, `deny` is not replaced by `ask`, and every limit is kept and no higher.
+  A scope without `amount_ceiling` authorizes no amount, so adding a ceiling to it
+  widens.
 - **Widening** needs a key with the `authorize` scope and neither `admit` nor
   `dispatch`, so whoever runs the task cannot enlarge it. It also needs the
   principal's `confirmation_ref` and the same `issued_by`. Give `authorize` to the

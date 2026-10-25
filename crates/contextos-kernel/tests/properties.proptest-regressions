@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a250bd4cc72f19653f7e448289181b7215c932c5e216855cdcdf5c56d8a803d3 # shrinks to parent = Object {"argument_constraints": Array [], "capability_ids": Array [String("b"), String("c")], "classification_labels": Array [String("INTERNAL"), String("RESTRICTED")], "destination_ids": Array [String("a"), String("b")], "purpose_ids": Array [String("c")], "resource_ids": Array [String("a"), String("b"), String("c")], "root_run_id": String("run_root")}, other = Object {"argument_constraints": Array [], "capability_ids": Array [], "classification_labels": Array [], "destination_ids": Array [], "purpose_ids": Array [], "resource_ids": Array [], "root_run_id": String("run_root")}, seed = 4129626751397536639, action = Object {"action_risk": Object {"data_scope": String("PUBLIC")}, "arguments": Object {}, "capability_id": String("a"), "destination_ids": Array [], "purpose_id": String("a"), "resource_ids": Array []}
