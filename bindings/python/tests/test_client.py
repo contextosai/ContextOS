@@ -106,6 +106,16 @@ def main() -> None:
         except ToolBlocked as refused:
             assert "outside_task_authorization" in refused.reason_codes, refused.reason_codes
             assert "task_scope_amount" in refused.reason_codes, refused.reason_codes
+        # The executor may restrict its own task further; widening is not its call.
+        lower = task_authorization(user, [task_scope(
+            "run_scoped", "support.refund", call["capability_id"], resources=["ord_881"], destinations=["cus_77"],
+            amount=(50_000, "INR"))])
+        assert client.amend_task_authorization("run_scoped", 0, lower)["change"] == "narrowed"
+        try:
+            client.amend_task_authorization("run_scoped", 1, scoped["task_authorization"])
+            raise AssertionError("the executor widened its own task")
+        except ContextOSHTTPError as refused:
+            assert refused.status == 403, refused
 
         # A decorated tool: the signature becomes the governed arguments.
         @governed_tool(run, call["capability_id"], approval_mode="destructive",

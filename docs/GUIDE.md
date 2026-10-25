@@ -283,6 +283,36 @@ binding with the same rules as broker grants.
 - **Delegated runs** keep their parent's task authorizations and may only add narrower
   ones.
 
+**Corrections mid-run.** When the principal corrects the task (another recipient, a
+lower amount, a goal that changed), replace the run's own task authorization with
+`PUT /v1/runs/{run_id}/task-authorization`, sending
+`{"expected_revision": n, "task_authorization": {…}}` (0 as admitted). The response
+says whether it `narrowed` or `widened` and gives the new revision.
+
+- **Narrowing** is open to the executor's own key (`dispatch`): an agent may always
+  restrict itself. Narrowing means every scope narrows a current one, reads are no
+  less scoped, and `deny` is not replaced by `ask`.
+- **Widening** needs a key with the `authorize` scope and neither `admit` nor
+  `dispatch`, so whoever runs the task cannot enlarge it. It also needs the
+  principal's `confirmation_ref` and the same `issued_by`. Give `authorize` to the
+  service that talks to the principal (your app backend), never to the agent's
+  orchestrator. The configuration refuses a principal holding `authorize` together
+  with `admit` or `dispatch`.
+- **Old approvals and claims stop applying.** The task reference is part of every
+  action digest, so an approval given under the previous authorization (say, for
+  the old recipient) no longer matches. An operation claimed under it cannot be
+  retried as the same operation; reconcile it instead.
+- **What is recorded:** each amendment is audited as `task_authorization_amended`,
+  with the old and new references, the change, the amending principal and the
+  confirmation. A delegated run's inherited authorizations never change; it may only
+  amend its own.
+
+**Measuring it.** Proposals outside the task show up in
+`contextos_dispatch_refusals_total{reason="outside_task_authorization"}`, broken down
+by `task_scope_*`. Asks that a principal later approved are your over-asking (the
+"incorrect denials" of an adoption trial). Corrections are counted in
+`contextos_task_authorization_amendments_total{change}`.
+
 `[guards] require_task_authorization = true` refuses runs that can apply effects
 without one (`task_authorization_required`). The Python and Node clients build the
 shape with `task_authorization(...)`/`task_scope(...)` (`taskAuthorization`/`taskScope`).

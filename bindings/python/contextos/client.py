@@ -218,6 +218,13 @@ class Client:
         status = self.request("GET", f"/v1/runs/{_quote(run_id)}")
         return Run(self, run_id, trace_id, status["executor_generation"], principal_chain, status)
 
+    def amend_task_authorization(self, run_id: str, expected_revision: int, task: dict) -> dict:
+        """Corrects what a run's principal authorized. Narrowing is open to the executor;
+        widening needs an ``authorize`` token that does not run tasks, the principal's
+        ``confirmation_ref`` and the same ``issued_by``. Returns the new revision."""
+        return self.request("PUT", f"/v1/runs/{_quote(run_id)}/task-authorization",
+                            {"expected_revision": expected_revision, "task_authorization": task})
+
     def score(self, run_id: str, record_id: str, evaluator_ref: str, *, policy: float, utility: float,
               safety: float) -> dict:
         """Scores a recorded decision as an independent evaluator (a client whose token

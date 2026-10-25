@@ -146,6 +146,17 @@ export class Client {
    * Scores a recorded decision as an independent evaluator (a client whose token has
    * only the `evaluate` scope). The runtime adds the measured cost and latency.
    */
+  /**
+   * Corrects what a run's principal authorized. Narrowing is open to the executor;
+   * widening needs an `authorize` token that does not run tasks, the principal's
+   * `confirmation_ref` and the same `issued_by`. Resolves to the new revision.
+   */
+  amendTaskAuthorization(runId, expectedRevision, task) {
+    return this.request("PUT", `/v1/runs/${segment(runId)}/task-authorization`, {
+      body: { expected_revision: expectedRevision, task_authorization: task },
+    });
+  }
+
   score(runId, recordId, { evaluatorRef, policy, utility, safety }) {
     return this.request("POST", `/v1/runs/${segment(runId)}/decisions/${segment(recordId)}/scores`, {
       body: { evaluator_ref: evaluatorRef, policy, utility, safety },

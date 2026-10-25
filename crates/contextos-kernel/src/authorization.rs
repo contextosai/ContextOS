@@ -489,6 +489,11 @@ fn in_scope(binding: &Value, scope: &Value) -> bool {
     scope_mismatch(binding, scope).is_none()
 }
 
+/// Whether grant scope `child` permits nothing `parent` does not (the delegation rule).
+pub fn authority_scope_narrows(child: &Value, parent: &Value) -> bool {
+    scope_narrows(child, parent)
+}
+
 /// Whether `value` is a well-formed `AuthorityGrant` scope.
 pub fn valid_authority_scope(value: &Value) -> bool {
     valid_scope(value)

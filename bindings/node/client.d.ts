@@ -73,6 +73,7 @@ export declare class Client {
   admit(body: Record<string, any>, options?: { principalChain?: { kind: string; id: string }[] }): Promise<Run>;
   attach(runId: string, traceId: string, principalChain: { kind: string; id: string }[]): Promise<Run>;
   /** Scores a recorded decision as an independent evaluator (token with only `evaluate`). */
+  amendTaskAuthorization(runId: string, expectedRevision: number, task: Json): Promise<{ run_id: string; revision: number; change: "narrowed" | "widened"; task_authorization_ref: Json; policy_refs: Json[] }>;
   score(runId: string, recordId: string, scores: { evaluatorRef: string; policy: number; utility: number; safety: number }): Promise<{ score: Record<string, any>; audit_sequence: number }>;
   /** Files an operator correction or override against a run (token with `evaluate`, independent of the run). */
   fileFeedback(runId: string, feedback: { kind: "correction" | "override" | "approval_verdict"; targetSurface: FeedbackSurface; summary: string; decisionRecordId?: string; expectedOutcome?: string }): Promise<Feedback>;

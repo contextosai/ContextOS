@@ -63,6 +63,18 @@ pub struct RunAdmission {
     /// one. A delegated run carries its parent's and may add narrower ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub task_authorizations: Vec<crate::TaskAuthorization>,
+    /// How many leading `task_authorizations` the run inherited; they never change.
+    /// Any after them is the run's own, which its principal may amend.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub inherited_task_authorizations: usize,
+    /// Amendments made to the run's own task authorization.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub task_authorization_revision: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 impl RunAdmission {
@@ -287,6 +299,8 @@ pub async fn admit_run<S: DocumentStore>(
         admitted_by: request.admitted_by,
         pack_ref: request.compiled.context_ledger.pack_ref.clone(),
         task_authorizations: Vec::new(),
+        inherited_task_authorizations: 0,
+        task_authorization_revision: 0,
         tenant_id,
         run_id,
     })

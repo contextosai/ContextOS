@@ -495,6 +495,17 @@ impl Config {
                 key.principal_id
             )));
         }
+        // Whoever widens a task on its principal's behalf does not also run it.
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "authorize") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both authorize tasks and admit or dispatch",
+                key.principal_id
+            )));
+        }
         // Whoever proposes or approves configuration does not also run agents under it.
         if let Some(key) = self
             .api_keys
@@ -555,6 +566,10 @@ mod tests {
         );
         let error = Config::parse(&second_key).unwrap_err().to_string();
         assert!(error.contains("cannot both evaluate"), "{error}");
+        // Whoever runs a task cannot also widen it.
+        let authorizer = second_key.replace(r#"scopes = ["evaluate"]"#, r#"scopes = ["authorize"]"#);
+        let error = Config::parse(&authorizer).unwrap_err().to_string();
+        assert!(error.contains("cannot both authorize tasks"), "{error}");
         // Published example keys are refused in production (the example file is).
         let published = EXAMPLE.replace(
             &format!("sha256:{}", "0".repeat(64)),

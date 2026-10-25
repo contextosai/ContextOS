@@ -3465,6 +3465,125 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/task-authorization": {
+      "put": {
+        "operationId": "amendTaskAuthorization",
+        "summary": "Correct what the run's principal authorized (narrow, or widen with confirmation)",
+        "description": "Replaces the run's own task authorization; inherited ones never change. Narrowing (every scope narrows a current one, reads no less scoped, `ask` not replacing `deny`) needs `dispatch` or `authorize`. Widening needs `authorize` held without `admit`/`dispatch`, a `confirmation_ref` and the same `issued_by`. The task reference is part of every action digest, so approvals and operation claims made under the previous authorization no longer match. Audited as `task_authorization_amended`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_revision",
+                  "task_authorization"
+                ],
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The run's current task authorization revision (0 as admitted)."
+                  },
+                  "task_authorization": {
+                    "$ref": "#/components/schemas/TaskAuthorization"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Amended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "revision",
+                    "change",
+                    "task_authorization_ref",
+                    "policy_refs"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "change": {
+                      "enum": [
+                        "narrowed",
+                        "widened"
+                      ]
+                    },
+                    "task_authorization_ref": {
+                      "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/ArtifactRef"
+                    },
+                    "policy_refs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "https://contextosai.com/schemas/execution-contract.v1.schema.json#/$defs/ArtifactRef"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          },
+          {
+            "bearer": [
+              "authorize"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
     }
   },
   "components": {
