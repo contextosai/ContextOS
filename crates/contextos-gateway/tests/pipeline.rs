@@ -3722,3 +3722,219 @@ async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
         "explored {explored} crash points; {recovered} stranded dispatches recovered, {in_flight} refused as in flight"
     );
 }
+
+/// How an operation came to need reconciliation, and how it is reconciled.
+#[derive(Debug, Clone, Copy)]
+enum Unresolved {
+    /// A dispatch crashed after its claim, before the provider was called; an operator
+    /// records the attempt never sent.
+    Stranded,
+    /// The provider's answer is unknown; an operator asserts it confirmed.
+    AssertedConfirmed,
+    /// The provider's answer is unknown; querying the provider confirms it.
+    Queried,
+}
+
+impl Unresolved {
+    fn behavior(self) -> Behavior {
+        match self {
+            Self::Stranded => Behavior::Confirm,
+            Self::AssertedConfirmed | Self::Queried => Behavior::Task,
+        }
+    }
+
+    fn resolution(self) -> Resolution {
+        match self {
+            Self::Stranded => Resolution::Assert {
+                outcome: EffectOutcome::NotApplied,
+                evidence_ref: artifact("incident", "never_sent"),
+                principal_id: "oncall".into(),
+            },
+            Self::AssertedConfirmed => Resolution::Assert {
+                outcome: EffectOutcome::Confirmed,
+                evidence_ref: artifact("provider_ledger_extract", "refund-ord-881"),
+                principal_id: "ops_alice".into(),
+            },
+            Self::Queried => Resolution::Query,
+        }
+    }
+
+    fn outcome(self) -> &'static str {
+        match self {
+            Self::Stranded => "not_applied",
+            Self::AssertedConfirmed | Self::Queried => "confirmed",
+        }
+    }
+}
+
+/// A running run with one operation, `recon_refund`, left unresolved as `how` says.
+/// A stranded dispatch is made by crashing it at `strand_at`, before that write commits.
+async fn unresolved(how: Unresolved, guarded: bool, strand_at: usize) -> (Harness, RunAdmission, Value) {
+    let h = harness("allow", how.behavior()).await;
+    running(&h).await;
+    let mut admission = h.admission.clone();
+    if guarded {
+        admission.task_authorizations = vec![limited_task(&admission.run_id)];
+    }
+    let call = shared_call(&admission, "recon_refund", 420_000);
+    let store = Arc::new(CrashStore::new(
+        h.store.clone(),
+        if matches!(how, Unresolved::Stranded) {
+            strand_at
+        } else {
+            usize::MAX
+        },
+        false,
+    ));
+    let _ = process(&h, store, 20_000, guarded).dispatch(&admission, &call).await;
+    if matches!(how, Unresolved::Queried) {
+        // The provider's task has finished: the first query confirms it.
+        h.adapter.queries.store(1, Ordering::SeqCst);
+    }
+    (h, admission, call)
+}
+
+/// The last write of a dispatch before its provider call: crashing there strands it.
+async fn last_write_before_the_provider(guarded: bool) -> usize {
+    let mut last = None;
+    for strand_at in 0.. {
+        let (h, _, _) = unresolved(Unresolved::Stranded, guarded, strand_at).await;
+        if h.adapter.calls.load(Ordering::SeqCst) > 0 {
+            break;
+        }
+        last = Some(strand_at);
+    }
+    last.expect("a dispatch writes before calling the provider")
+}
+
+/// RECONCILE-1..4: every single crash point of a reconciliation, explored exhaustively.
+/// For a stranded dispatch recorded not applied, and an unknown outcome confirmed by an
+/// operator or by querying the provider, with and without a shared guarantee and task
+/// limits, the reconciling process crashes at each of its durable writes, before or
+/// after the write commits, and a fresh process reconciles again. Then:
+///
+/// - RECONCILE-1: the operation ends with the resolved outcome;
+/// - RECONCILE-2: nothing is left held for it: no budget reservation, task-limit or
+///   shared-exposure hold, and the run no longer lists it as an outstanding effect; a
+///   confirmed effect is charged exactly once;
+/// - RECONCILE-3: the signed audit chain verifies and records the reconciliation;
+/// - RECONCILE-4: a stranded effect recorded not applied is then sent exactly once.
+#[tokio::test]
+async fn every_crash_point_of_a_reconciliation_is_safe_to_retry() {
+    let mut explored = 0;
+    for guarded in [false, true] {
+        let strand_at = last_write_before_the_provider(guarded).await;
+        for how in [Unresolved::Stranded, Unresolved::AssertedConfirmed, Unresolved::Queried] {
+            // A clean reconciliation counts its durable writes.
+            let (h, admission, _) = unresolved(how, guarded, strand_at).await;
+            let counter = Arc::new(CrashStore::new(h.store.clone(), usize::MAX, false));
+            let clean = process(&h, counter.clone(), 30_000, guarded)
+                .reconcile(&admission, "recon_refund", how.resolution())
+                .await
+                .unwrap();
+            assert_eq!(
+                clean.status, "resolved",
+                "{how:?} guarded={guarded}: {:?}",
+                clean.reason_codes
+            );
+            let writes = counter.writes.load(Ordering::SeqCst);
+            assert!(writes >= 2, "a reconciliation makes durable writes ({writes})");
+            for crash_at in 0..writes {
+                for after_commit in [false, true] {
+                    let case = format!("{how:?} guarded={guarded} crash_at={crash_at} after_commit={after_commit}");
+                    let (h, admission, call) = unresolved(how, guarded, strand_at).await;
+                    let crashing = Arc::new(CrashStore::new(h.store.clone(), crash_at, after_commit));
+                    let _ = process(&h, crashing, 30_000, guarded)
+                        .reconcile(&admission, "recon_refund", how.resolution())
+                        .await;
+                    let restarted = process(&h, h.store.clone(), 40_000, guarded);
+                    let retried = restarted
+                        .reconcile(&admission, "recon_refund", how.resolution())
+                        .await
+                        .unwrap();
+                    explored += 1;
+
+                    let operations = ledger(
+                        &h,
+                        DocKind::OperationLedger,
+                        &operation_ledger_key(&admission, "recon_refund").id,
+                    )
+                    .await;
+                    let op = &operations["operations"][0];
+                    assert_eq!(
+                        op["outcome"],
+                        how.outcome(),
+                        "RECONCILE-1 {case}: {} {:?}",
+                        retried.status,
+                        retried.reason_codes
+                    );
+                    let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+                    for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+                        assert_eq!(budget["reserved"][k], 0, "RECONCILE-2 {case}: {k} still reserved");
+                    }
+                    let charged = budget["used"]["tool_calls"].as_u64().unwrap();
+                    let confirmed = how.outcome() == "confirmed";
+                    assert_eq!(charged, u64::from(confirmed), "RECONCILE-2 {case}: charged {charged}");
+                    let state = restarted.run_state(&admission).await.unwrap().unwrap();
+                    assert!(
+                        !state["outstanding_effects"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|e| e["operation_id"] == "recon_refund"),
+                        "RECONCILE-2 {case}: still outstanding: {}",
+                        state["outstanding_effects"]
+                    );
+                    if guarded {
+                        let digest = sha256_canonical(&json!("ord_881")).unwrap();
+                        let view = restarted
+                            .shared_exposure(TENANT, "refunds", &digest)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(view["held"], 0, "RECONCILE-2 {case}: shared exposure held");
+                        assert_eq!(
+                            view["committed"],
+                            if confirmed { 420_000 } else { 0 },
+                            "RECONCILE-2 {case}: shared exposure committed"
+                        );
+                        let task = ledger(
+                            &h,
+                            DocKind::TaskExposure,
+                            &contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id).id,
+                        )
+                        .await;
+                        assert_eq!(
+                            task["effects"],
+                            u64::from(confirmed),
+                            "RECONCILE-2 {case}: task-limit charge"
+                        );
+                    }
+                    verify_tenant_chain(h.audit.log(), TENANT, &keys())
+                        .await
+                        .unwrap_or_else(|e| panic!("RECONCILE-3 {case}: {e:?}"));
+                    let rows = contextos_store::AppendLog::range(h.audit.log(), TENANT, 1, 1000)
+                        .await
+                        .unwrap();
+                    assert!(
+                        rows.iter().any(|r| r.body["kind"] == "effect_reconciliation"
+                            && r.body["payload"]["operation_id"] == "recon_refund"),
+                        "RECONCILE-3 {case}: the reconciliation is not audited"
+                    );
+                    if matches!(how, Unresolved::Stranded) {
+                        let later = process_at(&h, h.store.clone(), 50_000, guarded, Arc::new(LaterClock));
+                        let out = later.dispatch(&admission, &call).await.unwrap();
+                        assert_eq!(
+                            out.result["status"], "completed",
+                            "RECONCILE-4 {case}: {:?}",
+                            out.report.reason_codes
+                        );
+                        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1, "RECONCILE-4 {case}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(explored >= 24, "explored {explored} crash points");
+    eprintln!("explored {explored} crash points of reconciliation");
+}

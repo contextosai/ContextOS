@@ -95,6 +95,14 @@ First release candidate of the ContextOS runtime.
   releases its holds. Once the gate opened, the assertion is refused (`dispatch_active`).
   One more store write per dispatch. Found by exploring every single-crash point of a
   dispatch (properties DISPATCH-1..7).
+- Crash recovery: a reconciliation that crashed after recording its fact is completed
+  by the next reconciliation of the operation, which settles the held budget
+  reservation, returns task-limit charges and clears the run's outstanding-effect entry
+  (`reconciliation_completed`), auditing the completion with `source: "recovery"`.
+  Before, the retry saw a settled operation and changed nothing, so the reservation
+  stayed held and the run could not complete. An effect reconciled as not applied now
+  also returns its task-limit charge, as a dispatch reported not applied already did.
+  Found by exploring every single-crash point of a reconciliation (RECONCILE-1..4).
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
   provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
   persisted and reused on retry; MCP adapters may select the lossless

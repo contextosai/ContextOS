@@ -23,6 +23,12 @@
 //! gate first, the effect may be in flight and the assertion is refused
 //! (`dispatch_active`); otherwise the stranded dispatch, if it resumes, finds the gate
 //! closed and sends nothing.
+//!
+//! Reconciliation resumes after a crash. Once its fact is recorded, a later
+//! reconciliation of the operation finishes what the crash left (settling the
+//! reservation, returning task-limit charges, clearing the outstanding-effect entry) and
+//! audits that completion as `source: "recovery"`, citing the recorded observation; a
+//! crash between the two entries can audit one completion twice, never none.
 
 use std::time::Duration;
 
@@ -165,6 +171,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             // need human escalation, and settled outcomes need nothing.
             if op["conflict"] == true {
                 out.reason_codes.push("conflicting_effect_evidence".into());
+            } else if let Some(sequence) = self.complete_recorded(admission, operation_id, &op).await? {
+                // An earlier reconciliation recorded the fact and stopped before the rest.
+                "resolved".clone_into(&mut out.status);
+                out.attempt_id = op["attempts"]
+                    .as_array()
+                    .and_then(|a| a.last())
+                    .and_then(|a| a["attempt_id"].as_str())
+                    .map(str::to_owned);
+                out.reason_codes.push("reconciliation_completed".into());
+                out.audit_sequences.push(sequence);
             }
             return Ok(out);
         }
@@ -376,6 +392,122 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         out.audit_sequences
             .extend(self.settle_shared_exposure(admission, operation_id).await?);
 
+        let outcome = out.outcome.clone().unwrap_or_default();
+        self.settle_recorded(
+            admission,
+            operation_id,
+            &attempt_id,
+            &outcome,
+            claimed_without_fact,
+            (&observation_id, &observed_at, &valid_until, &evidence_ref),
+        )
+        .await?;
+        "resolved".clone_into(&mut out.status);
+        Ok(out)
+    }
+
+    /// Finishes a reconciliation that recorded its fact but crashed before settling
+    /// what the attempt held: returns the audit sequence of the completion, or `None`
+    /// when nothing was left to do. The completion is audited again, citing the
+    /// recorded observation, because the crash may have come before the first entry.
+    async fn complete_recorded(
+        &self,
+        admission: &RunAdmission,
+        operation_id: &str,
+        op: &Value,
+    ) -> Result<Option<u64>, GatewayError> {
+        let Some(attempt) = op["attempts"].as_array().and_then(|a| a.last()) else {
+            return Ok(None);
+        };
+        let attempt_id = attempt["attempt_id"].as_str().unwrap_or_default();
+        let facts: Vec<&Value> = op["observations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|o| o["attempt_id"] == attempt_id)
+            .collect();
+        let Some(fact) = facts
+            .iter()
+            .rev()
+            .find(|o| o["finality"] == "definitive" && o["outcome"] != "unknown")
+        else {
+            return Ok(None);
+        };
+        let outcome = op["outcome"].as_str().unwrap_or_default();
+        let reservation_id = format!("reservation:{attempt_id}");
+        let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
+        let held = self.store.get(&budget_key).await?.is_some_and(|r| {
+            r.body["reservations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|res| res["reservation_id"] == reservation_id.as_str() && res["status"] != "settled")
+        });
+        let listed = self.run_state(admission).await?.is_some_and(|state| {
+            state["outstanding_effects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|e| e["operation_id"] == operation_id && e["outcome"] != outcome)
+        });
+        let mut charged = false;
+        if outcome == "not_applied" {
+            for key in task_limit_keys(admission) {
+                charged |= self
+                    .store
+                    .get(&key)
+                    .await?
+                    .is_some_and(|used| used.body["operations"].get(operation_id).is_some());
+            }
+        }
+        if !held && !listed && !charged {
+            return Ok(None);
+        }
+        let entry = self
+            .audit
+            .append(
+                &admission.tenant_id,
+                "effect_reconciliation",
+                json!({"operation_id": operation_id, "attempt_id": attempt_id,
+                    "observation_id": fact["observation_id"], "outcome": fact["outcome"], "source": "recovery",
+                    "principal_id": null, "evidence_ref": fact["evidence_ref"]}),
+                &self.now(),
+            )
+            .await?;
+        // Every fact of the attempt is the resolving one: the provider never answered.
+        let unmeasured = facts
+            .iter()
+            .all(|o| o["finality"] == "definitive" && o["outcome"] != "unknown");
+        let text = |k: &str| fact[k].as_str().unwrap_or_default().to_owned();
+        self.settle_recorded(
+            admission,
+            operation_id,
+            attempt_id,
+            outcome,
+            unmeasured,
+            (
+                &text("observation_id"),
+                &text("observed_at"),
+                &text("valid_until"),
+                &fact["evidence_ref"],
+            ),
+        )
+        .await?;
+        Ok(Some(entry.sequence))
+    }
+
+    /// Settles what an attempt held once its outcome is recorded: the budget
+    /// reservation, a task-limit charge for an effect not applied, and the run's list
+    /// of outstanding effects. Each step is idempotent, so a retry repeats it safely.
+    async fn settle_recorded(
+        &self,
+        admission: &RunAdmission,
+        operation_id: &str,
+        attempt_id: &str,
+        outcome: &str,
+        unmeasured: bool,
+        (observation_id, observed_at, valid_until, evidence_ref): (&str, &str, &str, &Value),
+    ) -> Result<(), GatewayError> {
         // A confirmed claim without a provider observation has no measured usage.
         // Charge its protected original allocation conservatively; an original
         // response sealed out by recovery must not turn this call into free usage.
@@ -388,7 +520,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .flatten()
                 .find(|res| res["reservation_id"] == reservation_id.as_str() && res["status"] != "settled")
                 .map(|res| {
-                    if claimed_without_fact && response.outcome == EffectOutcome::Confirmed {
+                    if unmeasured && outcome == "confirmed" {
                         res["allocation"].clone()
                     } else {
                         res["used"].clone()
@@ -401,18 +533,36 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 &budget_key,
                 &reservation_id,
                 &format!("reconcile:{observation_id}"),
-                &observed_at,
-                &valid_until,
-                &evidence_ref,
+                observed_at,
+                valid_until,
+                evidence_ref,
                 &used,
                 true,
             )
             .await?;
         }
-        if let Some(outcome) = &out.outcome {
+        if outcome == "not_applied" {
+            // The effect never happened: it no longer counts against the task's limits.
+            for key in task_limit_keys(admission) {
+                crate::task_authorization::release(self.store.as_ref(), &key, operation_id).await?;
+            }
+        }
+        if !outcome.is_empty() {
             self.note_effect(admission, operation_id, outcome).await?;
         }
-        "resolved".clone_into(&mut out.status);
-        Ok(out)
+        Ok(())
     }
+}
+
+/// The exposure documents of the run's task authorizations that have limits.
+fn task_limit_keys(admission: &RunAdmission) -> Vec<DocKey> {
+    admission
+        .task_authorizations
+        .iter()
+        .enumerate()
+        .filter(|(_, task)| task.limits.is_some())
+        .map(|(index, _)| {
+            crate::task_authorization::exposure_key(&admission.tenant_id, admission.task_authorization_origin(index))
+        })
+        .collect()
 }
