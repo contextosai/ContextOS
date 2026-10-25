@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROW = re.compile(r"^\| ([A-Z]+-\d+) \|.*\| `(\w+)` in `([^`]+)` \|")
-IDENTIFIER = re.compile(r"\b(?:AUTH|POLICY|RUN|BUDGET|OP|CANON|DISPATCH|TASK|SPEC)-\d+\b")
+IDENTIFIER = re.compile(r"\b(?:AUTH|POLICY|RUN|BUDGET|OP|CANON|DISPATCH|RECONCILE|TASK|SPEC)-\d+\b")
 
 
 def problems(root: Path) -> list:
