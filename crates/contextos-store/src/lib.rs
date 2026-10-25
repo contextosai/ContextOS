@@ -74,6 +74,9 @@ pub enum DocKind {
     /// What a task authorization's limits have used, across the issuing run and its
     /// delegated runs.
     TaskExposure,
+    /// Whether an attempt was sent or aborted, decided once (the gateway's dispatch
+    /// gate).
+    DispatchGate,
 }
 
 impl DocKind {
@@ -107,6 +110,7 @@ impl DocKind {
             DocKind::SharedExposure => "shared_exposure",
             DocKind::ExposureLink => "exposure_link",
             DocKind::TaskExposure => "task_exposure",
+            DocKind::DispatchGate => "dispatch_gate",
         }
     }
 }

@@ -918,7 +918,7 @@ impl ConstraintProvider for Constraints {
     ) -> Result<Vec<Value>, PortError> {
         Ok(required
             .iter()
-            .map(|control| json!({"control": control, "action_digest": digest, "policy_refs": admission.policy_refs,
+            .map(|control| json!({"control": control, "action_digest": digest, "policy_refs": admission.binding_policy_refs(),
                 "verdict": "allow", "verification_status": "verified",
                 "verification_ref": artifact("control_observation", control["control_id"].as_str().unwrap()),
                 "observer": principal("grant_observer"), "observed_at": "2026-10-20T09:59:00Z", "valid_until": "2026-10-20T11:00:00Z"}))
@@ -987,7 +987,7 @@ impl ApprovalProvider for Approvals {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum Behavior {
     Confirm,
     Partial,
@@ -3295,4 +3295,430 @@ fn provider_keys_separate_runs_and_tenants_reusing_an_operation_id() {
     );
     assert!(key.starts_with("ctxos:v1:") && key.len() == "ctxos:v1:".len() + 64);
     assert!(!key.contains("ord_881") && !key.contains("run_1"));
+}
+
+/// A store whose process crashes at its `crash_at`th write: before the write commits,
+/// or (`after_commit`) after it commits but before the caller learns so. From then on
+/// every access fails, as a dead process's would.
+struct CrashStore {
+    inner: Arc<MemoryStore>,
+    writes: AtomicUsize,
+    crash_at: usize,
+    after_commit: bool,
+    crashed: std::sync::atomic::AtomicBool,
+}
+
+impl CrashStore {
+    fn new(inner: Arc<MemoryStore>, crash_at: usize, after_commit: bool) -> Self {
+        Self {
+            inner,
+            writes: AtomicUsize::new(0),
+            crash_at,
+            after_commit,
+            crashed: false.into(),
+        }
+    }
+
+    fn dead() -> contextos_store::StoreError {
+        contextos_store::StoreError::Backend("process crashed".into())
+    }
+
+    async fn write<T>(
+        &self,
+        commit: impl std::future::Future<Output = Result<T, contextos_store::StoreError>>,
+    ) -> Result<T, contextos_store::StoreError> {
+        if self.crashed.load(Ordering::SeqCst) {
+            return Err(Self::dead());
+        }
+        if self.writes.fetch_add(1, Ordering::SeqCst) != self.crash_at {
+            return commit.await;
+        }
+        self.crashed.store(true, Ordering::SeqCst);
+        if self.after_commit {
+            let _ = commit.await;
+        }
+        Err(Self::dead())
+    }
+}
+
+impl DocumentStore for CrashStore {
+    async fn get(&self, k: &DocKey) -> Result<Option<contextos_store::Versioned>, contextos_store::StoreError> {
+        if self.crashed.load(Ordering::SeqCst) {
+            return Err(Self::dead());
+        }
+        self.inner.get(k).await
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.write(self.inner.create(k, b)).await
+    }
+    async fn compare_and_swap(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: &Value,
+    ) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.write(self.inner.compare_and_swap(k, r, b)).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, contextos_store::StoreError> {
+        self.write(self.inner.compare_and_swap_encoded(k, r, b, e)).await
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&contextos_store::ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<contextos_store::ScanCursor>, contextos_store::StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+/// A minute after [`NOW`]: past the retry delay of an operation attempted at `NOW`.
+struct LaterClock;
+impl Clock for LaterClock {
+    fn now(&self) -> String {
+        "2026-10-20T10:01:00.000000Z".into()
+    }
+}
+
+/// Pauses a dispatch just before it opens its dispatch gate.
+struct GatePause {
+    inner: Arc<MemoryStore>,
+    entered: tokio::sync::Semaphore,
+    resume: tokio::sync::Semaphore,
+}
+
+impl DocumentStore for GatePause {
+    async fn get(&self, k: &DocKey) -> Result<Option<contextos_store::Versioned>, contextos_store::StoreError> {
+        self.inner.get(k).await
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        if k.kind == DocKind::DispatchGate {
+            self.entered.add_permits(1);
+            self.resume.acquire().await.unwrap().forget();
+        }
+        self.inner.create(k, b).await
+    }
+    async fn compare_and_swap(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: &Value,
+    ) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.inner.compare_and_swap(k, r, b).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, contextos_store::StoreError> {
+        self.inner.compare_and_swap_encoded(k, r, b, e).await
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&contextos_store::ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<contextos_store::ScanCursor>, contextos_store::StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+/// DISPATCH-7: an operator recording a claimed attempt as never sent and its dispatch
+/// resuming race on the dispatch gate. When the operator wins, the live dispatch sends
+/// nothing (`dispatch_aborted`) and releases what it held, and the next retry sends the
+/// effect exactly once; when the dispatch has opened the gate, the assertion is refused.
+#[tokio::test]
+async fn reconciliation_and_a_live_dispatch_race_on_the_dispatch_gate() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let mut admission = h.admission.clone();
+    admission.task_authorizations = vec![limited_task(&admission.run_id)];
+    let call = shared_call(&admission, "raced_refund", 420_000);
+    let paused = Arc::new(GatePause {
+        inner: h.store.clone(),
+        entered: tokio::sync::Semaphore::new(0),
+        resume: tokio::sync::Semaphore::new(0),
+    });
+    let live = Arc::new(process(&h, paused.clone(), 20_000, false));
+    let (dispatching, raced_call, raced_admission) = (live.clone(), call.clone(), admission.clone());
+    let pending = tokio::spawn(async move { dispatching.dispatch(&raced_admission, &raced_call).await });
+    paused.entered.acquire().await.unwrap().forget();
+
+    let operator = process(&h, h.store.clone(), 30_000, false);
+    let never_sent = Resolution::Assert {
+        outcome: EffectOutcome::NotApplied,
+        evidence_ref: artifact("incident", "stalled_before_send"),
+        principal_id: "oncall".into(),
+    };
+    let resolved = operator
+        .reconcile(&admission, "raced_refund", never_sent.clone())
+        .await
+        .unwrap();
+    assert_eq!(resolved.status, "resolved", "{:?}", resolved.reason_codes);
+    paused.resume.add_permits(1);
+    let out = pending.await.unwrap().unwrap();
+    assert_eq!(out.report.reason_codes, ["dispatch_aborted"]);
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        0,
+        "the aborted attempt sent nothing"
+    );
+    let task = h
+        .store
+        .get(&contextos_gateway::task_authorization::exposure_key(
+            TENANT,
+            &admission.run_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(task["effects"], 0, "its task-limit charge was returned");
+
+    let later = process_at(&h, h.store.clone(), 40_000, false, Arc::new(LaterClock));
+    let retried = later.dispatch(&admission, &call).await.unwrap();
+    assert_eq!(
+        retried.result["status"], "completed",
+        "{:?}",
+        retried.report.reason_codes
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    // The completed attempt opened its gate: a late "never sent" cannot be recorded.
+    let late = operator
+        .reconcile(&admission, "raced_refund", never_sent)
+        .await
+        .unwrap();
+    assert_ne!(late.status, "resolved");
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+}
+
+/// A gateway process on `store`, with ids that do not collide with another process's.
+fn process<S: DocumentStore + 'static>(h: &Harness, store: Arc<S>, ids: u64, shared: bool) -> Gateway<S, MemoryLog> {
+    process_at(h, store, ids, shared, Arc::new(FixedClock))
+}
+
+fn process_at<S: DocumentStore + 'static>(
+    h: &Harness,
+    store: Arc<S>,
+    ids: u64,
+    shared: bool,
+    clock: Arc<dyn Clock>,
+) -> Gateway<S, MemoryLog> {
+    let ports = Ports {
+        clock,
+        ids: Arc::new(SeqIds(AtomicU64::new(ids))),
+        authority: h.authority.clone(),
+        policy: Arc::new(Policy("allow")),
+        constraints: Arc::new(Constraints),
+        approvals: h.approvals.clone(),
+        idempotency: None,
+        data_flow: None,
+        boundary: None,
+        memory: None,
+    };
+    let mut g = Gateway::new(store, h.audit.clone(), ports);
+    g.register_adapter("adp_payments", h.adapter.clone());
+    g.pin_capability(manifest()).unwrap();
+    if shared {
+        g.set_shared_guarantees(vec![shared_rule()]).unwrap();
+    }
+    g
+}
+
+/// What the principal authorized: this refund, at most once and INR 4200 in total.
+fn limited_task(root_run_id: &str) -> TaskAuthorization {
+    serde_json::from_value(
+        json!({"issued_by": {"principal_id": "usr_771", "principal_type": "person",
+            "trust_domain": "contextos.test", "tenant_id": TENANT},
+        "scopes": [{"root_run_id": root_run_id, "purpose_ids": ["support.refund"],
+            "capability_ids": ["adp_payments.issue_refund"], "resource_ids": ["ord_881"], "destination_ids": ["cus_77"],
+            "classification_labels": ["CONFIDENTIAL"], "argument_constraints": [],
+            "amount_ceiling": {"minor_units": 420_000, "currency": "INR"}}],
+        "limits": {"max_effects": 1, "amount_total": {"minor_units": 420_000, "currency": "INR"}}}),
+    )
+    .unwrap()
+}
+
+/// DISPATCH-1..5: every single crash point of a dispatch, explored exhaustively. For
+/// each provider outcome, with and without a shared guarantee and task limits, the
+/// process crashes at each of the dispatch's durable writes, before or after the
+/// write commits, and a fresh process retries the identical call. Then:
+///
+/// - DISPATCH-1: the provider is called only under a durable claim (no more calls
+///   than recorded attempts);
+/// - DISPATCH-2: an effect is sent at most once, unless the provider definitively
+///   reported it not applied;
+/// - DISPATCH-3: a retry reports `completed` only if the effect was confirmed;
+/// - DISPATCH-4: budget, task limits and shared exposure stay conserved and never
+///   charge an effect that was not sent;
+/// - DISPATCH-5: the signed audit chain verifies;
+/// - DISPATCH-6: a dispatch the crash stranded before the effect was sent recovers:
+///   once an operator records it not applied, the next retry completes with exactly
+///   one provider call, so no claim, charge or reservation is left holding it.
+#[tokio::test]
+async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
+    let (mut explored, mut recovered, mut in_flight) = (0, 0, 0);
+    for behavior in [
+        Behavior::Confirm,
+        Behavior::Partial,
+        Behavior::RefuseInjected,
+        Behavior::Task,
+    ] {
+        for guarded in [false, true] {
+            // A clean run counts the dispatch's durable writes.
+            let clean = harness("allow", behavior).await;
+            let mut admission = clean.admission.clone();
+            if guarded {
+                admission.task_authorizations = vec![limited_task(&admission.run_id)];
+            }
+            let counter = Arc::new(CrashStore::new(clean.store.clone(), usize::MAX, false));
+            let out = process(&clean, counter.clone(), 20_000, guarded)
+                .dispatch(&admission, &shared_call(&admission, "crash_refund", 420_000))
+                .await
+                .unwrap();
+            assert_eq!(
+                clean.adapter.calls.load(Ordering::SeqCst),
+                1,
+                "{behavior:?} guarded={guarded}: the clean run reaches the provider: {:?}",
+                out.report.reason_codes
+            );
+            let writes = counter.writes.load(Ordering::SeqCst);
+            assert!(writes >= 4, "a dispatch makes durable writes ({writes})");
+            for crash_at in 0..writes {
+                for after_commit in [false, true] {
+                    let case =
+                        format!("{behavior:?} guarded={guarded} crash_at={crash_at} after_commit={after_commit}");
+                    let h = harness("allow", behavior).await;
+                    let mut admission = h.admission.clone();
+                    if guarded {
+                        admission.task_authorizations = vec![limited_task(&admission.run_id)];
+                    }
+                    let call = shared_call(&admission, "crash_refund", 420_000);
+                    let crashing = Arc::new(CrashStore::new(h.store.clone(), crash_at, after_commit));
+                    let _ = process(&h, crashing, 20_000, guarded).dispatch(&admission, &call).await;
+                    let restarted = process(&h, h.store.clone(), 30_000, guarded);
+                    let retried = restarted.dispatch(&admission, &call).await;
+                    explored += 1;
+
+                    let calls = h.adapter.calls.load(Ordering::SeqCst);
+                    let operations = ledger(
+                        &h,
+                        DocKind::OperationLedger,
+                        &operation_ledger_key(&admission, "crash_refund").id,
+                    )
+                    .await;
+                    let op = &operations["operations"][0];
+                    let attempts = op["attempts"].as_array().map_or(0, Vec::len);
+                    assert!(
+                        calls <= attempts,
+                        "DISPATCH-1 {case}: {calls} calls, {attempts} attempts"
+                    );
+                    let refused = matches!(behavior, Behavior::RefuseInjected);
+                    assert!(calls <= if refused { 2 } else { 1 }, "DISPATCH-2 {case}: {calls} calls");
+                    if let Ok(out) = &retried
+                        && out.result["status"] == "completed"
+                    {
+                        assert_eq!(op["outcome"], "confirmed", "DISPATCH-3 {case}");
+                        assert!(calls >= 1, "DISPATCH-3 {case}");
+                    }
+                    let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+                    for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+                        let (used, reserved, ceiling) = (
+                            budget["used"][k].as_i64().unwrap(),
+                            budget["reserved"][k].as_i64().unwrap(),
+                            budget["ceiling"][k].as_i64().unwrap(),
+                        );
+                        assert!(
+                            used >= 0 && reserved >= 0 && used + reserved <= ceiling,
+                            "DISPATCH-4 {case}: {k}"
+                        );
+                    }
+                    assert!(
+                        budget["used"]["tool_calls"].as_u64().unwrap() <= calls as u64,
+                        "DISPATCH-4 {case}: usage charged for an effect never sent"
+                    );
+                    if guarded {
+                        let exposure_key =
+                            contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id);
+                        if let Some(used) = h.store.get(&exposure_key).await.unwrap() {
+                            assert!(
+                                used.body["effects"].as_u64().unwrap() <= 1,
+                                "DISPATCH-4 {case}: task limit"
+                            );
+                            assert!(
+                                used.body["amounts"]["INR"].as_u64().unwrap_or(0) <= 420_000,
+                                "DISPATCH-4 {case}: task total"
+                            );
+                        }
+                        let digest = sha256_canonical(&json!("ord_881")).unwrap();
+                        if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
+                            let (held, committed) =
+                                (view["held"].as_u64().unwrap(), view["committed"].as_u64().unwrap());
+                            assert!(held + committed <= 500_000, "DISPATCH-4 {case}: shared exposure");
+                            assert!(
+                                committed == 0 || calls >= 1,
+                                "DISPATCH-4 {case}: committed without a call"
+                            );
+                        }
+                    }
+                    verify_tenant_chain(h.audit.log(), TENANT, &keys())
+                        .await
+                        .unwrap_or_else(|e| panic!("DISPATCH-5 {case}: {e:?}"));
+                    let stranded = calls == 0
+                        && matches!(behavior, Behavior::Confirm)
+                        && retried.as_ref().is_ok_and(|o| o.result["status"] != "completed");
+                    if stranded {
+                        let resolved = restarted
+                            .reconcile(
+                                &admission,
+                                "crash_refund",
+                                Resolution::Assert {
+                                    outcome: EffectOutcome::NotApplied,
+                                    evidence_ref: artifact("incident", "never_sent"),
+                                    principal_id: "oncall".into(),
+                                },
+                            )
+                            .await
+                            .unwrap();
+                        if resolved.status != "resolved" {
+                            // The crash came after the dispatch gate opened: the effect may
+                            // be in flight, so it cannot be recorded as not applied.
+                            assert!(
+                                resolved.reason_codes == ["dispatch_active"]
+                                    || resolved.reason_codes == ["shared_guarantee_dispatch_active"],
+                                "DISPATCH-6 {case}: {} {:?}",
+                                resolved.status,
+                                resolved.reason_codes
+                            );
+                            in_flight += 1;
+                            continue;
+                        }
+                        recovered += 1;
+                        let later = process_at(&h, h.store.clone(), 40_000, guarded, Arc::new(LaterClock));
+                        let out = later.dispatch(&admission, &call).await.unwrap();
+                        assert_eq!(
+                            out.result["status"], "completed",
+                            "DISPATCH-6 {case}: {:?}",
+                            out.report.reason_codes
+                        );
+                        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1, "DISPATCH-6 {case}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(explored >= 64, "explored {explored} crash points");
+    assert!(recovered >= 8, "recovered {recovered} stranded dispatches");
+    eprintln!(
+        "explored {explored} crash points; {recovered} stranded dispatches recovered, {in_flight} refused as in flight"
+    );
 }

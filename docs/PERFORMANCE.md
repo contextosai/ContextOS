@@ -92,10 +92,12 @@ within noise (`CONTEXTOS_BENCH_GUARDS=off` measures without the guards).
 
 `CONTEXTOS_BENCH_COUNT=1 cargo bench -p contextos-gateway --bench dispatch` prints
 document-store operations per sequential effect, counted with reads treated as
-expensive (as on PostgreSQL), besides the audit batch: 5 reads and 6 writes with the
-guards, 4 and 5 without. The guards' read is fetched concurrently with the other
-authorization facts; their one write is serial. (Before the claim and the loop count
-shared one seeded write, the guards cost 3 reads and 2 writes per effect.)
+expensive (as on PostgreSQL), besides the audit batch: 5 reads and 7 writes with the
+guards, 4 and 6 without. The guards' read is fetched concurrently with the other authorization facts;
+their one write is serial. (Before the claim and the loop count shared one seeded
+write, the guards cost 3 reads and 2 writes per effect.) One write is the attempt's
+dispatch gate, created immediately before the provider call so that crash recovery
+can tell a stranded attempt from one that was sent.
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:

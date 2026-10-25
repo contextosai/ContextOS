@@ -16,6 +16,13 @@
 //! facts), audited, and the held reservation is settled without further charge.
 //! A confirmed effect is never re-dispatched; a definitively unapplied one becomes
 //! eligible for retry under the operation's recovery policy.
+//!
+//! An attempt that was claimed but has no fact (its process crashed between the claim
+//! and the provider's answer) is unresolved too. Recording it as not applied first
+//! closes its dispatch gate ([`crate::dispatch_gate_key`]): if the dispatch opened the
+//! gate first, the effect may be in flight and the assertion is refused
+//! (`dispatch_active`); otherwise the stranded dispatch, if it resumes, finds the gate
+//! closed and sends nothing.
 
 use std::time::Duration;
 
@@ -123,13 +130,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             out.audit_sequences
                 .extend(self.settle_shared_exposure(admission, operation_id).await?);
         }
-        let claimed_without_fact = shared
-            && op["attempts"].as_array().and_then(|a| a.last()).is_some_and(|a| {
-                a["dispatch_state"] == "claimed"
-                    && !op["observations"].as_array().into_iter().flatten().any(|o| {
-                        o["attempt_id"] == a["attempt_id"] && o["finality"] == "definitive" && o["outcome"] != "unknown"
-                    })
-            });
+        // A claimed attempt without a definitive fact may or may not have been sent (the
+        // process may have crashed on either side of the provider call): it is
+        // unresolved, like an unknown outcome.
+        let claimed_without_fact = op["attempts"].as_array().and_then(|a| a.last()).is_some_and(|a| {
+            a["dispatch_state"] == "claimed"
+                && !op["observations"].as_array().into_iter().flatten().any(|o| {
+                    o["attempt_id"] == a["attempt_id"] && o["finality"] == "definitive" && o["outcome"] != "unknown"
+                })
+        });
         if (op["outcome"] != "unknown" && !claimed_without_fact) || op["conflict"] == true {
             if shared
                 && let Resolution::Assert {
@@ -247,7 +256,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
         // A rejected assertion/query must not abort a live dispatch. At this point
         // the resolving response and operator evidence have been validated.
-        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed {
+        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && !shared {
+            // Close the dispatch gate first: if the attempt's dispatch already opened it,
+            // the effect may be in flight and cannot be recorded as not applied.
+            let gate = crate::dispatch_gate_key(admission, &attempt_id);
+            match self
+                .store
+                .create(&gate, &json!({"state": "aborted", "operation_id": operation_id}))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {
+                    if self
+                        .store
+                        .get(&gate)
+                        .await?
+                        .is_some_and(|g| g.body["state"] == "started")
+                    {
+                        return Ok(out.rejected("dispatch_active"));
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && shared {
             let request = self
                 .audit
                 .append(
