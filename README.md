@@ -65,6 +65,8 @@ Framework examples have their own prerequisites in [examples/frameworks](example
 - **Specification:** the [published contract](https://contextosai.com/docs/implementation/execution-contract)
   defines portable behavior. [Conformance provenance](conformance/README.md) identifies
   the source revision used for this runtime's schemas and reference vectors.
+  [Verified properties](docs/verification/PROPERTIES.md) lists the rules beyond the
+  vectors that are checked on generated inputs, and how.
 - **Runtime:** embed the deterministic kernel, run `contextosd` as a gateway, or use
   Python, Node.js and WebAssembly bindings. Durable execution requires the protected
   stores and gateway, beyond the embedded decision kernel.

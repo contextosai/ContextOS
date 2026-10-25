@@ -66,6 +66,16 @@ First release candidate of the ContextOS runtime.
   parity vectors.
 - RFC 8785 canonical JSON and domain-separated digests; bounded JsonLogic with
   `json-logic-js` semantics and fail-visible errors.
+- Verified properties: a catalog of the rules the runtime's safety rests on
+  (`docs/verification/PROPERTIES.md`), each with its source, level of rigor and check.
+  New property suites check scope narrowing, policy composition, budget conservation
+  and task-authorization amendments on generated inputs, and the run lifecycle
+  exhaustively; the gate fails when the catalog and the checks drift apart.
+- Security: a task-authorization amendment that added an `amount_ceiling` to a scope
+  without one was classified as narrowing, so a run's own executor could permit
+  amounts the principal had not authorized. It is now a widening. Found by property
+  AUTH-1, which also showed the specification's delegation rule and grant-scope check
+  disagree on a missing ceiling (proposal spec-0004; grant chains are unaffected).
 
 ### Runtime
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;

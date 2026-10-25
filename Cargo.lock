@@ -544,6 +544,7 @@ dependencies = [
  "criterion",
  "flate2",
  "mimalloc",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror",

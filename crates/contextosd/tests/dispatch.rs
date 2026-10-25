@@ -1219,6 +1219,32 @@ async fn the_task_as_a_whole_stays_within_its_limits() {
 }
 
 #[tokio::test]
+async fn an_executor_cannot_allow_itself_amounts() {
+    let w = world(&ALL_CONTROLS).await;
+    // The principal asked for a refund without naming an amount: no amount is authorized.
+    let mut task = task_authorization("run_no_amount", "deny", 0);
+    task["scopes"][0].as_object_mut().unwrap().remove("amount_ceiling");
+    let mut body = run_body("run_no_amount", 1200);
+    body["task_authorization"] = task.clone();
+    assert_eq!(admit(&w, &body).await.status(), 201);
+    let call = refund("run_no_amount", "op_any", "ord_881", "cus_77", 120_000);
+    let out = dispatch(&w, "run_no_amount", &call).await;
+    assert!(
+        out["report"]["reason_codes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("task_scope_amount")),
+        "{out}"
+    );
+    // Adding a ceiling looks like a restriction to the delegation rule, but permits
+    // refunds the scope refused: it is a widening, which the executor cannot make.
+    task["scopes"][0]["amount_ceiling"] = json!({"minor_units": 120_000, "currency": "INR"});
+    let (status, refused) = amend(&w, "acme-key", "run_no_amount", 0, &task).await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(w.provider_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn effects_outside_the_task_can_wait_for_the_principal() {
     let w = world(&ALL_CONTROLS).await;
     let mut body = run_body("run_ask", 1200);

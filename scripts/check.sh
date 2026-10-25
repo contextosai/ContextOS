@@ -22,6 +22,7 @@ check_example() {
 }
 
 step script-tests; python3 -m unittest discover -s scripts -p 'test_*.py' || fail "script tests"
+step properties; python3 scripts/check_properties.py                    || fail "property catalog"
 step fmt;     cargo fmt --all --check                                   || fail fmt
 step clippy;  cargo clippy --workspace --all-targets -- -D warnings     || fail clippy
 # The OTLP integration test observes INFO request spans, independently of shell logging preferences.

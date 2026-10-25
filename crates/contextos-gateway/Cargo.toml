@@ -28,6 +28,7 @@ flate2.workspace = true
 mimalloc.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 contextos-policy.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "dispatch"
