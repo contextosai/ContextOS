@@ -3387,9 +3387,10 @@ impl Clock for LaterClock {
     }
 }
 
-/// Pauses a dispatch just before it opens its dispatch gate.
+/// Pauses a dispatch just before it creates a document of `kind`.
 struct GatePause {
     inner: Arc<MemoryStore>,
+    kind: DocKind,
     entered: tokio::sync::Semaphore,
     resume: tokio::sync::Semaphore,
 }
@@ -3399,7 +3400,7 @@ impl DocumentStore for GatePause {
         self.inner.get(k).await
     }
     async fn create(&self, k: &DocKey, b: &Value) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
-        if k.kind == DocKind::DispatchGate {
+        if k.kind == self.kind {
             self.entered.add_permits(1);
             self.resume.acquire().await.unwrap().forget();
         }
@@ -3445,6 +3446,7 @@ async fn reconciliation_and_a_live_dispatch_race_on_the_dispatch_gate() {
     let call = shared_call(&admission, "raced_refund", 420_000);
     let paused = Arc::new(GatePause {
         inner: h.store.clone(),
+        kind: DocKind::DispatchGate,
         entered: tokio::sync::Semaphore::new(0),
         resume: tokio::sync::Semaphore::new(0),
     });
@@ -3548,7 +3550,7 @@ fn limited_task(root_run_id: &str) -> TaskAuthorization {
     .unwrap()
 }
 
-/// DISPATCH-1..5: every single crash point of a dispatch, explored exhaustively. For
+/// DISPATCH-1..6, 8: every single crash point of a dispatch, explored exhaustively. For
 /// each provider outcome, with and without a shared guarantee and task limits, the
 /// process crashes at each of the dispatch's durable writes, before or after the
 /// write commits, and a fresh process retries the identical call. Then:
@@ -3563,7 +3565,10 @@ fn limited_task(root_run_id: &str) -> TaskAuthorization {
 /// - DISPATCH-5: the signed audit chain verifies;
 /// - DISPATCH-6: a dispatch the crash stranded before the effect was sent recovers:
 ///   once an operator records it not applied, the next retry completes with exactly
-///   one provider call, so no claim, charge or reservation is left holding it.
+///   one provider call, so no claim, charge or reservation is left holding it;
+/// - DISPATCH-8: once the outcome is known, nothing stays held: no reservation (also
+///   none a crash left before its claim), no shared exposure for a confirmed or
+///   unapplied effect, and no task-limit charge for an effect not applied.
 #[tokio::test]
 async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
     let (mut explored, mut recovered, mut in_flight) = (0, 0, 0);
@@ -3673,6 +3678,34 @@ async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
                     verify_tenant_chain(h.audit.log(), TENANT, &keys())
                         .await
                         .unwrap_or_else(|e| panic!("DISPATCH-5 {case}: {e:?}"));
+                    if matches!(op["outcome"].as_str(), Some("confirmed" | "not_applied" | "partial")) {
+                        for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+                            assert_eq!(
+                                budget["reserved"][k], 0,
+                                "DISPATCH-8 {case}: {k} still reserved for a {} effect",
+                                op["outcome"]
+                            );
+                        }
+                        // A partial effect keeps its shared exposure held until escalated.
+                        if guarded && op["outcome"] != "partial" {
+                            let digest = sha256_canonical(&json!("ord_881")).unwrap();
+                            if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
+                                assert_eq!(view["held"], 0, "DISPATCH-8 {case}: shared exposure held");
+                            }
+                        }
+                        if guarded && op["outcome"] == "not_applied" {
+                            let task = ledger(
+                                &h,
+                                DocKind::TaskExposure,
+                                &contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id).id,
+                            )
+                            .await;
+                            assert!(
+                                task["operations"].get("crash_refund").is_none(),
+                                "DISPATCH-8 {case}: an effect not applied still counts against the task"
+                            );
+                        }
+                    }
                     let stranded = calls == 0
                         && matches!(behavior, Behavior::Confirm)
                         && retried.as_ref().is_ok_and(|o| o.result["status"] != "completed");
@@ -3794,17 +3827,26 @@ async fn unresolved(how: Unresolved, guarded: bool, strand_at: usize) -> (Harnes
     (h, admission, call)
 }
 
-/// The last write of a dispatch before its provider call: crashing there strands it.
-async fn last_write_before_the_provider(guarded: bool) -> usize {
-    let mut last = None;
+/// The first write of a dispatch after its claim commits: crashing there strands the
+/// claimed attempt before anything could be sent.
+async fn first_write_after_the_claim(guarded: bool) -> usize {
     for strand_at in 0.. {
-        let (h, _, _) = unresolved(Unresolved::Stranded, guarded, strand_at).await;
-        if h.adapter.calls.load(Ordering::SeqCst) > 0 {
-            break;
+        let (h, admission, _) = unresolved(Unresolved::Stranded, guarded, strand_at).await;
+        assert_eq!(
+            h.adapter.calls.load(Ordering::SeqCst),
+            0,
+            "a dispatch claims before the provider call"
+        );
+        let key = operation_ledger_key(&admission, "recon_refund");
+        if let Some(read) = h.store.get(&key).await.unwrap()
+            && read.body["operations"][0]["attempts"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+        {
+            return strand_at;
         }
-        last = Some(strand_at);
     }
-    last.expect("a dispatch writes before calling the provider")
+    unreachable!()
 }
 
 /// RECONCILE-1..4: every single crash point of a reconciliation, explored exhaustively.
@@ -3823,7 +3865,7 @@ async fn last_write_before_the_provider(guarded: bool) -> usize {
 async fn every_crash_point_of_a_reconciliation_is_safe_to_retry() {
     let mut explored = 0;
     for guarded in [false, true] {
-        let strand_at = last_write_before_the_provider(guarded).await;
+        let strand_at = first_write_after_the_claim(guarded).await;
         for how in [Unresolved::Stranded, Unresolved::AssertedConfirmed, Unresolved::Queried] {
             // A clean reconciliation counts its durable writes.
             let (h, admission, _) = unresolved(how, guarded, strand_at).await;
@@ -3891,19 +3933,22 @@ async fn every_crash_point_of_a_reconciliation_is_safe_to_retry() {
                             .shared_exposure(TENANT, "refunds", &digest)
                             .await
                             .unwrap()
-                            .unwrap();
+                            .unwrap_or_else(|| json!({"held": 0, "committed": 0}));
                         assert_eq!(view["held"], 0, "RECONCILE-2 {case}: shared exposure held");
                         assert_eq!(
                             view["committed"],
                             if confirmed { 420_000 } else { 0 },
                             "RECONCILE-2 {case}: shared exposure committed"
                         );
-                        let task = ledger(
-                            &h,
-                            DocKind::TaskExposure,
-                            &contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id).id,
-                        )
-                        .await;
+                        let task = h
+                            .store
+                            .get(&contextos_gateway::task_authorization::exposure_key(
+                                TENANT,
+                                &admission.run_id,
+                            ))
+                            .await
+                            .unwrap()
+                            .map_or(json!({"effects": 0}), |t| t.body);
                         assert_eq!(
                             task["effects"],
                             u64::from(confirmed),
@@ -3937,4 +3982,51 @@ async fn every_crash_point_of_a_reconciliation_is_safe_to_retry() {
     }
     assert!(explored >= 24, "explored {explored} crash points");
     eprintln!("explored {explored} crash points of reconciliation");
+}
+
+/// DISPATCH-9: a retry reclaims the reservation of an attempt that never claimed the
+/// operation, closing that attempt's dispatch gate first: if the attempt's process was
+/// only paused, it can still claim later, but it sends nothing (`dispatch_aborted`).
+#[tokio::test]
+async fn a_reclaimed_attempt_never_sends() {
+    let h = harness("allow", Behavior::RefuseInjected).await;
+    let call = shared_call(&h.admission, "reclaimed_refund", 420_000);
+    // The straggler reserves, then stalls before creating the operation's ledger.
+    let paused = Arc::new(GatePause {
+        inner: h.store.clone(),
+        kind: DocKind::OperationLedger,
+        entered: tokio::sync::Semaphore::new(0),
+        resume: tokio::sync::Semaphore::new(0),
+    });
+    let straggler = Arc::new(process_at(&h, paused.clone(), 20_000, false, Arc::new(LaterClock)));
+    let (dispatching, stalled_call, admission) = (straggler.clone(), call.clone(), h.admission.clone());
+    let pending = tokio::spawn(async move { dispatching.dispatch(&admission, &stalled_call).await });
+    paused.entered.acquire().await.unwrap().forget();
+
+    // Another process sends the effect; the provider reports it not applied.
+    let out = process(&h, h.store.clone(), 30_000, false)
+        .dispatch(&h.admission, &call)
+        .await
+        .unwrap();
+    assert_eq!(out.result["status"], "failed", "{:?}", out.report.reason_codes);
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(
+        budget["reserved"]["tool_calls"], 0,
+        "DISPATCH-9: the stalled reservation was reclaimed"
+    );
+
+    // A minute later the retry is due, and the straggler resumes and claims it.
+    paused.resume.add_permits(1);
+    let resumed = pending.await.unwrap().unwrap();
+    assert_eq!(resumed.report.reason_codes, ["dispatch_aborted"], "DISPATCH-9");
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        1,
+        "DISPATCH-9: the straggler sent nothing"
+    );
+    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
+    assert_eq!(budget["reserved"]["tool_calls"], 0);
+    assert_eq!(budget["used"]["tool_calls"], 1);
+    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }

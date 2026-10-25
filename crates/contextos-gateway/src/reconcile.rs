@@ -410,7 +410,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// what the attempt held: returns the audit sequence of the completion, or `None`
     /// when nothing was left to do. The completion is audited again, citing the
     /// recorded observation, because the crash may have come before the first entry.
-    async fn complete_recorded(
+    pub(crate) async fn complete_recorded(
         &self,
         admission: &RunAdmission,
         operation_id: &str,
@@ -434,14 +434,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(None);
         };
         let outcome = op["outcome"].as_str().unwrap_or_default();
-        let reservation_id = format!("reservation:{attempt_id}");
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
         let held = self.store.get(&budget_key).await?.is_some_and(|r| {
-            r.body["reservations"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|res| res["reservation_id"] == reservation_id.as_str() && res["status"] != "settled")
+            r.body["reservations"].as_array().into_iter().flatten().any(|res| {
+                res["status"] != "settled"
+                    && crate::is_attempt_reservation(
+                        res["reservation_id"].as_str().unwrap_or_default(),
+                        admission,
+                        operation_id,
+                        attempt_id,
+                    )
+            })
         });
         let listed = self.run_state(admission).await?.is_some_and(|state| {
             state["outstanding_effects"]
@@ -512,22 +515,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Charge its protected original allocation conservatively; an original
         // response sealed out by recovery must not turn this call into free usage.
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
-        let reservation_id = format!("reservation:{attempt_id}");
         let held = self.store.get(&budget_key).await?.and_then(|r| {
             r.body["reservations"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .find(|res| res["reservation_id"] == reservation_id.as_str() && res["status"] != "settled")
+                .find(|res| {
+                    res["status"] != "settled"
+                        && crate::is_attempt_reservation(
+                            res["reservation_id"].as_str().unwrap_or_default(),
+                            admission,
+                            operation_id,
+                            attempt_id,
+                        )
+                })
                 .map(|res| {
-                    if unmeasured && outcome == "confirmed" {
+                    let used = if unmeasured && outcome == "confirmed" {
                         res["allocation"].clone()
                     } else {
                         res["used"].clone()
-                    }
+                    };
+                    (res["reservation_id"].as_str().unwrap_or_default().to_owned(), used)
                 })
         });
-        if let Some(used) = held {
+        if let Some((reservation_id, used)) = held {
             self.settle(
                 admission,
                 &budget_key,

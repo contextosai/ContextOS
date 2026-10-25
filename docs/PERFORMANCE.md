@@ -97,7 +97,9 @@ guards, 4 and 6 without. The guards' read is fetched concurrently with the other
 their one write is serial. (Before the claim and the loop count shared one seeded
 write, the guards cost 3 reads and 2 writes per effect.) One write is the attempt's
 dispatch gate, created immediately before the provider call so that crash recovery
-can tell a stranded attempt from one that was sent.
+can tell a stranded attempt from one that was sent (shared-guarantee dispatches create
+one too). Finding reservations a crash left behind costs nothing extra: they are seen
+in the budget state the reservation already reads.
 
 Every effect appends three signed entries to its tenant's hash chain, so a tenant's
 chain is the one serial point in the pipeline. The audit writer uses **group commit**:
