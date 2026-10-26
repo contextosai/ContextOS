@@ -6,13 +6,13 @@
   "type": "module",
   "packageManager": "npm@11.8.0",
   "engines": {
-    "node": ">=24.0.0"
+    "node": "^24.0.0 || >=26.0.0"
   },
   "scripts": {
     "test": "vitest run --config generator/vitest.config.mts"
   },
   "devDependencies": {
     "json-logic-js": "2.0.5",
-    "vitest": "4.1.12"
+    "vitest": "5.0.5"
   }
 }

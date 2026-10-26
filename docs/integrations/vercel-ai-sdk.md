@@ -14,7 +14,7 @@ safety; the seams only make sure the agent asks it and tells the model the truth
 ## 1. Install
 
 ```sh
-npm install ai@7.0.147 @ai-sdk/openai@4.0.98 zod@4.6.7   # or any AI SDK provider
+npm install ai@7.0.150 @ai-sdk/openai@4.0.101 zod@4.6.7   # or any AI SDK provider
 npm install @ai-sdk/mcp@2.0.80                           # only for the MCP route (section 8)
 ```
 

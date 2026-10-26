@@ -4,7 +4,7 @@ This guide puts an OpenAI Agents SDK agent under `contextosd`: every tool call i
 governed by the gateway, every model call spends the run's budget, refusals and pauses
 map onto the SDK's tool-error and human-in-the-loop mechanisms, and the run ends with a
 signed DecisionRecord. It targets the Python SDK (`openai-agents` 0.24) and covers the
-TypeScript SDK (`@openai/agents` 0.20) alongside; the APIs mirror each other. The
+TypeScript SDK (`@openai/agents` 0.21) alongside; the APIs mirror each other. The
 runnable versions are [examples/frameworks/openai-agents](../../examples/frameworks/openai-agents/README.md)
 and [examples/frameworks/openai-agents-js](../../examples/frameworks/openai-agents-js/README.md).
 
@@ -17,7 +17,7 @@ truth about what happened.
 
 ```sh
 pip install "openai-agents==0.24.0"
-npm install @openai/agents@0.20.0 zod@4.6.7
+npm install @openai/agents@0.21.0 zod@4.6.7
 ```
 
 `contextos.client` is standard-library only; vendor `bindings/python/contextos` or

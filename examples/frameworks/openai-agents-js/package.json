@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@openai/agents": "0.20.0",
+    "@openai/agents": "0.21.0",
     "zod": "4.6.7"
   }
 }
