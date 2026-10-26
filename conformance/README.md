@@ -18,18 +18,20 @@ all vectors in a temporary directory; vector contents matched after decompressio
 
 ## Reproduce
 
-Install Node.js 24 or newer and npm 11.8.0. From this runtime's root:
+Install Node.js 24 or newer, npm 11.8.0 and Python 3.9 or newer. From this runtime's root:
 
 ```sh
 (cd conformance/reference && shasum -a 256 -c SHA256SUMS)
 npm ci --prefix conformance --ignore-scripts --no-fund
 env -u CONTEXTOS_SPEC npm test --prefix conformance
-git diff --exit-code -- conformance/vectors schemas
+python3 scripts/check_conformance.py
 ```
 
 No other repository or private access is needed. CI regenerates the vectors from
-this snapshot and rejects drift. Rust consumers can build and run the committed
-conformance tests without installing Node.
+this snapshot and compares decompressed vector bytes and schema bytes with HEAD.
+This preserves exact contents across differences in gzip metadata and compression.
+Added, missing or malformed files fail the check. Rust consumers can build and run
+the committed conformance tests without installing Node.
 
 For an intentional spec update, review the upstream contract changes and refresh
 the licensed snapshot and its checksums from that exact Git revision. Copy the
