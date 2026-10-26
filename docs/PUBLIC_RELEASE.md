@@ -61,3 +61,32 @@ email reporting route in `SECURITY.md` works independently of the GitHub form.
   The workflow runs the shared-guarantees demo from each unpacked archive without
   cargo; also try the support-refund and Tower demos from a downloaded archive.
 - Publish the draft release only after every gate passes.
+
+## Cutting an alpha
+
+Keep the workspace, Tower package, Python fallback and Helm chart versions aligned.
+Add notes under `docs/releases/<tag>.md` and record the version in `CHANGELOG.md`.
+The first release is `v0.1.0-alpha.1`; it is a prerelease, with evolving APIs and
+storage formats. Package registries remain unpublished.
+
+Merge the preparation PR, obtain green CI for the exact commit to be tagged, and
+create an annotated `v<workspace version>` tag at that commit. Pushing the tag runs
+`.github/workflows/release.yml`. It validates the version and notes, builds and tests
+the three platform archives, emits all-target/all-feature Rust source inventories,
+attests the archives, signs the container and creates a draft with the checked-in
+notes. Alpha tags are marked as prereleases and are not marked Latest.
+
+Before publishing, download the draft's assets and independently verify checksums,
+the expected workflow/tag in provenance, archive contents and the runnable examples.
+Check the Linux ABI requirements and macOS deployment target; do not infer support
+for untested platforms. Verify the image signature and provenance by digest.
+
+New GHCR packages start private even when their repository is public. Set the image
+package to public and verify an anonymous pull before advertising it in a public
+release. Keep the package linked to this repository for Actions access.
+
+Publish the completed draft only after these checks pass. Record the exact source
+commit, image digest and verification results with the release. Do not move published
+tags or replace their assets; ship a new alpha for corrections. A failed candidate
+can remain unpublished with its failure explained, rather than being presented as a
+working release.

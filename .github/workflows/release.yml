@@ -5,7 +5,26 @@ on:
 permissions:
   contents: read
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate version and release notes
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              raise SystemExit(f"tag {tag!r} does not match workspace version {version!r}")
+          notes = Path("docs/releases") / f"{tag}.md"
+          if not notes.is_file() or not notes.read_text().strip():
+              raise SystemExit(f"release notes missing or empty: {notes}")
+          PY
   console:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -18,6 +37,7 @@ jobs:
         with:
           name: tower-dist
           path: tower/dist
+          if-no-files-found: error
 
   binaries:
     needs: console
@@ -62,20 +82,41 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: contextos-*.tar.gz*
+          if-no-files-found: error
 
   sbom:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.1
       - run: cargo install --locked cargo-cyclonedx@0.5.7
-      - run: cargo cyclonedx --format json --all-features   # one <crate>.cdx.json per crate
+      # Source inventories cover every target and feature, rather than describing
+      # only the Linux host used by this job. One <crate>.cdx.json per member.
+      - run: cargo cyclonedx --format json --all-features --target all
+      - name: Verify source inventories and lockfile
+        run: |
+          git diff --exit-code -- Cargo.lock
+          python3 - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          for manifest in Path("crates").glob("*/Cargo.toml"):
+              name = tomllib.loads(manifest.read_text())["package"]["name"]
+              path = manifest.with_name(f"{name}.cdx.json")
+              bom = json.loads(path.read_text())
+              if bom.get("bomFormat") != "CycloneDX" or bom.get("metadata", {}).get("component", {}).get("version") != version:
+                  raise SystemExit(f"invalid or incorrectly versioned inventory: {path}")
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: crates/*/*.cdx.json
+          if-no-files-found: error
 
   image:
+    needs: validate
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -90,12 +131,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image version
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/contextosd:${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/contextosd:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/contextosd:${{ steps.version.outputs.tag }}
           sbom: true
           provenance: mode=max
       - uses: sigstore/cosign-installer@v3
@@ -113,6 +159,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: binaries-*
@@ -125,6 +172,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
+            archive="contextos-$GITHUB_REF_NAME-$target.tar.gz"
+            test -f "$archive"
+            shasum -a 256 -c "$archive.sha256"
+          done
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          mapfile -t sboms < <(find sbom -name '*.cdx.json' -type f)
+          test "${#sboms[@]}" -gt 0
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --notes "Verify: gh attestation verify <file> --repo $GITHUB_REPOSITORY; cosign verify ghcr.io/${GITHUB_REPOSITORY_OWNER}/contextosd@<digest> --certificate-identity-regexp 'https://github.com/$GITHUB_REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com" \
-            contextos-*.tar.gz* $(find . -name '*.cdx.json')
+            --title "ContextOS ${GITHUB_REF_NAME#v}" --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
+            "${release_flags[@]}" contextos-*.tar.gz* "${sboms[@]}"
