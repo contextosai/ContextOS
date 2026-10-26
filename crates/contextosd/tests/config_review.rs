@@ -118,7 +118,7 @@ async fn a_dry_run_reports_errors_and_classified_changes() {
     )
     .await;
     assert_eq!(invalid["valid"], false);
-    assert!(!invalid["errors"][0].as_str().unwrap().is_empty());
+    assert_ne!(invalid["errors"][0].as_str().unwrap(), "");
 
     let looser = text().replace(
         "controls = []",

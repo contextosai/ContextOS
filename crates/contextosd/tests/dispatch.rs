@@ -4426,7 +4426,7 @@ async fn startup_can_require_schemas_on_effectful_tools() {
 async fn production_requires_pins_and_a_stated_role() {
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
     // Development defaults: neither required.
-    assert!(config.required_release_refs().is_empty());
+    assert_eq!(config.required_release_refs(), [] as [String; 0]);
     assert!(!config.require_user_role());
     // Production defaults: both, unless opted out explicitly.
     config.server.mode = contextosd::config::Mode::Production;

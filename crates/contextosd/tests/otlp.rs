@@ -77,7 +77,7 @@ async fn request_spans_join_the_callers_trace() {
     telemetry.shutdown().await;
 
     let exported = exports.lock().unwrap().concat();
-    assert!(!exported.is_empty(), "no spans exported");
+    assert_ne!(exported, [] as [u8; 0], "no spans exported");
     let needle = hex::decode(trace_id).unwrap();
     assert!(
         exported.windows(needle.len()).any(|w| w == needle.as_slice()),

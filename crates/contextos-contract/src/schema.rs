@@ -200,7 +200,7 @@ mod tests {
     fn cross_document_refs_resolve() {
         // invoke-agent references run-context $defs by absolute URI.
         let error = validate(&SchemaTarget::document(SchemaDoc::InvokeAgent), &json!({})).unwrap_err();
-        assert!(!error.violations.is_empty());
+        assert_ne!(error.violations, [] as [SchemaViolation; 0]);
     }
 
     #[test]
@@ -208,6 +208,62 @@ mod tests {
         let target = SchemaTarget::def(SchemaDoc::ExecutionContract, "ControlRef");
         assert!(validate(&target, &json!({"control_id": "a", "control_version": "1"})).is_ok());
         assert!(validate(&target, &json!({"control_id": "a", "control_version": "1", "x": 1})).is_err());
+    }
+
+    #[test]
+    fn argument_schemas_keep_local_refs_recursive_enum_and_const_validation() {
+        let schema = ArgumentSchema::compile(&json!({
+            "$defs": {"node": {
+                "type": "object",
+                "required": ["kind", "state"],
+                "properties": {
+                    "kind": {"const": "node"},
+                    "state": {"enum": ["ready", "done"]},
+                    "child": {"$ref": "#/$defs/node"}
+                },
+                "additionalProperties": false
+            }},
+            "$ref": "#/$defs/node"
+        }))
+        .unwrap();
+        assert!(
+            schema
+                .check(&json!({
+                    "kind": "node", "state": "ready", "child": {"kind": "node", "state": "done"}
+                }))
+                .is_ok()
+        );
+        let paths = schema
+            .check(&json!({
+                "kind": "node", "state": "ready", "child": {"kind": "private-value", "state": "private-value"}
+            }))
+            .unwrap_err();
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"/child/kind".to_owned()));
+        assert!(paths.contains(&"/child/state".to_owned()));
+    }
+
+    #[test]
+    fn argument_schemas_reject_external_references_offline() {
+        for uri in [
+            "https://example.invalid/schema.json",
+            "file:///contextos-missing-schema.json",
+        ] {
+            assert!(ArgumentSchema::compile(&json!({"$ref": uri})).is_err(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn argument_schema_errors_are_bounded_paths_without_values() {
+        let schema = ArgumentSchema::compile(&json!({"type": "array", "items": {"const": "allowed"}})).unwrap();
+        let paths = schema
+            .check(&json!(vec!["private-value"; MAX_REPORTED_VIOLATIONS + 8]))
+            .unwrap_err();
+        assert_eq!(paths.len(), MAX_REPORTED_VIOLATIONS);
+        for (index, path) in paths.iter().enumerate() {
+            assert_eq!(path, &format!("/{index}"));
+        }
+        assert_eq!(schema.check(&json!("private-value")).unwrap_err(), vec!["/"]);
     }
 }
 

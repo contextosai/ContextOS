@@ -225,10 +225,18 @@ impl Limiter {
             let mut slots = self.dispatch.lock().unwrap_or_else(PoisonError::into_inner);
             slots.entry(tenant_id.to_owned()).or_default().clone()
         };
-        counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < cap).then_some(n + 1))
-            .ok()
-            .map(|_| DispatchSlot(counter))
+        // Keep the declared Rust 1.90 MSRV: try_update is newer, while fetch_update
+        // is deprecated by the build toolchain. Retry against the observed count.
+        let mut current = counter.load(Ordering::Acquire);
+        loop {
+            if current >= cap {
+                return None;
+            }
+            match counter.compare_exchange_weak(current, current + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(DispatchSlot(counter)),
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 
@@ -300,5 +308,39 @@ mod tests {
         let (_x, _y) = (l.dispatch_permit("big").unwrap(), l.dispatch_permit("big").unwrap());
         let (_r1, _r2) = (l.admit_request().unwrap(), l.admit_request().unwrap());
         assert!(l.admit_request().is_none(), "global cap");
+    }
+
+    #[test]
+    fn concurrent_dispatch_attempts_never_exceed_the_cap() {
+        let l = Limiter::new(LimitsConfig {
+            max_concurrent_dispatch: 3,
+            ..LimitsConfig::default()
+        });
+        let start = std::sync::Barrier::new(9);
+        let acquired = std::sync::Barrier::new(9);
+        let release = std::sync::Barrier::new(9);
+        let admitted = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    start.wait();
+                    let permit = l.dispatch_permit("contended");
+                    if permit.is_some() {
+                        admitted.fetch_add(1, Ordering::SeqCst);
+                    }
+                    acquired.wait();
+                    release.wait();
+                    drop(permit);
+                });
+            }
+            start.wait();
+            acquired.wait();
+            release.wait();
+        });
+        assert_eq!(admitted.load(Ordering::SeqCst), 3);
+        let permits: Vec<_> = (0..3).map(|_| l.dispatch_permit("contended").unwrap()).collect();
+        assert!(l.dispatch_permit("contended").is_none());
+        drop(permits);
+        assert!(l.dispatch_permit("contended").is_some());
     }
 }

@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.96.1-bookworm AS build
+FROM rust:1.99.1-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release --locked -p contextosd -p towerd
+# Use the image's installed compiler without installing development components.
+RUN grep -Fxq "channel = \"$RUST_VERSION\"" rust-toolchain.toml \
+    && RUSTUP_AUTO_INSTALL=0 cargo "+$RUST_VERSION" build --release --locked \
+        -p contextosd -p towerd
 
 # The Tower UI: static files, served by towerd when [tower] dir points at them.
 FROM node:26.12.1-bookworm-slim AS console

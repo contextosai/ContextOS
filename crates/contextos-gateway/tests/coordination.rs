@@ -174,8 +174,14 @@ impl contextos_store::AppendLog for FailingLog {
     async fn head(&self, t: &str) -> Result<Option<contextos_store::LogRow>, contextos_store::StoreError> {
         contextos_store::AppendLog::head(&self.0, t).await
     }
-    async fn append_batch(&self, _: &str, _: &[contextos_store::AppendRow]) -> Result<(), contextos_store::StoreError> {
-        Err(contextos_store::StoreError::Backend("injected audit failure".into()))
+    fn append_batch(
+        &self,
+        _: &str,
+        _: &[contextos_store::AppendRow],
+    ) -> impl std::future::Future<Output = Result<(), contextos_store::StoreError>> + Send {
+        std::future::ready(Err(contextos_store::StoreError::Backend(
+            "injected audit failure".into(),
+        )))
     }
     async fn range(
         &self,
