@@ -9246,8 +9246,8 @@ DEALINGS IN THE SOFTWARE.
 ======================================================================
 MIT License (MIT)
 Used by:
-  jsonschema 0.59.0
-  referencing 0.59.0
+  jsonschema 0.60.1
+  referencing 0.60.1
 
 MIT License
 
@@ -9412,8 +9412,8 @@ SOFTWARE.
 ======================================================================
 MIT License (MIT)
 Used by:
-  jsonschema-regex 0.59.0
-  jsonschema-value 0.59.0
+  jsonschema-regex 0.60.1
+  jsonschema-value 0.60.1
   napi-build 2.6.0
   napi-derive-backend 6.1.5
   napi-derive 3.6.12
