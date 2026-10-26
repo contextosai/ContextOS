@@ -1,6 +1,6 @@
 # OpenAI Agents SDK (TypeScript) under ContextOS
 
-An `Agent` driven by the SDK's own loop (`Runner.run`, `@openai/agents` 0.20) that
+An `Agent` driven by the SDK's own loop (`Runner.run`, `@openai/agents` 0.21) that
 refunds the quickstart's damaged order through `contextosd`. It is the TypeScript twin
 of [../openai-agents](../openai-agents): same tools, budget, outcome mapping, approval
 and checkpoint. `agent.ts` runs on Node 24 with type stripping, no build step.
