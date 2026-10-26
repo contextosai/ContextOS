@@ -64,7 +64,7 @@ review reported no remaining important finding within the documented alpha scope
   Pause-based tests exercise delayed dispatch versus recovery, stale contradictory
   reconciliation, an unknown outcome appearing between the initial read and the
   authoritative claim, invalid recovery evidence, and confirmation without usage.
-- [HTTP tests](../../crates/contextosd/tests/dispatch.rs) cover shared capacity across
+- [HTTP tests](../../crates/contextosd/tests/dispatch/coordination.rs) cover shared capacity across
   server instances, scope and tenant isolation, read views and recovery after a run
   has failed. Configuration tests exercise weakened/changed protection review.
 
