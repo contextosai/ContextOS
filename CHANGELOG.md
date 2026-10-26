@@ -5,7 +5,11 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
-First release candidate of the ContextOS runtime.
+## 0.1.0-alpha.1 - 2026-10-26
+
+First public alpha of the ContextOS runtime. APIs and storage formats are evolving;
+this release is for evaluation and early integration. See the
+[release notes](docs/releases/v0.1.0-alpha.1.md) for downloads and limitations.
 
 ### Security
 - Upgrade Tokio to 1.54.1 to fix RUSTSEC-2026-0384, a timer race affecting

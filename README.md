@@ -26,7 +26,7 @@ fencing, adapters and shared business guarantees as an opt-in runtime extension.
 The [research and strategy](docs/research/2026-10-22-value-proposition.md) explain the
 chosen opportunity, competing approaches and unvalidated assumptions.
 
-> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
+> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The first public version is [v0.1.0-alpha.1](docs/releases/v0.1.0-alpha.1.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
 ## Quickstart
 
@@ -56,8 +56,9 @@ Bash and curl.
 For the original authorization and duplicate-operation walkthrough, run
 `./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).
 
-For the governance console, install Node.js 24 and run
-`./examples/tower/run.sh --serve`; follow the [Tower guide](docs/tower/README.md).
+For the governance console, run `./examples/tower/run.sh --serve`; a source checkout
+also needs Node.js 24 to build the UI, while release archives include it prebuilt.
+Follow the [Tower guide](docs/tower/README.md).
 Framework examples have their own prerequisites in [examples/frameworks](examples/frameworks/README.md).
 
 ## Project boundaries and support
