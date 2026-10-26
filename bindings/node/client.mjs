@@ -306,6 +306,27 @@ export class Run {
     return this.client.request("GET", this.#path("/checkpoint"), { generation: this.executorGeneration });
   }
 
+  /** Immutable task metadata shared with the root's descendants; grants no tool authority. */
+  publishWork(taskId, title, acceptanceCriteria, { dependencies = [] } = {}) {
+    return this.#post("/work", { task_id: taskId, title, acceptance_criteria: acceptanceCriteria, dependencies });
+  }
+
+  /** A live page; restart at the beginning to discover new earlier ids. */
+  workTasks({ after, limit = 100 } = {}) {
+    return this.client.request("GET", this.#path("/work"), {
+      generation: this.executorGeneration, query: { limit, ...(after === undefined ? {} : { after }) },
+    });
+  }
+
+  workTask(taskId) {
+    return this.client.request("GET", this.#path(`/work/${segment(taskId)}`), { generation: this.executorGeneration });
+  }
+
+  /** Conditional mutation. Inspect after conflicts/lost responses; lease expiry never proves effects safe to repeat. */
+  updateWork(taskId, command) {
+    return this.#post(`/work/${segment(taskId)}`, command);
+  }
+
   /** Reserves budget for a `model_call` or a `replan`; resolves to the reservation id. */
   async reserveUsage(kind, { tokens = 0, costCents = 0 } = {}) {
     return (await this.#post("/usage/reserve", { kind, tokens, cost_cents: costCents })).reservation_id;

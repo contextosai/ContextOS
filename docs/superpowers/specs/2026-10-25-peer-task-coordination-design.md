@@ -1,6 +1,6 @@
 # Peer task coordination
 
-Status: builder-reviewed proposal; awaiting user approval. Date: 2026-10-25.
+Status: approved for end-to-end implementation in this chat. Date: 2026-10-25.
 Research: [Agensh study](../../research/2026-10-25-agensh.md).
 
 ## Intent

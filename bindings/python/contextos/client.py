@@ -381,6 +381,38 @@ class Run:
         """The latest checkpoint (`state`, `revision`), e.g. after taking the run over."""
         return self.client.request("GET", self._path("/checkpoint"), generation=self.executor_generation)
 
+    def publish_work(self, task_id: str, title: str, acceptance_criteria: str, *,
+                     dependencies: Optional[List[str]] = None) -> dict:
+        """Publish immutable task metadata shared with this root's descendants.
+        Claims and worker-reported evidence confer no tool authority."""
+        return self._post("/work", {"task_id": task_id, "title": title,
+                                   "acceptance_criteria": acceptance_criteria, "dependencies": dependencies or []})
+
+    def work_tasks(self, *, after: Optional[str] = None, limit: int = 100) -> dict:
+        """A live page of tasks; restart from the beginning to see new earlier ids."""
+        query: Dict[str, Any] = {"limit": limit}
+        if after is not None:
+            query["after"] = after
+        return self.client.request("GET", self._path("/work"), query=query, generation=self.executor_generation)
+
+    def work_task(self, task_id: str) -> dict:
+        """Inspect current revision and lease, including predecessor provenance."""
+        return self.client.request("GET", self._path(f"/work/{_quote(task_id)}"), generation=self.executor_generation)
+
+    def update_work(self, task_id: str, action: str, expected_revision: int, *, lease_epoch: Optional[int] = None,
+                    lease_seconds: Optional[int] = None, evidence_refs: Optional[List[dict]] = None) -> dict:
+        """Conditionally claim, renew, release or report completion. After a lost
+        response or conflict, inspect the task. Reclaiming a lease does not establish
+        that the previous worker's external effects are safe to repeat."""
+        body: Dict[str, Any] = {"action": action, "expected_revision": expected_revision}
+        if lease_epoch is not None:
+            body["lease_epoch"] = lease_epoch
+        if lease_seconds is not None:
+            body["lease_seconds"] = lease_seconds
+        if evidence_refs is not None:
+            body["evidence_refs"] = evidence_refs
+        return self._post(f"/work/{_quote(task_id)}", body)
+
     def reserve_usage(self, kind: str, *, tokens: int = 0, cost_cents: int = 0) -> str:
         """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""
         return self._post("/usage/reserve", {"kind": kind, "tokens": tokens, "cost_cents": cost_cents})["reservation_id"]

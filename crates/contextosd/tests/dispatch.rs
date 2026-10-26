@@ -2,6 +2,147 @@
 //! MCP provider, all over real HTTP.
 
 #[tokio::test]
+async fn peer_work_is_shared_through_trusted_lineage_and_claimed_atomically_over_http() {
+    let w = world_with(&ALL_CONTROLS, 2, |c| {
+        c.api_keys.push(contextosd::config::ApiKey {
+            key_sha256: hash_api_key("impostor"),
+            tenant_id: TENANT.into(),
+            principal_id: "different-principal".into(),
+            scopes: vec!["dispatch".into()],
+        });
+    })
+    .await;
+    let http = executor_client(2);
+    let parent: Value = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("work_root", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(parent["executor_generation"], 2);
+    for id in ["work_a", "work_b"] {
+        let response = http
+            .post(format!("{}/v1/runs", w.base))
+            .bearer_auth("acme-key")
+            .json(&child_of(&parent, "work_root", id, "ctxpack.support@5.2.0"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 201, "{}", response.text().await.unwrap());
+    }
+    let url = |base: &str, run: &str, suffix: &str| format!("{base}/v1/runs/{run}/work{suffix}");
+    let board = url(&w.base, "work_root", "");
+    assert_eq!(http.get(&board).send().await.unwrap().status(), 401);
+    assert_eq!(
+        http.get(&board).bearer_auth("ops-key").send().await.unwrap().status(),
+        403
+    );
+    let impersonated = http.get(&board).bearer_auth("impostor").send().await.unwrap();
+    assert_eq!(impersonated.status(), 403);
+    assert_eq!(
+        impersonated.json::<Value>().await.unwrap()["error"]["code"],
+        "work_forbidden"
+    );
+    let definition =
+        json!({"task_id":"parser","title":"Implement parser","acceptance_criteria":"Checks pass","dependencies":[]});
+    let published = http
+        .post(&board)
+        .bearer_auth("acme-key")
+        .json(&definition)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(published.status(), 201, "{}", published.text().await.unwrap());
+    let input = json!({"action":"claim","expected_revision":1,"lease_seconds":60});
+    let a = http
+        .post(url(&w.base, "work_a", "/parser"))
+        .bearer_auth("acme-key")
+        .json(&input);
+    let b = http
+        .post(url(&w.bases[1], "work_b", "/parser"))
+        .bearer_auth("acme-key")
+        .json(&input);
+    let (a, b) = tokio::join!(a.send(), b.send());
+    let a = a.unwrap();
+    let b = b.unwrap();
+    assert_eq!(usize::from(a.status() == 200) + usize::from(b.status() == 200), 1);
+    let (winner, loser) = if a.status() == 200 { (a, b) } else { (b, a) };
+    assert_eq!(loser.status(), 409);
+    let winner: Value = winner.json().await.unwrap();
+    conforms("WorkResult", &winner);
+    assert_eq!(winner["data_only"], true);
+    let owner = winner["task"]["claim"]["run_id"].as_str().unwrap();
+    let completed=http.post(url(&w.base,owner,"/parser")).bearer_auth("acme-key")
+        .json(&json!({"action":"complete","expected_revision":2,"lease_epoch":1,
+            "evidence_refs":[{"artifact_type":"test","artifact_id":"report","sha256":format!("sha256:{}","b".repeat(64))}]}))
+        .send().await.unwrap();
+    assert_eq!(completed.status(), 200, "{}", completed.text().await.unwrap());
+    let listed: Value = http
+        .get(&board)
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("WorkPage", &listed);
+    assert_eq!(listed["tasks"][0]["status"], "completed");
+    assert_eq!(listed["evidence_verified"], false);
+    assert_eq!(
+        w.provider_calls.load(Ordering::SeqCst),
+        0,
+        "coordination never invokes a business tool"
+    );
+    let mut forged = definition.clone();
+    forged["root_run_id"] = json!("some-other-root");
+    assert_eq!(
+        http.post(&board)
+            .bearer_auth("acme-key")
+            .json(&forged)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        422
+    );
+    assert_eq!(
+        http.post(&board)
+            .bearer_auth("acme-key")
+            .header("Content-Type", "application/json")
+            .body(r#"{"task_id":"a","task_id":"b"}"#)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    assert_eq!(
+        http.get(format!("{board}?limit=101"))
+            .bearer_auth("acme-key")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        422
+    );
+    assert_eq!(
+        executor_client(1)
+            .get(&board)
+            .bearer_auth("acme-key")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+}
+
+#[tokio::test]
 async fn shared_guarantee_unknown_exposure_can_be_reconciled_after_the_run_fails() {
     let w = world_with(&ALL_CONTROLS, 1, |c| {
         c.guarantees = vec![

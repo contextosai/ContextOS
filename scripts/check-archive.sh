@@ -10,3 +10,4 @@ mkdir "$WORK/unpacked"
 tar xzf "$WORK/contextos-check.tar.gz" -C "$WORK/unpacked"
 cd "$WORK/unpacked/contextos-check"
 env PATH="/usr/bin:/bin" ./examples/shared-guarantees/run.sh
+env PATH="/usr/bin:/bin" ./examples/peer-coordination/run.sh

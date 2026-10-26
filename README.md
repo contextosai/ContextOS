@@ -99,6 +99,9 @@ for vulnerabilities.
 - **Runs end to end**: admission against a negotiated execution contract, delegated
   child runs with sub-budgets, executor failover with generation fencing, input
   continuation, reconciliation of unknown outcomes, and governed memory.
+- **Peer work coordination**: an optional root-owned task board with dependency
+  discovery, atomic leased claims and recovery across admitted peers. Task reports
+  remain advisory; [limits and trust boundaries](docs/PEER_COORDINATION.md) apply.
 - **Evidence**: signed, hash-chained audit; DecisionRecords with verified lineage and
   replay packets; scores from independent evaluators; conformance assessment against
   signed attestations.
@@ -133,6 +136,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Coordinate two agents against one business ceiling: [examples/shared-guarantees](examples/shared-guarantees/README.md) (`./examples/shared-guarantees/run.sh`)
 - Follow the original authorization quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
+- Peers choosing and recovering work: [examples/peer-coordination](examples/peer-coordination/README.md)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)

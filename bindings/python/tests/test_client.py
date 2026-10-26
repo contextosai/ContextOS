@@ -138,6 +138,22 @@ def main() -> None:
         # The orchestrator checkpoints its state after each verdict.
         assert run.checkpoint({"step": 1, "verdict": "accept"}, 0)["revision"] == 1
 
+        # Advisory peer tasks use conditional revisions, never tool authority.
+        task = run.publish_work("inspect", "Inspect the order", "Record a test report")["task"]
+        assert task["revision"] == 1
+        assert run.work_tasks(limit=1)["tasks"][0]["task_id"] == "inspect"
+        assert run.work_task("inspect")["data_only"] is True
+        claimed = run.update_work("inspect", "claim", 1, lease_seconds=30)["task"]
+        assert claimed["claim"]["run_id"] == run.run_id
+        proof = {"artifact_type": "test", "artifact_id": "local-report", "sha256": "sha256:" + "a" * 64}
+        done = run.update_work("inspect", "complete", 2, lease_epoch=1, evidence_refs=[proof])
+        assert done["task"]["status"] == "completed" and done["evidence_verified"] is False
+        try:
+            run.update_work("inspect", "claim", 1, lease_seconds=30)
+            raise AssertionError("stale task revision was accepted")
+        except ContextOSHTTPError as refused:
+            assert refused.code == "work_conflict", refused
+
         # Model calls spend the run's budget; a self-reported settlement charges it all.
         reservation = run.reserve_usage("model_call", tokens=3000)
         assert run.settle_usage(reservation)["charged"]["tokens"] == 3000
@@ -218,6 +234,11 @@ async def async_client(base: str, admission: dict) -> None:
     admission["contract"]["contract_id"] = "contract_run_async_1"
     run = await client.admit(admission)
     assert isinstance(run, AsyncRun) and run.executor_generation == 2, run
+    await run.publish_work("async-task", "Inspect", "Record a report")
+    assert (await run.work_tasks())["tasks"][0]["available"] is True
+    await run.update_work("async-task", "claim", 1, lease_seconds=30)
+    assert (await run.work_task("async-task"))["task"]["lease_epoch"] == 1
+    await run.update_work("async-task", "release", 2, lease_epoch=1)
 
     @governed_tool(run, "adp_orders.lookup")
     async def lookup_order(order_id: str) -> dict:  # pragma: no cover

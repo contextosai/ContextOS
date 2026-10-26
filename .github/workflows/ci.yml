@@ -80,6 +80,7 @@ jobs:
           ./examples/support-refund/run.sh
           ./examples/shared-guarantees/run.sh
           ./examples/agent-loop/run.sh
+          ./examples/peer-coordination/run.sh
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh
       - name: Node HTTP client against contextosd
