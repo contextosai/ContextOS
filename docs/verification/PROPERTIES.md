@@ -12,7 +12,7 @@ fails when a listed check is missing, or a check names a property not listed her
 |---|---|---|
 | L1 example | Fixed inputs with expected outputs | the specification's reference vectors (`conformance/vectors`), unit tests |
 | L2 property | A rule checked on thousands of generated inputs, shrunk to a minimal counterexample on failure | `proptest` suites below |
-| L3 exhaustive | Every state or interleaving of a bounded model | the run lifecycle; every single-crash point of the real dispatch and reconciliation paths |
+| L3 exhaustive | Every state or interleaving of a bounded model | the run lifecycle; every single-crash point of the real dispatch and reconciliation paths, and every pair of crash points of a dispatch and its retry |
 | L4 proof | A machine-checked proof for all inputs | none yet |
 
 An L2 property is only as good as how often its premise holds. Run a suite with
@@ -50,6 +50,8 @@ to fail when the code it guards was deliberately broken.
 | DISPATCH-8 | After any single crash and a retry, nothing stays held for an attempt whose outcome is known: no budget reservation (including one a crash left before its claim), no shared exposure for a confirmed or unapplied effect, no task-limit charge for an effect not applied | Conserved budget ledger; task limits (spec-0003) | L3 | `every_crash_point_of_a_dispatch_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | DISPATCH-9 | A retry reclaims the reservation of an attempt that never claimed the operation only after closing that attempt's dispatch gate: if its process was only paused and claims later, it sends nothing | Durable effects; conserved budget ledger | L1 | `a_reclaimed_attempt_never_sends` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | DISPATCH-10 | An attempt that reaches a closed dispatch gate is recorded as never sent, so its operation is not left in flight for an operator, and what it held is returned | Operation ledger: definitive facts resolve attempts | L1 | `a_reclaimed_attempt_never_sends` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
+| DISPATCH-11 | Concurrent dispatches of one run (duplicates and distinct operations racing for one budget, one task's limits and one shared guarantee) send each operation at most once unless its provider reported it not applied, apply no more effects than the limits allow, charge exactly what was sent, and leave nothing held or in flight | Operation ledger; conserved budget ledger; task limits (spec-0003) | L2 | `concurrent_dispatches_of_one_run_stay_within_every_limit` in `crates/contextos-gateway/tests/pipeline.rs` | Holds (48 seeded interleavings) |
+| DISPATCH-12 | DISPATCH-1..6 and 8 hold after any two crashes in a row: of the dispatch, then of its retry, at any write, before or after it commits | Durable effects; conserved accounting | L3 | `every_pair_of_crash_points_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds (1,074 pairs) |
 | RECONCILE-1 | After any single crash of a reconciliation and a retry, the operation ends with the resolved outcome | Reconciliation: a definitive fact resolves the latest attempt | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | RECONCILE-2 | Nothing stays held for a reconciled operation: no budget reservation, task-limit or shared-exposure hold, no outstanding-effect entry; a confirmed effect is charged exactly once | Conserved budget ledger; task limits (spec-0003); run completion | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | RECONCILE-3 | The signed audit chain verifies after a crash at any write of a reconciliation, and records the reconciliation | Audit integrity | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
@@ -59,9 +61,13 @@ to fail when the code it guards was deliberately broken.
 
 ## Not yet covered
 
-- **More than one crash.** DISPATCH-1..6 and RECONCILE-1..4 explore every single crash
-  of one dispatch or one reconciliation, followed by one retry; two crashes and
-  concurrent dispatches of one run are not explored.
+- **Three or more crashes, and crashes mixed with reconciliation.** DISPATCH-12
+  explores every pair of crashes of a dispatch and its retry; longer sequences, and a
+  dispatch crash followed by a reconciliation crash, are not explored.
+- **Concurrency is sampled, not exhausted.** DISPATCH-11 runs 48 seeded interleavings
+  through a store that yields at random; it is not a model checker, and crashes during
+  concurrent dispatches are not combined with it. Its jitter is wide enough that
+  dispatches race at the task-limit charge: accepting an exceeded charge fails it.
 - **A crash after the dispatch gate opened but before the provider was called** is
   refused as possibly in flight (DISPATCH-6): it needs the provider's own record, a
   confirmed assertion, or provider idempotency to resolve. A gate cannot tell "about

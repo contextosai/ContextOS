@@ -41,7 +41,7 @@ mod shared_guarantees;
 pub mod task_authorization;
 mod usage;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1350,6 +1350,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Commit::Rejected { reason_codes } => {
                 self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
                     .await?;
+                // A refused claim also returns reservations a crash left: otherwise an
+                // operation never claimed again would hold them, and its run could not
+                // complete.
+                self.reclaim_unclaimed(
+                    admission,
+                    &operations_key,
+                    &budget_key,
+                    &operation_id,
+                    &attempt_id,
+                    &unclaimed,
+                    &now,
+                )
+                .await?;
                 let status = if reason_codes.iter().any(|r| {
                     matches!(
                         r.as_str(),
@@ -1367,34 +1380,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 p.report.obligations.extend(obligations);
             }
         }
-        // This attempt now holds the operation's only claim, so another open reservation
-        // of the operation belongs to an attempt that never claimed it: its process
-        // crashed in between. Close that attempt's dispatch gate, so it can never send,
-        // and return its reservation.
-        for orphan in unclaimed {
-            let gate = dispatch_gate_key(admission, &orphan);
-            match self
-                .store
-                .create(&gate, &json!({"state": "aborted", "operation_id": operation_id}))
-                .await
-            {
-                Ok(_) => {}
-                Err(e) if e.is_conflict() => {
-                    if self
-                        .store
-                        .get(&gate)
-                        .await?
-                        .is_some_and(|g| g.body["state"] == "started")
-                    {
-                        continue;
-                    }
-                }
-                Err(e) => return Err(e.into()),
-            }
-            let id = attempt_reservation_id(admission, &operation_id, &orphan);
-            self.release_reservation(admission, &budget_key, &id, &orphan, &now)
-                .await?;
-        }
+        self.reclaim_unclaimed(
+            admission,
+            &operations_key,
+            &budget_key,
+            &operation_id,
+            &attempt_id,
+            &unclaimed,
+            &now,
+        )
+        .await?;
         let claim_entry = self
             .audit
             .append(
@@ -2026,6 +2021,70 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Err(e) if e.is_conflict() => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Returns the open reservations of `operation_id` whose attempts never claimed it:
+    /// their processes crashed between reserving and claiming. An attempt recorded in
+    /// the operation ledger is skipped (its claim settles it). Each orphan's dispatch
+    /// gate is closed first, so if its process was only paused it can never send.
+    #[allow(clippy::too_many_arguments)]
+    async fn reclaim_unclaimed(
+        &self,
+        admission: &RunAdmission,
+        operations_key: &DocKey,
+        budget_key: &DocKey,
+        operation_id: &str,
+        own_attempt: &str,
+        unclaimed: &[String],
+        now: &str,
+    ) -> Result<(), GatewayError> {
+        let others: Vec<&String> = unclaimed.iter().filter(|a| a.as_str() != own_attempt).collect();
+        if others.is_empty() {
+            return Ok(());
+        }
+        let recorded: HashSet<String> = self
+            .store
+            .get(operations_key)
+            .await?
+            .map(|r| {
+                r.body["operations"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|op| op["intent"]["operation_id"] == operation_id)
+                    .flat_map(|op| op["attempts"].as_array().cloned().unwrap_or_default())
+                    .filter_map(|a| a["attempt_id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for orphan in others {
+            if recorded.contains(orphan) {
+                continue;
+            }
+            let gate = dispatch_gate_key(admission, orphan);
+            match self
+                .store
+                .create(&gate, &json!({"state": "aborted", "operation_id": operation_id}))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) if e.is_conflict() => {
+                    if self
+                        .store
+                        .get(&gate)
+                        .await?
+                        .is_some_and(|g| g.body["state"] == "started")
+                    {
+                        continue;
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+            let id = attempt_reservation_id(admission, operation_id, orphan);
+            self.release_reservation(admission, budget_key, &id, orphan, now)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Returns `operation_id`'s charges to the task limits keyed by `keys`.
