@@ -3987,46 +3987,99 @@ async fn every_crash_point_of_a_reconciliation_is_safe_to_retry() {
 /// DISPATCH-9: a retry reclaims the reservation of an attempt that never claimed the
 /// operation, closing that attempt's dispatch gate first: if the attempt's process was
 /// only paused, it can still claim later, but it sends nothing (`dispatch_aborted`).
+/// DISPATCH-10: that attempt is then recorded as never sent, so the operation is not
+/// left in flight for an operator to resolve.
 #[tokio::test]
 async fn a_reclaimed_attempt_never_sends() {
-    let h = harness("allow", Behavior::RefuseInjected).await;
-    let call = shared_call(&h.admission, "reclaimed_refund", 420_000);
-    // The straggler reserves, then stalls before creating the operation's ledger.
-    let paused = Arc::new(GatePause {
-        inner: h.store.clone(),
-        kind: DocKind::OperationLedger,
-        entered: tokio::sync::Semaphore::new(0),
-        resume: tokio::sync::Semaphore::new(0),
-    });
-    let straggler = Arc::new(process_at(&h, paused.clone(), 20_000, false, Arc::new(LaterClock)));
-    let (dispatching, stalled_call, admission) = (straggler.clone(), call.clone(), h.admission.clone());
-    let pending = tokio::spawn(async move { dispatching.dispatch(&admission, &stalled_call).await });
-    paused.entered.acquire().await.unwrap().forget();
+    for shared in [false, true] {
+        let h = harness("allow", Behavior::RefuseInjected).await;
+        let mut admission = h.admission.clone();
+        if shared {
+            admission.task_authorizations = vec![limited_task(&admission.run_id)];
+        }
+        let call = shared_call(&admission, "reclaimed_refund", 420_000);
+        // The straggler reserves, then stalls before creating the operation's ledger.
+        let paused = Arc::new(GatePause {
+            inner: h.store.clone(),
+            kind: DocKind::OperationLedger,
+            entered: tokio::sync::Semaphore::new(0),
+            resume: tokio::sync::Semaphore::new(0),
+        });
+        let straggler = Arc::new(process_at(&h, paused.clone(), 20_000, shared, Arc::new(LaterClock)));
+        let (dispatching, stalled_call, stalled) = (straggler.clone(), call.clone(), admission.clone());
+        let pending = tokio::spawn(async move { dispatching.dispatch(&stalled, &stalled_call).await });
+        paused.entered.acquire().await.unwrap().forget();
 
-    // Another process sends the effect; the provider reports it not applied.
-    let out = process(&h, h.store.clone(), 30_000, false)
-        .dispatch(&h.admission, &call)
-        .await
-        .unwrap();
-    assert_eq!(out.result["status"], "failed", "{:?}", out.report.reason_codes);
-    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
-    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
-    assert_eq!(
-        budget["reserved"]["tool_calls"], 0,
-        "DISPATCH-9: the stalled reservation was reclaimed"
-    );
+        // Another process sends the effect; the provider reports it not applied.
+        let other = process(&h, h.store.clone(), 30_000, shared);
+        let out = other.dispatch(&admission, &call).await.unwrap();
+        assert_eq!(out.result["status"], "failed", "{:?}", out.report.reason_codes);
+        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+        let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+        assert_eq!(
+            budget["reserved"]["tool_calls"], 0,
+            "DISPATCH-9 shared={shared}: the stalled reservation was reclaimed"
+        );
 
-    // A minute later the retry is due, and the straggler resumes and claims it.
-    paused.resume.add_permits(1);
-    let resumed = pending.await.unwrap().unwrap();
-    assert_eq!(resumed.report.reason_codes, ["dispatch_aborted"], "DISPATCH-9");
-    assert_eq!(
-        h.adapter.calls.load(Ordering::SeqCst),
-        1,
-        "DISPATCH-9: the straggler sent nothing"
-    );
-    let budget = ledger(&h, DocKind::BudgetLedger, &h.admission.budget_ledger_id).await;
-    assert_eq!(budget["reserved"]["tool_calls"], 0);
-    assert_eq!(budget["used"]["tool_calls"], 1);
-    verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+        // A minute later the retry is due, and the straggler resumes and claims it.
+        paused.resume.add_permits(1);
+        let resumed = pending.await.unwrap().unwrap();
+        assert_eq!(
+            resumed.report.reason_codes,
+            ["dispatch_aborted"],
+            "DISPATCH-9 shared={shared}"
+        );
+        assert_eq!(
+            h.adapter.calls.load(Ordering::SeqCst),
+            1,
+            "DISPATCH-9 shared={shared}: the straggler sent nothing"
+        );
+        let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+        assert_eq!(budget["reserved"]["tool_calls"], 0);
+        assert_eq!(budget["used"]["tool_calls"], 1);
+
+        let operations = ledger(
+            &h,
+            DocKind::OperationLedger,
+            &operation_ledger_key(&admission, "reclaimed_refund").id,
+        )
+        .await;
+        let op = &operations["operations"][0];
+        assert_ne!(
+            op["attempts"].as_array().unwrap().last().unwrap()["dispatch_state"],
+            "claimed",
+            "DISPATCH-10 shared={shared}: the aborted attempt is left in flight: {op}"
+        );
+        assert_ne!(op["outcome"], "unknown", "DISPATCH-10 shared={shared}");
+        let again = process_at(&h, h.store.clone(), 40_000, shared, Arc::new(LaterClock))
+            .dispatch(&admission, &call)
+            .await
+            .unwrap();
+        assert!(
+            !again
+                .report
+                .reason_codes
+                .iter()
+                .any(|r| r == "operation_in_flight" || r == "shared_guarantee_unresolved"),
+            "DISPATCH-10 shared={shared}: {:?}",
+            again.report.reason_codes
+        );
+        if shared {
+            let digest = sha256_canonical(&json!("ord_881")).unwrap();
+            if let Some(view) = other.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
+                assert_eq!(view["held"], 0, "DISPATCH-10: shared exposure held");
+            }
+            let task = h
+                .store
+                .get(&contextos_gateway::task_authorization::exposure_key(
+                    TENANT,
+                    &admission.run_id,
+                ))
+                .await
+                .unwrap()
+                .map_or(json!({"effects": 0}), |t| t.body);
+            assert_eq!(task["effects"], 0, "DISPATCH-10: task-limit charge");
+        }
+        verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
+    }
 }

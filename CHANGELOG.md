@@ -124,6 +124,10 @@ First release candidate of the ContextOS runtime.
   `reservation:<attempt_id>` form is still recognized. Shared-guarantee dispatches now
   open a dispatch gate too (one more store write for them). Found by checking release,
   not only conservation, at every crash point of a dispatch (DISPATCH-8, DISPATCH-9).
+- Crash recovery: an attempt that reaches a closed dispatch gate (its reservation was
+  reclaimed, or an operator recorded it never sent) now records itself
+  `not_dispatched`. Before, it sent nothing but stayed claimed, so the operation was
+  refused as `operation_in_flight` until an operator resolved it (DISPATCH-10).
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
   provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
   persisted and reused on retry; MCP adapters may select the lossless

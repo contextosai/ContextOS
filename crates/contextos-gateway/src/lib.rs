@@ -1664,6 +1664,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             {
                 Ok(_) => {}
                 Err(e) if e.is_conflict() => {
+                    // Nothing was sent, so record it: the attempt would otherwise stay
+                    // claimed, in flight, until an operator resolved it. When the
+                    // attempt is already resolved, the kernel refuses this and it is a
+                    // no-op.
+                    self.withhold_dispatch(
+                        admission,
+                        &operations_key,
+                        &operation_id,
+                        &attempt_id,
+                        &action_digest,
+                        &now,
+                        "dispatch_aborted",
+                    )
+                    .await?;
                     self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
                         .await?;
                     if guards_effect && new_operation {
