@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.96.1-bookworm AS build
+FROM rust:1.99.1-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --release --locked -p contextosd -p towerd
