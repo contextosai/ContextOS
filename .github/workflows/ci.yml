@@ -12,6 +12,45 @@ jobs:
       - uses: actions/checkout@v7
       - name: Commit gate regression tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+  artifact-transport:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare release transport fixtures
+        run: |
+          mkdir -p smoke/binaries smoke/sbom smoke/other
+          python3 -c 'from pathlib import Path; Path("smoke/binaries/binary.bin").write_bytes(bytes(range(256)))'
+          echo '{"bomFormat":"CycloneDX"}' > smoke/sbom/contextos.cdx.json
+          echo 'unrelated build record' > smoke/other/build.dockerbuild
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries-smoke
+          path: smoke/binaries
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: smoke/sbom
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: transport-smoke.dockerbuild
+          path: smoke/other
+          retention-days: 1
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: received
+      - uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: received/sbom
+      - name: Verify bytes and release payload selection
+        run: |
+          cmp smoke/binaries/binary.bin received/binary.bin
+          cmp smoke/sbom/contextos.cdx.json received/sbom/contextos.cdx.json
+          python3 -c 'from pathlib import Path; assert sum(p.is_file() for p in Path("received").rglob("*")) == 2'
   conformance:
     runs-on: ubuntu-24.04
     defaults:
