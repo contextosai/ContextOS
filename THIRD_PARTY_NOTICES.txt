@@ -10101,7 +10101,7 @@ SOFTWARE.
 
 
 ======================================================================
-Tower: react 19.3.0
+Tower: react 19.3.1
 
 LICENSE
 MIT License
@@ -10128,7 +10128,7 @@ SOFTWARE.
 
 
 ======================================================================
-Tower: react-dom 19.3.0
+Tower: react-dom 19.3.1
 
 LICENSE
 MIT License
