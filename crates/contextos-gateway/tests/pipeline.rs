@@ -3572,178 +3572,17 @@ fn limited_task(root_run_id: &str) -> TaskAuthorization {
 #[tokio::test]
 async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
     let (mut explored, mut recovered, mut in_flight) = (0, 0, 0);
-    for behavior in [
-        Behavior::Confirm,
-        Behavior::Partial,
-        Behavior::RefuseInjected,
-        Behavior::Task,
-    ] {
+    for behavior in CRASH_BEHAVIORS {
         for guarded in [false, true] {
-            // A clean run counts the dispatch's durable writes.
-            let clean = harness("allow", behavior).await;
-            let mut admission = clean.admission.clone();
-            if guarded {
-                admission.task_authorizations = vec![limited_task(&admission.run_id)];
-            }
-            let counter = Arc::new(CrashStore::new(clean.store.clone(), usize::MAX, false));
-            let out = process(&clean, counter.clone(), 20_000, guarded)
-                .dispatch(&admission, &shared_call(&admission, "crash_refund", 420_000))
-                .await
-                .unwrap();
-            assert_eq!(
-                clean.adapter.calls.load(Ordering::SeqCst),
-                1,
-                "{behavior:?} guarded={guarded}: the clean run reaches the provider: {:?}",
-                out.report.reason_codes
-            );
-            let writes = counter.writes.load(Ordering::SeqCst);
+            let writes = dispatch_writes(behavior, guarded, &[]).await;
             assert!(writes >= 4, "a dispatch makes durable writes ({writes})");
             for crash_at in 0..writes {
                 for after_commit in [false, true] {
-                    let case =
-                        format!("{behavior:?} guarded={guarded} crash_at={crash_at} after_commit={after_commit}");
-                    let h = harness("allow", behavior).await;
-                    let mut admission = h.admission.clone();
-                    if guarded {
-                        admission.task_authorizations = vec![limited_task(&admission.run_id)];
-                    }
-                    let call = shared_call(&admission, "crash_refund", 420_000);
-                    let crashing = Arc::new(CrashStore::new(h.store.clone(), crash_at, after_commit));
-                    let _ = process(&h, crashing, 20_000, guarded).dispatch(&admission, &call).await;
-                    let restarted = process(&h, h.store.clone(), 30_000, guarded);
-                    let retried = restarted.dispatch(&admission, &call).await;
                     explored += 1;
-
-                    let calls = h.adapter.calls.load(Ordering::SeqCst);
-                    let operations = ledger(
-                        &h,
-                        DocKind::OperationLedger,
-                        &operation_ledger_key(&admission, "crash_refund").id,
-                    )
-                    .await;
-                    let op = &operations["operations"][0];
-                    let attempts = op["attempts"].as_array().map_or(0, Vec::len);
-                    assert!(
-                        calls <= attempts,
-                        "DISPATCH-1 {case}: {calls} calls, {attempts} attempts"
-                    );
-                    let refused = matches!(behavior, Behavior::RefuseInjected);
-                    assert!(calls <= if refused { 2 } else { 1 }, "DISPATCH-2 {case}: {calls} calls");
-                    if let Ok(out) = &retried
-                        && out.result["status"] == "completed"
-                    {
-                        assert_eq!(op["outcome"], "confirmed", "DISPATCH-3 {case}");
-                        assert!(calls >= 1, "DISPATCH-3 {case}");
-                    }
-                    let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
-                    for k in ["tokens", "tool_calls", "replans", "cost_units"] {
-                        let (used, reserved, ceiling) = (
-                            budget["used"][k].as_i64().unwrap(),
-                            budget["reserved"][k].as_i64().unwrap(),
-                            budget["ceiling"][k].as_i64().unwrap(),
-                        );
-                        assert!(
-                            used >= 0 && reserved >= 0 && used + reserved <= ceiling,
-                            "DISPATCH-4 {case}: {k}"
-                        );
-                    }
-                    assert!(
-                        budget["used"]["tool_calls"].as_u64().unwrap() <= calls as u64,
-                        "DISPATCH-4 {case}: usage charged for an effect never sent"
-                    );
-                    if guarded {
-                        let exposure_key =
-                            contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id);
-                        if let Some(used) = h.store.get(&exposure_key).await.unwrap() {
-                            assert!(
-                                used.body["effects"].as_u64().unwrap() <= 1,
-                                "DISPATCH-4 {case}: task limit"
-                            );
-                            assert!(
-                                used.body["amounts"]["INR"].as_u64().unwrap_or(0) <= 420_000,
-                                "DISPATCH-4 {case}: task total"
-                            );
-                        }
-                        let digest = sha256_canonical(&json!("ord_881")).unwrap();
-                        if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
-                            let (held, committed) =
-                                (view["held"].as_u64().unwrap(), view["committed"].as_u64().unwrap());
-                            assert!(held + committed <= 500_000, "DISPATCH-4 {case}: shared exposure");
-                            assert!(
-                                committed == 0 || calls >= 1,
-                                "DISPATCH-4 {case}: committed without a call"
-                            );
-                        }
-                    }
-                    verify_tenant_chain(h.audit.log(), TENANT, &keys())
-                        .await
-                        .unwrap_or_else(|e| panic!("DISPATCH-5 {case}: {e:?}"));
-                    if matches!(op["outcome"].as_str(), Some("confirmed" | "not_applied" | "partial")) {
-                        for k in ["tokens", "tool_calls", "replans", "cost_units"] {
-                            assert_eq!(
-                                budget["reserved"][k], 0,
-                                "DISPATCH-8 {case}: {k} still reserved for a {} effect",
-                                op["outcome"]
-                            );
-                        }
-                        // A partial effect keeps its shared exposure held until escalated.
-                        if guarded && op["outcome"] != "partial" {
-                            let digest = sha256_canonical(&json!("ord_881")).unwrap();
-                            if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
-                                assert_eq!(view["held"], 0, "DISPATCH-8 {case}: shared exposure held");
-                            }
-                        }
-                        if guarded && op["outcome"] == "not_applied" {
-                            let task = ledger(
-                                &h,
-                                DocKind::TaskExposure,
-                                &contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id).id,
-                            )
-                            .await;
-                            assert!(
-                                task["operations"].get("crash_refund").is_none(),
-                                "DISPATCH-8 {case}: an effect not applied still counts against the task"
-                            );
-                        }
-                    }
-                    let stranded = calls == 0
-                        && matches!(behavior, Behavior::Confirm)
-                        && retried.as_ref().is_ok_and(|o| o.result["status"] != "completed");
-                    if stranded {
-                        let resolved = restarted
-                            .reconcile(
-                                &admission,
-                                "crash_refund",
-                                Resolution::Assert {
-                                    outcome: EffectOutcome::NotApplied,
-                                    evidence_ref: artifact("incident", "never_sent"),
-                                    principal_id: "oncall".into(),
-                                },
-                            )
-                            .await
-                            .unwrap();
-                        if resolved.status != "resolved" {
-                            // The crash came after the dispatch gate opened: the effect may
-                            // be in flight, so it cannot be recorded as not applied.
-                            assert!(
-                                resolved.reason_codes == ["dispatch_active"]
-                                    || resolved.reason_codes == ["shared_guarantee_dispatch_active"],
-                                "DISPATCH-6 {case}: {} {:?}",
-                                resolved.status,
-                                resolved.reason_codes
-                            );
-                            in_flight += 1;
-                            continue;
-                        }
-                        recovered += 1;
-                        let later = process_at(&h, h.store.clone(), 40_000, guarded, Arc::new(LaterClock));
-                        let out = later.dispatch(&admission, &call).await.unwrap();
-                        assert_eq!(
-                            out.result["status"], "completed",
-                            "DISPATCH-6 {case}: {:?}",
-                            out.report.reason_codes
-                        );
-                        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1, "DISPATCH-6 {case}");
+                    match crash_case(behavior, guarded, &[(crash_at, after_commit)]).await {
+                        Recovery::Recovered => recovered += 1,
+                        Recovery::InFlight => in_flight += 1,
+                        Recovery::Settled => {}
                     }
                 }
             }
@@ -3754,6 +3593,254 @@ async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
     eprintln!(
         "explored {explored} crash points; {recovered} stranded dispatches recovered, {in_flight} refused as in flight"
     );
+}
+
+/// DISPATCH-12: DISPATCH-1..6 and 8 under two crashes: the dispatch crashes at any of its writes, its
+/// retry crashes at any of its own writes (each before or after the write commits),
+/// and a third process retries. The same properties hold as after one crash. The
+/// cases are independent, so they run in parallel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn every_pair_of_crash_points_is_safe_to_retry() {
+    let mut cases = Vec::new();
+    for behavior in CRASH_BEHAVIORS {
+        for guarded in [false, true] {
+            let writes = dispatch_writes(behavior, guarded, &[]).await;
+            for first in (0..writes).flat_map(|k| [(k, false), (k, true)]) {
+                let retry_writes = dispatch_writes(behavior, guarded, &[first]).await;
+                for second in (0..retry_writes).flat_map(|k| [(k, false), (k, true)]) {
+                    cases.push((behavior, guarded, [first, second]));
+                }
+            }
+        }
+    }
+    let explored = cases.len();
+    let mut running = tokio::task::JoinSet::new();
+    for (behavior, guarded, crashes) in cases {
+        running.spawn(async move { crash_case(behavior, guarded, &crashes).await });
+    }
+    let (mut recovered, mut in_flight) = (0, 0);
+    while let Some(outcome) = running.join_next().await {
+        match outcome.unwrap() {
+            Recovery::Recovered => recovered += 1,
+            Recovery::InFlight => in_flight += 1,
+            Recovery::Settled => {}
+        }
+    }
+    assert!(explored >= 1_000, "explored {explored} pairs of crash points");
+    assert!(recovered >= 8, "recovered {recovered} stranded dispatches");
+    eprintln!(
+        "explored {explored} pairs of crash points; {recovered} stranded dispatches recovered, {in_flight} refused as in flight"
+    );
+}
+
+const CRASH_BEHAVIORS: [Behavior; 4] = [
+    Behavior::Confirm,
+    Behavior::Partial,
+    Behavior::RefuseInjected,
+    Behavior::Task,
+];
+
+/// What became of a dispatch after its crashes and a clean retry.
+enum Recovery {
+    /// The retry settled it, or it needs no recovery.
+    Settled,
+    /// It was stranded before its effect was sent and recovered (DISPATCH-6).
+    Recovered,
+    /// It was stranded after its dispatch gate opened: refused as possibly in flight.
+    InFlight,
+}
+
+/// The durable writes of the dispatch that follows `crashes` (none: the first).
+async fn dispatch_writes(behavior: Behavior, guarded: bool, crashes: &[(usize, bool)]) -> usize {
+    let h = harness("allow", behavior).await;
+    let mut admission = h.admission.clone();
+    if guarded {
+        admission.task_authorizations = vec![limited_task(&admission.run_id)];
+    }
+    let call = shared_call(&admission, "crash_refund", 420_000);
+    for (i, &(crash_at, after_commit)) in (0_u64..).zip(crashes) {
+        let crashing = Arc::new(CrashStore::new(h.store.clone(), crash_at, after_commit));
+        let _ = process(&h, crashing, 20_000 + 10_000 * i, guarded)
+            .dispatch(&admission, &call)
+            .await;
+    }
+    let counter = Arc::new(CrashStore::new(h.store.clone(), usize::MAX, false));
+    let ids = 20_000 + 10_000 * crashes.len() as u64;
+    let _ = process(&h, counter.clone(), ids, guarded)
+        .dispatch(&admission, &call)
+        .await;
+    if crashes.is_empty() {
+        assert_eq!(
+            h.adapter.calls.load(Ordering::SeqCst),
+            1,
+            "{behavior:?} guarded={guarded}: the clean run reaches the provider"
+        );
+    }
+    counter.writes.load(Ordering::SeqCst)
+}
+
+/// One dispatch whose processes crash in turn at `crashes` (the `k`th write, before or
+/// after it commits), then a clean retry, checked against DISPATCH-1..6 and 8.
+async fn crash_case(behavior: Behavior, guarded: bool, crashes: &[(usize, bool)]) -> Recovery {
+    let case = format!("{behavior:?} guarded={guarded} crashes={crashes:?}");
+    let h = harness("allow", behavior).await;
+    let mut admission = h.admission.clone();
+    if guarded {
+        admission.task_authorizations = vec![limited_task(&admission.run_id)];
+    }
+    let call = shared_call(&admission, "crash_refund", 420_000);
+    for (i, &(crash_at, after_commit)) in (0_u64..).zip(crashes) {
+        let crashing = Arc::new(CrashStore::new(h.store.clone(), crash_at, after_commit));
+        let _ = process(&h, crashing, 20_000 + 10_000 * i, guarded)
+            .dispatch(&admission, &call)
+            .await;
+    }
+    let ids = 20_000 + 10_000 * crashes.len() as u64;
+    let restarted = process(&h, h.store.clone(), ids, guarded);
+    let retried = restarted.dispatch(&admission, &call).await;
+    let calls = h.adapter.calls.load(Ordering::SeqCst);
+    let operations = ledger(
+        &h,
+        DocKind::OperationLedger,
+        &operation_ledger_key(&admission, "crash_refund").id,
+    )
+    .await;
+    let op = &operations["operations"][0];
+    let attempts = op["attempts"].as_array().map_or(0, Vec::len);
+    assert!(
+        calls <= attempts,
+        "DISPATCH-1 {case}: {calls} calls, {attempts} attempts"
+    );
+    let refused = matches!(behavior, Behavior::RefuseInjected);
+    assert!(calls <= if refused { 2 } else { 1 }, "DISPATCH-2 {case}: {calls} calls");
+    if let Ok(out) = &retried
+        && out.result["status"] == "completed"
+    {
+        assert_eq!(op["outcome"], "confirmed", "DISPATCH-3 {case}");
+        assert!(calls >= 1, "DISPATCH-3 {case}");
+    }
+    let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+    for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+        let (used, reserved, ceiling) = (
+            budget["used"][k].as_i64().unwrap(),
+            budget["reserved"][k].as_i64().unwrap(),
+            budget["ceiling"][k].as_i64().unwrap(),
+        );
+        assert!(
+            used >= 0 && reserved >= 0 && used + reserved <= ceiling,
+            "DISPATCH-4 {case}: {k}"
+        );
+    }
+    assert!(
+        budget["used"]["tool_calls"].as_u64().unwrap() <= calls as u64,
+        "DISPATCH-4 {case}: usage charged for an effect never sent"
+    );
+    if guarded {
+        let exposure_key = contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id);
+        if let Some(used) = h.store.get(&exposure_key).await.unwrap() {
+            assert!(
+                used.body["effects"].as_u64().unwrap() <= 1,
+                "DISPATCH-4 {case}: task limit"
+            );
+            assert!(
+                used.body["amounts"]["INR"].as_u64().unwrap_or(0) <= 420_000,
+                "DISPATCH-4 {case}: task total"
+            );
+        }
+        let digest = sha256_canonical(&json!("ord_881")).unwrap();
+        if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
+            let (held, committed) = (view["held"].as_u64().unwrap(), view["committed"].as_u64().unwrap());
+            assert!(held + committed <= 500_000, "DISPATCH-4 {case}: shared exposure");
+            assert!(
+                committed == 0 || calls >= 1,
+                "DISPATCH-4 {case}: committed without a call"
+            );
+        }
+    }
+    verify_tenant_chain(h.audit.log(), TENANT, &keys())
+        .await
+        .unwrap_or_else(|e| panic!("DISPATCH-5 {case}: {e:?}"));
+    if matches!(op["outcome"].as_str(), Some("confirmed" | "not_applied" | "partial")) {
+        for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+            assert_eq!(
+                budget["reserved"][k],
+                0,
+                "DISPATCH-8 {case}: {k} still reserved for a {} effect; open {:?}; attempts {:?}",
+                op["outcome"],
+                budget["reservations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r["status"] != "settled")
+                    .map(|r| r["reservation_id"].clone())
+                    .collect::<Vec<_>>(),
+                op["attempts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|a| (a["attempt_id"].clone(), a["dispatch_state"].clone()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        // A partial effect keeps its shared exposure held until escalated.
+        if guarded && op["outcome"] != "partial" {
+            let digest = sha256_canonical(&json!("ord_881")).unwrap();
+            if let Some(view) = restarted.shared_exposure(TENANT, "refunds", &digest).await.unwrap() {
+                assert_eq!(view["held"], 0, "DISPATCH-8 {case}: shared exposure held");
+            }
+        }
+        if guarded && op["outcome"] == "not_applied" {
+            let task = ledger(
+                &h,
+                DocKind::TaskExposure,
+                &contextos_gateway::task_authorization::exposure_key(TENANT, &admission.run_id).id,
+            )
+            .await;
+            assert!(
+                task["operations"].get("crash_refund").is_none(),
+                "DISPATCH-8 {case}: an effect not applied still counts against the task"
+            );
+        }
+    }
+    let stranded = calls == 0
+        && matches!(behavior, Behavior::Confirm)
+        && retried.as_ref().is_ok_and(|o| o.result["status"] != "completed");
+    if stranded {
+        let resolved = restarted
+            .reconcile(
+                &admission,
+                "crash_refund",
+                Resolution::Assert {
+                    outcome: EffectOutcome::NotApplied,
+                    evidence_ref: artifact("incident", "never_sent"),
+                    principal_id: "oncall".into(),
+                },
+            )
+            .await
+            .unwrap();
+        if resolved.status != "resolved" {
+            // The crash came after the dispatch gate opened: the effect may
+            // be in flight, so it cannot be recorded as not applied.
+            assert!(
+                resolved.reason_codes == ["dispatch_active"]
+                    || resolved.reason_codes == ["shared_guarantee_dispatch_active"],
+                "DISPATCH-6 {case}: {} {:?}",
+                resolved.status,
+                resolved.reason_codes
+            );
+            return Recovery::InFlight;
+        }
+        let later = process_at(&h, h.store.clone(), ids + 10_000, guarded, Arc::new(LaterClock));
+        let out = later.dispatch(&admission, &call).await.unwrap();
+        assert_eq!(
+            out.result["status"], "completed",
+            "DISPATCH-6 {case}: {:?}",
+            out.report.reason_codes
+        );
+        assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1, "DISPATCH-6 {case}");
+        return Recovery::Recovered;
+    }
+    Recovery::Settled
 }
 
 /// How an operation came to need reconciliation, and how it is reconciled.
@@ -4082,4 +4169,192 @@ async fn a_reclaimed_attempt_never_sends() {
         }
         verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
     }
+}
+
+/// A store that yields a pseudo-random number of times before every access, so that
+/// concurrent dispatches interleave differently for each seed.
+struct JitterStore {
+    inner: Arc<MemoryStore>,
+    state: std::sync::Mutex<u64>,
+}
+
+impl JitterStore {
+    async fn jitter(&self) {
+        let turns = {
+            let mut x = self.state.lock().unwrap();
+            // xorshift64
+            *x ^= *x << 13;
+            *x ^= *x >> 7;
+            *x ^= *x << 17;
+            *x % 8
+        };
+        for _ in 0..turns {
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+impl DocumentStore for JitterStore {
+    async fn get(&self, k: &DocKey) -> Result<Option<contextos_store::Versioned>, contextos_store::StoreError> {
+        self.jitter().await;
+        self.inner.get(k).await
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.jitter().await;
+        self.inner.create(k, b).await
+    }
+    async fn compare_and_swap(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: &Value,
+    ) -> Result<contextos_store::Versioned, contextos_store::StoreError> {
+        self.jitter().await;
+        self.inner.compare_and_swap(k, r, b).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, contextos_store::StoreError> {
+        self.jitter().await;
+        self.inner.compare_and_swap_encoded(k, r, b, e).await
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&contextos_store::ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<contextos_store::ScanCursor>, contextos_store::StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+/// What the principal authorized for a team of effects: at most two, INR 4200 in all.
+fn team_task(root_run_id: &str) -> TaskAuthorization {
+    let mut task = limited_task(root_run_id);
+    task.limits.as_mut().unwrap().max_effects = Some(2);
+    task
+}
+
+/// DISPATCH-11: concurrent dispatches of one run. Under many interleavings, eight
+/// processes dispatch effects of three operations of one run at once (duplicates and
+/// distinct operations racing for one budget, one task's limits and one shared
+/// guarantee). Then each operation was sent at most as often as it was attempted and
+/// at most once unless its provider reported it not applied; no more effects were
+/// applied than the task's limits and the shared guarantee allow; nothing stays held
+/// or in flight; and the signed audit chain verifies.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_dispatches_of_one_run_stay_within_every_limit() {
+    const OPERATIONS: [&str; 3] = ["team_a", "team_b", "team_c"];
+    let (mut rounds, mut limited) = (0, 0);
+    for behavior in [Behavior::Confirm, Behavior::RefuseInjected] {
+        for guarded in [false, true] {
+            for seed in 1..=12_u64 {
+                rounds += 1;
+                let case = format!("{behavior:?} guarded={guarded} seed={seed}");
+                let h = harness("allow", behavior).await;
+                let mut admission = h.admission.clone();
+                if guarded {
+                    admission.task_authorizations = vec![team_task(&admission.run_id)];
+                }
+                let store = Arc::new(JitterStore {
+                    inner: h.store.clone(),
+                    state: std::sync::Mutex::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1),
+                });
+                let mut running = tokio::task::JoinSet::new();
+                for i in 0..8_u64 {
+                    let operation = OPERATIONS[usize::try_from((seed + i * 7) % 3).unwrap()];
+                    let gateway = process(&h, store.clone(), 20_000 + 1_000 * i, guarded);
+                    let (admission, call) = (admission.clone(), shared_call(&admission, operation, 200_000));
+                    running.spawn(async move { gateway.dispatch(&admission, &call).await.unwrap() });
+                }
+                while let Some(out) = running.join_next().await {
+                    out.unwrap();
+                }
+
+                let calls = h.adapter.calls.load(Ordering::SeqCst);
+                let (mut attempts, mut confirmed) = (0, 0);
+                for operation in OPERATIONS {
+                    let key = operation_ledger_key(&admission, operation);
+                    let Some(read) = h.store.get(&key).await.unwrap() else {
+                        continue;
+                    };
+                    let op = &read.body["operations"][0];
+                    let tried = op["attempts"].as_array().unwrap();
+                    attempts += tried.len();
+                    assert!(
+                        tried.iter().all(|a| a["dispatch_state"] != "claimed"),
+                        "DISPATCH-11 {case}: {operation} left in flight"
+                    );
+                    if op["outcome"] == "confirmed" {
+                        confirmed += 1;
+                    }
+                }
+                assert!(
+                    calls <= attempts,
+                    "DISPATCH-11 {case}: {calls} calls, {attempts} attempts"
+                );
+                match behavior {
+                    Behavior::Confirm => assert_eq!(calls, confirmed, "DISPATCH-11 {case}: an effect sent twice"),
+                    _ => assert!(calls <= 2 * OPERATIONS.len(), "DISPATCH-11 {case}: {calls} calls"),
+                }
+                let budget = ledger(&h, DocKind::BudgetLedger, &admission.budget_ledger_id).await;
+                for k in ["tokens", "tool_calls", "replans", "cost_units"] {
+                    assert_eq!(budget["reserved"][k], 0, "DISPATCH-11 {case}: {k} still reserved");
+                }
+                let used = budget["used"]["tool_calls"].as_u64().unwrap();
+                assert!(
+                    used <= calls as u64,
+                    "DISPATCH-11 {case}: charged {used} for {calls} calls"
+                );
+                if matches!(behavior, Behavior::Confirm) {
+                    assert_eq!(
+                        used, calls as u64,
+                        "DISPATCH-11 {case}: charged {used} for {calls} calls"
+                    );
+                }
+                if guarded {
+                    assert!(
+                        confirmed <= 2,
+                        "DISPATCH-11 {case}: {confirmed} effects past the task's limit"
+                    );
+                    if matches!(behavior, Behavior::Confirm) && confirmed == 2 {
+                        limited += 1;
+                    }
+                    let task = h
+                        .store
+                        .get(&contextos_gateway::task_authorization::exposure_key(
+                            TENANT,
+                            &admission.run_id,
+                        ))
+                        .await
+                        .unwrap()
+                        .map_or(json!({"effects": 0}), |t| t.body);
+                    assert_eq!(task["effects"], confirmed, "DISPATCH-11 {case}: task-limit charges");
+                    let digest = sha256_canonical(&json!("ord_881")).unwrap();
+                    let view = process(&h, h.store.clone(), 90_000, guarded)
+                        .shared_exposure(TENANT, "refunds", &digest)
+                        .await
+                        .unwrap()
+                        .unwrap_or_else(|| json!({"held": 0, "committed": 0}));
+                    assert_eq!(view["held"], 0, "DISPATCH-11 {case}: shared exposure held");
+                    assert_eq!(
+                        view["committed"],
+                        200_000 * confirmed,
+                        "DISPATCH-11 {case}: shared exposure committed"
+                    );
+                }
+                verify_tenant_chain(h.audit.log(), TENANT, &keys())
+                    .await
+                    .unwrap_or_else(|e| panic!("DISPATCH-11 {case}: {e:?}"));
+            }
+        }
+    }
+    // The premise: with three operations and room for two, the limits decided rounds.
+    assert!(limited >= 6, "the task's limit bound only {limited} rounds");
+    eprintln!("explored {rounds} interleavings of concurrent dispatches; the task's limit bound {limited}");
 }

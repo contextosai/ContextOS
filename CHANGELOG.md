@@ -128,6 +128,14 @@ First release candidate of the ContextOS runtime.
   reclaimed, or an operator recorded it never sent) now records itself
   `not_dispatched`. Before, it sent nothing but stayed claimed, so the operation was
   refused as `operation_in_flight` until an operator resolved it (DISPATCH-10).
+- Crash recovery: a retry whose claim is refused (for example `retry_not_due`) now also
+  returns reservations a crashed attempt of the operation left before its claim,
+  skipping any attempt the operation ledger records. Before, only a successful claim
+  reclaimed them, so an operation that was never claimed again kept the reservation
+  and its run was refused completion as `effects_in_flight`. Found by exploring every
+  pair of crash points of a dispatch and its retry (DISPATCH-12, 1,074 pairs).
+- Tests: concurrent dispatches of one run, racing for one budget, one task's limits
+  and one shared guarantee, across 48 seeded interleavings (DISPATCH-11).
 - Contract hardening (spec H01–H03): HTTP 202/206/207 leave the effect unknown;
   provider idempotency keys are `ctxos:v1:<sha256>` over tenant, run and operation,
   persisted and reused on retry; MCP adapters may select the lossless
