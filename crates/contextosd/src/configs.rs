@@ -471,9 +471,12 @@ mod tests {
 
     #[test]
     fn identical_configurations_have_no_changes() {
-        assert!(changes("", "").is_empty());
+        assert_eq!(changes("", ""), [] as [Change; 0]);
         // Spelling out a default is not a change of the effective configuration.
-        assert!(changes("", "[guards]\nrefuse_repeated_effects = true").is_empty());
+        assert_eq!(
+            changes("", "[guards]\nrefuse_repeated_effects = true"),
+            [] as [Change; 0]
+        );
     }
 
     #[test]

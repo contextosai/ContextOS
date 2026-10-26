@@ -25,7 +25,7 @@ fn served() -> BTreeSet<(String, String)> {
             .into_iter()
             .filter(|m| rest.starts_with(&format!(",{m}(")) || rest.contains(&format!(").{m}(")))
             .collect();
-        assert!(!methods.is_empty(), "no method for {path}");
+        assert_ne!(methods, [] as [&str; 0], "no method for {path}");
         for method in methods {
             if path == "/v1/runs/{run_id}/{action}" {
                 for action in ["complete", "fail", "cancel"] {
@@ -69,7 +69,7 @@ fn every_reference_resolves() {
     let doc = document();
     let mut found = Vec::new();
     refs(&doc, &mut found);
-    assert!(!found.is_empty());
+    assert_ne!(found, [] as [&str; 0]);
     for r in found {
         let (base, fragment) = r.split_once('#').unwrap_or((r, ""));
         let target = if base.is_empty() {

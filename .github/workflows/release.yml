@@ -34,7 +34,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }} -p contextosd -p ctx -p towerd
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: dtolnay/rust-toolchain@1.99.1
       - run: cargo install --locked cargo-cyclonedx@0.5.7
       - run: cargo cyclonedx --format json --all-features   # one <crate>.cdx.json per crate
       - uses: actions/upload-artifact@v7

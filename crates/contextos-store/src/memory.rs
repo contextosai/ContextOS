@@ -1,11 +1,20 @@
 //! In-process store for embedded use and tests. Linearizable per key.
 
 use std::collections::HashMap;
+use std::future::{Future, poll_fn};
 use std::sync::{Arc, RwLock};
+use std::task::Poll;
 
 use serde_json::Value;
 
 use crate::{DocKey, DocumentStore, Encoded, StoreError, Versioned};
+
+// Synchronous memory operations still execute only when their future is polled.
+// In particular, dropping an unpolled write must not mutate the store.
+fn deferred<T>(work: impl FnOnce() -> T) -> impl Future<Output = T> {
+    let mut work = Some(work);
+    poll_fn(move |_| Poll::Ready(work.take().expect("future polled after completion")()))
+}
 
 /// A stored document: revision, parsed body and the digest of its canonical form.
 /// The in-process store keeps the parsed body, so reads need no re-parsing; bodies
@@ -40,34 +49,38 @@ impl DocumentStore for MemoryStore {
         true
     }
 
-    async fn get(&self, key: &DocKey) -> Result<Option<Versioned>, StoreError> {
-        let found = {
-            let docs = self.docs.read().map_err(|_| Self::poisoned())?;
-            docs.get(key).cloned()
-        };
-        Ok(found.map(|(revision, body, digest, _)| Versioned {
-            revision,
-            body: Value::clone(&body),
-            digest,
-        }))
+    fn get(&self, key: &DocKey) -> impl Future<Output = Result<Option<Versioned>, StoreError>> + Send {
+        deferred(move || {
+            let found = {
+                let docs = self.docs.read().map_err(|_| Self::poisoned())?;
+                docs.get(key).cloned()
+            };
+            Ok(found.map(|(revision, body, digest, _)| Versioned {
+                revision,
+                body: Value::clone(&body),
+                digest,
+            }))
+        })
     }
 
-    async fn create(&self, key: &DocKey, body: &Value) -> Result<Versioned, StoreError> {
-        let Encoded { text, digest } = Encoded::of(body)?;
-        // Store the decoded canonical form so reads match what Postgres would return.
-        let canonical: Value = serde_json::from_str(&text).map_err(|_| StoreError::Integrity)?;
-        let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
-        if let Some((revision, _, _, _)) = docs.get(key) {
-            return Err(StoreError::Conflict {
-                expected: None,
-                actual: Some(*revision),
-            });
-        }
-        docs.insert(key.clone(), (1, Arc::new(canonical.clone()), digest.clone(), now_us()));
-        Ok(Versioned {
-            revision: 1,
-            body: canonical,
-            digest,
+    fn create(&self, key: &DocKey, body: &Value) -> impl Future<Output = Result<Versioned, StoreError>> + Send {
+        deferred(move || {
+            let Encoded { text, digest } = Encoded::of(body)?;
+            // Store the decoded canonical form so reads match what Postgres would return.
+            let canonical: Value = serde_json::from_str(&text).map_err(|_| StoreError::Integrity)?;
+            let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
+            if let Some((revision, _, _, _)) = docs.get(key) {
+                return Err(StoreError::Conflict {
+                    expected: None,
+                    actual: Some(*revision),
+                });
+            }
+            docs.insert(key.clone(), (1, Arc::new(canonical.clone()), digest.clone(), now_us()));
+            Ok(Versioned {
+                revision: 1,
+                body: canonical,
+                digest,
+            })
         })
     }
 
@@ -89,52 +102,56 @@ impl DocumentStore for MemoryStore {
         })
     }
 
-    async fn compare_and_swap_encoded(
+    fn compare_and_swap_encoded(
         &self,
         key: &DocKey,
         expected_revision: u64,
         body: Value,
         encoded: Encoded,
-    ) -> Result<u64, StoreError> {
-        let body = Arc::new(body);
-        let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
-        let Some(entry) = docs.get_mut(key) else {
-            return Err(StoreError::NotFound);
-        };
-        if entry.0 != expected_revision {
-            return Err(StoreError::Conflict {
-                expected: Some(expected_revision),
-                actual: Some(entry.0),
-            });
-        }
-        let revision = entry.0 + 1;
-        let replaced = std::mem::replace(entry, (revision, body, encoded.digest, entry.3));
-        drop(docs);
-        // The replaced body is freed outside the lock.
-        drop(replaced);
-        Ok(revision)
+    ) -> impl Future<Output = Result<u64, StoreError>> + Send {
+        deferred(move || {
+            let body = Arc::new(body);
+            let mut docs = self.docs.write().map_err(|_| Self::poisoned())?;
+            let Some(entry) = docs.get_mut(key) else {
+                return Err(StoreError::NotFound);
+            };
+            if entry.0 != expected_revision {
+                return Err(StoreError::Conflict {
+                    expected: Some(expected_revision),
+                    actual: Some(entry.0),
+                });
+            }
+            let revision = entry.0 + 1;
+            let replaced = std::mem::replace(entry, (revision, body, encoded.digest, entry.3));
+            drop(docs);
+            // The replaced body is freed outside the lock.
+            drop(replaced);
+            Ok(revision)
+        })
     }
 
-    async fn expiring(
+    fn expiring(
         &self,
         kind: crate::DocKind,
         before_us: u64,
         after: Option<&crate::ScanCursor>,
         limit: usize,
-    ) -> Result<Vec<crate::ScanCursor>, StoreError> {
-        let docs = self.docs.read().map_err(|_| Self::poisoned())?;
-        let mut found: Vec<crate::ScanCursor> = docs
-            .iter()
-            .filter(|(key, (_, body, _, created))| {
-                key.kind == kind && *created < before_us && !crate::is_tombstone(body)
-            })
-            .map(|(key, (_, _, _, created))| (*created, key.clone()))
-            .filter(|cursor| after.is_none_or(|after| cursor > after))
-            .collect();
-        drop(docs);
-        found.sort();
-        found.truncate(limit);
-        Ok(found)
+    ) -> impl Future<Output = Result<Vec<crate::ScanCursor>, StoreError>> + Send {
+        deferred(move || {
+            let docs = self.docs.read().map_err(|_| Self::poisoned())?;
+            let mut found: Vec<crate::ScanCursor> = docs
+                .iter()
+                .filter(|(key, (_, body, _, created))| {
+                    key.kind == kind && *created < before_us && !crate::is_tombstone(body)
+                })
+                .map(|(key, (_, _, _, created))| (*created, key.clone()))
+                .filter(|cursor| after.is_none_or(|after| cursor > after))
+                .collect();
+            drop(docs);
+            found.sort();
+            found.truncate(limit);
+            Ok(found)
+        })
     }
 }
 
@@ -154,47 +171,62 @@ impl MemoryLog {
 }
 
 impl crate::AppendLog for MemoryLog {
-    async fn head(&self, tenant_id: &str) -> Result<Option<crate::LogRow>, StoreError> {
-        let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
-        rows.get(tenant_id)
-            .and_then(|r| r.last())
-            .map(|(sequence, hash, text)| row(*sequence, hash, text))
-            .transpose()
+    fn head(&self, tenant_id: &str) -> impl Future<Output = Result<Option<crate::LogRow>, StoreError>> + Send {
+        deferred(move || {
+            let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
+            rows.get(tenant_id)
+                .and_then(|r| r.last())
+                .map(|(sequence, hash, text)| row(*sequence, hash, text))
+                .transpose()
+        })
     }
 
-    async fn append_batch(&self, tenant_id: &str, batch: &[crate::AppendRow]) -> Result<(), StoreError> {
-        let Some(first) = batch.first() else {
-            return Ok(());
-        };
-        if batch.windows(2).any(|w| w[1].sequence != w[0].sequence + 1) {
-            return Err(StoreError::Integrity);
-        }
-        let stored: Vec<StoredRow> = batch
-            .iter()
-            .map(|r| (r.sequence, r.record_hash.clone(), r.text.clone()))
-            .collect();
-        let mut rows = self.rows.write().map_err(|_| MemoryStore::poisoned())?;
-        let chain = rows.entry(tenant_id.to_owned()).or_default();
-        let head = chain.last().map(|(sequence, _, _)| *sequence);
-        if first.sequence != head.map_or(1, |h| h + 1) {
-            return Err(StoreError::Conflict {
-                expected: Some(first.sequence.saturating_sub(1)),
-                actual: head,
-            });
-        }
-        chain.extend(stored);
-        Ok(())
+    fn append_batch(
+        &self,
+        tenant_id: &str,
+        batch: &[crate::AppendRow],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        deferred(move || {
+            let Some(first) = batch.first() else {
+                return Ok(());
+            };
+            if batch.windows(2).any(|w| w[1].sequence != w[0].sequence + 1) {
+                return Err(StoreError::Integrity);
+            }
+            let stored: Vec<StoredRow> = batch
+                .iter()
+                .map(|r| (r.sequence, r.record_hash.clone(), r.text.clone()))
+                .collect();
+            let mut rows = self.rows.write().map_err(|_| MemoryStore::poisoned())?;
+            let chain = rows.entry(tenant_id.to_owned()).or_default();
+            let head = chain.last().map(|(sequence, _, _)| *sequence);
+            if first.sequence != head.map_or(1, |h| h + 1) {
+                return Err(StoreError::Conflict {
+                    expected: Some(first.sequence.saturating_sub(1)),
+                    actual: head,
+                });
+            }
+            chain.extend(stored);
+            Ok(())
+        })
     }
 
-    async fn range(&self, tenant_id: &str, from: u64, limit: usize) -> Result<Vec<crate::LogRow>, StoreError> {
-        let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
-        rows.get(tenant_id)
-            .into_iter()
-            .flatten()
-            .filter(|(sequence, _, _)| *sequence >= from)
-            .take(limit)
-            .map(|(sequence, hash, text)| row(*sequence, hash, text))
-            .collect()
+    fn range(
+        &self,
+        tenant_id: &str,
+        from: u64,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<crate::LogRow>, StoreError>> + Send {
+        deferred(move || {
+            let rows = self.rows.read().map_err(|_| MemoryStore::poisoned())?;
+            rows.get(tenant_id)
+                .into_iter()
+                .flatten()
+                .filter(|(sequence, _, _)| *sequence >= from)
+                .take(limit)
+                .map(|(sequence, hash, text)| row(*sequence, hash, text))
+                .collect()
+        })
     }
 }
 
@@ -205,4 +237,55 @@ fn row(sequence: u64, record_hash: &str, text: &str) -> Result<crate::LogRow, St
         record_hash: record_hash.to_owned(),
         body,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AppendLog, AppendRow, DocKind, LogRow};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn memory_operations_remain_lazy_until_polled() {
+        let store = MemoryStore::new();
+        let key = DocKey::new("tenant", DocKind::RunState, "lazy");
+        let body = json!({"version": 1});
+        let create = store.create(&key, &body);
+        assert_eq!(store.get(&key).await.unwrap(), None);
+        create.await.unwrap();
+
+        let read = store.get(&key);
+        let next = json!({"version": 2});
+        let swap = store.compare_and_swap_encoded(&key, 1, next.clone(), Encoded::of(&next).unwrap());
+        assert_eq!(store.get(&key).await.unwrap().unwrap().revision, 1);
+        swap.await.unwrap();
+        assert_eq!(read.await.unwrap().unwrap().body, next);
+
+        let cancelled = json!({"version": 3});
+        drop(store.compare_and_swap_encoded(&key, 2, cancelled.clone(), Encoded::of(&cancelled).unwrap()));
+        assert_eq!(store.get(&key).await.unwrap().unwrap().revision, 2);
+        let other = DocKey::new("tenant", DocKind::RunState, "cancelled");
+        drop(store.create(&other, &body));
+        assert_eq!(store.get(&other).await.unwrap(), None);
+
+        let scan = store.expiring(DocKind::RunState, u64::MAX, None, 10);
+        store.create(&other, &body).await.unwrap();
+        assert_eq!(scan.await.unwrap().len(), 2);
+
+        let log = MemoryLog::new();
+        let head = log.head("tenant");
+        let range = log.range("tenant", 1, 10);
+        let row = AppendRow::encode(&LogRow {
+            sequence: 1,
+            record_hash: "digest".into(),
+            body,
+        })
+        .unwrap();
+        let batch = [row];
+        let append = log.append_batch("tenant", &batch);
+        assert_eq!(log.head("tenant").await.unwrap(), None);
+        append.await.unwrap();
+        assert_eq!(head.await.unwrap().unwrap().sequence, 1);
+        assert_eq!(range.await.unwrap().len(), 1);
+    }
 }

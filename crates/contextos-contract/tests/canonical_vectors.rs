@@ -26,7 +26,7 @@ fn legacy_hash_keeps_the_original_unicode_collation() {
 #[test]
 fn canonical_encodings_match_reference() {
     let cases = vectors("canonical.json");
-    assert!(!cases.is_empty());
+    assert_ne!(cases, [] as [Value; 0]);
     for case in cases {
         let input = &case["input"];
         assert_eq!(

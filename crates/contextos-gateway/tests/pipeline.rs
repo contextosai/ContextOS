@@ -2857,7 +2857,7 @@ async fn escalation_and_policy_obligations_reach_the_orchestrator() {
             .await,
         Err(contextos_gateway::EscalationError::Resolved)
     ));
-    assert!(h.gateway.open_escalations(TENANT, 100).await.unwrap().is_empty());
+    assert_eq!(h.gateway.open_escalations(TENANT, 100).await.unwrap(), [] as [Value; 0]);
     // The same operation escalated again is a new hand-off, with the earlier one kept.
     let recurring = h
         .gateway

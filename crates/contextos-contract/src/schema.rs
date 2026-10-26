@@ -200,7 +200,7 @@ mod tests {
     fn cross_document_refs_resolve() {
         // invoke-agent references run-context $defs by absolute URI.
         let error = validate(&SchemaTarget::document(SchemaDoc::InvokeAgent), &json!({})).unwrap_err();
-        assert!(!error.violations.is_empty());
+        assert_ne!(error.violations, [] as [SchemaViolation; 0]);
     }
 
     #[test]

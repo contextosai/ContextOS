@@ -35,6 +35,8 @@ First release candidate of the ContextOS runtime.
   1,024 receipts per resource and orphaned active-dispatch recovery limits are explicit.
 
 ### Public release preparation
+- Align local, CI and container builds on Rust 1.99.1; refresh JSON Schema and Node
+  native binding dependencies with offline-validation and marshalling regressions.
 - Pin the legacy compiler's ICU comparator to 2.3.1 and test its persisted Unicode
   hashes. ICU 2.4 changes key ordering and requires a versioned encoding migration.
 - Refresh the Tower UI, conformance tooling and JavaScript framework integrations;
