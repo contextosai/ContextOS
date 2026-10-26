@@ -110,6 +110,18 @@ try {
   // The orchestrator checkpoints its state after each verdict.
   assert.equal((await run.checkpoint({ step: 1, verdict: "accept" }, 0)).revision, 1);
 
+  assert.equal((await run.publishWork("inspect", "Inspect the order", "Record a test report")).task.revision, 1);
+  assert.equal((await run.workTasks({ limit: 1 })).tasks[0].task_id, "inspect");
+  assert.equal((await run.workTask("inspect")).data_only, true);
+  const claimed = await run.updateWork("inspect", { action: "claim", expected_revision: 1, lease_seconds: 30 });
+  assert.equal(claimed.task.claim.run_id, run.runId);
+  const done = await run.updateWork("inspect", { action: "complete", expected_revision: 2, lease_epoch: 1,
+    evidence_refs: [{ artifact_type: "test", artifact_id: "local-report", sha256: `sha256:${"a".repeat(64)}` }] });
+  assert.equal(done.task.status, "completed");
+  assert.equal(done.evidence_verified, false);
+  await assert.rejects(run.updateWork("inspect", { action: "claim", expected_revision: 1, lease_seconds: 30 }),
+    (error) => error instanceof ContextOSHTTPError && error.code === "work_conflict");
+
   // Model calls spend the run's budget; a self-reported settlement charges it all.
   const reservation = await run.reserveUsage("model_call", { tokens: 3000 });
   assert.equal((await run.settleUsage(reservation)).charged.tokens, 3000);

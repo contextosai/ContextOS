@@ -22,6 +22,7 @@
 
 pub mod admission;
 mod checkpoints;
+mod coordination;
 mod decisions;
 mod delegation;
 mod erasure;
@@ -63,6 +64,7 @@ use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
+pub use coordination::{MAX_WORK_BOARD_BYTES, MAX_WORK_TASKS, WorkCommand, WorkError, WorkEvidence, WorkTaskInput};
 pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use erasure::{ErasureError, is_erased};

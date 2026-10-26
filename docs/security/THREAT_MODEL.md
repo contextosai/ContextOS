@@ -258,3 +258,36 @@ external outcome proof or regulatory certification.
   `SELECT, INSERT` only on the audit log.
 - **Synthetic evidence never establishes deployed conformance**; conformance claims
   need runtime evidence for the exact workflow, release and environment.
+
+## Peer task coordination extension
+
+The work board accepts explicitly published titles, criteria, dependencies and
+evidence references. All are untrusted peer data, including text containing
+instructions. The runtime labels responses `data_only` and `evidence_verified:false`
+and never promotes board reports into admitted evidence, accepted child output,
+authority or a provider-effect observation. Metadata is shared across a root's
+descendants irrespective of lane; no admission/context/result contents are copied
+automatically. Callers must keep task text inside that explicit sharing boundary.
+
+Guessing a same-tenant run id and generation must not impersonate its worker.
+Coordination reloads protected admissions, binds the authenticated principal to
+nonempty `admitted_by`, and resolves the board root from trusted lineage. Shared API
+principals remain shared identities. Tenant keys and distinct root keys isolate
+boards. Current worker/root lifecycle and deadlines are checked on entry and each
+CAS retry; these reads are separate from the board CAS, so an admitted request may
+commit during cancellation/takeover. No effect authority follows from that change.
+
+Conditional task revisions, epochs and matching run/generation prevent stale owners
+overwriting a replaced lease. Expiry/release does not prove non-application of prior
+effects. Frameworks must inspect/reconcile previous operations before repeating work;
+predecessor metadata is not a complete effect history. Dependencies describe reported
+completion only, and cannot bypass result schemas, acceptance or merge controls.
+
+Bound tasks, content, dependencies, evidence lists, leases, pages and CAS retries to
+limit resource abuse. Audit mutation attempts before CAS by digest, excluding free
+text; an audit attempt is not proof of commit. Audit/store errors stop mutations.
+Root-owned board content is tombstoned even when absent before erasing ReplayCase,
+preventing delayed recreation and keeping partial erasure retryable by retention.
+Child-only erasure leaves root-owned shared metadata. Regression coverage is in
+`crates/contextos-gateway/tests/coordination.rs` and the peer HTTP test in
+`crates/contextosd/tests/dispatch.rs`.

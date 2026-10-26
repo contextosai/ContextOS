@@ -30,6 +30,8 @@ pub enum DocKind {
     BudgetLedger,
     ApprovalRedemption,
     Checkpoint,
+    /// Root-owned advisory task definitions, dependencies and leased peer claims.
+    WorkBoard,
     ContextPack,
     ProfileRegistry,
     RunAdmission,
@@ -87,6 +89,7 @@ impl DocKind {
             DocKind::BudgetLedger => "budget_ledger",
             DocKind::ApprovalRedemption => "approval_redemption",
             DocKind::Checkpoint => "checkpoint",
+            DocKind::WorkBoard => "work_board",
             DocKind::ContextPack => "context_pack",
             DocKind::ProfileRegistry => "profile_registry",
             DocKind::RunAdmission => "run_admission",

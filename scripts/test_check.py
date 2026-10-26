@@ -10,7 +10,7 @@ import unittest
 
 class CheckScriptTests(unittest.TestCase):
     def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, archive_exit=0, marker=True,
-                 large_output=False):
+                 large_output=False, peer_exit=0):
         with tempfile.TemporaryDirectory(prefix="contextos-check-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -25,12 +25,14 @@ class CheckScriptTests(unittest.TestCase):
                 tool = tools / name
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
-            for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "tower"):
+            for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
                 if name == "shared-guarantees":
                     text += f"echo 'Offline audit verification:'\nexit {guarantee_exit}\n"
+                if name == "peer-coordination":
+                    text += f"echo 'peer coordination complete'\nexit {peer_exit}\n"
                 if name in ("agent-loop", "tower"):
                     if marker:
                         text += "echo 'run completed'\n" if name == "agent-loop" else "echo 'tower sees the fleet'\n"
@@ -69,6 +71,11 @@ class CheckScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("FAILED: release archive", result.stdout)
         self.assertNotIn("ALL CHECKS PASSED", result.stdout)
+
+    def test_peer_failure_after_success_message_fails_gate(self):
+        result = self.run_gate(peer_exit=8)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("FAILED: peer coordination", result.stdout)
 
     def test_missing_success_message_fails_gate(self):
         result = self.run_gate(marker=False)

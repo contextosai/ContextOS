@@ -7,6 +7,17 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Peer task coordination
+- Add a root-owned work board for admitted peers to publish immutable tasks, discover
+  dependencies, and atomically claim, renew, release or report completion with leased
+  ownership. Conditional revisions/epochs fence competing claims; expiry retains
+  predecessor provenance and never establishes that earlier effects are safe to repeat.
+- Bind board access to authenticated admission principals and protected lineage;
+  audit mutation attempts by digest and fence board writes before root-content erasure.
+- Add HTTP/OpenAPI, Python sync/async and typed Node client support, a local no-model
+  peer demo, and concurrency, recovery, erasure and failure-injection checks. The alpha
+  limit is 256 tasks/1 MiB per board; completion evidence is worker-reported.
+
 ### Shared business guarantees
 - Reposition ContextOS around numeric business-resource limits shared by independent
   agent runs. Research records current alternatives and the differentiation hypothesis.

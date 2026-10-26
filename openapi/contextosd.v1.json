@@ -3584,6 +3584,342 @@
         ],
         "x-contextos-scope": "dispatch"
       }
+    },
+    "/v1/runs/{run_id}/work": {
+      "get": {
+        "operationId": "list_work",
+        "summary": "Discover peer tasks in a live lexicographic page",
+        "description": "Alpha advisory coordination. The authenticated caller must match the stored admission admitted_by. Root and members come from protected delegation lineage. All descendants can read explicitly published metadata. Claims and worker-reported evidence grant no tool authority, evidence admission or child-output acceptance. Board CAS fences revisions/epochs; separate lifecycle checks cannot eliminate concurrent stop/takeover races. Board content is erased with the root. At most 100 tasks per page. Restart from the beginning to see ids published before the cursor; reading does not acknowledge tasks.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worker-reported coordination data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      },
+      "post": {
+        "operationId": "publish_work",
+        "summary": "Publish immutable peer task metadata",
+        "description": "Alpha advisory coordination. The authenticated caller must match the stored admission admitted_by. Root and members come from protected delegation lineage. All descendants can read explicitly published metadata. Claims and worker-reported evidence grant no tool authority, evidence admission or child-output acceptance. Board CAS fences revisions/epochs; separate lifecycle checks cannot eliminate concurrent stop/takeover races. Board content is erased with the root. Same creator/id/definition returns the current task; incompatible reuse conflicts. Limits: 256 tasks, 16 dependencies and 1 MiB canonical board, whichever is reached first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Worker-reported coordination data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkTaskInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/work/{task_id}": {
+      "get": {
+        "operationId": "inspect_work",
+        "summary": "Inspect task ownership and conditional revision",
+        "description": "Alpha advisory coordination. The authenticated caller must match the stored admission admitted_by. Root and members come from protected delegation lineage. All descendants can read explicitly published metadata. Claims and worker-reported evidence grant no tool authority, evidence admission or child-output acceptance. Board CAS fences revisions/epochs; separate lifecycle checks cannot eliminate concurrent stop/takeover races. Board content is erased with the root.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worker-reported coordination data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      },
+      "post": {
+        "operationId": "update_work",
+        "summary": "Conditionally claim, renew, release or report task completion",
+        "description": "Alpha advisory coordination. The authenticated caller must match the stored admission admitted_by. Root and members come from protected delegation lineage. All descendants can read explicitly published metadata. Claims and worker-reported evidence grant no tool authority, evidence admission or child-output acceptance. Board CAS fences revisions/epochs; separate lifecycle checks cannot eliminate concurrent stop/takeover races. Board content is erased with the root. Read the task after a lost response or conflict. Lease expiry does not establish that prior effects are safe to repeat: inspect/reconcile the prior worker operations first. Evidence refs are not independently verified.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worker-reported coordination data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkCommand"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5338,6 +5674,367 @@
             }
           }
         }
+      },
+      "WorkEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "sha256"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "artifact_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      },
+      "WorkTaskInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "title",
+          "acceptance_criteria"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Nonblank, at most 256 UTF-8 bytes."
+          },
+          "acceptance_criteria": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Nonblank, at most 4096 UTF-8 bytes."
+          },
+          "dependencies": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          }
+        }
+      },
+      "WorkClaim": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "executor_generation",
+          "lease_epoch",
+          "expires_at"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "executor_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lease_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WorkTask": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "title",
+          "acceptance_criteria",
+          "dependencies",
+          "created_by_run_id",
+          "created_at",
+          "revision",
+          "lease_epoch",
+          "status",
+          "claim",
+          "previous_claim",
+          "evidence_refs",
+          "dependencies_ready",
+          "available",
+          "lease_expired"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Nonblank, at most 256 UTF-8 bytes."
+          },
+          "acceptance_criteria": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Nonblank, at most 4096 UTF-8 bytes."
+          },
+          "dependencies": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "created_by_run_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lease_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "claimed",
+              "completed"
+            ]
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkClaim"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previous_claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkClaim"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_refs": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/WorkEvidence"
+            }
+          },
+          "dependencies_ready": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "lease_expired": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "root_run_id",
+          "data_only",
+          "evidence_verified",
+          "task"
+        ],
+        "properties": {
+          "root_run_id": {
+            "type": "string"
+          },
+          "data_only": {
+            "const": true
+          },
+          "evidence_verified": {
+            "const": false
+          },
+          "task": {
+            "$ref": "#/components/schemas/WorkTask"
+          }
+        }
+      },
+      "WorkPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "root_run_id",
+          "data_only",
+          "evidence_verified",
+          "tasks",
+          "next_cursor"
+        ],
+        "properties": {
+          "root_run_id": {
+            "type": "string"
+          },
+          "data_only": {
+            "const": true
+          },
+          "evidence_verified": {
+            "const": false
+          },
+          "tasks": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/WorkTask"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkCommand": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_revision",
+              "lease_seconds"
+            ],
+            "properties": {
+              "action": {
+                "const": "claim"
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lease_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_revision",
+              "lease_epoch",
+              "lease_seconds"
+            ],
+            "properties": {
+              "action": {
+                "const": "renew"
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lease_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_revision",
+              "lease_epoch"
+            ],
+            "properties": {
+              "action": {
+                "const": "release"
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_revision",
+              "lease_epoch",
+              "evidence_refs"
+            ],
+            "properties": {
+              "action": {
+                "const": "complete"
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "evidence_refs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/WorkEvidence"
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

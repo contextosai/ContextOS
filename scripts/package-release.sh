@@ -23,7 +23,7 @@ cp -R "$UI" "$NAME/tower/dist"
 git ls-files -z --cached --others --exclude-standard -- \
   README.md SECURITY.md LICENSE LICENSE-docs NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.txt docs \
   examples/binaries.sh examples/dev-env.sh examples/support-refund examples/shared-guarantees \
-  examples/agent-loop examples/metering-proxy examples/tower \
+  examples/agent-loop examples/peer-coordination examples/metering-proxy examples/tower \
   bindings/python/contextos/__init__.py bindings/python/contextos/client.py bindings/python/contextos/aio.py \
   | tar --null -T - -cf - | tar -xf - -C "$NAME"
 

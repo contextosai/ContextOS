@@ -112,6 +112,23 @@ export interface Feedback {
   evidence_ref?: { artifact_type: string; artifact_id: string; sha256: string };
 }
 
+export interface WorkEvidence { artifact_type: string; artifact_id: string; sha256: string }
+export interface WorkClaim { run_id: string; executor_generation: number; lease_epoch: number; expires_at: string }
+export interface WorkTask {
+  task_id: string; title: string; acceptance_criteria: string; dependencies: string[];
+  created_by_run_id: string; created_at: string; revision: number; lease_epoch: number;
+  status: "pending" | "claimed" | "completed"; claim: WorkClaim | null; previous_claim: WorkClaim | null;
+  evidence_refs: WorkEvidence[]; dependencies_ready: boolean; available: boolean; lease_expired: boolean;
+}
+export type WorkCommand =
+  | { action: "claim"; expected_revision: number; lease_seconds: number }
+  | { action: "renew"; expected_revision: number; lease_epoch: number; lease_seconds: number }
+  | { action: "release"; expected_revision: number; lease_epoch: number }
+  | { action: "complete"; expected_revision: number; lease_epoch: number; evidence_refs: WorkEvidence[] };
+/** Advisory worker metadata; evidence refs are not independently verified. */
+export interface WorkResult { root_run_id: string; task: WorkTask; data_only: true; evidence_verified: false }
+export interface WorkPage { root_run_id: string; tasks: WorkTask[]; next_cursor: string | null; data_only: true; evidence_verified: false }
+
 export declare class Run {
   readonly client: Client;
   readonly runId: string;
@@ -127,6 +144,10 @@ export declare class Run {
   closeChild(child: Run, decision?: "accept" | "reject"): Promise<{ status: string; usage: Record<string, number> | null; reason_codes: string[] }>;
   checkpoint(state: Json, expectedRevision: number): Promise<{ run_id: string; revision: number; digest: string; executor_generation: number; saved_at: string }>;
   latestCheckpoint(): Promise<{ revision: number; digest: string; state: Json; executor_generation: number; saved_at: string }>;
+  publishWork(taskId: string, title: string, acceptanceCriteria: string, options?: { dependencies?: string[] }): Promise<WorkResult>;
+  workTasks(options?: { after?: string; limit?: number }): Promise<WorkPage>;
+  workTask(taskId: string): Promise<WorkResult>;
+  updateWork(taskId: string, command: WorkCommand): Promise<WorkResult>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
   settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
   /** Headers for a model request that a metering LLM gateway settles with the usage it measures. */

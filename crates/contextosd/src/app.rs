@@ -16,6 +16,8 @@
 //! | `POST /v1/config/validate` | `config` | dry-run a proposed configuration: errors, effective values, classified changes |
 //! | `POST /v1/runs/{run_id}/checkpoint` | `dispatch` | save the orchestrator's checkpoint (current executor; optimistic on revision) |
 //! | `GET /v1/runs/{run_id}/checkpoint` | `dispatch` | the latest checkpoint, for the executor that takes over |
+//! | `GET/POST /v1/runs/{run_id}/work` | `dispatch` | discover/publish advisory peer tasks |
+//! | `GET/POST /v1/runs/{run_id}/work/{task_id}` | `dispatch` | inspect or conditionally claim, renew, release, complete |
 //! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
@@ -78,7 +80,7 @@ use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, Change, CheckpointRefusal, CloseDecision, Continuation,
     DecisionRefusal, DecisionReport, EffectOutcome, ErasureError, Gateway, MAX_CHECKPOINT_BYTES, Ownership,
     REVOCATION_KINDS, Resolution, RevocationError, RunAdmission, ScoreRefusal, ScoreReport, TaskAuthorization,
-    UsageKind, UsageRefusal, admit_run, is_erased,
+    UsageKind, UsageRefusal, WorkCommand, WorkError, WorkTaskInput, admit_run, is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1814,6 +1816,137 @@ struct CheckpointBody {
     state: Value,
 }
 
+fn work_error(error: WorkError) -> ApiError {
+    let code = error.code();
+    let status = match code {
+        "work_forbidden" => StatusCode::FORBIDDEN,
+        "work_not_found" => StatusCode::NOT_FOUND,
+        "work_closed" | "work_erased" => StatusCode::GONE,
+        "work_invalid" => StatusCode::UNPROCESSABLE_ENTITY,
+        "work_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::CONFLICT,
+    };
+    if matches!(error, WorkError::Store(_) | WorkError::Audit(_)) {
+        tracing::warn!(%error, "work coordination unavailable");
+    }
+    ApiError::new(
+        status,
+        code,
+        "The work request could not be accepted; inspect the task before retrying.",
+    )
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkQuery {
+    after: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn list_work<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<WorkQuery>,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let body = gateway
+        .work_tasks(
+            &admission,
+            &caller.principal_id,
+            executor_generation(&headers)?,
+            query.after.as_deref(),
+            query.limit.unwrap_or(100),
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(axum::Json(body).into_response())
+}
+
+async fn publish_work<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let input: WorkTaskInput = serde_json::from_value(parse_body(&state, &body)?)
+        .map_err(|_| work_error(WorkError::Refused("work_invalid")))?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    let result = gateway
+        .publish_work(&admission, &caller.principal_id, executor_generation(&headers)?, input)
+        .await
+        .map_err(work_error)?;
+    Ok((StatusCode::CREATED, axum::Json(result)).into_response())
+}
+
+async fn inspect_work<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, task_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    Ok(axum::Json(
+        gateway
+            .work_task(
+                &admission,
+                &caller.principal_id,
+                executor_generation(&headers)?,
+                &task_id,
+            )
+            .await
+            .map_err(work_error)?,
+    )
+    .into_response())
+}
+
+async fn update_work<S, L>(
+    State(state): State<Arc<AppState<S, L>>>,
+    Path((run_id, task_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let gateway = dispatch_gateway(&state)?;
+    let command: WorkCommand = serde_json::from_value(parse_body(&state, &body)?)
+        .map_err(|_| work_error(WorkError::Refused("work_invalid")))?;
+    let admission = load_admission(&state, &caller, &run_id).await?;
+    Ok(axum::Json(
+        gateway
+            .update_work(
+                &admission,
+                &caller.principal_id,
+                executor_generation(&headers)?,
+                &task_id,
+                command,
+            )
+            .await
+            .map_err(work_error)?,
+    )
+    .into_response())
+}
+
 /// Saves the orchestrator's checkpoint (the run's current executor only).
 async fn save_checkpoint<S, L>(
     State(state): State<Arc<AppState<S, L>>>,
@@ -3423,6 +3556,14 @@ where
             put(amend_task_authorization::<S, L>),
         )
         .route("/v1/runs/{run_id}/takeover", post(take_over::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/work",
+            get(list_work::<S, L>).post(publish_work::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/work/{task_id}",
+            get(inspect_work::<S, L>).post(update_work::<S, L>),
+        )
         .route("/v1/runs/{run_id}/close", post(close_child::<S, L>))
         .route("/v1/runs/{run_id}/memory", post(govern_memory::<S, L>))
         .route("/v1/memory/{record_id}", get(memory_state::<S, L>))
