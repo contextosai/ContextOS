@@ -1,6 +1,6 @@
 # Vercel AI SDK under ContextOS
 
-An AI SDK 7 agent (`ToolLoopAgent`, `ai@7.0.147`) that refunds the quickstart's damaged
+An AI SDK 7 agent (`ToolLoopAgent`, `ai@7.0.150`) that refunds the quickstart's damaged
 order through `contextosd`. The agent loop is the AI SDK's; ContextOS enters through the
 tools' `execute` functions and one language-model middleware.
 
