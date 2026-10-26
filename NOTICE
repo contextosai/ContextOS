@@ -7,6 +7,11 @@ Version 2.0 (see LICENSE).
 
 Third-party dependency licenses and attribution are in THIRD_PARTY_NOTICES.txt.
 
+conformance/reference/ includes the unmodified deterministic TypeScript reference
+and synthetic fixtures from contextosai/contextosai, revision
+7e2462fd931a79e3777ede81fb382e0cbf2ff46c.
+Copyright (c) 2025-2026 ContextOS; licensed under Apache-2.0.
+
 Documentation prose in docs/ and the Markdown guides is licensed under the
 Creative Commons Attribution 4.0 International license (see LICENSE-docs);
 code examples within it are licensed under Apache-2.0.

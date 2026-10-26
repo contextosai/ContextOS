@@ -5178,7 +5178,7 @@ Used by:
   idna 1.1.0
   idna_adapter 1.2.2
   indexmap 2.14.2
-  itertools 0.10.5
+  itertools 0.13.0
   jobserver 0.1.35
   js-sys 0.3.106
   lazy_static 1.5.1
@@ -9446,7 +9446,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 Used by:
   tokio-stream 0.1.19
-  tokio 1.54.0
+  tokio 1.54.1
 
 MIT License
 

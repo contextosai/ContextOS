@@ -1,10 +1,7 @@
 import { test } from "vitest";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-const require = createRequire(path.join(process.env.CONTEXTOS_SPEC ?? "/opt/contextosai", "package.json"));
-const jsonLogic = require("json-logic-js");
+import jsonLogic from "json-logic-js";
 const out = path.resolve(import.meta.dirname, "../vectors");
 
 // mulberry32: deterministic corpus.

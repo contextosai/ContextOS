@@ -15,9 +15,10 @@ deployment. This checklist covers the visibility change, not production certific
   conversations, and prohibit force pushes and deletion, including for administrators.
   With one maintainer, the review count is zero; add reviewer requirements when the
   maintainer team grows.
-- Verify that the pinned specification source can be obtained by outside contributors.
-  Its asset licenses and GitHub visibility are separate decisions. The runtime builds
-  and tests from its committed schemas and vectors without access to that repository.
+- Verify the checksums of the pinned TypeScript reference in `conformance/reference/`
+  and the conformance CI job. Outside contributors must be able to regenerate the
+  vectors using the committed snapshot and lockfile, as described in
+  `conformance/README.md`.
 - Review all branches, issues, attachments, Actions logs and artifacts for private
   material. Secret scans of the working files and Git history do not cover GitHub
   uploads or workflow logs. Rotate any exposed credential before removing it.

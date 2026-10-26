@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 First release candidate of the ContextOS runtime.
 
+### Security
+- Upgrade Tokio to 1.54.1 to fix RUSTSEC-2026-0384, a timer race affecting
+  interval-driven replica membership and retention on the multithreaded runtime.
+
 ### Peer task coordination
 - Add a root-owned work board for admitted peers to publish immutable tasks, discover
   dependencies, and atomically claim, renew, release or report completion with leased
@@ -31,6 +35,8 @@ First release candidate of the ContextOS runtime.
   1,024 receipts per resource and orphaned active-dispatch recovery limits are explicit.
 
 ### Public release preparation
+- Include the pinned, attributed TypeScript reference and synthetic fixtures so
+  contributors can regenerate conformance vectors without a private repository.
 - The commit gate checks each example's exit status before accepting its success
   message; regression tests cover failing examples and output after the message.
 - Release archives and the container carry the project's licenses, attribution and
