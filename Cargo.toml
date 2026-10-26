@@ -56,7 +56,7 @@ mimalloc = { version = "0.1", default-features = false }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
-jsonschema = { version = "0.59", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
