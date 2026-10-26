@@ -35,6 +35,8 @@ First release candidate of the ContextOS runtime.
   1,024 receipts per resource and orphaned active-dispatch recovery limits are explicit.
 
 ### Public release preparation
+- Update the workflow actions, validate artifact upload/download on pull requests,
+  and select binary archives and SBOMs explicitly for release publication.
 - Include the pinned, attributed TypeScript reference and synthetic fixtures so
   contributors can regenerate conformance vectors without a private repository.
 - The commit gate checks each example's exit status before accepting its success

@@ -3,6 +3,7 @@
     "strict": true,
     "contexts": [
       "repository",
+      "artifact-transport",
       "conformance",
       "rust",
       "bindings",

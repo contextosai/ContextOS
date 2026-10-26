@@ -8,13 +8,13 @@ jobs:
   console:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.12.0
       - run: npm ci --no-audit --no-fund && npm run build
         working-directory: tower
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tower-dist
           path: tower/dist
@@ -33,12 +33,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.96.1
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }} -p contextosd -p ctx -p towerd
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tower-dist
           path: tower-dist
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: contextos-*.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.target }}
           path: contextos-*.tar.gz*
@@ -66,11 +66,11 @@ jobs:
   sbom:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.96.1
       - run: cargo install --locked cargo-cyclonedx@0.5.7
       - run: cargo cyclonedx --format json --all-features   # one <crate>.cdx.json per crate
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: crates/*/*.cdx.json
@@ -83,7 +83,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -91,7 +91,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -113,9 +113,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
+          pattern: binaries-*
           merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: sbom
       - name: Draft GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
