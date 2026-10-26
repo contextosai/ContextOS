@@ -290,4 +290,4 @@ Root-owned board content is tombstoned even when absent before erasing ReplayCas
 preventing delayed recreation and keeping partial erasure retryable by retention.
 Child-only erasure leaves root-owned shared metadata. Regression coverage is in
 `crates/contextos-gateway/tests/coordination.rs` and the peer HTTP test in
-`crates/contextosd/tests/dispatch.rs`.
+`crates/contextosd/tests/dispatch/coordination.rs`.
