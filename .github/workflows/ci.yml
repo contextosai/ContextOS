@@ -29,8 +29,8 @@ jobs:
       - run: npm audit --audit-level=high
       - name: Regenerate every reference vector
         run: env -u CONTEXTOS_SPEC npm test
-      - name: Reject schema or vector drift
-        run: git diff --exit-code -- vectors ../schemas
+      - name: Reject schema or vector content drift
+        run: python3 ../scripts/check_conformance.py
   rust:
     runs-on: ubuntu-24.04
     services:

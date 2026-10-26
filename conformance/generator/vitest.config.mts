@@ -9,5 +9,6 @@ export default {
   root: here,
   resolve: { alias: { "@ref": path.join(spec, "src/lib/contextos"), "@fixtures": path.join(spec, "tests/fixtures"), "@/": path.join(spec, "src") + "/" } },
   server: { fs: { allow: [spec, path.resolve(here, "../..")] } },
-  test: { include: ["*.gen.ts"], environment: "node" },
+  // Bound complete corpus generation, including compression, on shared CI runners.
+  test: { include: ["*.gen.ts"], environment: "node", testTimeout: 60_000 },
 };
