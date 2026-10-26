@@ -18,7 +18,7 @@ all vectors in a temporary directory; vector contents matched after decompressio
 
 ## Reproduce
 
-Install Node.js 24 or newer, npm 11.8.0 and Python 3.9 or newer. From this runtime's root:
+Install Node.js 24 LTS or 26+, npm 11.8.0 and Python 3.9 or newer. From this runtime's root:
 
 ```sh
 (cd conformance/reference && shasum -a 256 -c SHA256SUMS)
