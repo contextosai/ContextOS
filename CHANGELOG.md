@@ -35,6 +35,8 @@ First release candidate of the ContextOS runtime.
   1,024 receipts per resource and orphaned active-dispatch recovery limits are explicit.
 
 ### Public release preparation
+- Include the pinned, attributed TypeScript reference and synthetic fixtures so
+  contributors can regenerate conformance vectors without a private repository.
 - The commit gate checks each example's exit status before accepting its success
   message; regression tests cover failing examples and output after the message.
 - Release archives and the container carry the project's licenses, attribution and

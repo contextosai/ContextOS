@@ -1,0 +1,20 @@
+ContextOS licensing
+Copyright (c) 2025-2026 ContextOS
+
+The following project-authored material is licensed under the Apache License,
+Version 2.0 (see LICENSE-code):
+- src/lib/contextos/ (the deterministic TypeScript reference);
+- public/schemas/ (the published machine-readable contracts);
+- tests/fixtures/ (synthetic reference fixtures);
+- code examples embedded in src/content/docs/.
+
+Documentation prose in src/content/docs/ is licensed under Creative Commons
+Attribution 4.0 International (see LICENSE-docs). Attribute ContextOS and link to
+https://contextosai.com/ and the license; indicate any changes.
+
+The website application, design, graphics, blog articles and other material outside
+those scopes remain all rights reserved, unless a file specifies otherwise.
+Third-party material retains its original license and notices.
+
+Neither license grants general rights to the ContextOS name or logo. Factual
+references are permitted; do not imply endorsement, certification or affiliation.

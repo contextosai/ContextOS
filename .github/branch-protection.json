@@ -3,6 +3,7 @@
     "strict": true,
     "contexts": [
       "repository",
+      "conformance",
       "rust",
       "bindings",
       "tower",

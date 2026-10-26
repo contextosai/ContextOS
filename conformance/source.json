@@ -6,5 +6,6 @@
   "fixture_directory": "tests/fixtures",
   "verification_date": "2026-10-25",
   "schema_files_verified": 9,
-  "vector_files_verified": 9
+  "vector_files_verified": 9,
+  "snapshot_directory": "reference"
 }
