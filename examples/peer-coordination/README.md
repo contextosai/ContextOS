@@ -17,6 +17,8 @@ Expected output includes:
 peers discovered two tasks; dependency blocks premature work
 concurrent claims: exactly one winner
 abandoned lease reclaimed; stale completion refused
+urgent hypothesis reached a peer on its next tool result
+recorded observation falsified the hypothesis; its author was notified
 dependency chain completed; evidence remains worker-reported
 peer coordination complete; ordinary child acceptance and run completion retained
 ```

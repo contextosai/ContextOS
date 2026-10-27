@@ -20,6 +20,20 @@ minor versions may break APIs and every break is listed.
   `GET /v1/runs/{run_id}/compensations` lists where each stands. Clients:
   `compensations`, `compensate`, `compensate_all` (Python) and `compensateAll` (Node).
   Erasure removes compensation records. Demo: `examples/compensation`.
+- Shared findings and peer notices for a root run's team (alpha). A `claim` is a peer's
+  assertion; an `observed` finding cites a recorded tool call of the team, and the
+  runtime takes its basis (action digest, outcome, observation evidence) from the
+  operation ledger, so peers cannot fabricate tool evidence. Only the author may
+  withdraw a finding; others must cite an active observed finding that refutes it.
+  Invalidation marks dependents `suspect` and notifies the team; urgent findings notify
+  on publication. Notices ride on each member's tool results
+  (`result.metadata.notices`; an MCP text block and `_meta`) until its orchestrator
+  acknowledges them. Routes `GET/POST /v1/runs/{run_id}/findings`,
+  `POST /v1/runs/{run_id}/findings/{finding_id}/invalidate`,
+  `GET /v1/runs/{run_id}/notices`, `POST /v1/runs/{run_id}/notices/ack`; client
+  methods `publish_finding`, `findings`, `invalidate_finding`, `notices`, `ack_notices`
+  and `last_notices`. Erasing the root tombstones its findings. Guide:
+  `docs/FINDINGS.md`.
 - Operation ids beginning with `compensation:` are reserved; a tool call using one is
   rejected with `operation_id_reserved`.
 

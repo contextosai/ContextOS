@@ -91,6 +91,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // This includes an absent-board tombstone. Keep the ReplayCase retention
         // index visible until the board fence is durable, so failures are retried.
         let work_erased = self.erase_work_board(admission, operator, reason).await?;
+        let findings_erased = self.erase_findings(admission, operator, reason).await?;
         // What remains to erase, with digests of the content being removed.
         let mut pending = Vec::new();
         let inputs: Vec<DocKey> = self
@@ -133,9 +134,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .iter()
             .map(|(kind, _, digest)| json!({"document": kind.as_str(), "content_digest": digest}))
             .collect();
-        if let Some(receipt) = work_erased {
-            erased.push(receipt);
-        }
+        erased.extend(work_erased);
+        erased.extend(findings_erased);
         // Audited before the content goes: the trail never misses an erasure.
         if !pending.is_empty() {
             let record = json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased});

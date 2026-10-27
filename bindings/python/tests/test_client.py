@@ -97,6 +97,17 @@ def main() -> None:
             assert refused.reason_codes == ["compensation_not_declared"], refused.reason_codes
         assert run.compensate_all()["status"] == "compensated"
 
+        # A finding bound to the refund the gateway recorded; the basis comes from its ledger.
+        observed = run.publish_finding("refunded", "ord_881 was refunded.", basis_operation_id=call["idempotency_key"])
+        assert observed["finding"]["basis"]["outcome"] == "confirmed", observed
+        assert [f["finding_id"] for f in run.findings()["findings"]] == ["refunded"]
+        assert run.notices()["pending"] == 0
+        assert run.invalidate_finding("refunded", "withdrawn")["finding"]["status"] == "invalidated"
+        try:
+            run.ack_notices(99)
+            raise AssertionError("acknowledged notices that do not exist")
+        except ContextOSHTTPError as refused:
+            assert refused.status == 422, refused
 
         # A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
         scoped = json.loads((EXAMPLE / "requests/run.json").read_text())

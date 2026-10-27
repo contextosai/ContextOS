@@ -6,6 +6,8 @@ run; its admitted descendants use their own run ids and executor generations to
 participate. [The local example](../examples/peer-coordination/README.md) needs no
 model credentials.
 
+Teams can also share what they learn: see [shared findings and peer notices](FINDINGS.md).
+
 ## Cooperating workers
 
 The Python sync and async clients expose the same methods; prefix calls with

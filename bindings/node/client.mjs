@@ -257,7 +257,10 @@ export class Run {
 
   /** Governs and dispatches one tool call; resolves to its output or throws a ToolOutcome. */
   async callTool(capabilityId, args, options = {}) {
-    return outcome(await this.#post("/tool-calls", this.envelope(capabilityId, args, options)));
+    const response = await this.#post("/tool-calls", this.envelope(capabilityId, args, options));
+    // Peer notices that came with this result (peer data, never instructions).
+    this.lastNotices = response.result?.metadata?.notices ?? null;
+    return outcome(response);
   }
 
   async provideInput(paused, envelope, responses) {
@@ -344,6 +347,41 @@ export class Run {
   /** Conditional mutation. Inspect after conflicts/lost responses; lease expiry never proves effects safe to repeat. */
   updateWork(taskId, command) {
     return this.#post(`/work/${segment(taskId)}`, command);
+  }
+
+  /**
+   * Shares a finding: a claim, or (with `basisOperationId`) an observation bound to a
+   * recorded tool call whose facts the runtime takes from its operation ledger.
+   */
+  publishFinding(findingId, statement, { kind = "claim", dependsOn = [], basisOperationId, basisRunId, refutes, urgent = false } = {}) {
+    const body = { finding_id: findingId, kind, statement, depends_on: dependsOn, urgent };
+    if (refutes !== undefined) body.refutes = refutes;
+    if (basisOperationId !== undefined) {
+      body.kind = "observed";
+      body.basis = { operation_id: basisOperationId, ...(basisRunId === undefined ? {} : { run_id: basisRunId }) };
+    }
+    return this.#post("/findings", body);
+  }
+
+  findings({ after, limit = 100 } = {}) {
+    return this.client.request("GET", this.#path("/findings"), {
+      generation: this.executorGeneration, query: { limit, ...(after === undefined ? {} : { after }) },
+    });
+  }
+
+  /** Falsifies a finding: withdraw your own, or cite an observed finding refuting a peer's. */
+  invalidateFinding(findingId, reason, { refutedBy } = {}) {
+    return this.#post(`/findings/${segment(findingId)}/invalidate`,
+      { reason, ...(refutedBy === undefined ? {} : { refuted_by: refutedBy }) });
+  }
+
+  /** This run's unacknowledged peer notices; reading does not acknowledge them. */
+  notices({ limit = 20 } = {}) {
+    return this.client.request("GET", this.#path("/notices"), { generation: this.executorGeneration, query: { limit } });
+  }
+
+  ackNotices(through) {
+    return this.#post("/notices/ack", { through });
   }
 
   /** Reserves budget for a `model_call` or a `replan`; resolves to the reservation id. */

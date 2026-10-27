@@ -7,6 +7,7 @@ pub mod compensation;
 pub mod config;
 pub mod configs;
 pub mod feedback;
+pub mod findings;
 pub mod kms;
 pub mod limits;
 pub mod mcp;

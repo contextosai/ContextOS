@@ -94,7 +94,27 @@ def main():
         assert error.code == "work_lease_stale", error
     print("abandoned lease reclaimed; stale completion refused")
 
-    order = replacement.call_tool("adp_orders.lookup", {"order_id": "ord_881"}, approval_mode="read_only")
+    # A peer's urgent hypothesis reaches the other worker on its next tool result.
+    first.publish_finding("in_transit", "ord_881 has not been delivered yet; hold any refund.", urgent=True)
+    order = replacement.call_tool("adp_orders.lookup", {"order_id": "ord_881"}, approval_mode="read_only",
+                                  tool_call_id="lookup_ord_881")
+    assert replacement.last_notices["notices"][0]["finding_id"] == "in_transit", replacement.last_notices
+    print("urgent hypothesis reached a peer on its next tool result")
+
+    # The lookup the gateway recorded falsifies it; the author is notified until it acknowledges.
+    observed = replacement.publish_finding("order_status", f"ord_881 status is {order['status']}.",
+                                           basis_operation_id="lookup_ord_881", refutes="in_transit")["finding"]
+    assert observed["basis"]["outcome"] == "confirmed", observed
+    try:
+        replacement.invalidate_finding("in_transit", "I disagree")
+        raise AssertionError("a peer falsified a finding without evidence")
+    except ContextOSHTTPError as error:
+        assert error.code == "refutation_required", error
+    replacement.invalidate_finding("in_transit", "The recorded lookup shows it delivered.", refuted_by="order_status")
+    seen = first.notices()
+    assert seen["notices"][0]["kind"] == "finding_invalidated", seen
+    assert first.ack_notices(seen["latest_seq"])["pending"] == 0
+    print("recorded observation falsified the hypothesis; its author was notified")
     replacement.update_work("research", "complete", 3, lease_epoch=2, evidence_refs=report("order", order))
     first.update_work("summarize", "claim", 1, lease_seconds=30)
     first.update_work("summarize", "complete", 2, lease_epoch=1, evidence_refs=report("summary", order["status"]))

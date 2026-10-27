@@ -28,6 +28,8 @@ mod decisions;
 mod delegation;
 mod erasure;
 mod escalation;
+mod findings;
+mod findings_api;
 mod input;
 mod lifecycle;
 mod loop_guard;
@@ -71,6 +73,10 @@ pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, Reco
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
+pub use findings::{
+    BasisInput, FindingInput, FindingKind, MAX_FINDINGS, MAX_FINDINGS_BYTES, MAX_NOTICES, MAX_STATEMENT_BYTES,
+    NOTICES_PER_RESULT,
+};
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{
