@@ -82,6 +82,8 @@ pub enum DocKind {
     /// What an applied effect's declared compensation needs (recorded before dispatch),
     /// and each run's index of them.
     Compensation,
+    /// A root team's shared findings, their invalidations and peer notices.
+    Findings,
 }
 
 impl DocKind {
@@ -118,6 +120,7 @@ impl DocKind {
             DocKind::TaskExposure => "task_exposure",
             DocKind::DispatchGate => "dispatch_gate",
             DocKind::Compensation => "compensation",
+            DocKind::Findings => "findings",
         }
     }
 }

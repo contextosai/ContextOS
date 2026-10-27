@@ -18,6 +18,10 @@
 //! | `GET /v1/runs/{run_id}/checkpoint` | `dispatch` | the latest checkpoint, for the executor that takes over |
 //! | `GET/POST /v1/runs/{run_id}/work` | `dispatch` | discover/publish advisory peer tasks |
 //! | `GET/POST /v1/runs/{run_id}/work/{task_id}` | `dispatch` | inspect or conditionally claim, renew, release, complete |
+//! | `GET/POST /v1/runs/{run_id}/findings` | `dispatch` | list or publish the team's findings (claims, or observations bound to recorded tool calls) |
+//! | `POST /v1/runs/{run_id}/findings/{finding_id}/invalidate` | `dispatch` | falsify a finding (author, or citing an observed refutation); dependents become suspect |
+//! | `GET /v1/runs/{run_id}/notices` | `dispatch` | this run's unacknowledged peer notices (also attached to its tool results) |
+//! | `POST /v1/runs/{run_id}/notices/ack` | `dispatch` | acknowledge notices through a sequence |
 //! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
@@ -918,16 +922,20 @@ where
     let envelope = parse_body(&state, &body)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
     let generation = executor_generation(&headers)?;
-    let outcome = gateway
-        .dispatch_as(&admission, &envelope, generation)
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "dispatch_unavailable",
-                "Governed dispatch is temporarily unavailable.",
-            )
-        })?;
+    let (outcome, notices) = tokio::join!(
+        gateway.dispatch_as(&admission, &envelope, generation),
+        gateway.notices_for_result(&admission, &caller.principal_id, generation)
+    );
+    let mut outcome = outcome.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "dispatch_unavailable",
+            "Governed dispatch is temporarily unavailable.",
+        )
+    })?;
+    if let Some(notices) = notices {
+        outcome.result["metadata"]["notices"] = notices;
+    }
     let capability = outcome.result["capability_id"].as_str().unwrap_or_default();
     let capability = if gateway.manifest(capability).is_some() {
         capability
@@ -3593,6 +3601,19 @@ where
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",
             post(provide_input::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/findings",
+            get(crate::findings::list::<S, L>).post(crate::findings::publish::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/findings/{finding_id}/invalidate",
+            post(crate::findings::invalidate::<S, L>),
+        )
+        .route("/v1/runs/{run_id}/notices", get(crate::findings::notices::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/notices/ack",
+            post(crate::findings::acknowledge::<S, L>),
         )
         .route(
             "/v1/runs/{run_id}/compensations",

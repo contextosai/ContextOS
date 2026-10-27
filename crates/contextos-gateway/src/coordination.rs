@@ -127,12 +127,14 @@ enum Status {
 struct Board {
     tasks: BTreeMap<String, Task>,
 }
-struct Access {
-    worker: RunAdmission,
-    root_id: String,
-    deadline: String,
-    generation: u64,
-    now: String,
+/// A verified team member: the worker's protected admission, its root and the current
+/// time (shared with [`crate::findings`]).
+pub(crate) struct Access {
+    pub(crate) worker: RunAdmission,
+    pub(crate) root_id: String,
+    pub(crate) deadline: String,
+    pub(crate) generation: u64,
+    pub(crate) now: String,
 }
 
 impl Task {
@@ -171,7 +173,7 @@ fn single(task: &Task, board: &Board, access: &Access) -> Value {
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     // Reload protected admissions: caller-supplied lineage is never membership.
-    async fn work_access(
+    pub(crate) async fn work_access(
         &self,
         admission: &RunAdmission,
         principal: &str,
@@ -520,10 +522,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         operator: &str,
         reason: &str,
     ) -> Result<Option<Value>, GatewayError> {
+        let key = key(&admission.tenant_id, &admission.run_id);
+        self.erase_team_document(admission, key, "work_board", operator, reason)
+            .await
+    }
+
+    /// Tombstones a root-owned team document, even an absent one, so a delayed write
+    /// cannot re-create it after erasure.
+    pub(crate) async fn erase_team_document(
+        &self,
+        admission: &RunAdmission,
+        key: DocKey,
+        document: &str,
+        operator: &str,
+        reason: &str,
+    ) -> Result<Option<Value>, GatewayError> {
         if admission.lineage.is_some() {
             return Ok(None);
         }
-        let key = key(&admission.tenant_id, &admission.run_id);
         for _ in 0..CAS_ATTEMPTS {
             let read = self.store.get(&key).await?;
             if read.as_ref().is_some_and(|r| is_erased(&r.body)) {
@@ -533,12 +549,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             let now = self.now();
             let receipt = read
                 .as_ref()
-                .map(|_| json!({"document":"work_board","content_digest":digest}));
+                .map(|_| json!({"document":document,"content_digest":digest}));
             let tombstone = json!({"content_digest":digest,"erased":true,"erased_at":now,"erased_by":operator});
             self.audit
                 .append(
                     &admission.tenant_id,
-                    "work_board_erasure_attempt",
+                    &format!("{document}_erasure_attempt"),
                     json!({
                 "root_run_id":admission.run_id,"principal_id":operator,"content_digest":digest,
                 "reason_digest":sha256_canonical(&json!(reason)).map_err(StoreError::from)?}),
@@ -555,7 +571,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Err(e) => return Err(e.into()),
             }
         }
-        Err(StoreError::Backend("work board erasure contention".into()).into())
+        Err(StoreError::Backend(format!("{document} erasure contention")).into())
     }
 }
 fn lease_end(access: &Access, seconds: u64) -> Result<String, WorkError> {

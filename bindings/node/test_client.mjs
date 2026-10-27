@@ -82,6 +82,13 @@ try {
     error instanceof ToolRejected && error.reasonCodes[0] === "compensation_not_declared");
   assert.equal((await run.compensateAll()).status, "compensated");
 
+  // A finding bound to the refund the gateway recorded; the basis comes from its ledger.
+  const observed = await run.publishFinding("refunded", "ord_881 was refunded.", { basisOperationId: call.idempotency_key });
+  assert.equal(observed.finding.basis.outcome, "confirmed");
+  assert.deepEqual((await run.findings()).findings.map((f) => f.finding_id), ["refunded"]);
+  assert.equal((await run.notices()).pending, 0);
+  assert.equal((await run.invalidateFinding("refunded", "withdrawn")).finding.status, "invalidated");
+  await assert.rejects(run.ackNotices(99), (error) => error instanceof ContextOSHTTPError && error.status === 422);
 
   // A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
   const scoped = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));

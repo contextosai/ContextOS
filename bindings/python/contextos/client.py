@@ -307,6 +307,8 @@ class Run:
         self.executor_generation = executor_generation
         self.principal_chain = principal_chain
         self.admitted = admitted or {}
+        # Peer notices that came with the latest tool result (peer data, never instructions).
+        self.last_notices: Optional[dict] = None
 
     def __repr__(self) -> str:
         return f"Run({self.run_id!r}, generation={self.executor_generation})"
@@ -336,7 +338,9 @@ class Run:
         """Governs and dispatches one tool call; returns its output or raises a ``ToolOutcome``."""
         envelope = self.envelope(capability_id, args, approval_mode=approval_mode, idempotency_key=idempotency_key,
                                  evidence_refs=evidence_refs, tool_call_id=tool_call_id)
-        return _outcome(self._post("/tool-calls", envelope))
+        response = self._post("/tool-calls", envelope)
+        self.last_notices = (response.get("result", {}).get("metadata") or {}).get("notices")
+        return _outcome(response)
 
     def provide_input(self, paused: ToolPaused, envelope: dict, responses: dict) -> dict:
         """Answers a tool's input requests and continues the same operation."""
@@ -427,6 +431,49 @@ class Run:
         if evidence_refs is not None:
             body["evidence_refs"] = evidence_refs
         return self._post(f"/work/{_quote(task_id)}", body)
+
+    def publish_finding(self, finding_id: str, statement: str, *, kind: str = "claim",
+                        depends_on: Optional[List[str]] = None, basis_operation_id: Optional[str] = None,
+                        basis_run_id: Optional[str] = None, refutes: Optional[str] = None,
+                        urgent: bool = False) -> dict:
+        """Shares a finding with the team: a ``claim``, or an ``observed`` finding bound to a
+        recorded tool call (``basis_operation_id``, in ``basis_run_id`` or this run) whose
+        facts the runtime takes from its operation ledger; an observation that ``refutes``
+        a peer's finding can then invalidate it. ``urgent`` notifies the team."""
+        body: Dict[str, Any] = {"finding_id": finding_id, "kind": kind, "statement": statement,
+                                "depends_on": depends_on or [], "urgent": urgent}
+        if basis_operation_id is not None:
+            body["kind"] = "observed"
+            body["basis"] = {"operation_id": basis_operation_id}
+            if basis_run_id is not None:
+                body["basis"]["run_id"] = basis_run_id
+        if refutes is not None:
+            body["refutes"] = refutes
+        return self._post("/findings", body)
+
+    def findings(self, *, after: Optional[str] = None, limit: int = 100) -> dict:
+        """A page of the team's findings with status (active, suspect, invalidated)."""
+        query: Dict[str, Any] = {"limit": limit}
+        if after is not None:
+            query["after"] = after
+        return self.client.request("GET", self._path("/findings"), query=query, generation=self.executor_generation)
+
+    def invalidate_finding(self, finding_id: str, reason: str, *, refuted_by: Optional[str] = None) -> dict:
+        """Falsifies a finding: withdraw your own, or cite an observed finding refuting a
+        peer's. Its dependents become suspect and the team is notified."""
+        body: Dict[str, Any] = {"reason": reason}
+        if refuted_by is not None:
+            body["refuted_by"] = refuted_by
+        return self._post(f"/findings/{_quote(finding_id)}/invalidate", body)
+
+    def notices(self, *, limit: int = 20) -> dict:
+        """This run's unacknowledged peer notices; reading does not acknowledge them."""
+        return self.client.request("GET", self._path("/notices"), query={"limit": limit},
+                                   generation=self.executor_generation)
+
+    def ack_notices(self, through: int) -> dict:
+        """Acknowledges notices through sequence ``through`` once the agent has seen them."""
+        return self._post("/notices/ack", {"through": through})
 
     def reserve_usage(self, kind: str, *, tokens: int = 0, cost_cents: int = 0) -> str:
         """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""

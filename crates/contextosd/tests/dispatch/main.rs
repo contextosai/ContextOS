@@ -11,6 +11,7 @@ mod effects;
 mod erasure;
 mod evaluation;
 mod executors;
+mod findings;
 mod harness;
 mod load;
 mod memory;

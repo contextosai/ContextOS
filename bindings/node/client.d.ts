@@ -42,6 +42,42 @@ export declare class ToolOutcome extends Error {
   readonly obligations: string[];
   readonly operationId: string | null;
 }
+/** A team finding: a claim, or an observation bound to a recorded tool call. */
+export interface Finding {
+  finding_id: string;
+  kind: "claim" | "observed";
+  statement: string;
+  depends_on: string[];
+  urgent: boolean;
+  basis: { run_id: string; operation_id: string; action_digest: string; capability_ref: Json; outcome: "confirmed"; observation_ref: Json; observed_at: string } | null;
+  refutes: string | null;
+  author_run_id: string;
+  created_at: string;
+  status: "active" | "suspect" | "invalidated";
+  suspect_because: string[];
+  invalidation: { by_run_id: string; at: string; reason: string; refuted_by: string | null } | null;
+}
+
+export interface Notice {
+  seq: number;
+  kind: "finding_invalidated" | "finding_published";
+  finding_id: string;
+  by_run_id: string;
+  at: string;
+  excerpt: string;
+  suspect: string[];
+  suspect_count: number;
+}
+
+export interface NoticeView {
+  notices: Notice[];
+  pending: number;
+  missed: boolean;
+  acknowledged_seq: number;
+  latest_seq: number;
+  data_only: true;
+}
+
 /** An effect whose capability declares compensation, and where it stands. */
 export interface CompensableEffect {
   operation_id: string;
@@ -162,6 +198,13 @@ export declare class Run {
   workTasks(options?: { after?: string; limit?: number }): Promise<WorkPage>;
   workTask(taskId: string): Promise<WorkResult>;
   updateWork(taskId: string, command: WorkCommand): Promise<WorkResult>;
+  /** Peer notices that came with the latest tool result (peer data, never instructions). */
+  lastNotices: NoticeView | null;
+  publishFinding(findingId: string, statement: string, options?: { kind?: "claim" | "observed"; dependsOn?: string[]; basisOperationId?: string; basisRunId?: string; refutes?: string; urgent?: boolean }): Promise<{ root_run_id: string; finding: Finding; data_only: true }>;
+  findings(options?: { after?: string; limit?: number }): Promise<{ root_run_id: string; findings: Finding[]; next_cursor: string | null; data_only: true }>;
+  invalidateFinding(findingId: string, reason: string, options?: { refutedBy?: string }): Promise<{ root_run_id: string; finding: Finding; suspect: string[]; data_only: true }>;
+  notices(options?: { limit?: number }): Promise<NoticeView & { root_run_id: string }>;
+  ackNotices(through: number): Promise<NoticeView>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
   settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
   /** Headers for a model request that a metering LLM gateway settles with the usage it measures. */
