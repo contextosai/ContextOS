@@ -264,7 +264,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     }
 
     /// Effects between reservation and settlement (open run-scoped reservations).
-    async fn effects_in_flight(&self, admission: &RunAdmission) -> Result<bool, GatewayError> {
+    pub(crate) async fn effects_in_flight(&self, admission: &RunAdmission) -> Result<bool, GatewayError> {
         let key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
         let closure = format!("closure:{}", admission.run_id);
         Ok(self.store.get(&key).await?.is_some_and(|l| {

@@ -5,6 +5,24 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Governed compensation (sagas). A capability manifest may declare `compensation`: the
+  capability that undoes its effect and where that capability's arguments come from
+  (the original call's arguments, or `/external_ref`, the provider reference recorded
+  with the effect, which never reaches the agent). Before such an effect is sent, the
+  gateway records what compensating it needs; an effect that could not be compensated
+  is refused (`compensation_binding_incomplete`, `compensation_index_full`).
+  `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` runs the compensation
+  as a new governed operation (authority, policy, approval, budget, claim, audit) whose
+  claim the kernel checks against the original's outcome (`compensates_operation_id`);
+  each effect is compensated at most once. `POST /v1/runs/{run_id}/compensate`
+  compensates the run's effects newest first and stops at any effect in doubt;
+  `GET /v1/runs/{run_id}/compensations` lists where each stands. Clients:
+  `compensations`, `compensate`, `compensate_all` (Python) and `compensateAll` (Node).
+  Erasure removes compensation records. Demo: `examples/compensation`.
+- Operation ids beginning with `compensation:` are reserved; a tool call using one is
+  rejected with `operation_id_reserved`.
+
 ## 0.1.0-alpha.1 - 2026-10-26
 
 First public alpha of the ContextOS runtime. APIs and storage formats are evolving;

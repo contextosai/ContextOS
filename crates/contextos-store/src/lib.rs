@@ -79,6 +79,9 @@ pub enum DocKind {
     /// Whether an attempt was sent or aborted, decided once (the gateway's dispatch
     /// gate).
     DispatchGate,
+    /// What an applied effect's declared compensation needs (recorded before dispatch),
+    /// and each run's index of them.
+    Compensation,
 }
 
 impl DocKind {
@@ -114,6 +117,7 @@ impl DocKind {
             DocKind::ExposureLink => "exposure_link",
             DocKind::TaskExposure => "task_exposure",
             DocKind::DispatchGate => "dispatch_gate",
+            DocKind::Compensation => "compensation",
         }
     }
 }

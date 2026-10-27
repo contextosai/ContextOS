@@ -3,6 +3,7 @@
 pub mod app;
 pub mod attest;
 pub mod auth;
+pub mod compensation;
 pub mod config;
 pub mod configs;
 pub mod feedback;

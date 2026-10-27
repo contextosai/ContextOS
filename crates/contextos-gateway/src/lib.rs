@@ -22,6 +22,7 @@
 
 pub mod admission;
 mod checkpoints;
+mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
@@ -64,6 +65,7 @@ use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
+pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, compensation_operation_id};
 pub use coordination::{MAX_WORK_BOARD_BYTES, MAX_WORK_TASKS, WorkCommand, WorkError, WorkEvidence, WorkTaskInput};
 pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
@@ -71,7 +73,9 @@ pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
-pub use manifest::{CapabilityManifest, CompletionCheck, ManifestError, RecoveryStrategy, is_path_segment};
+pub use manifest::{
+    CapabilityManifest, Compensation, CompletionCheck, ManifestError, RecoveryStrategy, is_path_segment,
+};
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
 pub use ports::{
@@ -242,9 +246,33 @@ struct Pipeline<'a> {
     policy_decision_id: Option<String>,
     /// The escalation opened for a call policy escalated.
     escalation_id: Option<String>,
+    /// The operation this call compensates.
+    compensates: Option<String>,
 }
 
-impl Pipeline<'_> {
+impl<'a> Pipeline<'a> {
+    fn new(admission: &'a RunAdmission, envelope: &'a Value) -> Self {
+        Pipeline {
+            admission,
+            envelope,
+            report: DispatchReport {
+                status: String::new(),
+                action_digest: None,
+                operation_id: None,
+                attempt_id: None,
+                reason_codes: vec![],
+                obligations: vec![],
+                approval_request_id: None,
+                audit_sequences: vec![],
+            },
+            started: std::time::Instant::now(),
+            risk_tags: Vec::new(),
+            policy_decision_id: None,
+            escalation_id: None,
+            compensates: None,
+        }
+    }
+
     fn finish(
         mut self,
         status: &str,
@@ -266,6 +294,9 @@ impl Pipeline<'_> {
         }
         if let Some(id) = &self.escalation_id {
             metadata.insert("escalation_id".into(), json!(id));
+        }
+        if let Some(id) = &self.compensates {
+            metadata.insert("compensates_operation_id".into(), json!(id));
         }
         // Tool output is evidence, never instructions: it cannot grant authority.
         metadata.insert("instruction_treatment".into(), json!("data_only"));
@@ -319,8 +350,9 @@ pub fn provider_idempotency_key(tenant_id: &str, run_id: &str, operation_id: &st
 /// how many effects the run has made and parallel operations never contend. The
 /// kernel evaluates the projection holding just this operation; the cross-operation
 /// checks it would otherwise perform hold by construction here: attempt ids are
-/// fresh, provider idempotency keys derive from the run-scoped operation identity, and compensation
-/// is not dispatched through this path.
+/// fresh, provider idempotency keys derive from the run-scoped operation identity, and a
+/// compensation's claim is evaluated with its original operation alongside (see
+/// [`compensation`]).
 pub fn operation_ledger_key(admission: &RunAdmission, operation_id: &str) -> DocKey {
     let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id));
     DocKey::new(
@@ -504,7 +536,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )
     )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope, None, None).await;
+        let outcome = self.dispatch_inner(admission, envelope, None, None, None).await;
         let span = tracing::Span::current();
         match &outcome {
             Ok(outcome) => {
@@ -533,7 +565,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         envelope: &Value,
         executor_generation: u64,
     ) -> Result<DispatchOutcome, GatewayError> {
-        self.dispatch_inner(admission, envelope, None, Some(executor_generation))
+        self.dispatch_inner(admission, envelope, None, Some(executor_generation), None)
             .await
     }
 
@@ -557,6 +589,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 envelope,
                 Some(continuation),
                 continuation.executor_generation,
+                None,
             )
             .await;
         if let Ok(outcome) = &outcome {
@@ -571,25 +604,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         envelope: &Value,
         continuation: Option<&Continuation>,
         fence: Option<u64>,
+        compensates: Option<&Value>,
     ) -> Result<DispatchOutcome, GatewayError> {
-        let mut p = Pipeline {
-            admission,
-            envelope,
-            report: DispatchReport {
-                status: String::new(),
-                action_digest: None,
-                operation_id: None,
-                attempt_id: None,
-                reason_codes: vec![],
-                obligations: vec![],
-                approval_request_id: None,
-                audit_sequences: vec![],
-            },
-            started: std::time::Instant::now(),
-            risk_tags: Vec::new(),
-            policy_decision_id: None,
-            escalation_id: None,
-        };
+        let mut p = Pipeline::new(admission, envelope);
+        let compensates_id = compensates.map(|op| op["intent"]["operation_id"].clone());
+        p.compensates = compensates_id.as_ref().and_then(Value::as_str).map(str::to_owned);
 
         // 0. Fence: only the run's current executor may start work.
         // One read of the run state serves ownership, status and the unresolved count.
@@ -702,6 +721,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .as_str()
             .map_or_else(|| tool_call_id.clone(), str::to_owned);
         p.report.operation_id = Some(operation_id.clone());
+        // Compensations are requested by naming the effect, never by a tool call.
+        if compensates.is_none() && operation_id.starts_with(COMPENSATION_OPERATION_PREFIX) {
+            return Ok(p.stop(
+                "rejected",
+                vec!["operation_id_reserved".into()],
+                "Operation ids beginning with compensation: are reserved.",
+            ));
+        }
         let pending_key = {
             let key = operation_ledger_key(admission, &operation_id);
             DocKey::new(&admission.tenant_id, DocKind::PendingInput, key.id)
@@ -761,6 +788,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     ));
                 }
             }
+        }
+        if compensates.is_none() && !compensation::plannable(manifest, &arguments) {
+            return Ok(p.stop(
+                "rejected",
+                vec!["compensation_binding_incomplete".into()],
+                "An argument the capability's compensation needs is missing.",
+            ));
         }
         let mut binding = json!({
             "binding_version": "contextos.action_binding.v1",
@@ -1268,6 +1302,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Commit::Rejected { reason_codes } = commit {
             return Ok(p.stop("blocked", reason_codes, "Budget could not be reserved."));
         }
+        // What compensating this effect will need is recorded before it can be sent.
+        let recorded = if compensates.is_none() {
+            self.record_compensation(admission, manifest, &operation_id, &action_digest, &arguments)
+                .await
+        } else {
+            Ok(Ok(()))
+        };
+        let recorded = match recorded {
+            Ok(recorded) => recorded,
+            Err(error) => {
+                self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                    .await?;
+                return Err(error);
+            }
+        };
+        if let Err(reason) = recorded {
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            return Ok(p.stop(
+                "rejected",
+                vec![reason.into()],
+                "The effect could not be made compensable as its capability declares.",
+            ));
+        }
         // Compact from the state just written instead of reading it back; otherwise the
         // state seeds the settlement.
         let mut settle_seed = None;
@@ -1301,7 +1359,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "idempotency_key": provider_key, "idempotency_scope": idempotency.map(|i| i.scope.clone()),
             "provider_idempotency_ref": idempotency.map(|i| i.provider_contract_ref.clone()),
             "max_attempts": manifest.recovery.max_attempts, "retry_delays_seconds": manifest.recovery.retry_delays_seconds,
-            "deadline": admission.deadline, "compensates_operation_id": null,
+            "deadline": admission.deadline, "compensates_operation_id": compensates_id,
             "attempt": {"attempt_id": attempt_id, "operation_id": operation_id,
                 "executor_generation": admission.executor_generation, "started_at": now,
                 "dispatch_state": "claimed", "last_observation_ref": null},
@@ -1322,6 +1380,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Err(e) => return Err(e.into()),
             }
         }
+        let original = match compensates {
+            Some(original) => Some(self.current_original(admission, original).await?),
+            None => None,
+        };
         let (commit, claimed) = transact_from(
             self.store.as_ref(),
             &operations_key,
@@ -1336,12 +1398,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 {
                     return TransitionResult::rejected(ledger.clone(), "shared_guarantee_unresolved");
                 }
-                claim_operation(
-                    ledger,
-                    &claim,
-                    &ledger["revision"],
-                    &json!(admission.executor_generation),
-                )
+                match &original {
+                    Some(original) => compensation::claim_with_original(ledger, &claim, original, admission),
+                    None => claim_operation(
+                        ledger,
+                        &claim,
+                        &ledger["revision"],
+                        &json!(admission.executor_generation),
+                    ),
+                }
             },
             |_| seed_transitions,
         )

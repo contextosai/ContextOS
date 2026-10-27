@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governedTool, taskAuthorization, taskScope,
+  BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, ToolRejected, governedTool, taskAuthorization,
+  taskScope,
 } from "./client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -73,6 +74,14 @@ try {
 
   await assert.rejects(run.callTool(call.capability_id, call.args, options), (error) =>
     error instanceof ToolPaused && error.reasonCodes[0] === "retry_unsafe");
+
+  // This example's refund declares no compensation: nothing is listed, and a request to
+  // compensate it is refused before the provider.
+  assert.deepEqual(await run.compensations(), { run_id: run.runId, effects: [] });
+  await assert.rejects(run.compensate(call.idempotency_key), (error) =>
+    error instanceof ToolRejected && error.reasonCodes[0] === "compensation_not_declared");
+  assert.equal((await run.compensateAll()).status, "compensated");
+
 
   // A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
   const scoped = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));

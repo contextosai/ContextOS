@@ -53,8 +53,11 @@
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
+//! | `GET /v1/runs/{run_id}/compensations` | `dispatch` | the run's compensable effects and where each stands |
+//! | `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | compensate one applied effect with its declared capability, governed as a new operation |
+//! | `POST /v1/runs/{run_id}/compensate` | `dispatch` | compensate the run's applied effects newest first, stopping at any in doubt |
 //!
-//! Effectful routes (tool calls, input, reconcile, close, complete, fail) require the
+//! Effectful routes (tool calls, input, reconcile, compensate, close, complete, fail) require the
 //! `ContextOS-Executor-Generation` header returned by admission or takeover.
 //!
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
@@ -160,7 +163,7 @@ impl ApiError {
         }
     }
 
-    fn retry_after(mut self, wait: std::time::Duration) -> Self {
+    pub(crate) fn retry_after(mut self, wait: std::time::Duration) -> Self {
         // Whole seconds, rounded up, at least one.
         self.retry_after_seconds = Some((wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1));
         self
@@ -209,9 +212,13 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult = Result<Response, ApiError>;
+pub(crate) type ApiResult = Result<Response, ApiError>;
 
-fn authorize<S, L>(state: &AppState<S, L>, headers: &HeaderMap, scope: Option<&str>) -> Result<Caller, ApiError> {
+pub(crate) fn authorize<S, L>(
+    state: &AppState<S, L>,
+    headers: &HeaderMap,
+    scope: Option<&str>,
+) -> Result<Caller, ApiError> {
     let header = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
     let caller = state.auth.authenticate(header).ok_or_else(ApiError::unauthorized)?;
     if let Some(scope) = scope
@@ -230,7 +237,7 @@ fn authorize<S, L>(state: &AppState<S, L>, headers: &HeaderMap, scope: Option<&s
     Ok(caller)
 }
 
-fn parse_body<S, L>(state: &AppState<S, L>, body: &Bytes) -> Result<Value, ApiError> {
+pub(crate) fn parse_body<S, L>(state: &AppState<S, L>, body: &Bytes) -> Result<Value, ApiError> {
     parse_strict(body, state.max_body_bytes).map_err(|e| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -445,7 +452,7 @@ async fn audit_verify<S, L: AppendLog>(State(state): State<Arc<AppState<S, L>>>,
     }
 }
 
-fn dispatch_gateway<S, L>(state: &AppState<S, L>) -> Result<&Arc<Gateway<S, L>>, ApiError> {
+pub(crate) fn dispatch_gateway<S, L>(state: &AppState<S, L>) -> Result<&Arc<Gateway<S, L>>, ApiError> {
     state.gateway.as_ref().ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
@@ -936,7 +943,7 @@ where
 /// The fencing token an executor presents with effectful requests.
 pub const EXECUTOR_GENERATION_HEADER: &str = "contextos-executor-generation";
 
-fn executor_generation(headers: &HeaderMap) -> Result<u64, ApiError> {
+pub(crate) fn executor_generation(headers: &HeaderMap) -> Result<u64, ApiError> {
     headers
         .get(EXECUTOR_GENERATION_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -1135,7 +1142,7 @@ where
     .into_response())
 }
 
-async fn load_admission<S: DocumentStore, L>(
+pub(crate) async fn load_admission<S: DocumentStore, L>(
     state: &AppState<S, L>,
     caller: &Caller,
     run_id: &str,
@@ -3586,6 +3593,18 @@ where
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/input",
             post(provide_input::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/compensations",
+            get(crate::compensation::list::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/compensate",
+            post(crate::compensation::compensate_run::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/operations/{operation_id}/compensate",
+            post(crate::compensation::compensate::<S, L>),
         )
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/reconcile",

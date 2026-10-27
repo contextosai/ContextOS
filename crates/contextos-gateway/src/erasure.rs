@@ -3,7 +3,8 @@
 //! A run's user-provided content lives in the replay case (the original request,
 //! including the user's message and context), the compiled context (the task prompt
 //! and evidence blocks), the orchestrator's checkpoint, and any pending tool input
-//! requests (what a tool asked the user; indexed per run when recorded). Operator
+//! requests (what a tool asked the user; indexed per run when recorded), and the
+//! compensation records of its effects (arguments of the original calls). Operator
 //! feedback filed against the run (indexed per run) has its free text redacted; its
 //! status and replay obligation stay, so an operator still closes it explicitly.
 //! Erasure overwrites the rest with a tombstone that
@@ -103,10 +104,23 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .filter_map(Value::as_str)
             .map(|id| DocKey::new(&admission.tenant_id, DocKind::PendingInput, id))
             .collect();
+        // Compensation records hold arguments of the original calls.
+        let compensations: Vec<DocKey> = self
+            .store
+            .get(&crate::compensation::index_key(admission))
+            .await
+            .map_err(GatewayError::from)?
+            .and_then(|i| i.body["keys"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|id| DocKey::new(&admission.tenant_id, DocKind::Compensation, id))
+            .collect();
         let documents = [DocKind::ReplayCase, DocKind::CompiledContext, DocKind::Checkpoint]
             .into_iter()
             .map(|kind| DocKey::new(&admission.tenant_id, kind, &admission.run_id))
-            .chain(inputs);
+            .chain(inputs)
+            .chain(compensations);
         for key in documents {
             let kind = key.kind;
             if let Some(current) = self.store.get(&key).await.map_err(GatewayError::from)?
