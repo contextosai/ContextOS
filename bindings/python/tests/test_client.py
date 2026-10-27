@@ -17,8 +17,8 @@ import time
 import urllib.request
 
 from contextos.aio import AsyncClient, AsyncRun
-from contextos.client import (BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, governed_tool,
-                              task_authorization, task_scope)
+from contextos.client import (BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, ToolRejected,
+                              governed_tool, task_authorization, task_scope)
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BINARY = ROOT / "target/release/contextosd"
@@ -86,6 +86,17 @@ def main() -> None:
             raise AssertionError("replay must not succeed")
         except ToolPaused as paused:
             assert paused.reason_codes == ["retry_unsafe"], paused.reason_codes
+
+        # This example's refund declares no compensation: nothing is listed, and a request
+        # to compensate it is refused before the provider.
+        assert run.compensations() == {"run_id": run.run_id, "effects": []}
+        try:
+            run.compensate(call["idempotency_key"])
+            raise AssertionError("an undeclared compensation must not run")
+        except ToolRejected as refused:
+            assert refused.reason_codes == ["compensation_not_declared"], refused.reason_codes
+        assert run.compensate_all()["status"] == "compensated"
+
 
         # A run bound to what the user asked: the refund of ord_881 to cus_77, up to INR 1200.
         scoped = json.loads((EXAMPLE / "requests/run.json").read_text())

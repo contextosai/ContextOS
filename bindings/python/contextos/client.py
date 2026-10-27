@@ -350,6 +350,21 @@ class Run:
             {"source": "operator", "outcome": outcome, "evidence_ref": evidence_ref}
         return self._post(f"/operations/{_quote(operation_id)}/reconcile", body)
 
+    def compensations(self) -> dict:
+        """The run's compensable effects and where each stands (``state``)."""
+        return self.client.request("GET", self._path("/compensations"))
+
+    def compensate(self, operation_id: str, *, tool_call_id: Optional[str] = None) -> dict:
+        """Compensates one applied effect with its declared compensating capability, governed
+        as a new operation; returns its output or raises a ``ToolOutcome``."""
+        body = {"tool_call_id": tool_call_id or f"tc_{uuid.uuid4().hex}"}
+        return _outcome(self._post(f"/operations/{_quote(operation_id)}/compensate", body))
+
+    def compensate_all(self) -> dict:
+        """Compensates the run's applied effects newest first, stopping at any in doubt.
+        Returns ``{"status": "compensated" | "stopped", "steps", "stopped_at"}``."""
+        return self._post("/compensate")
+
     def record_decision(self, decision_key: str, status: str, *, decision_version: str = "1",
                         outcome: Optional[str] = None, tool_calls: Optional[List[dict]] = None, **fields: Any) -> dict:
         """Records a DecisionRecord; returns ``{"record", "replay_packet"}``."""

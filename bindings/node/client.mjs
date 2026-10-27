@@ -272,6 +272,25 @@ export class Run {
     return this.#post(`/operations/${segment(operationId)}/reconcile`, body);
   }
 
+  /** The run's compensable effects and where each stands (`state`). */
+  compensations() {
+    return this.client.request("GET", this.#path("/compensations"));
+  }
+
+  /**
+   * Compensates one applied effect with its declared compensating capability, governed as
+   * a new operation; resolves to its output or throws a ToolOutcome.
+   */
+  async compensate(operationId, { toolCallId } = {}) {
+    const body = { tool_call_id: toolCallId ?? `tc_${globalThis.crypto.randomUUID().replaceAll("-", "")}` };
+    return outcome(await this.#post(`/operations/${segment(operationId)}/compensate`, body));
+  }
+
+  /** Compensates the run's applied effects newest first, stopping at any in doubt. */
+  compensateAll() {
+    return this.#post("/compensate");
+  }
+
   recordDecision(decisionKey, status, { decisionVersion = "1", toolCalls = [], ...fields } = {}) {
     return this.#post("/decisions", { decision_key: decisionKey, decision_version: decisionVersion, status,
       tool_calls: toolCalls, ...fields });

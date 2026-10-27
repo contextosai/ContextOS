@@ -90,6 +90,46 @@ pub struct AmountBinding {
     pub currency: String,
 }
 
+/// How a capability's applied effect is undone: the capability that compensates it and
+/// where each of that capability's arguments comes from. Compensation is a new governed
+/// operation (fresh authority, policy, approval and budget), never a rollback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Compensation {
+    /// The compensating capability (pinned and surfaced like any other).
+    pub capability_id: String,
+    /// Compensating argument name → source: `/arguments/<pointer>` into the original
+    /// call's arguments, or `/external_ref`, the provider's reference recorded with the
+    /// original effect (the reversal token; it never reaches the agent).
+    pub arguments: std::collections::BTreeMap<String, String>,
+}
+
+/// Compensating arguments a manifest may map at most.
+pub const MAX_COMPENSATION_ARGUMENTS: usize = 32;
+
+impl Compensation {
+    fn validate(&self, capability_id: &str) -> Result<(), &'static str> {
+        if self.capability_id.is_empty() || self.capability_id == capability_id {
+            return Err("capability_id must name another capability");
+        }
+        if self.arguments.len() > MAX_COMPENSATION_ARGUMENTS {
+            return Err("too many arguments");
+        }
+        for (name, source) in &self.arguments {
+            if name.is_empty() {
+                return Err("argument names must be non-empty");
+            }
+            let pointer_ok = source
+                .strip_prefix("/arguments")
+                .is_some_and(|rest| rest.starts_with('/'));
+            if !(pointer_ok || source == "/external_ref") {
+                return Err("sources must be /arguments/<pointer> or /external_ref");
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Budget reserved for one attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -149,6 +189,10 @@ pub struct CapabilityManifest {
     /// Human-readable description shown to agents (for example as an MCP tool).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// How an applied effect of this capability is compensated. Only `reversible` or
+    /// `compensatable` capabilities may declare it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compensation: Option<Compensation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -169,6 +213,8 @@ pub enum ManifestError {
     OutputSchema(String, String),
     #[error("capability {0} completion check is invalid: {1}")]
     Completion(String, &'static str),
+    #[error("capability {0} compensation is invalid: {1}")]
+    Compensation(String, &'static str),
 }
 
 impl CompletionCheck {
@@ -253,6 +299,21 @@ impl CapabilityManifest {
         if let Some(schema) = &self.output_schema {
             contextos_contract::schema::ArgumentSchema::compile(schema)
                 .map_err(|e| ManifestError::OutputSchema(id.clone(), e))?;
+        }
+        if let Some(compensation) = &self.compensation {
+            use contextos_contract::types::ActionReversibility;
+            if !matches!(
+                self.action_risk.reversibility,
+                ActionReversibility::Reversible | ActionReversibility::Compensatable
+            ) {
+                return Err(ManifestError::Compensation(
+                    id.clone(),
+                    "only a reversible or compensatable capability can declare compensation",
+                ));
+            }
+            compensation
+                .validate(id)
+                .map_err(|reason| ManifestError::Compensation(id.clone(), reason))?;
         }
         Ok(())
     }

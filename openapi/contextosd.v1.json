@@ -3920,6 +3920,302 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/compensations": {
+      "get": {
+        "operationId": "list_compensations",
+        "summary": "The run's compensable effects and where each stands",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compensable effects in the order they were requested; `state` is compensable, compensated, partially_compensated, compensating, compensation_exhausted, unresolved or not_applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "effects"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "effects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "operation_id",
+                          "capability_id",
+                          "compensator",
+                          "outcome",
+                          "compensation_operation_id",
+                          "compensation_outcome",
+                          "state"
+                        ],
+                        "properties": {
+                          "operation_id": {
+                            "type": "string"
+                          },
+                          "capability_id": {
+                            "type": "string"
+                          },
+                          "compensator": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "compensation_operation_id": {
+                            "type": "string"
+                          },
+                          "compensation_outcome": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "compensable",
+                              "compensated",
+                              "partially_compensated",
+                              "compensating",
+                              "compensation_exhausted",
+                              "unresolved",
+                              "not_applied"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/compensate": {
+      "post": {
+        "operationId": "compensate_run",
+        "summary": "Compensate the run's applied effects newest first, stopping at any effect or compensation in doubt",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Each step's governed outcome; `status` is compensated or stopped (with `stopped_at`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "status",
+                    "steps",
+                    "stopped_at"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "compensated",
+                        "stopped"
+                      ]
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "stopped_at": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
+    "/v1/runs/{run_id}/operations/{operation_id}/compensate": {
+      "post": {
+        "operationId": "compensate",
+        "summary": "Compensate one applied effect with its declared compensating capability, governed as a new operation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/ExecutorGeneration"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tool_call_id"
+                ],
+                "properties": {
+                  "tool_call_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The governed outcome; `result.metadata.compensates_operation_id` names the effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
     }
   },
   "components": {

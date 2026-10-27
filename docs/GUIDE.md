@@ -179,6 +179,8 @@ have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized
 | `POST /v1/schemas/{schema}/validate` | any | Validate a payload against a published schema |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | Answer a tool's input request and continue |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | Resolve an unknown effect |
+| `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | Undo an applied effect with its declared compensation |
+| `POST /v1/runs/{run_id}/compensate` | `dispatch` | Compensate the run's effects newest first (saga) |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
 | `GET /metrics`, `/healthz`, `/readyz` | – | Operations |
 
@@ -440,6 +442,15 @@ resolve; conflicting facts need escalation) or `rejected` with reasons such as
 `reconcile_requires_operator`. A recorded fact cannot be overwritten by a later
 contradicting assertion. Grant `reconcile` only to operators and automation that verify
 outcomes at the provider.
+
+### Compensating applied effects
+
+When a workflow fails after some effects applied, undo them with the compensations
+their manifests declare: `run.compensate(operation_id)` for one effect, or
+`run.compensate_all()` to compensate the run newest first, stopping at any effect in
+doubt. Each compensation is a new governed operation with its own authority, policy,
+approval and budget, and runs at most once per effect. See
+[COMPENSATION.md](COMPENSATION.md).
 
 ## 4. Integrate your services
 

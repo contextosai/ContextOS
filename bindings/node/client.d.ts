@@ -42,6 +42,17 @@ export declare class ToolOutcome extends Error {
   readonly obligations: string[];
   readonly operationId: string | null;
 }
+/** An effect whose capability declares compensation, and where it stands. */
+export interface CompensableEffect {
+  operation_id: string;
+  capability_id: string;
+  compensator: string;
+  outcome: string;
+  compensation_operation_id: string;
+  compensation_outcome: string;
+  state: "compensable" | "compensated" | "partially_compensated" | "compensating" | "compensation_exhausted" | "unresolved" | "not_applied";
+}
+
 /** Approval pending, input required, or an unknown outcome to reconcile. Never retry blindly. */
 export declare class ToolPaused extends ToolOutcome {
   /**
@@ -139,6 +150,9 @@ export declare class Run {
   callTool(capabilityId: string, args: Record<string, Json>, options?: CallOptions): Promise<Record<string, Json>>;
   provideInput(paused: ToolPaused, envelope: Record<string, Json>, responses: Record<string, Json>): Promise<Record<string, Json>>;
   reconcile(operationId: string, options?: { outcome?: "confirmed" | "not_applied" | "partial"; evidenceRef?: Record<string, string> }): Promise<any>;
+  compensations(): Promise<{ run_id: string; effects: CompensableEffect[] }>;
+  compensate(operationId: string, options?: { toolCallId?: string }): Promise<Record<string, Json>>;
+  compensateAll(): Promise<{ run_id: string; status: "compensated" | "stopped"; steps: { operation_id: string; result: any; report: any }[]; stopped_at: { operation_id: string; reason: string } | null }>;
   recordDecision(decisionKey: string, status: DecisionStatus, options?: { decisionVersion?: string; outcome?: string; toolCalls?: { tool_call_id: string; operation_id: string }[]; [field: string]: unknown }): Promise<{ record: any; replay_packet: any }>;
   delegate(childAdmission: Record<string, any>, envelope: Record<string, any>): Promise<Run>;
   closeChild(child: Run, decision?: "accept" | "reject"): Promise<{ status: string; usage: Record<string, number> | null; reason_codes: string[] }>;

@@ -135,6 +135,25 @@ pub(crate) fn world_packs() -> HashMap<String, contextosd::app::LoadedPack> {
     candidate["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"][1]["then"] = json!({"allow": true});
     let (pack_ref, loaded) = load_pack(&candidate.to_string()).unwrap();
     packs.insert(pack_ref, loaded);
+    // A version that also surfaces the refund's compensation.
+    let mut reversible = vectors["cases"][0]["pack"].clone();
+    reversible["pack_meta"]["pack_version"] = json!("5.4.0");
+    let tooling = &mut reversible["tooling_layer"];
+    for adapter in tooling["adapter_registry"].as_array_mut().unwrap() {
+        if adapter["adapter_id"] == "adp_payments" {
+            adapter["capabilities"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("reverse_refund"));
+            adapter["capability_risks"]["reverse_refund"] = json!({"effect": "external_state", "authority": "service",
+                "reversibility": "irreversible", "interaction": "api", "data_scope": "CONFIDENTIAL"});
+        }
+    }
+    tooling["permissions"].as_array_mut().unwrap().push(
+        json!({"permission_id": "p_reverse", "adapter_id": "adp_payments", "capability": "reverse_refund", "allow": true}),
+    );
+    let (pack_ref, loaded) = load_pack(&reversible.to_string()).unwrap();
+    packs.insert(pack_ref, loaded);
     packs
 }
 

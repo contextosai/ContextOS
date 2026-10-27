@@ -10,7 +10,7 @@ import unittest
 
 class CheckScriptTests(unittest.TestCase):
     def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, archive_exit=0, marker=True,
-                 large_output=False, peer_exit=0):
+                 large_output=False, peer_exit=0, compensation_exit=0):
         with tempfile.TemporaryDirectory(prefix="contextos-check-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -25,7 +25,8 @@ class CheckScriptTests(unittest.TestCase):
                 tool = tools / name
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
-            for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination", "tower"):
+            for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
+                         "compensation", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
@@ -33,6 +34,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += f"echo 'Offline audit verification:'\nexit {guarantee_exit}\n"
                 if name == "peer-coordination":
                     text += f"echo 'peer coordination complete'\nexit {peer_exit}\n"
+                if name == "compensation":
+                    text += f"echo 'saga compensated'\nexit {compensation_exit}\n"
                 if name in ("agent-loop", "tower"):
                     if marker:
                         text += "echo 'run completed'\n" if name == "agent-loop" else "echo 'tower sees the fleet'\n"
@@ -76,6 +79,11 @@ class CheckScriptTests(unittest.TestCase):
         result = self.run_gate(peer_exit=8)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("FAILED: peer coordination", result.stdout)
+
+    def test_compensation_failure_after_success_message_fails_gate(self):
+        result = self.run_gate(compensation_exit=4)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("FAILED: compensation", result.stdout)
 
     def test_missing_success_message_fails_gate(self):
         result = self.run_gate(marker=False)

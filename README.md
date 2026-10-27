@@ -138,6 +138,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Follow the original authorization quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
 - Peers choosing and recovering work: [examples/peer-coordination](examples/peer-coordination/README.md)
+- Undo a workflow that failed halfway, as governed compensations: [examples/compensation](examples/compensation/README.md) (`./examples/compensation/run.sh`), [guide](docs/COMPENSATION.md)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)

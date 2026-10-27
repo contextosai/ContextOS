@@ -3,6 +3,7 @@
 
 mod api;
 mod budgets;
+mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
