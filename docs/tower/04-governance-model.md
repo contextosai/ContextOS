@@ -299,13 +299,17 @@ A guardrail is an organisation rule evaluated against every agent's facts:
   included, is no longer the approved risk. Either kind voids the approval until the
   agent is reviewed again. A review that recorded no risk cannot vouch for any.
 - **Journal.** Every declaration, review, guardrail and waiver change is journaled
-  after it commits, never before. A collection's changes are journaled in commit order:
+  after it commits, never before. Each collection's changes are journaled in its commit
+  order; the order is per collection, and entries of different collections interleave
+  without a defined order:
   a change commits only once the previous change to that collection is journaled, and
   waits while another writer is still journaling one. A writer that stops (a crash, or
   a stall past its 30-second lease) has its entry journaled by the next writer or by
   the sweep that runs every 30 seconds. Each entry's payload names its `collection` and
-  `collection_seq`, the collection's commit number counting from 1 without gaps, so a
-  verifier can check commit order and completeness directly.
+  `collection_seq`, the collection's commit number, so a verifier can check that
+  collection's commit order and completeness directly. Numbering starts at 1 with the
+  collection's first change after upgrading to a version that numbers them, and has no
+  gaps from there. Entries written earlier carry no `collection_seq`.
 - **Waiver** (`POST /api/waivers`, owner role): one rule, one agent, a reason of at least
   10 characters, 1 to 180 days. A risk reviewer who is not the requester approves or
   rejects it; approval sets `expires_at`. Expired waivers no longer apply and are shown

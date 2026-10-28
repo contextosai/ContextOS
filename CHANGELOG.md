@@ -95,11 +95,13 @@ minor versions may break APIs and every break is listed.
   even if it declared less risk), and `capability_risk_conflict` is raised.
 - Tower journals entries a crashed writer left pending once per lease period, so they
   no longer wait for the collection's next change.
-- Tower journals a collection's changes in commit order. A change commits only after
+- Tower journals each collection's changes in that collection's commit order (there
+  is no order across collections). A change commits only after
   the previous change to that collection is journaled, waiting while another writer is
   still journaling; previously a stalled writer's entry could be journaled after a
   later change. Journal payloads carry `collection` and `collection_seq` (the
-  collection's commit number, from 1 without gaps).
+  collection's commit number). Numbering starts at 1 with each collection's first
+  change after upgrading and has no gaps from there; earlier entries carry none.
 - Tower keeps every interaction kind a capability's packs declare (`interactions`) and
   derives required controls from all of them. Previously a merge kept one kind, so a
   `browser` and a `computer` variant together required `isolation.required` but not
