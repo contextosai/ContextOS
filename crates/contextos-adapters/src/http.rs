@@ -6,7 +6,9 @@
 //!
 //! | Response | Outcome |
 //! |---|---|
-//! | 2xx except 202, 206, 207 | confirmed (definitive) |
+//! | effectful capability without `recovery.completion` | not dispatched (definitive): the call is never sent |
+//! | 2xx except 202, 206, 207, effectful | the body's state at `state_pointer`: listed confirmed / partial / not applied (definitive), otherwise unknown |
+//! | 2xx except 202, 206, 207, read-only | confirmed (definitive) |
 //! | 202, 206, 207 (accepted, partial or multi-status) | unknown; a response `id` becomes the external reference |
 //! | 4xx listed in the manifest's `recovery.not_applied_statuses` | not applied (definitive) |
 //! | 400, 401, 403, 404, 405, 413, 415, 422 from a read-only capability | not applied (definitive) |
@@ -99,6 +101,12 @@ impl Adapter for HttpAdapter {
         if !is_path_segment(&manifest.protocol_tool) {
             return not_dispatched();
         }
+        // A success status alone cannot confirm an effect; without the provider's
+        // reported-state contract an effectful call is not sent (contextosd refuses
+        // such a configuration at startup).
+        if manifest.action_risk.effect != ActionEffect::None && manifest.recovery.completion.is_none() {
+            return not_dispatched();
+        }
         let Ok(url) = self.endpoint.join(&manifest.protocol_tool) else {
             return not_dispatched();
         };
@@ -136,13 +144,7 @@ impl Adapter for HttpAdapter {
                         external_ref,
                         ..AdapterResponse::unknown()
                     },
-                    200..=299 => AdapterResponse {
-                        outcome: EffectOutcome::Confirmed,
-                        definitive: true,
-                        output,
-                        external_ref,
-                        cost_units: None,
-                    },
+                    200..=299 => success(manifest, output, external_ref),
                     s if rejected_before_execution(manifest, s) => AdapterResponse {
                         outcome: EffectOutcome::NotApplied,
                         definitive: true,
@@ -231,6 +233,46 @@ impl HttpAdapter {
                 ..AdapterResponse::unknown()
             },
         }
+    }
+}
+
+/// A finished 2xx. Under the provider contract (`recovery.completion`, required for
+/// effectful capabilities) the reported state decides, as it does for a status lookup:
+/// a `200` whose body says `pending` or `failed` is not a confirmed effect. An unlisted
+/// or missing state stays unknown, keeping the provider's `id` so reconciliation can
+/// look the effect up. A read-only capability without a contract has no effect to
+/// confirm, and its success status stands.
+fn success(manifest: &CapabilityManifest, output: Map<String, Value>, external_ref: Option<String>) -> AdapterResponse {
+    let outcome = match &manifest.recovery.completion {
+        None => Some(EffectOutcome::Confirmed),
+        Some(check) => pointer(&output, &check.state_pointer)
+            .and_then(Value::as_str)
+            .and_then(|state| check.outcome(state)),
+    };
+    match outcome {
+        Some(outcome) => AdapterResponse {
+            outcome,
+            definitive: true,
+            output,
+            external_ref,
+            cost_units: None,
+        },
+        None => AdapterResponse {
+            output,
+            external_ref,
+            ..AdapterResponse::unknown()
+        },
+    }
+}
+
+/// RFC 6901 lookup in an object, without copying it into a `Value`.
+fn pointer<'a>(object: &'a Map<String, Value>, pointer: &str) -> Option<&'a Value> {
+    let rest = pointer.strip_prefix('/')?;
+    let (head, tail) = rest.split_once('/').map_or((rest, None), |(h, t)| (h, Some(t)));
+    let value = object.get(&head.replace("~1", "/").replace("~0", "~"))?;
+    match tail {
+        None => Some(value),
+        Some(tail) => value.pointer(&format!("/{tail}")),
     }
 }
 

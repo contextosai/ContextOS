@@ -95,6 +95,8 @@ export interface Facts {
   exposure: Record<string, unknown>;
   controls: { required_profile: string; required: string[]; missing: Record<string, string[]>; admitted_profiles: string[]; features: string[] };
   drift: string[];
+  /** Reviewed capabilities whose risk differs from what was approved. */
+  risk_changed: string[];
   activity: Record<string, unknown> & { refusals: Record<string, number> };
   agent: Record<string, unknown> & { models: string[]; evaluators: string[]; packs: string[]; sources: string[]; intents: string[] };
 }

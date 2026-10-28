@@ -39,6 +39,19 @@ fn fleet() -> Fleet {
     fleet
 }
 
+/// The risk `pack("external_state")` declares for `pay.refund`.
+static REFUND_RISK: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+    json!({"effect": "external_state", "authority": "service", "reversibility": "irreversible",
+        "interaction": "api", "data_scope": "INTERNAL", "approval_mode": "destructive"})
+});
+
+/// An approval of `pay.refund` at `risk`, valid until `expires_at`.
+fn review(expires_at: &str, risk: Value) -> Value {
+    json!({"acme/bot": {"decision": "approved", "capabilities": ["pay.refund"],
+        "capability_risks": {"pay.refund": risk},
+        "reviewed_at": "2026-01-01T00:00:00.000000Z", "expires_at": expires_at}})
+}
+
 fn rules(fleet: &Fleet, reviews: &Value, now: &str) -> Vec<(String, String)> {
     let views = governance::views(fleet, &json!({}), reviews, now);
     governance::findings(fleet, &views, &json!([]), &json!([]), now)
@@ -50,8 +63,7 @@ fn rules(fleet: &Fleet, reviews: &Value, now: &str) -> Vec<(String, String)> {
 #[test]
 fn an_approval_stops_counting_when_it_expires() {
     let fleet = fleet();
-    let reviews = json!({"acme/bot": {"decision": "approved", "capabilities": ["pay.refund"],
-        "reviewed_at": "2026-01-01T00:00:00.000000Z", "expires_at": "2026-06-01T00:00:00.000000Z"}});
+    let reviews = review("2026-06-01T00:00:00.000000Z", REFUND_RISK.clone());
 
     let before = governance::views(&fleet, &json!({}), &reviews, "2026-05-01T00:00:00.000000Z");
     assert!(before[0].approved && !before[0].review_expired);
@@ -206,4 +218,86 @@ async fn a_change_committed_before_a_crash_is_journaled_once() {
         .unwrap();
     let kinds: Vec<Value> = journal(&records).await.iter().map(|e| e["kind"].clone()).collect();
     assert_eq!(kinds, [json!("waiver_requested"), json!("waiver_decided")]);
+}
+
+#[test]
+fn a_risk_change_under_the_same_id_voids_the_approval() {
+    let fleet = fleet();
+    let valid = "2027-01-01T00:00:00.000000Z";
+    let same = governance::views(&fleet, &json!({}), &review(valid, REFUND_RISK.clone()), NOW);
+    assert!(same[0].approved && same[0].risk_changed.is_empty());
+
+    // Every reviewed dimension counts, the approval mode included.
+    for (field, reviewed) in [
+        ("approval_mode", "network"),
+        ("reversibility", "compensatable"),
+        ("authority", "human_approved"),
+    ] {
+        let mut risk = REFUND_RISK.clone();
+        risk[field] = json!(reviewed);
+        let reviews = review(valid, risk);
+        let view = &governance::views(&fleet, &json!({}), &reviews, NOW)[0];
+        assert!(!view.approved, "{field}");
+        assert_eq!(view.risk_changed, ["pay.refund"], "{field}");
+        assert_eq!(governance::facts(view)["reviewed"], false);
+        let found = governance::findings(&fleet, std::slice::from_ref(view), &json!([]), &json!([]), NOW);
+        let drift = found.iter().find(|f| f.rule == "authority_drift").expect("drift");
+        assert_eq!(drift.evidence["risk_changed"][0]["reviewed"][field], reviewed);
+        assert!(!found.iter().any(|f| f.rule == "unreviewed"), "reported once, as drift");
+    }
+
+    // A review that recorded no risk cannot vouch for any.
+    let legacy = json!({"acme/bot": {"decision": "approved", "capabilities": ["pay.refund"], "expires_at": valid}});
+    let view = &governance::views(&fleet, &json!({}), &legacy, NOW)[0];
+    assert!(!view.approved && view.risk_changed == ["pay.refund"]);
+}
+
+#[test]
+fn packs_disagreeing_on_a_capabilitys_risk_yield_the_most_consequential() {
+    let mut fleet = fleet();
+    // A second pack the agent runs under pins pay.refund as read-only, and sorts first.
+    let mut safe = pack("none");
+    let risks = &mut safe["tooling_layer"]["adapter_registry"][0]["capability_risks"]["refund"];
+    risks["reversibility"] = json!("read_only");
+    risks["data_scope"] = json!("PUBLIC");
+    risks["authority"] = json!("human_approved");
+    safe["tooling_layer"]["adapter_registry"][0]["approval_mode"] = json!("read_only");
+    fleet.source("eu").packs["packs"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!({"pack_ref": "a@1", "pack": safe}));
+    let agent = fleet.agents.get_mut("acme/bot").unwrap();
+    agent.packs.insert("a@1".into());
+    agent.source_packs.insert(("eu".into(), "a@1".into()));
+
+    let views = governance::views(&fleet, &json!({}), &json!({}), NOW);
+    let cap = &views[0].graph[0];
+    assert!(cap.risk_conflict);
+    assert_eq!(
+        cap.risk(),
+        *REFUND_RISK,
+        "no dimension is lowered by the read-only declaration"
+    );
+    let found = rules(&fleet, &json!({}), NOW);
+    assert!(found.iter().any(|(r, _)| r == "capability_risk_conflict"), "{found:?}");
+}
+
+#[test]
+fn ids_created_in_the_same_millisecond_stay_distinct() {
+    let ids: Vec<String> = (0..2000).map(|_| towerd::records::new_id()).collect();
+    let distinct: std::collections::BTreeSet<&String> = ids.iter().collect();
+    assert_eq!(distinct.len(), ids.len());
+    assert!(ids.iter().all(|id| id.len() == 32));
+    // The loop is fast enough that ids share a millisecond, where a 12-hex-character
+    // prefix (the old id) would have collided.
+    let prefixes: std::collections::BTreeSet<&str> = ids.iter().map(|id| &id[..12]).collect();
+    assert!(prefixes.len() < ids.len(), "no two ids shared a millisecond");
+
+    let mut items = json!([]);
+    let record = json!({"id": ids[0]});
+    towerd::records::push_new(&mut items, &record).unwrap();
+    assert!(matches!(
+        towerd::records::push_new(&mut items, &record),
+        Err(RecordError::Conflict(_))
+    ));
 }

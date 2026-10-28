@@ -350,9 +350,18 @@ async fn redirects_are_never_followed() {
 
 #[tokio::test]
 async fn http_status_mapping_and_headers() {
-    let (url, seen) = server(|_| (StatusCode::CREATED, json_response(json!({"id": "rf_9"}))).into_response()).await;
+    let (url, seen) = server(|_| {
+        (
+            StatusCode::CREATED,
+            json_response(json!({"id": "rf_9", "job": {"state": "succeeded"}})),
+        )
+            .into_response()
+    })
+    .await;
     let adapter = HttpAdapter::new(&url, policy(), Arc::new(Broker)).unwrap();
-    let response = adapter.invoke(&manifest("external_state"), &call()).await;
+    let response = adapter
+        .invoke(&with_completion(manifest("external_state")), &call())
+        .await;
     assert_eq!(
         (response.outcome, response.external_ref.as_deref()),
         (EffectOutcome::Confirmed, Some("rf_9"))
@@ -360,16 +369,32 @@ async fn http_status_mapping_and_headers() {
     assert_eq!(seen.lock().unwrap()[0].0["idempotency-key"], "ctxos:op_refund");
     // A client error settles an effect as not applied only when the reviewed manifest
     // declares the provider returns it before acting; otherwise it may have acted.
-    let mut declared = manifest("external_state");
+    let mut declared = with_completion(manifest("external_state"));
     declared.recovery.not_applied_statuses = vec![422];
     for (status, manifest, expected) in [
-        (422, manifest("external_state"), (EffectOutcome::Unknown, false)),
-        (400, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (
+            422,
+            with_completion(manifest("external_state")),
+            (EffectOutcome::Unknown, false),
+        ),
+        (
+            400,
+            with_completion(manifest("external_state")),
+            (EffectOutcome::Unknown, false),
+        ),
         (422, declared.clone(), (EffectOutcome::NotApplied, true)),
         (400, declared, (EffectOutcome::Unknown, false)),
         (422, manifest("none"), (EffectOutcome::NotApplied, true)),
-        (503, manifest("external_state"), (EffectOutcome::Unknown, false)),
-        (409, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (
+            503,
+            with_completion(manifest("external_state")),
+            (EffectOutcome::Unknown, false),
+        ),
+        (
+            409,
+            with_completion(manifest("external_state")),
+            (EffectOutcome::Unknown, false),
+        ),
     ] {
         let router = Router::new().fallback(post(move || async move { StatusCode::from_u16(status).unwrap() }));
         let url = serve(router).await;
@@ -388,7 +413,9 @@ async fn http_status_mapping_and_headers() {
         }));
         let url = serve(router).await;
         let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
-        let response = adapter.invoke(&manifest("external_state"), &call()).await;
+        let response = adapter
+            .invoke(&with_completion(manifest("external_state")), &call())
+            .await;
         assert_eq!(
             (response.outcome, response.definitive, response.external_ref.as_deref()),
             (EffectOutcome::Unknown, false, Some("job_4")),
@@ -396,7 +423,7 @@ async fn http_status_mapping_and_headers() {
         );
         assert_eq!(response.output["state"], "pending");
     }
-    let mut traversal = manifest("external_state");
+    let mut traversal = with_completion(manifest("external_state"));
     traversal.protocol_tool = "../admin".into();
     assert_eq!(
         adapter.invoke(&traversal, &call()).await.outcome,
@@ -571,4 +598,69 @@ async fn mcp_client_errors_settle_effects_only_when_declared() {
             .await;
         assert_eq!((response.outcome, response.definitive), expected, "{status}");
     }
+}
+
+#[tokio::test]
+async fn http_success_bodies_are_read_under_a_declared_contract() {
+    for (body, expected, external_ref) in [
+        (
+            json!({"id": "rf_1", "job": {"state": "succeeded"}}),
+            (EffectOutcome::Confirmed, true),
+            Some("rf_1"),
+        ),
+        (
+            json!({"id": "rf_2", "job": {"state": "partially_refunded"}}),
+            (EffectOutcome::Partial, true),
+            Some("rf_2"),
+        ),
+        (
+            json!({"id": "rf_3", "job": {"state": "canceled"}}),
+            (EffectOutcome::NotApplied, true),
+            Some("rf_3"),
+        ),
+        // A 200 that reports a queued or failed-but-unlisted job is not a confirmation.
+        (
+            json!({"id": "rf_4", "job": {"state": "pending"}}),
+            (EffectOutcome::Unknown, false),
+            Some("rf_4"),
+        ),
+        (
+            json!({"id": "rf_5", "job": {"state": "failed"}}),
+            (EffectOutcome::Unknown, false),
+            Some("rf_5"),
+        ),
+        (json!({"id": "rf_6"}), (EffectOutcome::Unknown, false), Some("rf_6")),
+        (
+            json!({"id": "rf_7", "job": {"state": 3}}),
+            (EffectOutcome::Unknown, false),
+            Some("rf_7"),
+        ),
+    ] {
+        let text = body.to_string();
+        let router = Router::new().fallback(post(move || {
+            let text = text.clone();
+            async move { ([(header::CONTENT_TYPE, "application/json")], text).into_response() }
+        }));
+        let url = serve(router).await;
+        let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
+        let response = adapter
+            .invoke(&with_completion(manifest("external_state")), &call())
+            .await;
+        assert_eq!((response.outcome, response.definitive), expected, "{body}");
+        assert_eq!(response.external_ref.as_deref(), external_ref, "{body}");
+    }
+    // Without the contract an effectful call is never sent; a read-only one has no
+    // effect to confirm, and its success status stands.
+    let (url, seen) = server(|_| json_response(json!({"id": "rf_8"}))).await;
+    let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
+    let refused = adapter.invoke(&manifest("external_state"), &call()).await;
+    assert_eq!(
+        (refused.outcome, refused.definitive),
+        (EffectOutcome::NotDispatched, true)
+    );
+    assert!(seen.lock().unwrap().is_empty(), "nothing reached the provider");
+    assert_eq!(
+        adapter.invoke(&manifest("none"), &call()).await.outcome,
+        EffectOutcome::Confirmed
+    );
 }

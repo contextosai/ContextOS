@@ -43,6 +43,7 @@ async fn main() {
                     .unwrap_or_else(|e| fail(e)),
             );
             tower.spawn_collectors();
+            tower.spawn_journal_recovery();
             api::router(tower)
         }
         StoreConfig::Postgres {
@@ -58,13 +59,8 @@ async fn main() {
             let tower = Arc::new(
                 Tower::build(config, store.clone(), (*store).clone(), signer, model).unwrap_or_else(|e| fail(e)),
             );
-            // Journal any change a crash left committed but unjournaled.
-            for collection in towerd::records::COLLECTIONS {
-                if let Err(e) = tower.records.recover(collection).await {
-                    tracing::warn!(collection, error = %e, "journal recovery deferred to the next change");
-                }
-            }
             tower.spawn_collectors();
+            tower.spawn_journal_recovery();
             api::router(tower)
         }
     };

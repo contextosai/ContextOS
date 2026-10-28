@@ -32,9 +32,50 @@ pub struct Capability {
     pub packs: BTreeSet<String>,
     pub surfaced: bool,
     pub used: bool,
+    /// The packs pinning it declare different risk; the most consequential value of
+    /// each dimension is kept.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub risk_conflict: bool,
+}
+
+/// Each risk dimension's values, least to most consequential. A value not listed ranks
+/// above all of them, like the defaults for undeclared risk.
+const EFFECT: [&str; 4] = ["none", "local_state", "external_state", "physical_world"];
+const AUTHORITY: [&str; 4] = ["human_approved", "user_delegated", "service", "agent"];
+const REVERSIBILITY: [&str; 4] = ["read_only", "reversible", "compensatable", "irreversible"];
+const INTERACTION: [&str; 5] = ["api", "human_handoff", "agent_to_agent", "browser", "computer"];
+const DATA_SCOPE: [&str; 4] = ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"];
+const APPROVAL_MODE: [&str; 5] = ["read_only", "local_write", "network", "delegated", "destructive"];
+
+fn riskier(order: &[&str], current: &mut String, other: &str) {
+    let rank = |v: &str| order.iter().position(|o| *o == v).unwrap_or(order.len());
+    if rank(other) > rank(current) {
+        other.clone_into(current);
+    }
 }
 
 impl Capability {
+    /// The reviewed risk of the capability: every dimension that a review approves.
+    pub fn risk(&self) -> Value {
+        json!({"effect": self.effect, "authority": self.authority, "reversibility": self.reversibility,
+            "interaction": self.interaction, "data_scope": self.data_scope, "approval_mode": self.approval_mode})
+    }
+
+    /// Adds another pack's declaration of the same capability, keeping the most
+    /// consequential value of each dimension.
+    fn merge(&mut self, other: &Capability) {
+        if other.risk() != self.risk() {
+            self.risk_conflict = true;
+            riskier(&EFFECT, &mut self.effect, &other.effect);
+            riskier(&AUTHORITY, &mut self.authority, &other.authority);
+            riskier(&REVERSIBILITY, &mut self.reversibility, &other.reversibility);
+            riskier(&INTERACTION, &mut self.interaction, &other.interaction);
+            riskier(&DATA_SCOPE, &mut self.data_scope, &other.data_scope);
+            riskier(&APPROVAL_MODE, &mut self.approval_mode, &other.approval_mode);
+        }
+        self.packs.extend(other.packs.iter().cloned());
+    }
+
     pub fn external(&self) -> bool {
         matches!(self.effect.as_str(), "external_state" | "physical_world")
     }
@@ -82,6 +123,7 @@ pub fn pack_capabilities(pack_ref: &str, pack: &Value) -> Vec<Capability> {
                 packs: BTreeSet::from([pack_ref.to_owned()]),
                 surfaced: false,
                 used: false,
+                risk_conflict: false,
             });
         }
     }
@@ -124,11 +166,7 @@ pub fn graph(agent: &AgentActivity, packs: &BTreeMap<(String, String), Value>) -
         let Some(pack) = packs.get(key) else { continue };
         let pack_ref = &key.1;
         for cap in pack_capabilities(pack_ref, pack) {
-            caps.entry(cap.id.clone())
-                .and_modify(|c| {
-                    c.packs.extend(cap.packs.clone());
-                })
-                .or_insert(cap);
+            caps.entry(cap.id.clone()).and_modify(|c| c.merge(&cap)).or_insert(cap);
         }
     }
     // Capabilities seen at admission or in use but not pinned in any known pack still
@@ -146,6 +184,7 @@ pub fn graph(agent: &AgentActivity, packs: &BTreeMap<(String, String), Value>) -
             packs: BTreeSet::new(),
             surfaced: false,
             used: false,
+            risk_conflict: false,
         });
     }
     for cap in caps.values_mut() {
@@ -157,19 +196,7 @@ pub fn graph(agent: &AgentActivity, packs: &BTreeMap<(String, String), Value>) -
 
 /// `sha256:` of the graph's edges and their risk, for review and drift.
 pub fn graph_digest(caps: &[Capability]) -> String {
-    let edges: Vec<Value> = caps
-        .iter()
-        .map(|c| {
-            json!([
-                c.id,
-                c.effect,
-                c.authority,
-                c.reversibility,
-                c.interaction,
-                c.data_scope
-            ])
-        })
-        .collect();
+    let edges: Vec<Value> = caps.iter().map(|c| json!([c.id, c.risk()])).collect();
     contextos_contract::canonical::sha256_canonical(&json!(edges)).unwrap_or_default()
 }
 
@@ -380,6 +407,7 @@ mod tests {
             packs: BTreeSet::new(),
             surfaced: true,
             used: false,
+            risk_conflict: false,
         }
     }
 
