@@ -39,6 +39,10 @@ pub struct AgentView {
     pub activity: AgentActivity,
     pub declaration: Option<Value>,
     pub review: Option<Value>,
+    /// The review approves the agent and has not expired.
+    pub approved: bool,
+    /// The review approved the agent, but its validity has passed.
+    pub review_expired: bool,
     pub graph: Vec<Capability>,
     pub digest: String,
     pub requirement: Requirement,
@@ -49,7 +53,17 @@ pub struct AgentView {
     pub approval_gates: Vec<Value>,
 }
 
-pub fn views(fleet: &Fleet, declarations: &Value, reviews: &Value) -> Vec<AgentView> {
+/// Whether a stored review approves its agent at `now`: an approval counts only until
+/// it expires, and one without an expiry never counts.
+pub fn approval(review: Option<&Value>, now: &str) -> (bool, bool) {
+    let Some(r) = review.filter(|r| r["decision"] == "approved") else {
+        return (false, false);
+    };
+    let current = r["expires_at"].as_str().is_some_and(|e| e > now);
+    (current, !current)
+}
+
+pub fn views(fleet: &Fleet, declarations: &Value, reviews: &Value, now: &str) -> Vec<AgentView> {
     let packs = authority::packs(fleet);
     let mut keys: BTreeSet<String> = fleet.agents.keys().cloned().collect();
     // Declared agents Tower has never seen run are part of the inventory too.
@@ -69,6 +83,7 @@ pub fn views(fleet: &Fleet, declarations: &Value, reviews: &Value) -> Vec<AgentV
                 activity,
                 declarations.get(&key).cloned(),
                 reviews.get(&key).cloned(),
+                now,
             )
         })
         .collect()
@@ -76,11 +91,13 @@ pub fn views(fleet: &Fleet, declarations: &Value, reviews: &Value) -> Vec<AgentV
 
 fn view(
     fleet: &Fleet,
-    packs: &BTreeMap<String, Value>,
+    packs: &BTreeMap<(String, String), Value>,
     activity: AgentActivity,
     declaration: Option<Value>,
     review: Option<Value>,
+    now: &str,
 ) -> AgentView {
+    let (approved, review_expired) = approval(review.as_ref(), now);
     let graph = authority::graph(&activity, packs);
     let contexts: Vec<String> = declaration
         .as_ref()
@@ -107,13 +124,13 @@ fn view(
     let digest = authority::graph_digest(&graph);
     let reviewed: BTreeSet<String> = review
         .as_ref()
-        .filter(|r| r["decision"] == "approved")
+        .filter(|_| approved)
         .and_then(|r| r["capabilities"].as_array().cloned())
         .unwrap_or_default()
         .iter()
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect();
-    let drift = if review.as_ref().is_some_and(|r| r["decision"] == "approved") {
+    let drift = if approved {
         graph
             .iter()
             .filter(|c| !reviewed.contains(&c.id))
@@ -123,7 +140,7 @@ fn view(
         Vec::new()
     };
     let approval_gates = activity
-        .packs
+        .source_packs
         .iter()
         .filter_map(|p| packs.get(p))
         .flat_map(|p| {
@@ -138,6 +155,8 @@ fn view(
         activity,
         declaration,
         review,
+        approved,
+        review_expired,
         graph,
         digest,
         requirement,
@@ -159,7 +178,8 @@ pub fn facts(view: &AgentView) -> Value {
             "tenants": a.tenants, "packs": a.packs, "intents": a.intents, "models": a.models, "evaluators": a.evaluators},
         "declared": !decl.is_null(),
         "declaration": decl,
-        "reviewed": view.review.as_ref().is_some_and(|r| r["decision"] == "approved"),
+        "reviewed": view.approved,
+        "review_expired": view.review_expired,
         "review": view.review,
         "capabilities": g,
         "exposure": {
@@ -242,13 +262,19 @@ pub fn builtin(view: &AgentView, now_hour: i64) -> Vec<Finding> {
             json!({"runs": a.runs, "first_seen": a.first_seen, "admitted_by": a.admitted_by}),
         ));
     }
-    let approved = view.review.as_ref().is_some_and(|r| r["decision"] == "approved");
-    if !approved && (lifecycle == "production" || (a.runs > 0 && !external.is_empty())) {
+    if !view.approved && (lifecycle == "production" || (a.runs > 0 && !external.is_empty())) {
+        let expired = view.review.as_ref().filter(|_| view.review_expired);
         out.push(finding(
             "unreviewed",
             if external.is_empty() { "medium" } else { "high" },
             view,
-            format!("{name} has not passed a risk review"),
+            match expired {
+                Some(r) => format!(
+                    "{name}'s risk review expired at {}",
+                    r["expires_at"].as_str().unwrap_or("?")
+                ),
+                None => format!("{name} has not passed a risk review"),
+            },
             format!(
                 "Required profile {} ({}).",
                 view.requirement.profile,
@@ -476,6 +502,22 @@ pub fn findings(fleet: &Fleet, views: &[AgentView], guardrails: &Value, waivers:
             out.extend(guardrail(rule, view, &facts));
         }
     }
+    for (pack_ref, sources) in authority::pack_conflicts(&authority::packs(fleet)) {
+        out.push(Finding {
+            id: format!("pack_version_conflict:{pack_ref}"),
+            rule: "pack_version_conflict".into(),
+            severity: "high",
+            agent: None,
+            source: None,
+            title: format!("{pack_ref} has different content in {}", sources.join(", ")),
+            detail: "One pack version names different packs. Each agent's authority is read from the source \
+                     that admitted its runs, but reviews and reports that cite the version are ambiguous."
+                .into(),
+            remediation: "Publish changed content under a new version, and pin that version in every source.".into(),
+            evidence: json!({"pack_ref": pack_ref, "sources": sources}),
+            waiver: None,
+        });
+    }
     for state in fleet.sources.values() {
         if let Some(broken) = &state.broken {
             out.push(Finding {
@@ -593,6 +635,7 @@ mod tests {
             ..AgentActivity::default()
         };
         a.packs.insert("p@1".into());
+        a.source_packs.insert(("eu".into(), "p@1".into()));
         a.sources.insert("eu".into());
         a.admitted_profiles.insert("contextos.core".into());
         a.capabilities.insert(
@@ -611,7 +654,9 @@ mod tests {
         src.packs = json!({"packs": [{"pack_ref": "p@1", "pack": {"tooling_layer": {"adapter_registry": adapters}, "policy_layer": {"approval_gates": []}}}]});
         src.deployment = json!({"support": {"supported_controls": [{"control_id": "identity.authenticated"}]}});
         fleet.agents.insert(a.key.clone(), a);
-        let view = views(&fleet, &Value::Null, &Value::Null).pop().unwrap();
+        let view = views(&fleet, &Value::Null, &Value::Null, "2026-01-01T00:00:00Z")
+            .pop()
+            .unwrap();
         (fleet, view)
     }
 

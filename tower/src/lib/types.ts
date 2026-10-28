@@ -89,6 +89,8 @@ export interface Facts {
   declared: boolean;
   declaration: Record<string, unknown> | null;
   reviewed: boolean;
+  /** The review approved the agent, but its validity has passed. */
+  review_expired: boolean;
   review: Record<string, unknown> | null;
   exposure: Record<string, unknown>;
   controls: { required_profile: string; required: string[]; missing: Record<string, string[]>; admitted_profiles: string[]; features: string[] };

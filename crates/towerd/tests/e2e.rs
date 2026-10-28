@@ -262,10 +262,21 @@ async fn governance_actions_need_the_right_role_and_a_second_person() {
         "PUT",
         &format!("/api/agents/{key}/declaration"),
         "owner",
-        Some(declaration),
+        Some(declaration.clone()),
     )
     .await;
     assert_eq!(status, 200);
+    // After risk transfers the agent to another team, its former owners cannot write
+    // it back: the team is checked against the stored declaration at commit.
+    let mut transferred = declaration.clone();
+    transferred["team"] = json!("payments");
+    let path = format!("/api/agents/{key}/declaration");
+    assert_eq!(call(&base, "PUT", &path, "risk-b", Some(transferred)).await.0, 200);
+    assert_eq!(
+        call(&base, "PUT", &path, "owner", Some(declaration.clone())).await.0,
+        403
+    );
+    assert_eq!(call(&base, "PUT", &path, "risk-b", Some(declaration)).await.0, 200);
     // A risk reviewer may declare any team's agent (owners only their own).
     let (status, _) = call(
         &base,
@@ -359,6 +370,8 @@ async fn governance_actions_need_the_right_role_and_a_second_person() {
     assert_eq!(
         kinds,
         [
+            "agent_declared",
+            "agent_declared",
             "agent_declared",
             "agent_declared",
             "agent_reviewed",

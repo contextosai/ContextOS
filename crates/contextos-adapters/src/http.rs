@@ -8,8 +8,9 @@
 //! |---|---|
 //! | 2xx except 202, 206, 207 | confirmed (definitive) |
 //! | 202, 206, 207 (accepted, partial or multi-status) | unknown; a response `id` becomes the external reference |
-//! | 400, 401, 403, 404, 405, 413, 415, 422 | not applied (definitive; rejected before execution) |
-//! | anything else (3xx, 408, 409, 429, 5xx), lost or oversized response | unknown |
+//! | 4xx listed in the manifest's `recovery.not_applied_statuses` | not applied (definitive) |
+//! | 400, 401, 403, 404, 405, 413, 415, 422 from a read-only capability | not applied (definitive) |
+//! | any other 4xx, 3xx, 5xx, lost or oversized response | unknown |
 //! | connection never established | not dispatched (definitive) |
 //!
 //! Reconciliation queries an accepted job only when the pinned manifest declares the
@@ -20,11 +21,18 @@
 //! Acceptance is not completion (RFC 9110 §15.3.3): a 202 says the provider queued the
 //! work, not that the effect's postcondition holds, so the outcome stays unknown until
 //! reconciliation establishes it.
+//!
+//! A client error is not proof of absence either. HTTP gives a 4xx no guarantee that the
+//! handler made no change before it failed, and a definitive "not applied" releases
+//! shared exposure and permits a retry. An effectful capability is therefore settled as
+//! not applied only by the statuses its reviewed manifest declares the provider returns
+//! before any effect; a read-only capability has no effect to apply.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
+use contextos_contract::types::ActionEffect;
 use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome, is_path_segment};
 use serde_json::{Map, Value};
 use url::Url;
@@ -135,7 +143,7 @@ impl Adapter for HttpAdapter {
                         external_ref,
                         cost_units: None,
                     },
-                    s if REJECTED_BEFORE_EXECUTION.contains(&s) => AdapterResponse {
+                    s if rejected_before_execution(manifest, s) => AdapterResponse {
                         outcome: EffectOutcome::NotApplied,
                         definitive: true,
                         output,
@@ -224,6 +232,13 @@ impl HttpAdapter {
             },
         }
     }
+}
+
+/// Whether `status` establishes that the effect was not applied: a status the
+/// manifest declares for this provider, or a request rejection when there is no effect.
+pub(crate) fn rejected_before_execution(manifest: &CapabilityManifest, status: u16) -> bool {
+    manifest.recovery.not_applied_statuses.contains(&status)
+        || (manifest.action_risk.effect == ActionEffect::None && REJECTED_BEFORE_EXECUTION.contains(&status))
 }
 
 pub(crate) fn not_dispatched() -> AdapterResponse {

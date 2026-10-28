@@ -57,7 +57,16 @@ pub struct Recovery {
     /// that have no protocol-level task status (HTTP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion: Option<CompletionCheck>,
+    /// HTTP client-error statuses the provider guarantees it returns only when it did
+    /// not and will not apply the effect (for example, validation that runs before any
+    /// write). A status code alone does not establish that, so for an effectful HTTP
+    /// capability every other 4xx leaves the outcome unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_applied_statuses: Vec<u16>,
 }
+
+/// Statuses a manifest may declare as not applied, at most.
+pub const MAX_NOT_APPLIED_STATUSES: usize = 16;
 
 /// The provider's reviewed completion contract for an accepted job: the status
 /// endpoint, where the job state is in its response and which states are final.
@@ -215,6 +224,8 @@ pub enum ManifestError {
     Completion(String, &'static str),
     #[error("capability {0} compensation is invalid: {1}")]
     Compensation(String, &'static str),
+    #[error("capability {0} not_applied_statuses must list at most 16 distinct 4xx statuses")]
+    NotAppliedStatuses(String),
 }
 
 impl CompletionCheck {
@@ -288,6 +299,13 @@ impl CapabilityManifest {
             completion
                 .validate()
                 .map_err(|reason| ManifestError::Completion(id.clone(), reason))?;
+        }
+        let statuses = &self.recovery.not_applied_statuses;
+        if statuses.len() > MAX_NOT_APPLIED_STATUSES
+            || statuses.iter().any(|s| !(400..500).contains(s))
+            || statuses.iter().collect::<std::collections::BTreeSet<_>>().len() != statuses.len()
+        {
+            return Err(ManifestError::NotAppliedStatuses(id.clone()));
         }
         if self.timeout_ms == 0 || self.timeout_ms > 600_000 {
             return Err(ManifestError::Timeout(id.clone()));

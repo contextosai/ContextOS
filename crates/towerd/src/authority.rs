@@ -89,23 +89,40 @@ pub fn pack_capabilities(pack_ref: &str, pack: &Value) -> Vec<Capability> {
 }
 
 /// Every pack the fleet's sources have loaded, by reference.
-pub fn packs(fleet: &Fleet) -> BTreeMap<String, Value> {
+/// Pinned packs by `(source, pack_ref)`. Sources are independent runtimes, so the same
+/// `id@version` is resolved within the source that admitted the run, never across.
+pub fn packs(fleet: &Fleet) -> BTreeMap<(String, String), Value> {
     let mut out = BTreeMap::new();
     for state in fleet.sources.values() {
         for p in state.packs["packs"].as_array().into_iter().flatten() {
             if let Some(r) = p["pack_ref"].as_str() {
-                out.insert(r.to_owned(), p["pack"].clone());
+                out.insert((state.id.clone(), r.to_owned()), p["pack"].clone());
             }
         }
     }
     out
 }
 
+/// Pack references whose content differs between sources, with the sources that
+/// publish each. One `id@version` should name one pack everywhere.
+pub fn pack_conflicts(packs: &BTreeMap<(String, String), Value>) -> BTreeMap<String, Vec<String>> {
+    let mut by_ref: BTreeMap<&str, Vec<(&str, &Value)>> = BTreeMap::new();
+    for ((source, pack_ref), pack) in packs {
+        by_ref.entry(pack_ref).or_default().push((source, pack));
+    }
+    by_ref
+        .into_iter()
+        .filter(|(_, versions)| versions.iter().any(|(_, p)| *p != versions[0].1))
+        .map(|(r, versions)| (r.to_owned(), versions.iter().map(|(s, _)| (*s).to_owned()).collect()))
+        .collect()
+}
+
 /// The agent's authority graph: the capabilities of the packs it runs under.
-pub fn graph(agent: &AgentActivity, packs: &BTreeMap<String, Value>) -> Vec<Capability> {
+pub fn graph(agent: &AgentActivity, packs: &BTreeMap<(String, String), Value>) -> Vec<Capability> {
     let mut caps: BTreeMap<String, Capability> = BTreeMap::new();
-    for pack_ref in &agent.packs {
-        let Some(pack) = packs.get(pack_ref) else { continue };
+    for key in &agent.source_packs {
+        let Some(pack) = packs.get(key) else { continue };
+        let pack_ref = &key.1;
         for cap in pack_capabilities(pack_ref, pack) {
             caps.entry(cap.id.clone())
                 .and_modify(|c| {

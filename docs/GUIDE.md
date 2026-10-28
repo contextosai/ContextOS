@@ -437,6 +437,20 @@ which the provider guarantees the job will never apply. Any other state, a missi
 (`404`) or a failed lookup stays unknown, because absence is not proof of
 non-application.
 
+A client error from an effectful HTTP capability is unknown too, unless the manifest
+lists that status. The same applies to HTTP client errors from an MCP endpoint. HTTP does not promise that a handler which answered `400` or `422`
+changed nothing first. Treating such an answer as not applied would release shared
+exposure and permit a retry that applies the effect twice. List only the statuses the
+provider documents as returned before any effect:
+
+```json
+"recovery": {"strategy": "manual_reconcile", "max_attempts": 1, "retry_delays_seconds": [],
+  "not_applied_statuses": [400, 401, 403, 422]}
+```
+
+Read-only capabilities have no effect to apply. For them, `400`, `401`, `403`, `404`,
+`405`, `413`, `415` and `422` remain definitive.
+
 `status` is `resolved`, `pending` (still running), `no_change` (nothing unknown to
 resolve; conflicting facts need escalation) or `rejected` with reasons such as
 `reconcile_requires_operator`. A recorded fact cannot be overwritten by a later

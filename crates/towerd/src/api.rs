@@ -169,6 +169,12 @@ impl From<RecordError> for ApiError {
                 "unavailable",
                 "Tower's store or journal is unavailable.",
             ),
+            RecordError::JournalPending => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "journal_pending",
+                "The change is saved, but its journal entry could not be written yet. It is journaled \
+                 before this collection changes again; no other change is accepted until then.",
+            ),
         }
     }
 }
@@ -248,7 +254,7 @@ async fn snapshot<S: DocumentStore, L: AppendLog>(t: &Tower<S, L>) -> Result<Sna
     let waivers = t.records.load("waivers").await?;
     let now = wall_clock();
     let fleet = t.fleet.read().await;
-    let views = governance::views(&fleet, &declarations, &reviews);
+    let views = governance::views(&fleet, &declarations, &reviews, &now);
     let findings = governance::findings(&fleet, &views, &guardrails, &waivers, &now);
     let anomalies = governance::anomalies(&fleet);
     Ok(Snapshot {
@@ -276,7 +282,8 @@ fn agent_row(view: &AgentView, findings: &[Finding]) -> Value {
         "business_unit": d.map(|d| d["business_unit"].clone()),
         "lifecycle": d.map_or(json!("undeclared"), |d| d["lifecycle"].clone()),
         "purpose": d.map(|d| d["purpose"].clone()),
-        "reviewed": view.review.as_ref().is_some_and(|r| r["decision"] == "approved"),
+        "reviewed": view.approved,
+        "review_expired": view.review_expired,
         "required_profile": view.requirement.profile,
         "capabilities": view.graph.len(),
         "external": view.graph.iter().filter(|c| c.external()).count(),
@@ -341,7 +348,7 @@ async fn posture<S: DocumentStore, L: AppendLog>(State(t): State<Shared<S, L>>, 
     ok(json!({
         "now": snap.now,
         "agents": {"total": n, "declared": count(&|v| v.declaration.is_some()),
-            "reviewed": count(&|v| v.review.as_ref().is_some_and(|r| r["decision"] == "approved")),
+            "reviewed": count(&|v| v.approved),
             "external_effects": external,
             "irreversible_external": count(&|v| v.graph.iter().any(|c| c.external() && c.irreversible())),
             "by_required_profile": by_profile, "by_lifecycle": by_lifecycle},
@@ -570,14 +577,8 @@ async fn declare<S: DocumentStore, L: AppendLog>(
     let c = caller_any(&t, &headers, &["owner", "risk"])?;
     let declaration: Declaration = body(&bytes)?;
     declaration.check().map_err(ApiError::bad)?;
-    let existing = t.records.load("declarations").await?;
     let team_ok = |team: &str| c.teams.iter().any(|t| t == team);
-    if !c.has("risk") {
-        let current_team = existing[&key]["team"].as_str();
-        if !team_ok(&declaration.team) || current_team.is_some_and(|ct| !team_ok(ct)) {
-            return Err(ApiError::forbidden("Owners declare agents of their own teams."));
-        }
-    }
+    let owner_only = !c.has("risk");
     let now = wall_clock();
     let mut record = serde_json::to_value(&declaration).unwrap_or(Value::Null);
     record["declared_by"] = json!(c.principal_id);
@@ -590,7 +591,14 @@ async fn declare<S: DocumentStore, L: AppendLog>(
             json!({"agent": key, "declaration": record, "by": c.principal_id}),
             &now,
             |items| {
-                object(items).insert(key.clone(), stored.clone());
+                // Checked against the stored declaration on every attempt, so a
+                // concurrent transfer to another team is never overwritten.
+                let items = object(items);
+                let current_team = items.get(&key).and_then(|d| d["team"].as_str());
+                if owner_only && (!team_ok(&declaration.team) || current_team.is_some_and(|ct| !team_ok(ct))) {
+                    return Err(RecordError::Forbidden("Owners declare agents of their own teams."));
+                }
+                items.insert(key.clone(), stored.clone());
                 Ok(())
             },
         )
@@ -660,6 +668,16 @@ async fn review<S: DocumentStore, L: AppendLog>(
         )
         .await?;
     ok(record)
+}
+
+/// Appends a record whose `id` no stored record has.
+fn push_new(items: &mut Value, record: &Value) -> Result<(), RecordError> {
+    let items = array(items);
+    if items.iter().any(|i| i["id"] == record["id"]) {
+        return Err(RecordError::Conflict("a record with this id exists"));
+    }
+    items.push(record.clone());
+    Ok(())
 }
 
 fn add_days(now: &str, days: u32) -> String {
@@ -758,7 +776,7 @@ async fn create_guardrail<S: DocumentStore, L: AppendLog>(
         return Err(ApiError::bad(format!("The rule fails to evaluate: {errors}")));
     }
     let now = wall_clock();
-    let id = uuid::Uuid::now_v7().simple().to_string()[..12].to_owned();
+    let id = uuid::Uuid::now_v7().simple().to_string();
     let record = json!({"id": id, "title": g.title, "description": g.description, "severity": g.severity, "rule": g.rule,
         "remediation": g.remediation, "origin": g.origin.unwrap_or_else(|| "manual".into()), "intent": g.intent,
         "status": "draft", "created_by": c.principal_id, "created_at": now});
@@ -769,10 +787,7 @@ async fn create_guardrail<S: DocumentStore, L: AppendLog>(
             "guardrail_drafted",
             json!({"guardrail": record}),
             &now,
-            |items| {
-                array(items).push(stored.clone());
-                Ok(())
-            },
+            |items| push_new(items, &stored),
         )
         .await?;
     Ok((StatusCode::CREATED, axum::Json(record)).into_response())
@@ -888,7 +903,7 @@ async fn request_waiver<S: DocumentStore, L: AppendLog>(
         ));
     }
     let now = wall_clock();
-    let id = uuid::Uuid::now_v7().simple().to_string()[..12].to_owned();
+    let id = uuid::Uuid::now_v7().simple().to_string();
     let record = json!({"id": id, "rule": w.rule, "agent": w.agent, "reason": w.reason, "days": w.days, "status": "requested",
         "requested_by": c.principal_id, "requested_at": now});
     let stored = record.clone();
@@ -898,10 +913,7 @@ async fn request_waiver<S: DocumentStore, L: AppendLog>(
             "waiver_requested",
             json!({"waiver": record}),
             &now,
-            |items| {
-                array(items).push(stored.clone());
-                Ok(())
-            },
+            |items| push_new(items, &stored),
         )
         .await?;
     Ok((StatusCode::CREATED, axum::Json(record)).into_response())

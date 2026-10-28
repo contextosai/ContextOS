@@ -463,7 +463,9 @@ function Review({ d, agentKey, canAssess }: { d: AgentDetail; agentKey: string; 
         {review ? (
           <Kv
             rows={[
-              ["Decision", <Badge key="d" tone={review.decision === "approved" ? "ok" : "warn"}>{String(review.decision)}</Badge>],
+              ["Decision", d.facts.review_expired
+                ? <Badge key="d" tone="warn">approved, expired</Badge>
+                : <Badge key="d" tone={review.decision === "approved" ? "ok" : "warn"}>{String(review.decision)}</Badge>],
               ["By", `${String(review.reviewed_by)}, ${time(String(review.reviewed_at))}`],
               ["Expires", time(String(review.expires_at))],
               ["Profile at review", String(review.required_profile)],

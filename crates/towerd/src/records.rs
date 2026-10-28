@@ -2,9 +2,23 @@
 //!
 //! Records are low-cardinality collections (one per kind) in the document store, so
 //! they survive restarts on PostgreSQL and change only by compare-and-swap. Every
-//! change to them is first written to Tower's journal: an Ed25519-signed hash chain
-//! (the same format as a runtime's audit chain), so governance decisions are evidence
-//! too, verifiable with `ctx audit-verify` against `GET /api/journal/keys`.
+//! change to them is journaled in Tower's journal: an Ed25519-signed hash chain (the
+//! same format as a runtime's audit chain), so governance decisions are evidence too,
+//! verifiable with `ctx audit-verify` against `GET /api/journal/keys`.
+//!
+//! The journal is an outbox of the records. A change commits together with its
+//! journal entry, marked pending, in one compare-and-swap; the entry is signed only
+//! after that commit, so the journal never holds an event for a change that did not
+//! happen. An entry left pending (a crash, or the journal unavailable) is journaled
+//! before the collection changes again.
+//!
+//! One writer at a time publishes a pending entry: the committer holds a lease on it,
+//! written by the same compare-and-swap, and recovery takes over only entries whose
+//! lease has expired, claiming them by compare-and-swap first. Each entry's payload
+//! carries a `change_id`, and a publisher looks for it in the journal before
+//! appending, so an entry already journaled is not signed again. An entry is journaled
+//! twice only if its publisher stalls for longer than the lease between that check and
+//! its append; both copies then name the same `change_id`.
 
 use std::sync::Arc;
 
@@ -14,6 +28,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const NAMESPACE: &str = "tower";
+
+/// How long a writer owns publishing a pending entry before recovery may take it over.
+const PUBLISH_LEASE_MICROS: u64 = 30_000_000;
+
+fn micros_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
+}
+
+/// The record collections, recovered at startup.
+pub const COLLECTIONS: [&str; 4] = ["declarations", "reviews", "guardrails", "waivers"];
 
 /// What an agent's owner states about it. Inputs to review, never evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -71,6 +97,10 @@ pub enum RecordError {
     Store(#[from] StoreError),
     #[error("journal unavailable")]
     Journal,
+    /// The change is committed; its journal entry is pending and is written before the
+    /// collection changes again.
+    #[error("journal entry pending")]
+    JournalPending,
 }
 
 pub struct Records<S, L> {
@@ -106,30 +136,43 @@ impl<S: DocumentStore, L: AppendLog> Records<S, L> {
             .map_or(Value::Null, |v| v.body["items"].clone()))
     }
 
-    /// Journals `kind` with `payload`, then changes the collection by compare-and-swap.
-    /// The change function sees the current items and may refuse.
+    /// Changes the collection by compare-and-swap, then journals `kind` with `payload`
+    /// (see the module documentation). The change function sees the current items and
+    /// may refuse; a refused change is never journaled.
     pub async fn change<R>(
         &self,
         collection: &str,
         kind: &str,
-        payload: Value,
+        mut payload: Value,
         at: &str,
         mut change: impl FnMut(&mut Value) -> Result<R, RecordError>,
     ) -> Result<R, RecordError> {
-        // Validate against the current state before journalling, so a refused change
-        // leaves no journal entry.
-        let current = self.store.get(&key(collection)).await?;
-        let mut probe = current.as_ref().map_or(Value::Null, |c| c.body["items"].clone());
-        change(&mut probe)?;
-        self.journal
-            .append(NAMESPACE, kind, payload, at)
+        // Earlier changes' evidence first: nothing changes while it cannot be written.
+        self.recover(collection).await?;
+        let change_id = uuid::Uuid::now_v7().simple().to_string();
+        if let Some(fields) = payload.as_object_mut() {
+            fields.insert("change_id".into(), json!(change_id));
+        }
+        let after = self
+            .journal
+            .log()
+            .head(NAMESPACE)
             .await
-            .map_err(|_| RecordError::Journal)?;
-        let mut current = current;
+            .map_err(|_| RecordError::Journal)?
+            .map_or(0, |row| row.sequence);
+        let entry = json!({"change_id": change_id, "kind": kind, "payload": payload, "at": at, "after": after,
+            "claimed_until": micros_now() + PUBLISH_LEASE_MICROS});
+        let mut current = self.store.get(&key(collection)).await?;
+        let mut committed = None;
         for _ in 0..16 {
             let mut items = current.as_ref().map_or(Value::Null, |c| c.body["items"].clone());
             let result = change(&mut items)?;
-            let body = json!({"items": items});
+            let mut pending = current
+                .as_ref()
+                .and_then(|c| c.body["pending"].as_array().cloned())
+                .unwrap_or_default();
+            pending.push(entry.clone());
+            let body = json!({"items": items, "pending": pending});
             let written = match &current {
                 None => self.store.create(&key(collection), &body).await.map(|_| ()),
                 Some(c) => self
@@ -139,8 +182,127 @@ impl<S: DocumentStore, L: AppendLog> Records<S, L> {
                     .map(|_| ()),
             };
             match written {
-                Ok(()) => return Ok(result),
+                Ok(()) => {
+                    committed = Some(result);
+                    break;
+                }
                 Err(e) if e.is_conflict() => current = self.store.get(&key(collection)).await?,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let result = committed.ok_or(RecordError::Conflict("too much contention"))?;
+        if self.publish(&entry).await.is_err() {
+            // Give the entry up, so the collection's next change journals it first.
+            let _ = self.claim(collection, Some(&change_id), 0).await;
+            return Err(RecordError::JournalPending);
+        }
+        // Best effort: an entry left marked pending is found in the journal and dropped.
+        let _ = self.settle(collection, &[change_id]).await;
+        Ok(result)
+    }
+
+    /// Journals the collection's pending entries that no writer is publishing (their
+    /// lease has expired), and clears them. Entries another writer holds are left to it.
+    pub async fn recover(&self, collection: &str) -> Result<(), RecordError> {
+        let claimed = self
+            .claim(collection, None, micros_now() + PUBLISH_LEASE_MICROS)
+            .await?;
+        if claimed.is_empty() {
+            return Ok(());
+        }
+        let mut ids = Vec::with_capacity(claimed.len());
+        for entry in &claimed {
+            self.publish(entry).await.map_err(|_| RecordError::Journal)?;
+            ids.extend(entry["change_id"].as_str().map(str::to_owned));
+        }
+        self.settle(collection, &ids).await
+    }
+
+    /// Sets the lease of pending entries to `until` by compare-and-swap and returns
+    /// them: the entry `change_id` names, or, with none, every entry whose lease has
+    /// expired.
+    async fn claim(&self, collection: &str, change_id: Option<&str>, until: u64) -> Result<Vec<Value>, RecordError> {
+        for _ in 0..16 {
+            let Some(current) = self.store.get(&key(collection)).await? else {
+                return Ok(Vec::new());
+            };
+            let now = micros_now();
+            let mut pending = current.body["pending"].as_array().cloned().unwrap_or_default();
+            let mut claimed = Vec::new();
+            for entry in &mut pending {
+                let chosen = match change_id {
+                    Some(id) => entry["change_id"] == id,
+                    None => entry["claimed_until"].as_u64().unwrap_or(0) <= now,
+                };
+                if chosen {
+                    entry["claimed_until"] = json!(until);
+                    claimed.push(entry.clone());
+                }
+            }
+            if claimed.is_empty() {
+                return Ok(claimed);
+            }
+            let body = json!({"items": current.body["items"], "pending": pending});
+            match self
+                .store
+                .compare_and_swap(&key(collection), current.revision, &body)
+                .await
+            {
+                Ok(_) => return Ok(claimed),
+                Err(e) if e.is_conflict() => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(RecordError::Conflict("too much contention"))
+    }
+
+    /// Appends a pending entry unless the journal already holds its `change_id`.
+    async fn publish(&self, entry: &Value) -> Result<(), RecordError> {
+        let id = &entry["change_id"];
+        let log = self.journal.log();
+        let mut from = entry["after"].as_u64().unwrap_or(0) + 1;
+        loop {
+            let rows = log.range(NAMESPACE, from, 500).await?;
+            if rows.iter().any(|r| r.body["payload"]["change_id"] == *id) {
+                return Ok(());
+            }
+            match rows.last() {
+                Some(last) if rows.len() == 500 => from = last.sequence + 1,
+                _ => break,
+            }
+        }
+        let kind = entry["kind"].as_str().unwrap_or_default();
+        let at = entry["at"].as_str().unwrap_or_default();
+        self.journal
+            .append(NAMESPACE, kind, entry["payload"].clone(), at)
+            .await
+            .map(|_| ())
+            .map_err(|_| RecordError::Journal)
+    }
+
+    /// Removes journaled entries from the collection's pending list.
+    async fn settle(&self, collection: &str, ids: &[String]) -> Result<(), RecordError> {
+        for _ in 0..16 {
+            let Some(current) = self.store.get(&key(collection)).await? else {
+                return Ok(());
+            };
+            let pending = current.body["pending"].as_array().cloned().unwrap_or_default();
+            let left: Vec<Value> = pending
+                .iter()
+                .filter(|e| !ids.iter().any(|id| e["change_id"] == id.as_str()))
+                .cloned()
+                .collect();
+            if left.len() == pending.len() {
+                return Ok(());
+            }
+            let body = json!({"items": current.body["items"], "pending": left});
+            match self
+                .store
+                .compare_and_swap(&key(collection), current.revision, &body)
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(e) if e.is_conflict() => {}
                 Err(e) => return Err(e.into()),
             }
         }
