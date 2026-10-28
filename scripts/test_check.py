@@ -26,7 +26,7 @@ class CheckScriptTests(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
             for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
-                         "compensation", "tower"):
+                         "compensation", "why-not-a-row-lock", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
@@ -36,6 +36,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += f"echo 'peer coordination complete'\nexit {peer_exit}\n"
                 if name == "compensation":
                     text += f"echo 'saga compensated'\nexit {compensation_exit}\n"
+                if name == "why-not-a-row-lock":
+                    text += "echo 'row lock comparison complete'\n"
                 if name in ("agent-loop", "tower"):
                     if marker:
                         text += "echo 'run completed'\n" if name == "agent-loop" else "echo 'tower sees the fleet'\n"
