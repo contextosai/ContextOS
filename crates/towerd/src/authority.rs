@@ -25,7 +25,11 @@ pub struct Capability {
     pub effect: String,
     pub authority: String,
     pub reversibility: String,
+    /// The most consequential interaction kind, for display. Kinds are not ordered by
+    /// the controls they need, so those derive from `interactions`.
     pub interaction: String,
+    /// Every interaction kind its packs declare: a merge keeps each variant's controls.
+    pub interactions: BTreeSet<String>,
     pub data_scope: String,
     pub approval_mode: String,
     /// Packs that pin it.
@@ -57,8 +61,19 @@ fn riskier(order: &[&str], current: &mut String, other: &str) {
 impl Capability {
     /// The reviewed risk of the capability: every dimension that a review approves.
     pub fn risk(&self) -> Value {
-        json!({"effect": self.effect, "authority": self.authority, "reversibility": self.reversibility,
-            "interaction": self.interaction, "data_scope": self.data_scope, "approval_mode": self.approval_mode})
+        let mut risk = json!({"effect": self.effect, "authority": self.authority, "reversibility": self.reversibility,
+            "interaction": self.interaction, "data_scope": self.data_scope, "approval_mode": self.approval_mode});
+        // Only a merged capability has several kinds; a single kind keeps the fingerprint
+        // reviews recorded before kinds were kept.
+        if self.interactions.len() > 1 {
+            risk["interactions"] = json!(self.interactions);
+        }
+        risk
+    }
+
+    /// Whether any of its packs declares this interaction kind.
+    pub fn interacts(&self, kind: &str) -> bool {
+        self.interactions.contains(kind)
     }
 
     /// Adds another pack's declaration of the same capability, keeping the most
@@ -70,6 +85,7 @@ impl Capability {
             riskier(&AUTHORITY, &mut self.authority, &other.authority);
             riskier(&REVERSIBILITY, &mut self.reversibility, &other.reversibility);
             riskier(&INTERACTION, &mut self.interaction, &other.interaction);
+            self.interactions.extend(other.interactions.iter().cloned());
             riskier(&DATA_SCOPE, &mut self.data_scope, &other.data_scope);
             riskier(&APPROVAL_MODE, &mut self.approval_mode, &other.approval_mode);
         }
@@ -118,6 +134,7 @@ pub fn pack_capabilities(pack_ref: &str, pack: &Value) -> Vec<Capability> {
                 authority: field("authority", "agent"),
                 reversibility: field("reversibility", "irreversible"),
                 interaction: field("interaction", "api"),
+                interactions: BTreeSet::from([field("interaction", "api")]),
                 data_scope: field("data_scope", "RESTRICTED"),
                 approval_mode: adapter["approval_mode"].as_str().unwrap_or("destructive").to_owned(),
                 packs: BTreeSet::from([pack_ref.to_owned()]),
@@ -179,6 +196,7 @@ pub fn graph(agent: &AgentActivity, packs: &BTreeMap<(String, String), Value>) -
             authority: "agent".into(),
             reversibility: "irreversible".into(),
             interaction: "api".into(),
+            interactions: BTreeSet::from(["api".to_owned()]),
             data_scope: "RESTRICTED".into(),
             approval_mode: "destructive".into(),
             packs: BTreeSet::new(),
@@ -228,10 +246,10 @@ pub fn requirement(agent: &AgentActivity, caps: &[Capability], declared_contexts
     if !external.is_empty() {
         features.insert("external_effects".to_owned());
     }
-    if caps.iter().any(|c| c.interaction == "browser") {
+    if caps.iter().any(|c| c.interacts("browser")) {
         features.insert("external_network".to_owned());
     }
-    if caps.iter().any(|c| c.interaction == "computer") {
+    if caps.iter().any(|c| c.interacts("computer")) {
         features.insert("arbitrary_code".to_owned());
     }
     if caps.iter().any(Capability::sensitive) {
@@ -402,6 +420,7 @@ mod tests {
             authority: "service".into(),
             reversibility: reversibility.into(),
             interaction: "api".into(),
+            interactions: BTreeSet::from(["api".to_owned()]),
             data_scope: scope.into(),
             approval_mode: "network".into(),
             packs: BTreeSet::new(),

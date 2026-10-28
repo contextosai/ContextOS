@@ -9,9 +9,16 @@
 //! The journal is an outbox of the records. A change commits together with its
 //! journal entry, marked pending, in one compare-and-swap; the entry is signed only
 //! after that commit, so the journal never holds an event for a change that did not
-//! happen. An entry left pending (a crash, or the journal unavailable) is journaled
-//! before the collection changes again, and by a sweep that runs once per lease
-//! period, so an entry whose writer crashed is journaled even if nothing else changes.
+//! happen.
+//!
+//! A collection holds at most one pending entry. A change commits only when none is
+//! pending, a condition the compare-and-swap enforces: it first journals entries whose
+//! writer is gone (lease expired), and waits for an entry another writer is still
+//! publishing. So a collection's entries are journaled in commit order, and each change
+//! is journaled before the collection changes again. Each entry's payload also carries
+//! the collection and its commit number (`collection_seq`, consecutive from 1), so a
+//! verifier reads commit order without relying on journal position. A sweep once per
+//! lease period journals an entry whose writer crashed even if nothing else changes.
 //!
 //! One writer at a time publishes a pending entry: the committer holds a lease on it,
 //! written by the same compare-and-swap, and recovery takes over only entries whose
@@ -148,57 +155,76 @@ impl<S: DocumentStore, L: AppendLog> Records<S, L> {
         at: &str,
         mut change: impl FnMut(&mut Value) -> Result<R, RecordError>,
     ) -> Result<R, RecordError> {
-        // Earlier changes' evidence first: nothing changes while it cannot be written.
-        self.recover(collection).await?;
-        let change_id = uuid::Uuid::now_v7().simple().to_string();
+        let change_id = new_id();
         if let Some(fields) = payload.as_object_mut() {
             fields.insert("change_id".into(), json!(change_id));
+            fields.insert("collection".into(), json!(collection));
         }
-        let after = self
-            .journal
-            .log()
-            .head(NAMESPACE)
-            .await
-            .map_err(|_| RecordError::Journal)?
-            .map_or(0, |row| row.sequence);
-        let entry = json!({"change_id": change_id, "kind": kind, "payload": payload, "at": at, "after": after,
-            "claimed_until": micros_now() + PUBLISH_LEASE_MICROS});
-        let mut current = self.store.get(&key(collection)).await?;
-        let mut committed = None;
-        for _ in 0..16 {
-            let mut items = current.as_ref().map_or(Value::Null, |c| c.body["items"].clone());
+        let started = std::time::Instant::now();
+        let mut pause = std::time::Duration::from_millis(5);
+        let mut conflicts = 0;
+        let (result, entry) = loop {
+            // Earlier changes' evidence first: nothing changes while it cannot be written.
+            self.recover(collection).await?;
+            let current = self.store.get(&key(collection)).await?;
+            let body = current.as_ref().map_or(Value::Null, |c| c.body.clone());
+            if body["pending"].as_array().is_some_and(|p| !p.is_empty()) {
+                // Another writer is publishing its entry: commit after it, so the journal
+                // keeps commit order. A writer that never finishes loses its lease, and
+                // recovery above then journals its entry.
+                if started.elapsed() > std::time::Duration::from_micros(2 * PUBLISH_LEASE_MICROS) {
+                    return Err(RecordError::Conflict("an earlier change is not journaled yet"));
+                }
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(std::time::Duration::from_millis(200));
+                continue;
+            }
+            let seq = body["seq"].as_u64().unwrap_or(0) + 1;
+            let after = self
+                .journal
+                .log()
+                .head(NAMESPACE)
+                .await
+                .map_err(|_| RecordError::Journal)?
+                .map_or(0, |row| row.sequence);
+            let mut payload = payload.clone();
+            if let Some(fields) = payload.as_object_mut() {
+                fields.insert("collection_seq".into(), json!(seq));
+            }
+            let entry = json!({"change_id": change_id, "kind": kind, "payload": payload, "at": at, "after": after,
+                "claimed_until": micros_now() + PUBLISH_LEASE_MICROS});
+            let mut items = body["items"].clone();
             let result = change(&mut items)?;
-            let mut pending = current
-                .as_ref()
-                .and_then(|c| c.body["pending"].as_array().cloned())
-                .unwrap_or_default();
-            pending.push(entry.clone());
-            let body = json!({"items": items, "pending": pending});
+            let next = json!({"items": items, "pending": [entry], "seq": seq});
             let written = match &current {
-                None => self.store.create(&key(collection), &body).await.map(|_| ()),
+                None => self.store.create(&key(collection), &next).await.map(|_| ()),
                 Some(c) => self
                     .store
-                    .compare_and_swap(&key(collection), c.revision, &body)
+                    .compare_and_swap(&key(collection), c.revision, &next)
                     .await
                     .map(|_| ()),
             };
             match written {
-                Ok(()) => {
-                    committed = Some(result);
-                    break;
+                Ok(()) => break (result, entry),
+                Err(e) if e.is_conflict() => {
+                    conflicts += 1;
+                    if conflicts >= 64 {
+                        return Err(RecordError::Conflict("too much contention"));
+                    }
                 }
-                Err(e) if e.is_conflict() => current = self.store.get(&key(collection)).await?,
                 Err(e) => return Err(e.into()),
             }
-        }
-        let result = committed.ok_or(RecordError::Conflict("too much contention"))?;
+        };
         if self.publish(&entry).await.is_err() {
             // Give the entry up, so the collection's next change journals it first.
             let _ = self.claim(collection, Some(&change_id), 0).await;
             return Err(RecordError::JournalPending);
         }
-        // Best effort: an entry left marked pending is found in the journal and dropped.
-        let _ = self.settle(collection, &[change_id]).await;
+        if self.settle(collection, std::slice::from_ref(&change_id)).await.is_err() {
+            // Still marked pending: release it, so the next writer finds it journaled
+            // and clears it at once rather than waiting out the lease.
+            let _ = self.claim(collection, Some(&change_id), 0).await;
+        }
         Ok(result)
     }
 
@@ -243,7 +269,8 @@ impl<S: DocumentStore, L: AppendLog> Records<S, L> {
             if claimed.is_empty() {
                 return Ok(claimed);
             }
-            let body = json!({"items": current.body["items"], "pending": pending});
+            let mut body = current.body.clone();
+            body["pending"] = json!(pending);
             match self
                 .store
                 .compare_and_swap(&key(collection), current.revision, &body)
@@ -296,7 +323,8 @@ impl<S: DocumentStore, L: AppendLog> Records<S, L> {
             if left.len() == pending.len() {
                 return Ok(());
             }
-            let body = json!({"items": current.body["items"], "pending": left});
+            let mut body = current.body.clone();
+            body["pending"] = json!(left);
             match self
                 .store
                 .compare_and_swap(&key(collection), current.revision, &body)

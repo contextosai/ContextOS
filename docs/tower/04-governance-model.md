@@ -83,9 +83,13 @@ For each pack the agent runs under, `authority::pack_capabilities` reads
 - **Conflicting risk keeps the most consequential value.** When the agent's packs
   declare one capability with different risk, each dimension takes its most
   consequential value, so an entry declaring less risk never wins. The capability is
-  marked `"risk_conflict": true` and `capability_risk_conflict` is raised. Interaction
-  ranks `api` < `human_handoff` < `agent_to_agent` < `browser` < `computer`; authority
+  marked `"risk_conflict": true` and `capability_risk_conflict` is raised. Authority
   ranks `human_approved` < `user_delegated` < `service` < `agent`.
+- **Interaction kinds are kept, not ranked.** Each kind needs its own controls (a
+  `browser` kind needs `network.mediated`, a `computer` kind `isolation.required`), so a
+  capability keeps every kind its packs declare in `interactions`, and the required
+  controls follow from all of them. `interaction` shows one kind for display. When a
+  capability has several kinds, they are part of its reviewed risk.
 - `graph_digest` is `sha256` of the canonical list of edges and their full risk,
   approval mode included; a review records it.
 
@@ -294,6 +298,14 @@ A guardrail is an organisation rule evaluated against every agent's facts:
   include, and approved capabilities whose risk in any dimension, approval mode
   included, is no longer the approved risk. Either kind voids the approval until the
   agent is reviewed again. A review that recorded no risk cannot vouch for any.
+- **Journal.** Every declaration, review, guardrail and waiver change is journaled
+  after it commits, never before. A collection's changes are journaled in commit order:
+  a change commits only once the previous change to that collection is journaled, and
+  waits while another writer is still journaling one. A writer that stops (a crash, or
+  a stall past its 30-second lease) has its entry journaled by the next writer or by
+  the sweep that runs every 30 seconds. Each entry's payload names its `collection` and
+  `collection_seq`, the collection's commit number counting from 1 without gaps, so a
+  verifier can check commit order and completeness directly.
 - **Waiver** (`POST /api/waivers`, owner role): one rule, one agent, a reason of at least
   10 characters, 1 to 180 days. A risk reviewer who is not the requester approves or
   rejects it; approval sets `expires_at`. Expired waivers no longer apply and are shown

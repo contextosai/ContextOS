@@ -447,8 +447,8 @@ refuses to start with an effectful capability on an HTTP adapter whose manifest 
 need none: a `2xx` other than `202`, `206` or `207` stands.
 
 A client error from an effectful HTTP capability is unknown too, unless the manifest
-lists that status. The same applies to HTTP client errors from an MCP endpoint. HTTP does not promise that a handler which answered `400` or `422`
-changed nothing first. Treating such an answer as not applied would release shared
+lists that status. The same applies to HTTP client errors from an MCP endpoint. HTTP
+does not promise that a handler which answered `400` or `422` changed nothing first. Treating such an answer as not applied would release shared
 exposure and permit a retry that applies the effect twice. List only the statuses the
 provider documents as returned before any effect:
 
@@ -459,6 +459,37 @@ provider documents as returned before any effect:
 
 Read-only capabilities have no effect to apply. For them, `400`, `401`, `403`, `404`,
 `405`, `413`, `415` and `422` remain definitive.
+
+#### Migrating an HTTP integration
+
+Since this release every effectful capability on an `http` adapter needs
+`recovery.completion`, and `contextosd` refuses to start without it. The startup error
+names the manifest, the capability and the adapter, so starting once lists what to
+migrate. For each capability:
+
+1. Find the field in which the provider reports the effect's state. Most providers
+   return the same resource from the call and from a status lookup, for example a
+   refund object with `status: pending | succeeded | failed | canceled`.
+2. Declare where to read it and which states are final. List under `not_applied` only
+   states in which the provider guarantees the effect did not and will not apply.
+   Leave out states such as `failed` unless the provider documents that. An unlisted
+   state stays unknown and is reconciled, which is the safe outcome.
+
+   ```json
+   "recovery": {"strategy": "query", "max_attempts": 1, "retry_delays_seconds": [],
+     "completion": {"status_tool": "refunds", "state_pointer": "/status",
+       "confirmed": ["succeeded"], "not_applied": ["canceled"]},
+     "not_applied_statuses": [400, 401, 403]}
+   ```
+
+3. Optionally list in `not_applied_statuses` the client errors the provider documents
+   as returned before any effect (see above).
+4. Deploy the updated manifest to every replica. Operations that were already unknown
+   before the upgrade keep their state; reconcile them as before.
+
+A provider that reports no state cannot have its success checked. Put such a provider
+behind an MCP server or a service that does report a state, rather than declaring a
+contract its responses cannot satisfy: every call would stay unknown.
 
 `status` is `resolved`, `pending` (still running), `no_change` (nothing unknown to
 resolve; conflicting facts need escalation) or `rejected` with reasons such as

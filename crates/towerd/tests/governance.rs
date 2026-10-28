@@ -301,3 +301,104 @@ fn ids_created_in_the_same_millisecond_stay_distinct() {
         Err(RecordError::Conflict(_))
     ));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_later_change_waits_for_a_stalled_writers_entry() {
+    let (store, records) = records();
+    let records = Arc::new(records);
+    records
+        .change("waivers", "waiver_requested", json!({"id": "w1"}), NOW, |items| {
+            array(items).push(json!({"id": "w1", "status": "requested"}));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // A writer committed change 2 and stalled before journaling it, holding its lease.
+    let key = DocKey::new(NAMESPACE, DocKind::Governance, "waivers");
+    let doc = store.get(&key).await.unwrap().unwrap();
+    let stalled = json!({"change_id": "stalled", "kind": "waiver_decided", "at": NOW, "after": 1,
+        "payload": {"id": "w1", "change_id": "stalled", "collection": "waivers", "collection_seq": 2},
+        "claimed_until": u64::MAX});
+    store
+        .compare_and_swap(
+            &key,
+            doc.revision,
+            &json!({"items": doc.body["items"], "pending": [stalled], "seq": 2}),
+        )
+        .await
+        .unwrap();
+
+    let later = records.clone();
+    let task = tokio::spawn(async move {
+        later
+            .change("waivers", "waiver_withdrawn", json!({"id": "w1"}), NOW, |_| Ok(()))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(
+        !task.is_finished(),
+        "a later change must not commit ahead of a pending entry"
+    );
+    assert_eq!(journal(&records).await.len(), 1);
+
+    // The stalled writer resumes: it journals its entry and clears the mark.
+    records
+        .journal()
+        .append(NAMESPACE, "waiver_decided", stalled["payload"].clone(), NOW)
+        .await
+        .unwrap();
+    let doc = store.get(&key).await.unwrap().unwrap();
+    let mut body = doc.body.clone();
+    body["pending"] = json!([]);
+    store.compare_and_swap(&key, doc.revision, &body).await.unwrap();
+
+    task.await.unwrap().unwrap();
+    let entries = journal(&records).await;
+    let order: Vec<(Value, Value)> = entries
+        .iter()
+        .map(|e| (e["kind"].clone(), e["payload"]["collection_seq"].clone()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (json!("waiver_requested"), json!(1)),
+            (json!("waiver_decided"), json!(2)),
+            (json!("waiver_withdrawn"), json!(3)),
+        ]
+    );
+}
+
+#[test]
+fn merged_interaction_kinds_keep_every_kinds_controls() {
+    let mut fleet = fleet();
+    let variant = |interaction: &str| {
+        let mut p = pack("external_state");
+        p["tooling_layer"]["adapter_registry"][0]["capability_risks"]["refund"]["interaction"] = json!(interaction);
+        p
+    };
+    fleet.source("eu").packs = json!({"packs": [
+        {"pack_ref": "a@1", "pack": variant("browser")},
+        {"pack_ref": "p@1", "pack": variant("computer")}]});
+    let agent = fleet.agents.get_mut("acme/bot").unwrap();
+    agent.source_packs.insert(("eu".into(), "a@1".into()));
+
+    let views = governance::views(&fleet, &json!({}), &json!({}), NOW);
+    let (cap, requirement) = (&views[0].graph[0], &views[0].requirement);
+    assert_eq!(cap.interactions, ["browser".to_owned(), "computer".to_owned()].into());
+    assert!(requirement.features.contains("external_network") && requirement.features.contains("arbitrary_code"));
+    assert!(
+        requirement.controls.contains("network.mediated") && requirement.controls.contains("isolation.required"),
+        "{:?}",
+        requirement.controls
+    );
+    let facts = governance::facts(&views[0]);
+    assert_eq!(
+        (
+            facts["exposure"]["browser"].clone(),
+            facts["exposure"]["computer"].clone()
+        ),
+        (json!(true), json!(true))
+    );
+    // Both kinds are part of the reviewed risk, so adding a variant is drift.
+    assert_eq!(cap.risk()["interactions"], json!(["browser", "computer"]));
+}

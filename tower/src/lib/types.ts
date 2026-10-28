@@ -43,6 +43,8 @@ export interface Capability {
   authority: string;
   reversibility: string;
   interaction: string;
+  /** Every interaction kind its packs declare; controls derive from all of them. */
+  interactions: string[];
   data_scope: string;
   approval_mode: string;
   packs: string[];

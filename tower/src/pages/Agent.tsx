@@ -17,7 +17,7 @@ const RISKY: Record<string, string[]> = {
 };
 
 function Dim({ name, value }: { name: string; value: string }) {
-  const risky = RISKY[name]?.includes(value);
+  const risky = value.split(" + ").some((v) => RISKY[name]?.includes(v));
   const severe = (name === "effect" && value === "physical_world") || (name === "reversibility" && value === "irreversible") || value === "RESTRICTED";
   return <span className={`badge ${severe ? "bad" : risky ? "warn" : ""}`}>{value.replace(/_/g, " ")}</span>;
 }
@@ -242,7 +242,7 @@ function Authority({ d }: { d: AgentDetail }) {
                       <Dim name="data_scope" value={c.data_scope} />
                     </td>
                     <td>
-                      <Dim name="interaction" value={c.interaction} />
+                      <Dim name="interaction" value={c.interactions.length > 1 ? c.interactions.join(" + ") : c.interaction} />
                     </td>
                     <td className="small">{c.used ? <Badge tone="info">used</Badge> : c.surfaced ? <Badge>offered</Badge> : <span className="faint">pinned only</span>}</td>
                   </tr>
