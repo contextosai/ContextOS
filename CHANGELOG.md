@@ -6,6 +6,15 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Linux release executables are built on AlmaLinux 8 against glibc 2.28, so the
+  archives run on RHEL, AlmaLinux and Rocky 8+, Debian 10+ and Ubuntu 20.04+.
+  `v0.1.0-alpha.1` was built on Ubuntu 24.04, and its `contextosd` fails to start on
+  older systems (for example `GLIBC_2.38 not found` on Ubuntu 22.04).
+  `scripts/check-glibc.sh` fails the build if an executable needs a newer glibc. The
+  release workflow smoke-tests every archive on its runner and on AlmaLinux 8
+  (`scripts/smoke-archive.sh`), and CI runs the baseline build and the
+  shared-guarantees demo on every pull request.
+- `contextosd --version` and `towerd --version`, like `ctx --version`.
 - "Why not a database transaction?": a README section, a guide
   ([docs/WHY_NOT_A_TRANSACTION.md](docs/WHY_NOT_A_TRANSACTION.md)) and a runnable
   example (`examples/why-not-a-row-lock`). The example runs a row-lock refund service

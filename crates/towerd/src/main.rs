@@ -1,4 +1,4 @@
-//! `towerd --config <path>`
+//! `towerd --config <path>`, or `towerd --version`
 
 use std::sync::Arc;
 
@@ -14,14 +14,18 @@ fn fail(message: impl std::fmt::Display) -> ! {
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if matches!(args.as_slice(), [_, flag] if flag == "--version") {
+        println!("towerd {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
-    let args: Vec<String> = std::env::args().collect();
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
-        _ => fail("usage: towerd --config <path>"),
+        _ => fail("usage: towerd --config <path> | --version"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
     let signer =

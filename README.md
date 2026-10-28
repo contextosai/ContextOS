@@ -51,7 +51,9 @@ Without Rust: download the archive for your platform from a
 `shasum -a 256 -c` and `gh attestation verify <archive> --repo contextosai/ContextOS`,
 unpack it and run the same script from its directory. The archive carries `ctx`,
 `contextosd`, `towerd`, the Tower UI and the examples below, so it needs only Python,
-Bash and curl.
+Bash and curl. Linux archives need glibc 2.28 or newer (RHEL, AlmaLinux or Rocky 8+,
+Debian 10+, Ubuntu 20.04+); `./bin/contextosd --version` checks that the executables
+start on your system.
 
 For the original authorization and duplicate-operation walkthrough, run
 `./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).
