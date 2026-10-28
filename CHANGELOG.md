@@ -43,6 +43,39 @@ minor versions may break APIs and every break is listed.
 - Operation ids beginning with `compensation:` are reserved; a tool call using one is
   rejected with `operation_id_reserved`.
 
+### Changed (breaking)
+- The HTTP adapter no longer treats a client error from an effectful capability as
+  definitively not applied. HTTP does not promise a handler changed nothing before it
+  answered `400` or `422`, and "not applied" releases shared exposure and permits a
+  retry. Such responses are now unknown until reconciled, unless the capability
+  manifest lists the status in the new `recovery.not_applied_statuses` (at most 16
+  distinct 4xx statuses the provider documents as returned before any effect).
+  Read-only capabilities keep the previous mapping. The MCP adapter applies the same
+  rule to HTTP 400, 401, 403, 404, 405 and 415 from the MCP endpoint, which it
+  previously treated as not applied for every tool; JSON-RPC protocol errors
+  (-32700, -32600, -32601, -32602) are unchanged.
+- Tower journal entries for governance changes carry a `change_id` in their payload.
+  Guardrail and waiver ids are full 32-character UUIDv7s; the 12-character ids were
+  only the creation millisecond and could collide.
+
+### Fixed
+- Tower: an approved review stops counting when it expires. Expired reviews raise
+  `unreviewed` ("review expired"), produce no drift baseline, and set `reviewed`
+  false and `review_expired` true in guardrail facts and the console.
+- Tower signs a governance change's journal entry only after the change commits.
+  Previously an entry was signed first, so a crash, a store error or a concurrent
+  refusal (two reviewers activating one draft) left a signed event for a change that
+  never happened. Records now commit the change and its pending entry together;
+  entries a crash leaves pending are journaled at startup or before the collection
+  next changes, without repeating an entry already journaled.
+- Tower checks an owner's team against the stored declaration at commit, so a
+  concurrent transfer to another team is not overwritten.
+- Tower resolves a pack version within the source that admitted the agent's runs.
+  Previously sources publishing different content under one `id@version` overwrote
+  each other, and an agent's authority graph and approval gates could come from
+  another source's pack. Such conflicts raise `pack_version_conflict`.
+- Creating a guardrail or waiver refuses an id that already exists.
+
 ## 0.1.0-alpha.1 - 2026-10-26
 
 First public alpha of the ContextOS runtime. APIs and storage formats are evolving;

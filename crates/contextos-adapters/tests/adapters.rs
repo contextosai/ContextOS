@@ -358,19 +358,24 @@ async fn http_status_mapping_and_headers() {
         (EffectOutcome::Confirmed, Some("rf_9"))
     );
     assert_eq!(seen.lock().unwrap()[0].0["idempotency-key"], "ctxos:op_refund");
-    for (status, expected) in [
-        (422, EffectOutcome::NotApplied),
-        (503, EffectOutcome::Unknown),
-        (409, EffectOutcome::Unknown),
+    // A client error settles an effect as not applied only when the reviewed manifest
+    // declares the provider returns it before acting; otherwise it may have acted.
+    let mut declared = manifest("external_state");
+    declared.recovery.not_applied_statuses = vec![422];
+    for (status, manifest, expected) in [
+        (422, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (400, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (422, declared.clone(), (EffectOutcome::NotApplied, true)),
+        (400, declared, (EffectOutcome::Unknown, false)),
+        (422, manifest("none"), (EffectOutcome::NotApplied, true)),
+        (503, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (409, manifest("external_state"), (EffectOutcome::Unknown, false)),
     ] {
         let router = Router::new().fallback(post(move || async move { StatusCode::from_u16(status).unwrap() }));
         let url = serve(router).await;
         let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
-        assert_eq!(
-            adapter.invoke(&manifest("external_state"), &call()).await.outcome,
-            expected,
-            "{status}"
-        );
+        let response = adapter.invoke(&manifest, &call()).await;
+        assert_eq!((response.outcome, response.definitive), expected, "{status}");
     }
     // Acceptance is not completion: a queued or partial response leaves the effect
     // unknown and keeps the provider's job id for reconciliation.
@@ -527,5 +532,43 @@ fn completion_checks_are_reviewed() {
         let mut m = manifest("external_state");
         m.recovery.completion = Some(serde_json::from_value(check).unwrap());
         assert!(m.validate().is_err(), "{why}");
+    }
+}
+
+#[test]
+fn declared_not_applied_statuses_are_distinct_client_errors() {
+    let mut m = manifest("external_state");
+    m.recovery.not_applied_statuses = vec![400, 422];
+    assert!(m.validate().is_ok());
+    for (statuses, why) in [
+        (vec![200], "success"),
+        (vec![503], "server error"),
+        (vec![422, 422], "duplicate"),
+        ((400..417).collect(), "too many"),
+    ] {
+        m.recovery.not_applied_statuses = statuses;
+        assert!(m.validate().is_err(), "{why}");
+    }
+}
+
+#[tokio::test]
+async fn mcp_client_errors_settle_effects_only_when_declared() {
+    let mut declared = manifest("external_state");
+    declared.recovery.not_applied_statuses = vec![401];
+    for (status, manifest, expected) in [
+        (400, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (401, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (404, manifest("external_state"), (EffectOutcome::Unknown, false)),
+        (401, declared.clone(), (EffectOutcome::NotApplied, true)),
+        (403, declared, (EffectOutcome::Unknown, false)),
+        (400, manifest("none"), (EffectOutcome::NotApplied, true)),
+    ] {
+        let url =
+            serve(Router::new().fallback(post(move || async move { StatusCode::from_u16(status).unwrap() }))).await;
+        let response = McpAdapter::new(&url, policy(), Arc::new(Broker), "contextos-test")
+            .unwrap()
+            .invoke(&manifest, &call())
+            .await;
+        assert_eq!((response.outcome, response.definitive), expected, "{status}");
     }
 }

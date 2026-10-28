@@ -49,6 +49,9 @@ pub struct AgentActivity {
     pub sources: BTreeSet<String>,
     pub tenants: BTreeSet<String>,
     pub packs: BTreeSet<String>,
+    /// `(source, pack_ref)`: the pack each source admitted the agent's runs under. One
+    /// `id@version` may name different content in different sources.
+    pub source_packs: BTreeSet<(String, String)>,
     pub intents: BTreeSet<String>,
     /// `model_profile` release references, as `id@version`.
     pub models: BTreeSet<String>,
@@ -627,6 +630,7 @@ impl Fleet {
         a.tenants.insert(entry.tenant_id.clone());
         if let Some(pack) = s(&p["pack_ref"]) {
             a.packs.insert(pack.to_owned());
+            a.source_packs.insert((source.to_owned(), pack.to_owned()));
         }
         if let Some(intent) = s(&p["intent"]) {
             a.intents.insert(intent.to_owned());

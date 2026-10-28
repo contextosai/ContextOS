@@ -21,8 +21,16 @@
 //! | `tasks/get`: failed / cancelled | like an error result (unknown for effectful tools) |
 //! | `tasks/get`: working / input_required | still unknown |
 //! | JSON-RPC error -32700/-32600/-32601/-32602, incl. unsupported protocol version | not applied (definitive) |
+//! | HTTP 4xx listed in the manifest's `recovery.not_applied_statuses` | not applied (definitive) |
+//! | HTTP 400, 401, 403, 404, 405, 413, 415, 422, read-only capability | not applied (definitive) |
+//! | HTTP 400, 401, 403, 404, 405, 415, effectful capability, not listed | unknown |
 //! | other errors, id mismatch, malformed or lost response | unknown |
 //! | connection never established | not dispatched (definitive) |
+//!
+//! An HTTP client error is not proof that an effectful tool did nothing: a proxy or
+//! server can answer one after the tool acted, and "not applied" releases shared
+//! exposure and permits a retry. As for the HTTP adapter, only statuses the reviewed
+//! manifest declares settle an effectful call as not applied.
 //!
 //! A finished result maps into the object-only tool output through a selected
 //! [`ResultProjection`]. `Flat` is the original mapping and stays the default so
@@ -39,7 +47,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::{Map, Value, json};
 use url::Url;
 
-use crate::http::{not_dispatched, object};
+use crate::http::{not_dispatched, object, rejected_before_execution};
 use crate::transport::{
     CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers, pinned_endpoint, send,
     traceparent,
@@ -181,12 +189,15 @@ impl McpAdapter {
                 content_type,
                 body,
             } => {
-                if matches!(status, 400 | 401 | 403 | 404 | 405 | 415) {
+                if (400..500).contains(&status) && rejected_before_execution(manifest, status) {
                     return Err(AdapterResponse {
                         outcome: EffectOutcome::NotApplied,
                         definitive: true,
                         ..AdapterResponse::unknown()
                     });
+                }
+                if matches!(status, 400 | 401 | 403 | 404 | 405 | 415) {
+                    return Err(AdapterResponse::unknown());
                 }
                 (content_type, body)
             }

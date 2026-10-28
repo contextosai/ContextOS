@@ -1,0 +1,209 @@
+//! Governance correctness that does not need a runtime: review expiry, pack identity
+//! across sources, and the records' journal outbox.
+
+use std::sync::Arc;
+
+use contextos_audit::{AuditSigner, AuditWriter};
+use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, MemoryLog, MemoryStore};
+use serde_json::{Value, json};
+use towerd::fleet::{AgentActivity, Counts, Fleet};
+use towerd::governance;
+use towerd::records::{NAMESPACE, RecordError, Records, array};
+
+const NOW: &str = "2026-10-28T12:00:00.000000Z";
+
+fn pack(effect: &str) -> Value {
+    json!({"tooling_layer": {"adapter_registry": [{"adapter_id": "pay", "capabilities": ["refund"],
+        "approval_mode": "destructive", "capability_risks": {"refund": {"effect": effect, "authority": "service",
+        "reversibility": "irreversible", "interaction": "api", "data_scope": "INTERNAL"}}}]},
+        "policy_layer": {"approval_gates": []}})
+}
+
+/// An agent that ran `p@1` in source `eu`.
+fn fleet() -> Fleet {
+    let mut fleet = Fleet::new(10, 48);
+    let mut a = AgentActivity {
+        key: "acme/bot".into(),
+        agent_id: "bot".into(),
+        runs: 3,
+        first_seen: "2026-10-21T10:00:00Z".into(),
+        last_seen: "2026-10-21T10:00:00Z".into(),
+        ..AgentActivity::default()
+    };
+    a.packs.insert("p@1".into());
+    a.source_packs.insert(("eu".into(), "p@1".into()));
+    a.sources.insert("eu".into());
+    a.capabilities.insert("pay.refund".into(), Counts::default());
+    fleet.source("eu").packs = json!({"packs": [{"pack_ref": "p@1", "pack": pack("external_state")}]});
+    fleet.agents.insert(a.key.clone(), a);
+    fleet
+}
+
+fn rules(fleet: &Fleet, reviews: &Value, now: &str) -> Vec<(String, String)> {
+    let views = governance::views(fleet, &json!({}), reviews, now);
+    governance::findings(fleet, &views, &json!([]), &json!([]), now)
+        .into_iter()
+        .map(|f| (f.rule, f.title))
+        .collect()
+}
+
+#[test]
+fn an_approval_stops_counting_when_it_expires() {
+    let fleet = fleet();
+    let reviews = json!({"acme/bot": {"decision": "approved", "capabilities": ["pay.refund"],
+        "reviewed_at": "2026-01-01T00:00:00.000000Z", "expires_at": "2026-06-01T00:00:00.000000Z"}});
+
+    let before = governance::views(&fleet, &json!({}), &reviews, "2026-05-01T00:00:00.000000Z");
+    assert!(before[0].approved && !before[0].review_expired);
+    assert!(
+        !rules(&fleet, &reviews, "2026-05-01T00:00:00.000000Z")
+            .iter()
+            .any(|(r, _)| r == "unreviewed")
+    );
+
+    let after = governance::views(&fleet, &json!({}), &reviews, NOW);
+    assert!(!after[0].approved && after[0].review_expired);
+    assert_eq!(governance::facts(&after[0])["reviewed"], false);
+    let found = rules(&fleet, &reviews, NOW);
+    let (_, title) = found
+        .iter()
+        .find(|(r, _)| r == "unreviewed")
+        .expect("an expired review is no review");
+    assert!(title.contains("expired"), "{title}");
+
+    // An approval without an expiry never counts.
+    let undated = json!({"acme/bot": {"decision": "approved", "capabilities": ["pay.refund"]}});
+    assert!(!governance::views(&fleet, &json!({}), &undated, NOW)[0].approved);
+}
+
+#[test]
+fn a_pack_version_resolves_within_the_source_that_ran_it() {
+    let mut fleet = fleet();
+    // Another source publishes different content under the same id@version; it sorts
+    // after `eu`, so a global index would have let it replace eu's pack.
+    fleet.source("us").packs = json!({"packs": [{"pack_ref": "p@1", "pack": pack("none")}]});
+    let views = governance::views(&fleet, &json!({}), &json!({}), NOW);
+    assert_eq!(views[0].graph[0].effect, "external_state");
+
+    let found = rules(&fleet, &json!({}), NOW);
+    assert!(
+        found
+            .iter()
+            .any(|(r, t)| r == "pack_version_conflict" && t.contains("eu, us")),
+        "{found:?}"
+    );
+
+    // Identical content in both sources is not a conflict.
+    fleet.source("us").packs = json!({"packs": [{"pack_ref": "p@1", "pack": pack("external_state")}]});
+    assert!(
+        !rules(&fleet, &json!({}), NOW)
+            .iter()
+            .any(|(r, _)| r == "pack_version_conflict")
+    );
+}
+
+fn records() -> (Arc<MemoryStore>, Records<MemoryStore, MemoryLog>) {
+    let store = Arc::new(MemoryStore::new());
+    let journal = Arc::new(AuditWriter::new(MemoryLog::new(), AuditSigner::from_seed("j", [7; 32])));
+    (store.clone(), Records::new(store, journal))
+}
+
+async fn journal(records: &Records<MemoryStore, MemoryLog>) -> Vec<Value> {
+    let rows = records.journal().log().range(NAMESPACE, 1, 500).await.unwrap();
+    rows.into_iter().map(|r| r.body).collect()
+}
+
+/// Activates draft `g1`, as Tower's guardrail activation does.
+async fn activate(records: &Records<MemoryStore, MemoryLog>, by: &str) -> Result<(), RecordError> {
+    records
+        .change(
+            "guardrails",
+            "guardrail_activated",
+            json!({"id": "g1", "by": by}),
+            NOW,
+            |items| {
+                let g = array(items)
+                    .iter_mut()
+                    .find(|g| g["id"] == "g1")
+                    .ok_or(RecordError::NotFound)?;
+                if g["status"] != "draft" {
+                    return Err(RecordError::Conflict("only a draft can be activated"));
+                }
+                g["status"] = json!("active");
+                Ok(())
+            },
+        )
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_committed_changes_are_journaled() {
+    // Two reviewers activate the same draft at once: one commits, the other is refused
+    // on its compare-and-swap retry, and only the committed activation is signed.
+    for _ in 0..50 {
+        let (_, records) = records();
+        let records = Arc::new(records);
+        records
+            .change("guardrails", "guardrail_drafted", json!({"id": "g1"}), NOW, |items| {
+                array(items).push(json!({"id": "g1", "status": "draft"}));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (r1, r2) = (records.clone(), records.clone());
+        let (a, b) = tokio::join!(
+            tokio::spawn(async move { activate(&r1, "risk-a").await }),
+            tokio::spawn(async move { activate(&r2, "risk-b").await })
+        );
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1, "{a:?} {b:?}");
+        let kinds: Vec<Value> = journal(&records).await.iter().map(|e| e["kind"].clone()).collect();
+        assert_eq!(kinds, [json!("guardrail_drafted"), json!("guardrail_activated")]);
+        assert!(
+            journal(&records)
+                .await
+                .iter()
+                .all(|e| e["payload"]["change_id"].is_string())
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_change_committed_before_a_crash_is_journaled_once() {
+    let (store, records) = records();
+    // The state a crash leaves between the commit and the journal append.
+    let key = DocKey::new(NAMESPACE, DocKind::Governance, "waivers");
+    let pending = json!({"change_id": "c1", "kind": "waiver_requested", "payload": {"id": "w1", "change_id": "c1"},
+        "at": NOW, "after": 0});
+    store
+        .create(
+            &key,
+            &json!({"items": [{"id": "w1", "status": "requested"}], "pending": [pending]}),
+        )
+        .await
+        .unwrap();
+    records.recover("waivers").await.unwrap();
+    records.recover("waivers").await.unwrap();
+    let entries = journal(&records).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["payload"]["change_id"], "c1");
+    assert_eq!(store.get(&key).await.unwrap().unwrap().body["pending"], json!([]));
+
+    // A crash after the append but before the pending mark was cleared: recovery finds
+    // the entry in the journal and does not sign it again.
+    let doc = store.get(&key).await.unwrap().unwrap();
+    store
+        .compare_and_swap(
+            &key,
+            doc.revision,
+            &json!({"items": doc.body["items"], "pending": [pending]}),
+        )
+        .await
+        .unwrap();
+    records
+        .change("waivers", "waiver_decided", json!({"id": "w1"}), NOW, |_| Ok(()))
+        .await
+        .unwrap();
+    let kinds: Vec<Value> = journal(&records).await.iter().map(|e| e["kind"].clone()).collect();
+    assert_eq!(kinds, [json!("waiver_requested"), json!("waiver_decided")]);
+}
