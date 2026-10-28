@@ -10,7 +10,8 @@
 //! journal entry, marked pending, in one compare-and-swap; the entry is signed only
 //! after that commit, so the journal never holds an event for a change that did not
 //! happen. An entry left pending (a crash, or the journal unavailable) is journaled
-//! before the collection changes again.
+//! before the collection changes again, and by a sweep that runs once per lease
+//! period, so an entry whose writer crashed is journaled even if nothing else changes.
 //!
 //! One writer at a time publishes a pending entry: the committer holds a lease on it,
 //! written by the same compare-and-swap, and recovery takes over only entries whose
@@ -30,7 +31,7 @@ use serde_json::{Value, json};
 pub const NAMESPACE: &str = "tower";
 
 /// How long a writer owns publishing a pending entry before recovery may take it over.
-const PUBLISH_LEASE_MICROS: u64 = 30_000_000;
+pub const PUBLISH_LEASE_MICROS: u64 = 30_000_000;
 
 fn micros_now() -> u64 {
     std::time::SystemTime::now()
@@ -333,4 +334,21 @@ pub fn array(items: &mut Value) -> &mut Vec<Value> {
         *items = json!([]);
     }
     items.as_array_mut().expect("just set")
+}
+
+/// A new record id: a full UUIDv7. Its first 48 bits are the creation millisecond, so
+/// a prefix of it would collide for records created together; the random bits keep
+/// ids distinct.
+pub fn new_id() -> String {
+    uuid::Uuid::now_v7().simple().to_string()
+}
+
+/// Appends a record to an array collection, refusing an `id` a stored record has.
+pub fn push_new(items: &mut Value, record: &Value) -> Result<(), RecordError> {
+    let items = array(items);
+    if items.iter().any(|i| i["id"] == record["id"]) {
+        return Err(RecordError::Conflict("a record with this id exists"));
+    }
+    items.push(record.clone());
+    Ok(())
 }

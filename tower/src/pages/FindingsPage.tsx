@@ -86,7 +86,8 @@ function order(s: Severity) {
 const LABELS: Record<string, string> = {
   undeclared_agent: "Agents running without an owner",
   unreviewed: "Agents without a risk review",
-  authority_drift: "Authority grew since review",
+  authority_drift: "Authority changed since review",
+  capability_risk_conflict: "Packs disagree on risk",
   controls_missing: "Required controls missing on a runtime",
   profile_understated: "Runs admitted under a weaker profile than needed",
   irreversible_without_approval: "Irreversible actions with no human approval",

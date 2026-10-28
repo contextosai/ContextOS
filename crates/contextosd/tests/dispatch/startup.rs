@@ -118,3 +118,21 @@ async fn production_requires_pins_and_a_stated_role() {
         .unwrap();
     assert_eq!(admitted.status(), 201, "{}", admitted.text().await.unwrap());
 }
+
+#[tokio::test]
+async fn effectful_http_capabilities_need_a_reported_state_contract() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    let path = config.capabilities[0].clone();
+    let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let adapter_id = manifest["adapter_id"].as_str().unwrap().to_owned();
+    let adapter = config.adapters.iter_mut().find(|a| a.id == adapter_id).unwrap();
+    adapter.kind = contextosd::config::AdapterKind::Http;
+    // An HTTP success status cannot confirm the refund on its own.
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("needs recovery.completion"), "{refused}");
+
+    manifest["recovery"]["completion"] = json!({"status_tool": "refund_status", "state_pointer": "/status",
+        "confirmed": ["succeeded"], "not_applied": ["canceled"]});
+    std::fs::write(&path, manifest.to_string()).unwrap();
+    assert!(dispatch_setup_from_config(&config).is_ok());
+}

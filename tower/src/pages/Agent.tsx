@@ -196,6 +196,11 @@ function Authority({ d }: { d: AgentDetail }) {
           <strong>Drift:</strong> {d.facts.drift.join(", ")} added since the last approved review.
         </div>
       )}
+      {d.facts.risk_changed.length > 0 && (
+        <div className="banner warn">
+          <strong>Risk changed:</strong> {d.facts.risk_changed.join(", ")} no longer carry the risk that was approved. The approval does not cover them.
+        </div>
+      )}
       <Card title="Capabilities and their risk" actions={<span className="small faint">each dimension is assessed separately; risk is never collapsed into a score</span>} flush>
         {sorted.length === 0 ? (
           <Empty title="No capabilities known">Tower learns them from the packs the agent runs under.</Empty>

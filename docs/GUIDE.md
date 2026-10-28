@@ -437,6 +437,15 @@ which the provider guarantees the job will never apply. Any other state, a missi
 (`404`) or a failed lookup stays unknown, because absence is not proof of
 non-application.
 
+The same contract decides a finished `2xx`, and every effectful HTTP capability must
+declare it. A provider may answer `200` with a body that says `pending` or `failed`,
+so a success status alone never confirms an effect. The body's state at
+`state_pointer` decides the outcome: listed states settle it, and any other state, or
+a missing one, stays unknown and keeps the body's `id` for the lookup. `contextosd`
+refuses to start with an effectful capability on an HTTP adapter whose manifest has no
+`completion`, and the adapter does not send such a call. Read-only HTTP capabilities
+need none: a `2xx` other than `202`, `206` or `207` stands.
+
 A client error from an effectful HTTP capability is unknown too, unless the manifest
 lists that status. The same applies to HTTP client errors from an MCP endpoint. HTTP does not promise that a handler which answered `400` or `422`
 changed nothing first. Treating such an answer as not applied would release shared

@@ -265,6 +265,24 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
                 manifest.capability_id
             ));
         }
+        // An HTTP success status is not proof of the effect: the provider's reported
+        // state is, so an effectful HTTP capability must declare how to read it.
+        let http = config
+            .adapters
+            .iter()
+            .any(|a| a.id == manifest.adapter_id && a.kind == crate::config::AdapterKind::Http);
+        if http
+            && manifest.action_risk.effect != contextos_contract::types::ActionEffect::None
+            && manifest.recovery.completion.is_none()
+        {
+            return Err(format!(
+                "{}: {} is effectful on HTTP adapter {} and needs recovery.completion: the provider's \
+                 reported-state contract that decides its 2xx responses",
+                path.display(),
+                manifest.capability_id,
+                manifest.adapter_id
+            ));
+        }
         manifests.push(manifest);
     }
     Ok(Some(DispatchSetup {

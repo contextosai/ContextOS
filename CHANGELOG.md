@@ -44,6 +44,20 @@ minor versions may break APIs and every break is listed.
   rejected with `operation_id_reserved`.
 
 ### Changed (breaking)
+- Tower reviews record each capability's risk (`capability_risks`), and an approval
+  covers a capability only at that risk. A change in any dimension under the same id,
+  approval mode included, voids the approval and raises `authority_drift` with the
+  reviewed and current risk. Reviews made before this change recorded no risk and no
+  longer count; re-review approved agents after upgrading. `graph_digest` now covers
+  approval mode, so its values change.
+- Every effectful HTTP capability must declare `recovery.completion`, the provider's
+  reported-state contract, and its `2xx` responses are read under it: the body's state
+  at `state_pointer` settles the effect only when listed, and a `200` reporting
+  `pending`, `failed` or no state is unknown, keeping the body's `id` for the status
+  lookup. A success status alone no longer confirms an effect. `contextosd` refuses to
+  start with an effectful capability on an HTTP adapter whose manifest lacks the
+  contract, and the HTTP adapter does not send such a call (`not_dispatched`).
+  Read-only HTTP capabilities need no contract.
 - The HTTP adapter no longer treats a client error from an effectful capability as
   definitively not applied. HTTP does not promise a handler changed nothing before it
   answered `400` or `422`, and "not applied" releases shared exposure and permits a
@@ -75,6 +89,11 @@ minor versions may break APIs and every break is listed.
   each other, and an agent's authority graph and approval gates could come from
   another source's pack. Such conflicts raise `pack_version_conflict`.
 - Creating a guardrail or waiver refuses an id that already exists.
+- Tower: when an agent's packs declare one capability with different risk, each risk
+  dimension keeps its most consequential value (previously the first pack's entry won,
+  even if it declared less risk), and `capability_risk_conflict` is raised.
+- Tower journals entries a crashed writer left pending once per lease period, so they
+  no longer wait for the collection's next change.
 
 ## 0.1.0-alpha.1 - 2026-10-26
 

@@ -104,6 +104,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         })
     }
 
+    /// Journals, once per publish lease, any change a crashed writer left committed but
+    /// unjournaled, starting immediately.
+    pub fn spawn_journal_recovery(self: &Arc<Self>) {
+        let tower = self.clone();
+        let every = std::time::Duration::from_micros(records::PUBLISH_LEASE_MICROS);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(every);
+            loop {
+                tick.tick().await;
+                for collection in records::COLLECTIONS {
+                    if let Err(e) = tower.records.recover(collection).await {
+                        tracing::warn!(collection, error = %e, "journal recovery deferred");
+                    }
+                }
+            }
+        });
+    }
+
     /// Starts one collector per source.
     pub fn spawn_collectors(&self) {
         let every = std::time::Duration::from_millis(self.config.collector.poll_ms);

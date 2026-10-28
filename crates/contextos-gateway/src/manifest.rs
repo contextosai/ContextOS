@@ -53,8 +53,10 @@ pub struct Recovery {
     pub retry_delays_seconds: Vec<u64>,
     #[serde(default)]
     pub idempotency: Option<ProviderIdempotency>,
-    /// How to look up an accepted, unfinished effect at the provider, for adapters
-    /// that have no protocol-level task status (HTTP).
+    /// The provider's reported-state contract, for adapters that have no
+    /// protocol-level task status (HTTP). It decides a finished `2xx` from the state in
+    /// its body, and how to look up an accepted, unfinished effect. Required for every
+    /// effectful capability on an HTTP adapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion: Option<CompletionCheck>,
     /// HTTP client-error statuses the provider guarantees it returns only when it did

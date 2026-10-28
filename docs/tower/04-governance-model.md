@@ -77,8 +77,17 @@ For each pack the agent runs under, `authority::pack_capabilities` reads
   "unknown risk".
 - `surfaced` = offered to at least one of its runs at admission; `used` = at least one
   `operation_claim`.
-- `graph_digest` is `sha256` of the canonical list of edges and their risk; a review
-  records it.
+- **Packs resolve per source.** A run's pack is read from the source that admitted it,
+  so one `id@version` cannot be replaced by another source's content. Different content
+  under one `id@version` raises `pack_version_conflict`.
+- **Conflicting risk keeps the most consequential value.** When the agent's packs
+  declare one capability with different risk, each dimension takes its most
+  consequential value, so an entry declaring less risk never wins. The capability is
+  marked `"risk_conflict": true` and `capability_risk_conflict` is raised. Interaction
+  ranks `api` < `human_handoff` < `agent_to_agent` < `browser` < `computer`; authority
+  ranks `human_approved` < `user_delegated` < `service` < `agent`.
+- `graph_digest` is `sha256` of the canonical list of edges and their full risk,
+  approval mode included; a review records it.
 
 ## 4.3 Required profiles and controls
 
@@ -188,11 +197,13 @@ document of the quickstart agent in `examples/tower`, abridged only in the contr
 | `agent.key` | string | Fleet-wide agent id |
 | `agent.models`, `agent.evaluators` | string[] | `id@version` of pinned release references |
 | `declared`, `declaration.*` | bool, object | Owner's statement (`owner`, `team`, `business_unit`, `purpose`, `users_served`, `lifecycle`, `data_categories`, `regulatory_contexts`, `declared_by`, `declared_at`) |
-| `reviewed`, `review.*` | bool, object | Last review (`decision`, `notes`, `conditions`, `capabilities`, `graph_digest`, `required_profile`, `reviewed_by`, `reviewed_at`, `expires_at`) |
+| `reviewed`, `review.*` | bool, object | `reviewed` is true only while an approval is unexpired and covers the whole graph at its approved risk. Last review: `decision`, `notes`, `conditions`, `capabilities`, `capability_risks`, `graph_digest`, `required_profile`, `reviewed_by`, `reviewed_at`, `expires_at` |
+| `review_expired` | bool | The last review approved the agent, but its validity has passed |
 | `capabilities[]` | object[] | The authority graph (§4.2) |
 | `exposure.*` | bool, string[], number | Derived from the graph; `approval_gates` counts gates in the agent's packs |
 | `controls.*` | | §4.3 |
 | `drift` | string[] | Capabilities not in the last approved review |
+| `risk_changed` | string[] | Reviewed capabilities whose risk differs from what was approved |
 | `activity.*` | | Counters from the fleet model (§4.1) |
 
 ## 4.5 Built-in findings
@@ -204,8 +215,9 @@ id across requests.
 | Rule | Severity | Fires when | Fix it gives |
 |---|---|---|---|
 | `undeclared_agent` | critical if the agent has external capabilities, else high | the agent has runs and no declaration | Declare owner, team, purpose, users, lifecycle |
-| `unreviewed` | high if external, else medium | no approved review, and the agent is in production or has run with external capabilities | Run an intake review |
-| `authority_drift` | high | capabilities exist that the approved review did not include | Re-review, or remove them from its packs |
+| `unreviewed` | high if external, else medium | no current approval (none, or expired: the title then says so), and the agent is in production or has run with external capabilities | Run an intake review |
+| `authority_drift` | high | a current approval no longer covers the graph: capabilities it did not include, or reviewed capabilities whose risk changed (evidence lists reviewed and current risk) | Re-review, or restore what was reviewed |
+| `capability_risk_conflict` | medium | the agent's packs declare different risk for one capability | Make the packs agree, or use distinct capability ids |
 | `controls_missing` | critical if high-assurance is required, else high | a source where it runs does not declare a required control (one finding per source) | Enable the controls (with conformance evidence) or narrow the agent |
 | `profile_understated` | high | its runs were admitted under profiles whose controls do not cover the required ones | Request the required profile in the execution contract |
 | `irreversible_without_approval` | critical | its packs have no approval gate and a capability is external, irreversible and not `human_approved` | Add an approval gate or mark the authority `human_approved` |
@@ -218,6 +230,7 @@ id across requests.
 | `ungoverned_or_dormant` | high | declared `production` but no governed run in 30 days | Route its tools through a runtime, or deprecate and revoke |
 | `retired_but_running` | high | declared `retired` or `deprecated` and ran in the last 24 hours | Revoke it fleet-wide, or fix the lifecycle |
 | `chain_broken` | critical | a source's chain failed verification | Treat as a security incident |
+| `pack_version_conflict` | high | sources publish different content under one pack `id@version` (fleet-wide, not per agent) | Publish changes under a new version |
 
 Findings are sorted by severity, with waived ones after unwaived ones of the same
 severity.
@@ -273,11 +286,14 @@ A guardrail is an organisation rule evaluated against every agent's facts:
 
 - **Review** (`POST /api/agents/{key}/review`, risk role): `approved`,
   `changes_requested` or `rejected`, with notes, conditions and a validity (default 365
-  days, at most 730). It records the capability list, graph digest and required profile
-  at the time. The agent's owner or declarer cannot review it; an undeclared agent cannot
-  be approved.
-- **Drift** is recomputed on every request: graph capabilities minus approved
-  capabilities.
+  days, at most 730). It records the capability list, each capability's risk, the graph
+  digest and the required profile at the time. The agent's owner or declarer cannot
+  review it; an undeclared agent cannot be approved. An approval stops counting when it
+  expires.
+- **Drift** is recomputed on every request: graph capabilities the approval did not
+  include, and approved capabilities whose risk in any dimension, approval mode
+  included, is no longer the approved risk. Either kind voids the approval until the
+  agent is reviewed again. A review that recorded no risk cannot vouch for any.
 - **Waiver** (`POST /api/waivers`, owner role): one rule, one agent, a reason of at least
   10 characters, 1 to 180 days. A risk reviewer who is not the requester approves or
   rejects it; approval sets `expires_at`. Expired waivers no longer apply and are shown

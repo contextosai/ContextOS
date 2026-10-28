@@ -45,7 +45,7 @@ use crate::collector::wall_clock;
 use crate::config::ApiKey;
 use crate::governance::{self, AgentView, Anomaly, Finding};
 use crate::intel::{self, IntelError, jobs};
-use crate::records::{Declaration, RecordError, array, object};
+use crate::records::{Declaration, RecordError, array, object, push_new};
 
 type Shared<S, L> = Arc<Tower<S, L>>;
 
@@ -652,7 +652,9 @@ async fn review<S: DocumentStore, L: AppendLog>(
     let days = request.valid_days.unwrap_or(365).clamp(1, 730);
     let expires = add_days(&now, days);
     let record = json!({"decision": request.decision, "notes": request.notes, "conditions": request.conditions,
-        "capabilities": view.graph.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), "graph_digest": view.digest,
+        "capabilities": view.graph.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        "capability_risks": view.graph.iter().map(|c| (c.id.clone(), c.risk())).collect::<serde_json::Map<_, _>>(),
+        "graph_digest": view.digest,
         "required_profile": view.requirement.profile, "reviewed_by": c.principal_id, "reviewed_at": now, "expires_at": expires});
     let stored = record.clone();
     t.records
@@ -668,16 +670,6 @@ async fn review<S: DocumentStore, L: AppendLog>(
         )
         .await?;
     ok(record)
-}
-
-/// Appends a record whose `id` no stored record has.
-fn push_new(items: &mut Value, record: &Value) -> Result<(), RecordError> {
-    let items = array(items);
-    if items.iter().any(|i| i["id"] == record["id"]) {
-        return Err(RecordError::Conflict("a record with this id exists"));
-    }
-    items.push(record.clone());
-    Ok(())
 }
 
 fn add_days(now: &str, days: u32) -> String {
@@ -776,7 +768,7 @@ async fn create_guardrail<S: DocumentStore, L: AppendLog>(
         return Err(ApiError::bad(format!("The rule fails to evaluate: {errors}")));
     }
     let now = wall_clock();
-    let id = uuid::Uuid::now_v7().simple().to_string();
+    let id = crate::records::new_id();
     let record = json!({"id": id, "title": g.title, "description": g.description, "severity": g.severity, "rule": g.rule,
         "remediation": g.remediation, "origin": g.origin.unwrap_or_else(|| "manual".into()), "intent": g.intent,
         "status": "draft", "created_by": c.principal_id, "created_at": now});
@@ -903,7 +895,7 @@ async fn request_waiver<S: DocumentStore, L: AppendLog>(
         ));
     }
     let now = wall_clock();
-    let id = uuid::Uuid::now_v7().simple().to_string();
+    let id = crate::records::new_id();
     let record = json!({"id": id, "rule": w.rule, "agent": w.agent, "reason": w.reason, "days": w.days, "status": "requested",
         "requested_by": c.principal_id, "requested_at": now});
     let stored = record.clone();
