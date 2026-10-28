@@ -57,7 +57,8 @@ minor versions may break APIs and every break is listed.
   lookup. A success status alone no longer confirms an effect. `contextosd` refuses to
   start with an effectful capability on an HTTP adapter whose manifest lacks the
   contract, and the HTTP adapter does not send such a call (`not_dispatched`).
-  Read-only HTTP capabilities need no contract.
+  Read-only HTTP capabilities need no contract. See "Migrating an HTTP integration" in
+  [docs/GUIDE.md](docs/GUIDE.md).
 - The HTTP adapter no longer treats a client error from an effectful capability as
   definitively not applied. HTTP does not promise a handler changed nothing before it
   answered `400` or `422`, and "not applied" releases shared exposure and permits a
@@ -94,6 +95,15 @@ minor versions may break APIs and every break is listed.
   even if it declared less risk), and `capability_risk_conflict` is raised.
 - Tower journals entries a crashed writer left pending once per lease period, so they
   no longer wait for the collection's next change.
+- Tower journals a collection's changes in commit order. A change commits only after
+  the previous change to that collection is journaled, waiting while another writer is
+  still journaling; previously a stalled writer's entry could be journaled after a
+  later change. Journal payloads carry `collection` and `collection_seq` (the
+  collection's commit number, from 1 without gaps).
+- Tower keeps every interaction kind a capability's packs declare (`interactions`) and
+  derives required controls from all of them. Previously a merge kept one kind, so a
+  `browser` and a `computer` variant together required `isolation.required` but not
+  `network.mediated`.
 
 ## 0.1.0-alpha.1 - 2026-10-26
 
