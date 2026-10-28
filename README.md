@@ -61,6 +61,34 @@ also needs Node.js 24 to build the UI, while release archives include it prebuil
 Follow the [Tower guide](docs/tower/README.md).
 Framework examples have their own prerequisites in [examples/frameworks](examples/frameworks/README.md).
 
+## Why not a database transaction?
+
+If the refund is a write to a database you own and every caller goes through one
+service, use `SELECT ... FOR UPDATE` and skip ContextOS for that limit. The lock wins
+the race. Keep it even if you deploy ContextOS.
+
+A refund is usually not a write to your database. The money moves at the payment
+provider, and no provider joins your transaction. That breaks the row lock in three
+places the race never tests:
+
+- **Lost responses.** The provider applies the refund and the answer times out. Rolling
+  back the counter forgets the money and the next refund passes. Keeping the counter
+  blocks refunds forever when the call was in fact never applied. A correct design
+  holds the amount as *unknown* until evidence resolves it. That needs attempt
+  identity, fencing of delayed workers, no retries before reconciliation, and
+  evidence. ContextOS already runs that ledger in front of every governed effect.
+- **Limits that span systems.** Refunds, store credit and vouchers live in three
+  databases. Each can lock its own row; none can enforce "compensation per order
+  ≤ INR 1,000". One ContextOS guarantee can cover all three tools.
+- **Tools you do not own.** Agents call third-party MCP servers and SaaS APIs. There
+  is no row to lock; the call path is the only enforcement point.
+
+`./examples/why-not-a-row-lock/run.sh` runs a careful row-lock refund service and
+ContextOS against the same faults. The row lock overpays INR 1,600 against a
+INR 1,000 limit; ContextOS holds, reconciles and stops at exactly INR 1,000. The
+[full argument](docs/WHY_NOT_A_TRANSACTION.md) covers when to build this in your
+service instead, and what ContextOS does not solve.
+
 ## Project boundaries and support
 
 - **Specification:** the [published contract](https://contextosai.com/docs/implementation/execution-contract)
@@ -138,6 +166,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Follow the original authorization quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)
 - Peers choosing and recovering work, and falsifying each other's findings with recorded evidence: [examples/peer-coordination](examples/peer-coordination/README.md), [findings guide](docs/FINDINGS.md)
+- Compare a row-lock refund service with ContextOS under lost responses and cross-system limits: [examples/why-not-a-row-lock](examples/why-not-a-row-lock/README.md) (`./examples/why-not-a-row-lock/run.sh`), [argument](docs/WHY_NOT_A_TRANSACTION.md)
 - Undo a workflow that failed halfway, as governed compensations: [examples/compensation](examples/compensation/README.md) (`./examples/compensation/run.sh`), [guide](docs/COMPENSATION.md)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)

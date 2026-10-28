@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- "Why not a database transaction?": a README section, a guide
+  ([docs/WHY_NOT_A_TRANSACTION.md](docs/WHY_NOT_A_TRANSACTION.md)) and a runnable
+  example (`examples/why-not-a-row-lock`). The example runs a row-lock refund service
+  and ContextOS against the same lost-response, stalled-call and cross-system faults.
+  It covers one guarantee spanning two adapters and operator reconciliation in both
+  directions.
 - Governed compensation (sagas). A capability manifest may declare `compensation`: the
   capability that undoes its effect and where that capability's arguments come from
   (the original call's arguments, or `/external_ref`, the provider reference recorded

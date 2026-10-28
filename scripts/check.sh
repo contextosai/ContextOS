@@ -36,6 +36,7 @@ step shared-guarantees; check_example examples/shared-guarantees/run.sh "Offline
 step agent-loop; check_example examples/agent-loop/run.sh "run completed" || fail "agent loop"
 step peer-coordination; check_example examples/peer-coordination/run.sh "peer coordination complete" || fail "peer coordination"
 step compensation; check_example examples/compensation/run.sh "saga compensated" || fail "compensation"
+step row-lock; check_example examples/why-not-a-row-lock/run.sh "row lock comparison complete" || fail "row lock comparison"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
 step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || fail "tower example"
 step archive;    check_example scripts/check-archive.sh "Offline audit verification:" || fail "release archive"
