@@ -15,9 +15,12 @@
 //! pending, a condition the compare-and-swap enforces: it first journals entries whose
 //! writer is gone (lease expired), and waits for an entry another writer is still
 //! publishing. So a collection's entries are journaled in commit order, and each change
-//! is journaled before the collection changes again. Each entry's payload also carries
-//! the collection and its commit number (`collection_seq`, consecutive from 1), so a
-//! verifier reads commit order without relying on journal position. A sweep once per
+//! is journaled before the collection changes again. The order is per collection:
+//! entries of different collections interleave in the journal without a defined order.
+//! Each entry's payload also carries the collection and its commit number
+//! (`collection_seq`), so a verifier reads commit order without relying on journal
+//! position. Numbering starts at 1 with a collection's first change made by a version
+//! that numbers them and has no gaps from there; entries written before carry none. A sweep once per
 //! lease period journals an entry whose writer crashed even if nothing else changes.
 //!
 //! One writer at a time publishes a pending entry: the committer holds a lease on it,

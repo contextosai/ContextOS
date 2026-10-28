@@ -120,7 +120,7 @@ fn records() -> (Arc<MemoryStore>, Records<MemoryStore, MemoryLog>) {
     (store.clone(), Records::new(store, journal))
 }
 
-async fn journal(records: &Records<MemoryStore, MemoryLog>) -> Vec<Value> {
+async fn journal<L: AppendLog>(records: &Records<MemoryStore, L>) -> Vec<Value> {
     let rows = records.journal().log().range(NAMESPACE, 1, 500).await.unwrap();
     rows.into_iter().map(|r| r.body).collect()
 }
@@ -401,4 +401,110 @@ fn merged_interaction_kinds_keep_every_kinds_controls() {
     );
     // Both kinds are part of the reviewed risk, so adding a variant is drift.
     assert_eq!(cap.risk()["interactions"], json!(["browser", "computer"]));
+}
+
+fn micros_now() -> u64 {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    u64::try_from(since.as_micros()).unwrap()
+}
+
+/// What a writer leaves when it commits change `seq` and dies before journaling it,
+/// with `lease_left` of its publish lease remaining.
+async fn strand(store: &MemoryStore, collection: &str, seq: u64, lease_left: std::time::Duration) -> Value {
+    let key = DocKey::new(NAMESPACE, DocKind::Governance, collection);
+    let id = format!("stranded-{collection}");
+    let entry = json!({"change_id": id, "kind": format!("{collection}_changed"), "at": NOW, "after": 0,
+        "payload": {"change_id": id, "collection": collection, "collection_seq": seq},
+        "claimed_until": micros_now() + u64::try_from(lease_left.as_micros()).unwrap()});
+    let body = json!({"items": [], "pending": [entry.clone()], "seq": seq});
+    match store.get(&key).await.unwrap() {
+        Some(doc) => store
+            .compare_and_swap(&key, doc.revision, &body)
+            .await
+            .map(|_| ())
+            .unwrap(),
+        None => store.create(&key, &body).await.map(|_| ()).unwrap(),
+    }
+    entry
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restart_mid_lease_journals_the_stranded_entry_once() {
+    // Two processes in turn over one store and one log, as on PostgreSQL.
+    let store = Arc::new(MemoryStore::new());
+    let log = Arc::new(MemoryLog::new());
+    let process = || {
+        Records::new(
+            store.clone(),
+            Arc::new(AuditWriter::new(log.clone(), AuditSigner::from_seed("j", [7; 32]))),
+        )
+    };
+    let crashed = process();
+    crashed
+        .change("reviews", "agent_reviewed", json!({"agent": "a"}), NOW, |_| Ok(()))
+        .await
+        .unwrap();
+    // It commits one more change in each of two collections, then dies holding the leases.
+    let lease_left = std::time::Duration::from_millis(400);
+    let expires = std::time::Instant::now() + lease_left;
+    strand(&store, "reviews", 2, lease_left).await;
+    strand(&store, "waivers", 1, lease_left).await;
+    drop(crashed);
+
+    // The restarted process's startup sweep leaves leased entries to their writer.
+    let restarted = Arc::new(process());
+    for collection in towerd::records::COLLECTIONS {
+        restarted.recover(collection).await.unwrap();
+    }
+    assert_eq!(journal(&restarted).await.len(), 1);
+
+    // A change after the restart waits behind the stranded entry, then journals it
+    // first once the lease expires.
+    let writer = restarted.clone();
+    let task = tokio::spawn(async move {
+        writer
+            .change("reviews", "agent_reviewed", json!({"agent": "b"}), NOW, |_| Ok(()))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(!task.is_finished() && std::time::Instant::now() < expires);
+    tokio::time::timeout(std::time::Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    // With no further change, the sweep journals the other collection's entry after expiry.
+    restarted.recover("waivers").await.unwrap();
+    restarted.recover("waivers").await.unwrap();
+
+    let entries = journal(&restarted).await;
+    let order: Vec<(Value, Value)> = entries
+        .iter()
+        .map(|e| {
+            (
+                e["payload"]["collection"].clone(),
+                e["payload"]["collection_seq"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (json!("reviews"), json!(1)),
+            (json!("reviews"), json!(2)),
+            (json!("reviews"), json!(3)),
+            (json!("waivers"), json!(1)),
+        ]
+    );
+    for collection in ["reviews", "waivers"] {
+        let key = DocKey::new(NAMESPACE, DocKind::Governance, collection);
+        assert_eq!(
+            store.get(&key).await.unwrap().unwrap().body["pending"],
+            json!([]),
+            "{collection}"
+        );
+    }
 }
