@@ -65,7 +65,7 @@ What a resend does depends on where the outage met the call:
 | First answer | Meaning | Resent unchanged |
 |---|---|---|
 | `503 store_unavailable` | refused before anything was claimed | an ordinary first attempt |
-| `503 dispatch_unavailable` | claimed, and possibly sent | `paused: operation_in_flight` or `retry_unsafe`; never sent again |
+| `503 dispatch_unavailable` | failed inside governed dispatch: claimed and possibly sent, or stopped before its claim | claimed: `paused: operation_in_flight` or `retry_unsafe`, never sent again; not claimed: sent once, as a first attempt |
 
 A claimed attempt holds its capacity until it is reconciled. Phase 6 does that from the
 provider's records.

@@ -53,7 +53,12 @@ Across runs, the outage met calls at different points. Calls sent during the res
 were variously refused before any claim (`store_unavailable`), completed after the
 database returned, or claimed and then failed (`dispatch_unavailable`); resending a
 claimed call returned `operation_in_flight` or `retry_unsafe` and never reached the
-provider.
+provider. `dispatch_unavailable` covers any store failure inside governed dispatch,
+including one before the attempt is claimed: in the first CI run on a slower Linux
+runner, 7 of 24 such calls had not reached the provider, and their unchanged resend
+sent each exactly once. The drill's first version wrongly required no provider call at
+all for those resends; it now checks that no refund the provider already applied is
+sent again.
 
 Loopback latency per tool call, last run (includes the synthetic fact services each
 dispatch consults; not a capacity figure):

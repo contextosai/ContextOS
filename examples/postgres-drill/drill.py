@@ -214,8 +214,9 @@ class Drill:
         print(f"    in flight: {self.phases['database_restart']['outcomes']}")
         print(f"    sent during the outage: {self.phases['during_outage']['outcomes']}")
         # An agent that treats a 503 as retryable resends the identical call: same run,
-        # same key. It must find the operation already claimed and never reach the provider.
-        effects = len(self.payments.entries())
+        # same key. A call the provider already applied must never reach it again; one the
+        # outage stopped before it was sent may be sent now, once.
+        before = {e["operation_id"] for e in self.payments.entries()}
         failed = [r[4] for r in in_flight if r[2] != "completed"]
         retried = {}
         for run, agent, order, amount, generation, base in failed:
@@ -223,8 +224,11 @@ class Drill:
             retried[label] = retried.get(label, 0) + 1
         self.phases["identical_retry"] = retried
         print(f"    identical retries of the {len(failed)} failed calls: {retried}")
-        self.check(len(self.payments.entries()) == effects,
-                   f"identical retries reached the provider: {len(self.payments.entries()) - effects} new effects")
+        again = [e["operation_id"] for e in self.payments.entries() if e["operation_id"] in before]
+        self.check(len(again) == len(before), f"identical retries re-sent {len(again) - len(before)} applied refunds")
+        first = len(self.payments.entries()) - len(again)
+        self.phases["identical_retry_first_sends"] = first
+        print(f"    of those, sent for the first time (the outage stopped them before dispatch): {first}")
         # Where the outage met each call decides what a resend does: refused before its
         # claim (store_unavailable), it is an ordinary first attempt; claimed first, it
         # stays fenced (operation_in_flight, retry_unsafe) until reconciled.
