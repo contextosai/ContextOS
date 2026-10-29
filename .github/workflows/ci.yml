@@ -203,6 +203,21 @@ jobs:
       - run: cargo test --release -p contextos-embed --test fuzz
         env:
           CONTEXTOS_FUZZ_CASES: "20000"
+  # The Linux release executables are built against glibc 2.28 (AlmaLinux 8), so they
+  # start on RHEL 8+, Debian 10+ and Ubuntu 20.04+. Catch a dependency that needs a
+  # newer glibc, or a build break on the baseline, before release day.
+  linux-glibc-baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build on glibc 2.28 and run the shared-guarantees demo there
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e CARGO_TARGET_DIR=/src/target/baseline almalinux:8 bash -c '
+            scripts/build-linux-release.sh x86_64-unknown-linux-gnu &&
+            dnf install -y -q --setopt=retries=10 --setopt=timeout=300 python39 >/dev/null &&
+            bin=/src/target/baseline/x86_64-unknown-linux-gnu/release &&
+            for b in contextosd ctx towerd; do "$bin/$b" --version; done &&
+            CONTEXTOS_BIN="$bin" env PATH=/usr/bin:/bin ./examples/shared-guarantees/run.sh'
   helm:
     runs-on: ubuntu-24.04
     steps:

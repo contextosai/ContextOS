@@ -44,9 +44,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, linux: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, linux: true }
+          - { os: macos-latest, target: aarch64-apple-darwin, linux: false }
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -55,9 +55,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.1
+        if: ${{ !matrix.linux }}
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }} -p contextosd -p ctx -p towerd
+        if: ${{ !matrix.linux }}
+      # Linux executables link against the oldest supported glibc (2.28), not the
+      # runner's, so the archive starts on RHEL 8+, Debian 10+ and Ubuntu 20.04+.
+      - name: Build against the glibc baseline
+        if: ${{ matrix.linux }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src almalinux:8 \
+            scripts/build-linux-release.sh ${{ matrix.target }}
+          sudo chown -R "$(id -u):$(id -g)" target
       - uses: actions/download-artifact@v8
         with:
           name: tower-dist
@@ -66,15 +76,17 @@ jobs:
         run: |
           scripts/package-release.sh "contextos-${GITHUB_REF_NAME}-${{ matrix.target }}" \
             target/${{ matrix.target }}/release tower-dist
-      # The archive must run on its own: unpack it outside the checkout, without cargo
-      # on PATH, and run the shared-guarantees demo from it.
+      # The archive must run on its own: every executable starts, and the
+      # shared-guarantees demo runs from it outside the checkout without cargo. Linux
+      # archives are run on the runner and on the oldest supported glibc.
       - name: Smoke-test the archive
+        run: scripts/smoke-archive.sh "contextos-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+      - name: Smoke-test the archive on glibc 2.28
+        if: ${{ matrix.linux }}
         run: |
-          dir="contextos-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir "$RUNNER_TEMP/smoke"
-          tar xzf "$dir.tar.gz" -C "$RUNNER_TEMP/smoke"
-          cd "$RUNNER_TEMP/smoke/$dir"
-          env PATH="/usr/bin:/bin" ./examples/shared-guarantees/run.sh
+          docker run --rm -v "$PWD:/src" -w /src -e ARCHIVE="contextos-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" \
+            almalinux:8 bash -c 'sed -i -e "s/^mirrorlist=/#mirrorlist=/" -e "s/^# *baseurl=/baseurl=/" /etc/yum.repos.d/almalinux*.repo &&
+              dnf install -y -q --setopt=retries=10 --setopt=timeout=300 python39 tar >/dev/null && scripts/smoke-archive.sh "$ARCHIVE"'
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: contextos-*.tar.gz

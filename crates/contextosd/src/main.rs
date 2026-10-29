@@ -1,4 +1,4 @@
-//! `contextosd --config <path>`
+//! `contextosd --config <path>`, or `contextosd --version`
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,11 +21,15 @@ fn fail(message: impl std::fmt::Display) -> ! {
 
 #[tokio::main]
 async fn main() {
-    let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let args: Vec<String> = std::env::args().collect();
+    if matches!(args.as_slice(), [_, flag] if flag == "--version") {
+        println!("contextosd {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
-        _ => fail("usage: contextosd --config <path>"),
+        _ => fail("usage: contextosd --config <path> | --version"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
     let signer = contextosd::audit_signer(&config).await.unwrap_or_else(|e| fail(e));
