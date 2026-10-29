@@ -78,7 +78,8 @@ The local demo and cross-replica tests use a shared in-memory store. No PostgreS
 server or test database URL was available, so PostgreSQL-backed contention,
 multi-process crash recovery, throughput and latency were not exercised. The
 workspace's existing ignored load test was not enabled. A green gate is not an
-enterprise capacity measurement.
+enterprise capacity measurement. (Multi-process operation on PostgreSQL was later
+exercised: see the [29 October drill record](2026-10-29-postgres-shared-limit-drill.md).)
 
 The contract requires stable resource identity, complete tool mediation, consistent
 configuration and tenant identity, a protected shared store, truthful definitive

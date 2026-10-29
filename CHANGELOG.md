@@ -6,6 +6,15 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `examples/postgres-drill`: a failure drill for one shared limit on PostgreSQL.
+  Three `contextosd` processes share one store; agents race refunds on hot orders, a
+  process is SIGKILLed after the provider applied its refund and restarted, a reply is
+  lost, and (with `CONTEXTOS_DRILL_PG_RESTART`) the database restarts under load.
+  Every hold is then found through the inspection API and resolved from the
+  synthetic provider's ledger, and the protected balances are checked against that
+  ledger. It runs in CI with a database restart and ships in release archives. Results
+  and one stranded-hold finding are in
+  [docs/research/2026-10-29-postgres-shared-limit-drill.md](docs/research/2026-10-29-postgres-shared-limit-drill.md).
 - Shared-guarantee hold inspection (`audit:read`, read-only).
   `GET /v1/guarantees/{id}/holds` pages through the tenant's resources with capacity
   held. `GET /v1/guarantees/{id}/resources/{resource_digest}/holds` explains each open
