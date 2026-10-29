@@ -1,0 +1,71 @@
+//! `contextosd --check-config`: passes on a startable configuration and reports the
+//! first problem otherwise, without serving.
+
+use std::path::PathBuf;
+use std::process::Command;
+
+fn root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The support-refund quickstart with its API key placeholder filled and the given
+/// listen address, written under the target directory.
+fn config(name: &str, listen: &str) -> PathBuf {
+    let text = std::fs::read_to_string(root().join("examples/support-refund/contextosd.toml"))
+        .unwrap()
+        .replace("sha256:REPLACED_BY_RUN_SH", &format!("sha256:{}", "ab".repeat(32)))
+        .replace("127.0.0.1:8080", listen);
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+fn check(path: &PathBuf, seed: Option<&str>) -> (bool, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_contextosd"));
+    command.arg("--check-config").arg(path).current_dir(root());
+    command.env_remove("CONTEXTOS_AUDIT_SEED");
+    if let Some(seed) = seed {
+        command.env("CONTEXTOS_AUDIT_SEED", seed);
+    }
+    let output = command.output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).into_owned() + &String::from_utf8_lossy(&output.stderr);
+    (output.status.success(), text)
+}
+
+#[test]
+fn passes_on_a_startable_configuration() {
+    let (ok, text) = check(&config("check-ok.toml", "127.0.0.1:0"), Some(&"11".repeat(32)));
+    assert!(ok, "{text}");
+    assert!(text.contains("ok: 1 context pack(s) valid"), "{text}");
+    assert!(text.contains("ok: dispatch gateway and manifests valid"), "{text}");
+    assert!(text.contains("ok: 127.0.0.1:0 is free"), "{text}");
+}
+
+#[test]
+fn reports_a_missing_signing_seed() {
+    let (ok, text) = check(&config("check-seed.toml", "127.0.0.1:0"), None);
+    assert!(!ok);
+    assert!(text.contains("CONTEXTOS_AUDIT_SEED is not set"), "{text}");
+}
+
+#[test]
+fn reports_a_listen_address_in_use() {
+    let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listen = busy.local_addr().unwrap().to_string();
+    let (ok, text) = check(&config("check-busy.toml", &listen), Some(&"11".repeat(32)));
+    assert!(!ok);
+    assert!(text.contains(&format!("cannot listen on {listen}")), "{text}");
+}
+
+#[test]
+fn reports_an_unreadable_pack() {
+    let path = config("check-pack.toml", "127.0.0.1:0");
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        "examples/support-refund/pack.json",
+        "examples/support-refund/missing.json",
+    );
+    std::fs::write(&path, text).unwrap();
+    let (ok, text) = check(&path, Some(&"11".repeat(32)));
+    assert!(!ok);
+    assert!(text.contains("missing.json"), "{text}");
+}

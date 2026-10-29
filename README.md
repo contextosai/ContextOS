@@ -40,9 +40,13 @@ cd ContextOS
 ./examples/shared-guarantees/run.sh
 ```
 
-The script builds the server and CLI, starts synthetic services on loopback addresses,
-races two agents against one order ceiling, shows how pending exposure blocks another
-effect, reconciles it by provider query, and verifies the exported audit offline.
+The script builds the server and CLI, checks this machine can run them, and starts
+synthetic services on loopback addresses. It races two agents against one order
+ceiling, loses a provider response and shows its reservation held, blocks a further
+effect, then resolves the held effects by provider query and by an operator citing the
+provider's ledger. Each step prints `limit / committed / held / available`. The audit
+log, keys and balances stay in `receipts/shared-guarantees/` with the command to verify
+them yourself.
 See the [shared guarantees demo](examples/shared-guarantees/README.md) and
 [configuration and recovery guide](docs/SHARED_GUARANTEES.md).
 
@@ -52,8 +56,8 @@ Without Rust: download the archive for your platform from a
 unpack it and run the same script from its directory. The archive carries `ctx`,
 `contextosd`, `towerd`, the Tower UI and the examples below, so it needs only Python,
 Bash and curl. Linux archives need glibc 2.28 or newer (RHEL, AlmaLinux or Rocky 8+,
-Debian 10+, Ubuntu 20.04+); `./bin/contextosd --version` checks that the executables
-start on your system.
+Debian 10+, Ubuntu 20.04+); `examples/doctor.sh` checks that your system can run the
+executables and names the alternative when it cannot.
 
 For the original authorization and duplicate-operation walkthrough, run
 `./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).

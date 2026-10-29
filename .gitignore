@@ -7,3 +7,5 @@
 node_modules/
 .venv/
 __pycache__/
+# Receipts the examples keep for independent verification
+/receipts/

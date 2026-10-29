@@ -3,6 +3,7 @@
 pub mod app;
 pub mod attest;
 pub mod auth;
+pub mod check;
 pub mod compensation;
 pub mod config;
 pub mod configs;
@@ -134,6 +135,24 @@ pub fn deployment_summary(config: &Config) -> Value {
     })
 }
 
+/// Reads and validates the configured context packs, keyed by pack reference.
+pub fn load_packs(config: &Config) -> Result<HashMap<String, LoadedPack>, String> {
+    let mut packs = HashMap::new();
+    for pack_path in &config.packs {
+        let text = std::fs::read_to_string(pack_path).map_err(|e| format!("{}: {e}", pack_path.display()))?;
+        let (pack_ref, pack) = load_pack(&text).map_err(|e| format!("{}: {e}", pack_path.display()))?;
+        packs.insert(pack_ref, pack);
+    }
+    Ok(packs)
+}
+
+fn guarantees_need_dispatch(config: &Config, dispatch: bool) -> Result<(), String> {
+    if !config.guarantees.is_empty() && !dispatch {
+        return Err("shared guarantees require an active dispatch gateway".into());
+    }
+    Ok(())
+}
+
 /// Assembles server state for any store backend.
 #[allow(clippy::implicit_hasher)]
 pub fn build_state<S, L>(
@@ -148,9 +167,7 @@ where
     S: contextos_store::DocumentStore + 'static,
     L: contextos_store::AppendLog + 'static,
 {
-    if !config.guarantees.is_empty() && dispatch.is_none() {
-        return Err("shared guarantees require an active dispatch gateway".into());
-    }
+    guarantees_need_dispatch(config, dispatch.is_some())?;
     let mut keys = KeyRing::new();
     keys.insert(signer.kid(), signer.verifying_key());
     for retired in &config.audit.retired_keys {

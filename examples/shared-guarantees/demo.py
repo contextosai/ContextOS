@@ -20,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[2]
 # Set by run.sh: a release archive's bin/ or a fresh cargo build.
 BIN = Path(os.environ.get("CONTEXTOS_BIN", ROOT / "target/debug"))
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
+# Kept after the run so the evidence can be verified again independently.
+RECEIPT = Path(os.environ.get("CONTEXTOS_RECEIPT_DIR", ROOT / "receipts/shared-guarantees"))
+LOST, PENDING = 10_000, 5_000
+
+
+def shown(path):
+    """A path relative to the working directory when it is inside it."""
+    try:
+        return str(Path(path).resolve().relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+
+def inr(minor):
+    return f"INR {minor // 100:,}"
+
+
+def show(view, note=None):
+    print(f"    limit {inr(view['limit'])} | committed {inr(view['committed'])} | "
+          f"held {inr(view['held'])} | available {inr(view['available'])}")
+    if note:
+        print(f"    next safe step: {note}")
 
 
 def digest(value):
@@ -32,7 +54,11 @@ def serve(handler):
         def do_POST(self):
             try:
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                payload = json.dumps(handler(request)).encode()
+                reply = handler(request)
+                if reply is None:  # the response is lost: close without answering
+                    self.close_connection = True
+                    return
+                payload = json.dumps(reply).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
@@ -54,17 +80,23 @@ def main():
         "development_facts", ROOT / "examples/support-refund/dev_services.py")
     facts = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(facts)
-    calls, lock = [], threading.Lock()
+    calls, ledger, lock = [], {}, threading.Lock()
 
     def payments(request):
         if request["method"] == "tasks/get":
             return {"jsonrpc": "2.0", "id": request["id"], "result": {"task": {
                 "taskId": request["params"]["taskId"], "status": "completed",
                 "result": {"structuredContent": {"refund_id": "synthetic_pending_refund"}}}}}
-        amount = request["params"]["arguments"]["amount_minor"]
+        arguments = request["params"]["arguments"]
+        amount = arguments["amount_minor"]
+        key = request["params"]["_meta"]["io.contextos/operationId"]
         with lock:
             calls.append(amount)
-        if amount == 15_000:
+            ledger[key] = {"refund_id": f"synthetic_{key}", "order_id": arguments["order_id"],
+                           "amount_minor": amount, "status": "succeeded"}
+        if amount == LOST:
+            return None
+        if amount == PENDING:
             return {"jsonrpc": "2.0", "id": request["id"], "result": {
                 "resultType": "task", "task": {"taskId": "pending_refund", "status": "working"}}}
         return {"jsonrpc": "2.0", "id": request["id"], "result": {
@@ -154,6 +186,22 @@ unit = "INR_minor"
                     body["principal_chain"] = [{"kind": "agent", "id": agent}]
                     return api(f"/v1/runs/{run}/tool-calls", body, generation)
 
+                resource = digest("ord_881")
+                path = f"/v1/guarantees/refunds-per-order/resources/{resource}"
+                balances = []
+
+                def balance(step, expected):
+                    view = api(path)
+                    assert (view["committed"], view["held"], view["available"]) == expected, view
+                    balances.append({"step": step, **{k: view[k] for k in
+                                     ("limit", "committed", "held", "available", "unit")}})
+                    return view
+
+                def refused(result):
+                    return ", ".join(result["report"]["reason_codes"])
+
+                print("1. Two agents each request INR 800 from order ord_881; all refunds on the")
+                print("   order share one INR 1,000 ceiling.")
                 a = admit("shared_a", "support_email", 80_000)
                 b = admit("shared_b", "support_chat", 80_000)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -164,41 +212,74 @@ unit = "INR_minor"
                 assert sum(r["result"]["status"] == "completed" for r in results) == 1, results
                 assert any("shared_guarantee_exceeded" in r["report"]["reason_codes"] for r in results), results
                 assert calls == [80_000], calls
-                print("Two independent agents request INR 800 each against one INR 1,000 ceiling.")
-                print("Provider effects: 1; the competing effect is withheld before dispatch.")
+                for agent, result in zip(["support_email", "support_chat"], results):
+                    if result["result"]["status"] == "completed":
+                        print(f"    {agent}: refunded (the provider was called once)")
+                    else:
+                        print(f"    {agent}: withheld before dispatch ({refused(result)})")
+                show(balance("race", (80_000, 0, 20_000)))
 
-                resource = digest("ord_881")
-                path = f"/v1/guarantees/refunds-per-order/resources/{resource}"
-                view = api(path)
-                assert (view["committed"], view["held"], view["available"]) == (80_000, 0, 20_000), view
+                print(f"2. A third agent requests {inr(LOST)}. The provider applies it, but the response")
+                print("   is lost, so the outcome is unknown and its reservation stays held.")
+                lost_gen = admit("shared_lost", "support_voice", LOST)
+                lost = dispatch("shared_lost", "support_voice", LOST, lost_gen)
+                assert lost["result"]["status"] != "completed", lost
+                assert calls == [80_000, LOST], calls
+                print(f"    support_voice: {lost['result']['status']} ({lost['result']['error']})")
+                show(balance("lost_response", (80_000, LOST, 10_000)),
+                     "reconcile against the provider's records; do not retry the refund")
 
-                c = admit("shared_pending", "support_async", 15_000)
-                pending = dispatch("shared_pending", "support_async", 15_000, c)
+                print(f"3. A fourth agent's {inr(PENDING)} refund is accepted as a pending provider task;")
+                print(f"   it is held too. A further {inr(10_000)} request is withheld before dispatch.")
+                c = admit("shared_pending", "support_async", PENDING)
+                pending = dispatch("shared_pending", "support_async", PENDING, c)
                 assert pending["result"]["status"] == "paused", pending
-                view = api(path)
-                assert (view["committed"], view["held"], view["available"]) == (80_000, 15_000, 5_000), view
                 d = admit("shared_after_pending", "support_followup", 10_000)
                 blocked = dispatch("shared_after_pending", "support_followup", 10_000, d)
                 assert blocked["report"]["reason_codes"] == ["shared_guarantee_exceeded"], blocked
-                assert calls == [80_000, 15_000], calls
-                print("A pending INR 150 effect holds capacity; a further INR 100 effect is withheld.")
+                assert calls == [80_000, LOST, PENDING], calls
+                print(f"    support_followup: withheld ({refused(blocked)})")
+                show(balance("pending_and_refused", (80_000, LOST + PENDING, 5_000)),
+                     "resolve the held effects; capacity returns only if they did not apply")
 
+                print("4. Querying the provider's task confirms the pending refund.")
                 resolved = api("/v1/runs/shared_pending/operations/refund_shared_pending/reconcile",
                                {"source": "provider"}, c)
                 assert resolved["status"] == "resolved", resolved
-                view = api(path)
-                assert (view["committed"], view["held"], view["available"]) == (95_000, 0, 5_000), view
-                print("Provider query confirms the pending effect: INR 950 committed, INR 50 available.")
+                show(balance("provider_query", (80_000 + PENDING, LOST, 5_000)))
+
+                print("5. The lost response left no task to query. An operator checks the provider's")
+                print("   ledger, finds the refund and records it as confirmed, citing that export.")
+                RECEIPT.mkdir(parents=True, exist_ok=True)
+                entry = ledger["refund_shared_lost"]
+                export = json.dumps({"provider": "synthetic_payments", "entries": [entry]}, indent=2)
+                (RECEIPT / "provider-ledger.json").write_text(export)
+                confirmed = api("/v1/runs/shared_lost/operations/refund_shared_lost/reconcile", {
+                    "source": "operator", "outcome": "confirmed", "evidence_ref": {
+                        "artifact_type": "provider_ledger", "artifact_id": "synthetic_payments_export",
+                        "version": "1", "sha256": "sha256:" + hashlib.sha256(export.encode()).hexdigest()}},
+                    lost_gen)
+                assert confirmed["status"] == "resolved", confirmed
+                show(balance("operator_confirmed", (95_000, 0, 5_000)))
+                assert calls == [80_000, LOST, PENDING], calls
 
                 entries = api("/v1/audit/entries?from=1&limit=1000")
                 keys = api("/v1/audit/keys")
-                (tmp / "entries.json").write_text(json.dumps(entries))
-                (tmp / "keys.json").write_text(json.dumps(keys))
-                verified = subprocess.run(
-                    [str(BIN / "ctx"), "audit-verify", "--entries", str(tmp / "entries.json"),
-                     "--keys", str(tmp / "keys.json")], check=True, capture_output=True, text=True)
+                (RECEIPT / "entries.json").write_text(json.dumps(entries))
+                (RECEIPT / "keys.json").write_text(json.dumps(keys))
+                (RECEIPT / "balances.json").write_text(json.dumps(
+                    {"guarantee_id": "refunds-per-order", "resource_digest": resource,
+                     "provider_calls": len(calls), "balances": balances}, indent=2))
+                verify = [str(BIN / "ctx"), "audit-verify", "--entries", str(RECEIPT / "entries.json"),
+                          "--keys", str(RECEIPT / "keys.json")]
+                verified = subprocess.run(verify, check=True, capture_output=True, text=True)
                 proof = json.loads(verified.stdout)
                 assert proof["verified"] is True, proof
+                print(f"6. {len(calls)} provider calls, never more than INR 1,000 committed. The audit log")
+                print(f"   ({proof['entries']} signed entries) verifies offline.")
+                print(f"Receipt: {shown(RECEIPT)}/ (audit entries, keys, balances, provider ledger)")
+                print("Verify it yourself:")
+                print("  " + " ".join(shown(Path(arg)) if "/" in arg else arg for arg in verify))
                 print("Offline audit verification:", json.dumps(proof, sort_keys=True))
     finally:
         if process is not None:
