@@ -118,7 +118,12 @@ back as tool errors whose `structuredContent` carries the status and reason code
 the model sees that the action did not happen. Operation identity comes from
 `_meta["io.contextos/idempotencyKey"]` when given; otherwise effectful calls derive it
 from the capability and arguments, so a host that retries a call it thinks failed
-cannot apply the effect twice. Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`,
+cannot apply the effect twice. The same derivation means two calls in one run with
+identical capability and arguments are one operation: once the first applied, the
+second is not sent and comes back `paused` with `retry_unsafe` (while the first is in
+flight, `operation_in_flight`). When equal calls are meant as separate
+effects (two equal top-ups), give each its own `io.contextos/idempotencyKey` and mark
+the capability `"repeatable": true` (see "Repeated effects"). Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`,
 and the host's own call id, if it has one, in `_meta["io.contextos/toolCallId"]`. Every
 result names the call and its operation in `_meta` (`io.contextos/toolCallId`,
 `io.contextos/operationId`), which is what a DecisionRecord cites. Keep one effect on
@@ -507,6 +512,24 @@ A provider that reports no state cannot have its success checked. Put such a pro
 behind an MCP server or a service that does report a state, rather than declaring a
 contract its responses cannot satisfy: every call would stay unknown.
 
+#### MCP tools that report a state
+
+A finished MCP result without `isError` is the tool saying it succeeded, but a tool
+can finish while its job is still `pending`, or report `failed` in its content. When
+an effectful MCP capability declares `recovery.completion`, the state at its
+`state_pointer` inside `structuredContent` decides, as for HTTP: a listed state
+settles the call, and a missing or unlisted one stays unknown and is reconciled.
+`status_tool` is not needed (MCP looks tasks up with `tasks/get`):
+
+```json
+"completion": {"state_pointer": "/status", "confirmed": ["succeeded"],
+  "not_applied": ["canceled"]}
+```
+
+`[guards] require_completion_contracts` (on in production, off in development)
+refuses to start with an effectful MCP capability that has no completion contract.
+Without one, a result without `isError` is confirmed.
+
 `status` is `resolved`, `pending` (still running), `no_change` (nothing unknown to
 resolve; conflicting facts need escalation) or `rejected` with reasons such as
 `reconcile_requires_operator`. A recorded fact cannot be overwritten by a later
@@ -519,8 +542,11 @@ records show no effect, a principal with the `attest` scope (never together with
 `admit` or `dispatch`) releases it with `POST
 …/operations/$OP/attest-absence`, citing the records and the time they were checked
 through: at least the attempt's start plus the capability's timeout plus 5 minutes.
-It is signed as `effect_absence_attested` before anything changes. See "Attesting
-absence" in [shared guarantees](SHARED_GUARANTEES.md).
+It advances the run's executor generation, so the executor that sent the call must
+take the run over, and is signed as `effect_absence_attested` before anything else
+changes. A dispatch that stalls more than 120 seconds before calling the provider
+sends nothing (`dispatch_stalled`). See "Attesting absence" in
+[shared guarantees](SHARED_GUARANTEES.md).
 
 ### Compensating applied effects
 

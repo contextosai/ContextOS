@@ -11,10 +11,6 @@ async fn serve(dir: Option<&PathBuf>) -> String {
         Some(d) => routes(Arc::new(Console::load(d).unwrap())),
         None => axum::Router::new(),
     };
-    let app = app.layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
-        axum::http::header::X_CONTENT_TYPE_OPTIONS,
-        axum::http::HeaderValue::from_static("nosniff"),
-    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -65,9 +61,11 @@ async fn serves_the_build_with_a_strict_policy_and_client_routes() {
     assert_eq!(page.headers()["x-frame-options"], "DENY");
     assert_eq!(page.headers()["referrer-policy"], "no-referrer");
     assert_eq!(page.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(page.headers()["cache-control"], "no-store");
 
     let script = http.get(format!("{base}/tower/assets/app.js")).send().await.unwrap();
     assert_eq!(script.headers()["content-type"], "text/javascript; charset=utf-8");
+    assert_eq!(script.headers()["x-content-type-options"], "nosniff");
     assert_eq!(script.text().await.unwrap(), "export {};");
 
     // A client-side route gets the application page; a missing file does not.

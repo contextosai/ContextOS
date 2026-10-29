@@ -10,7 +10,7 @@
 //! session storage only.
 //!
 //! Pages carry a restrictive Content-Security-Policy: scripts, styles and connections
-//! from this origin only, no inline script, no framing.
+//! from this origin only, no inline script, no framing; and `nosniff` and `no-store`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -117,6 +117,10 @@ impl Console {
         headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
         headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+        // Set here too, not only by the API router's layers, so the console carries them
+        // however it is mounted.
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
         headers.insert("cross-origin-opener-policy", HeaderValue::from_static("same-origin"));
         headers.insert("cross-origin-resource-policy", HeaderValue::from_static("same-origin"));

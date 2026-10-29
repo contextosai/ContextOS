@@ -17,5 +17,6 @@ mod harness;
 mod load;
 mod memory;
 mod operations;
+mod ownership;
 mod startup;
 mod task_authorization;

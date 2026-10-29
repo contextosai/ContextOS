@@ -318,7 +318,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         event: &str,
     ) -> Result<Result<(), Vec<String>>, GatewayError> {
         let Some(doc) = self.store.get(&link_key(admission, operation)?).await? else {
-            return Ok(Ok(()));
+            // A guarded dispatch reserved through its link, so a missing one means its
+            // receipt cannot be marked: fail closed rather than send unmarked.
+            return Ok(if event == "start" {
+                Err(vec!["shared_guarantee_link_missing".into()])
+            } else {
+                Ok(())
+            });
         };
         let link: Link =
             serde_json::from_value(doc.body).map_err(|_| GatewayError::Guarantee("shared_guarantee_invalid".into()))?;

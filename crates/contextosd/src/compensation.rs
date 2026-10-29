@@ -13,7 +13,7 @@ use contextos_store::{AppendLog, DocumentStore};
 use serde_json::{Value, json};
 
 use crate::app::{
-    ApiError, ApiResult, AppState, authorize, dispatch_gateway, executor_generation, load_admission, parse_body,
+    ApiError, ApiResult, AppState, authorize, dispatch_gateway, executor_generation, load_owned_admission, parse_body,
 };
 
 fn unavailable() -> ApiError {
@@ -52,7 +52,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let listed = gateway.compensations(&admission).await.map_err(|_| unavailable())?;
     Ok(axum::Json(listed).into_response())
 }
@@ -81,7 +81,7 @@ where
                 "The compensate request needs a tool_call_id.",
             )
         })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let generation = executor_generation(&headers)?;
     let outcome = gateway
         .compensate(&admission, &operation_id, &request.tool_call_id, Some(generation))
@@ -112,7 +112,7 @@ where
             "The compensate request takes no fields.",
         ));
     }
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let generation = executor_generation(&headers)?;
     let report = gateway
         .compensate_run(&admission, Some(generation))

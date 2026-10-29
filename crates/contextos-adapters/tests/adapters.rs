@@ -532,6 +532,45 @@ async fn http_completion_check_is_declared_and_confined() {
     );
 }
 
+/// A finished tool result reporting `state` (or none) where the contract looks.
+fn job(request: &Value, state: Option<&str>) -> Response {
+    let job = state.map_or_else(|| json!({}), |s| json!({"state": s}));
+    rpc_result(
+        request,
+        json!({"isError": false, "structuredContent": {"refund_id": "rf_1", "job": job}}),
+    )
+}
+
+#[tokio::test]
+async fn mcp_completion_contract_decides_a_finished_result() {
+    use contextos_gateway::EffectOutcome::{Confirmed, NotApplied, Partial, Unknown};
+    type Respond = fn(&Value) -> Response;
+    let responders: [(Respond, _, _); 5] = [
+        (|r| job(r, Some("succeeded")), Confirmed, true),
+        (|r| job(r, Some("partially_refunded")), Partial, true),
+        (|r| job(r, Some("canceled")), NotApplied, true),
+        // A finished call whose body says the job is still pending is not a confirmed effect.
+        (|r| job(r, Some("pending")), Unknown, false),
+        (|r| job(r, None), Unknown, false),
+    ];
+    for (respond, outcome, definitive) in responders {
+        let (url, _) = server(respond).await;
+        let response = McpAdapter::new(&url, policy(), Arc::new(Broker), "contextos-test")
+            .unwrap()
+            .invoke(&with_completion(manifest("external_state")), &call())
+            .await;
+        assert_eq!((response.outcome, response.definitive), (outcome, definitive));
+    }
+    // Without a contract, the protocol's success stands (the default outside production).
+    let (url, _) = server(|r| job(r, Some("pending"))).await;
+    assert_eq!(mcp(&url, "external_state").await.outcome, Confirmed);
+    // MCP needs no status endpoint: tasks are looked up with tasks/get.
+    let mut m = manifest("external_state");
+    m.recovery.completion =
+        Some(serde_json::from_value(json!({"state_pointer": "/job/state", "confirmed": ["succeeded"]})).unwrap());
+    assert!(m.validate().is_ok());
+}
+
 #[test]
 fn completion_checks_are_reviewed() {
     for (check, why) in [

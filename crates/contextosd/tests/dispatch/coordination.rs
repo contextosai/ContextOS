@@ -48,11 +48,12 @@ async fn peer_work_is_shared_through_trusted_lineage_and_claimed_atomically_over
         http.get(&board).bearer_auth("ops-key").send().await.unwrap().status(),
         403
     );
+    // Another principal's run is not found: runs are bound to the principal that admitted them.
     let impersonated = http.get(&board).bearer_auth("impostor").send().await.unwrap();
-    assert_eq!(impersonated.status(), 403);
+    assert_eq!(impersonated.status(), 404);
     assert_eq!(
         impersonated.json::<Value>().await.unwrap()["error"]["code"],
-        "work_forbidden"
+        "run_not_found"
     );
     let definition =
         json!({"task_id":"parser","title":"Implement parser","acceptance_criteria":"Checks pass","dependencies":[]});

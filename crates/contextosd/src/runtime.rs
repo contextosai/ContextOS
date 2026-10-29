@@ -271,13 +271,32 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .adapters
             .iter()
             .any(|a| a.id == manifest.adapter_id && a.kind == crate::config::AdapterKind::Http);
+        let effectful = manifest.action_risk.effect != contextos_contract::types::ActionEffect::None;
         if http
-            && manifest.action_risk.effect != contextos_contract::types::ActionEffect::None
-            && manifest.recovery.completion.is_none()
+            && effectful
+            && manifest
+                .recovery
+                .completion
+                .as_ref()
+                .is_none_or(|c| c.status_tool.is_empty())
         {
             return Err(format!(
                 "{}: {} is effectful on HTTP adapter {} and needs recovery.completion: the provider's \
-                 reported-state contract that decides its 2xx responses",
+                 reported-state contract that decides its 2xx responses, with a status_tool",
+                path.display(),
+                manifest.capability_id,
+                manifest.adapter_id
+            ));
+        }
+        // Nor is an MCP result without `isError`: a tool can finish reporting a pending
+        // or failed job. Its reported state decides once the contract is declared.
+        let mcp = config
+            .adapters
+            .iter()
+            .any(|a| a.id == manifest.adapter_id && a.kind == crate::config::AdapterKind::Mcp);
+        if mcp && effectful && manifest.recovery.completion.is_none() && config.require_completion_contracts() {
+            return Err(format!(
+                "{}: [guards] require_completion_contracts: {} is effectful on MCP adapter {} and needs                  recovery.completion (state_pointer into structuredContent and the states that settle it)",
                 path.display(),
                 manifest.capability_id,
                 manifest.adapter_id
