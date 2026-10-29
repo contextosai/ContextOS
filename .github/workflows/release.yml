@@ -87,7 +87,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e ARCHIVE="contextos-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" \
             almalinux:8 bash -c 'sed -i -e "s/^mirrorlist=/#mirrorlist=/" -e "s/^# *baseurl=/baseurl=/" /etc/yum.repos.d/almalinux*.repo &&
               dnf install -y -q --setopt=retries=10 --setopt=timeout=300 python39 tar >/dev/null && scripts/smoke-archive.sh "$ARCHIVE"'
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: contextos-*.tar.gz
       - uses: actions/upload-artifact@v7
@@ -137,7 +137,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -159,7 +159,7 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Sign image (keyless)
         run: cosign sign --yes ghcr.io/${{ github.repository_owner }}/contextosd@${{ steps.build.outputs.digest }}
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/contextosd
           subject-digest: ${{ steps.build.outputs.digest }}
