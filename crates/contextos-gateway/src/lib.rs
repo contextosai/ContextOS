@@ -41,6 +41,7 @@ mod reconcile;
 mod revocations;
 mod scores;
 mod shared_guarantees;
+mod shared_inspection;
 pub mod task_authorization;
 mod usage;
 
@@ -92,6 +93,7 @@ pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::SharedGuarantee;
+pub use shared_inspection::MAX_INSPECTION_SCAN;
 pub use task_authorization::{Amount, Change, OutOfScope, ReadOnly, TaskAuthorization, TaskLimits};
 pub use usage::{UsageKind, UsageRefusal};
 
@@ -360,12 +362,12 @@ pub fn provider_idempotency_key(tenant_id: &str, run_id: &str, operation_id: &st
 /// compensation's claim is evaluated with its original operation alongside (see
 /// [`compensation`]).
 pub fn operation_ledger_key(admission: &RunAdmission, operation_id: &str) -> DocKey {
-    let digest = contextos_contract::canonical::sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id));
-    DocKey::new(
-        &admission.tenant_id,
-        DocKind::OperationLedger,
-        format!("op_{}", &digest[7..39]),
-    )
+    run_operation_key(&admission.tenant_id, &admission.run_id, operation_id)
+}
+
+fn run_operation_key(tenant_id: &str, run_id: &str, operation_id: &str) -> DocKey {
+    let digest = contextos_contract::canonical::sha256_text(&format!("{run_id}\u{0}{operation_id}"));
+    DocKey::new(tenant_id, DocKind::OperationLedger, format!("op_{}", &digest[7..39]))
 }
 
 /// An attempt's dispatch gate, created once: `started` by the dispatch immediately

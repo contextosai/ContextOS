@@ -3366,6 +3366,143 @@
         }
       }
     },
+    "/v1/guarantees/{id}/holds": {
+      "get": {
+        "operationId": "listResourcesWithHolds",
+        "summary": "List resources with shared capacity held",
+        "description": "Read-only. Reads at most `scan` (default and maximum 1000) of the tenant's shared-exposure ledgers after the `after` cursor and returns those under this guarantee with capacity held. Continue from `next` until it is null; a page can be empty while `next` is not. Holds never expire; resolve them by reconciliation.",
+        "x-contextos-scope": "audit:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scan",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of resources with holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "guarantee_id",
+                    "resources",
+                    "next"
+                  ],
+                  "properties": {
+                    "guarantee_id": {
+                      "type": "string"
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "guarantee_id",
+                          "definition_digest",
+                          "resource_digest",
+                          "unit",
+                          "limit",
+                          "committed",
+                          "held",
+                          "available",
+                          "receipt_count",
+                          "open_holds"
+                        ],
+                        "properties": {
+                          "guarantee_id": {
+                            "type": "string"
+                          },
+                          "definition_digest": {
+                            "type": "string"
+                          },
+                          "resource_digest": {
+                            "type": "string"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "committed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "held": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "available": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "receipt_count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "open_holds": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/guarantees/{id}/resources/{resource_digest}": {
       "get": {
         "operationId": "getSharedExposure",
@@ -3445,6 +3582,216 @@
                     "receipt_count": {
                       "type": "integer",
                       "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/guarantees/{id}/resources/{resource_digest}/holds": {
+      "get": {
+        "operationId": "getExposureHolds",
+        "summary": "Explain the open holds on one shared resource",
+        "description": "Read-only. The resource's balance and each open hold, oldest attempt first: its run, operation, attempt, action digest and amount, dispatch state, last observation and observer, and the next safe step with the reconcile route to use. Raw tool arguments are not returned. Nothing here releases capacity; elapsed time never does.",
+        "x-contextos-scope": "audit:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource_digest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balance and open holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "guarantee_id",
+                    "definition_digest",
+                    "resource_digest",
+                    "unit",
+                    "limit",
+                    "committed",
+                    "held",
+                    "available",
+                    "receipt_count",
+                    "as_of",
+                    "holds"
+                  ],
+                  "properties": {
+                    "guarantee_id": {
+                      "type": "string"
+                    },
+                    "definition_digest": {
+                      "type": "string"
+                    },
+                    "resource_digest": {
+                      "type": "string"
+                    },
+                    "unit": {
+                      "type": "string"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "committed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "held": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "available": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "receipt_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "as_of": {
+                      "type": "string"
+                    },
+                    "holds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "reservation_id",
+                          "run_id",
+                          "operation_id",
+                          "attempt_id",
+                          "action_digest",
+                          "amount",
+                          "state",
+                          "dispatch_started",
+                          "attempt_started_at",
+                          "operation_outcome",
+                          "last_observation",
+                          "next_safe_step"
+                        ],
+                        "properties": {
+                          "reservation_id": {
+                            "type": "string"
+                          },
+                          "run_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "operation_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "attempt_id": {
+                            "type": "string"
+                          },
+                          "action_digest": {
+                            "type": "string"
+                          },
+                          "amount": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "state": {
+                            "enum": [
+                              "reserved_not_sent",
+                              "dispatch_active",
+                              "unknown_provider_reference",
+                              "unknown",
+                              "partial",
+                              "settlement_pending",
+                              "conflicting_facts",
+                              "unlinked"
+                            ]
+                          },
+                          "dispatch_started": {
+                            "type": "boolean"
+                          },
+                          "attempt_started_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "operation_outcome": {},
+                          "last_observation": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "next_safe_step": {
+                            "type": "object",
+                            "required": [
+                              "action",
+                              "detail",
+                              "reconcile"
+                            ],
+                            "properties": {
+                              "action": {
+                                "enum": [
+                                  "wait_or_reconcile",
+                                  "confirm_with_evidence_only",
+                                  "provider_query",
+                                  "operator_reconcile",
+                                  "reconcile_again",
+                                  "incident",
+                                  "investigate"
+                                ]
+                              },
+                              "detail": {
+                                "type": "string"
+                              },
+                              "reconcile": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }

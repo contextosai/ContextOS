@@ -212,6 +212,31 @@ impl DocumentStore for PostgresStore {
             })
             .collect())
     }
+
+    async fn list(
+        &self,
+        tenant_id: &str,
+        kind: crate::DocKind,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StoreError> {
+        let tombstone = format!(r#"{{"content\_digest":"sha256:{}","erased":true,%"#, "_".repeat(64));
+        // The primary key (tenant_id, kind, id) serves every page.
+        let rows = sqlx::query(
+            "SELECT id FROM contextos_documents \
+             WHERE tenant_id = $1 AND kind = $2 AND id > $3 AND body NOT LIKE $4 \
+             ORDER BY id LIMIT $5",
+        )
+        .bind(tenant_id)
+        .bind(kind.as_str())
+        .bind(after.unwrap_or(""))
+        .bind(&tombstone)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| backend(&e))?;
+        Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
 }
 
 impl crate::AppendLog for PostgresStore {

@@ -227,12 +227,61 @@ async fn expiry_semantics<S: DocumentStore>(store: &S, tenant: &str) {
     );
 }
 
+/// One tenant's documents of one kind, by id, in pages; tombstones and other tenants'
+/// and kinds' documents are not listed.
+async fn listing_semantics<S: DocumentStore>(store: &S, tenant: &str) {
+    for id in ["lst_c", "lst_a", "lst_b", "lst_d"] {
+        let key = DocKey::new(tenant, DocKind::SharedExposure, id);
+        store.create(&key, &json!({"held": 1})).await.unwrap();
+    }
+    store
+        .create(&DocKey::new(tenant, DocKind::ExposureLink, "lst_x"), &json!({}))
+        .await
+        .unwrap();
+    store
+        .create(
+            &DocKey::new(format!("{tenant}_other"), DocKind::SharedExposure, "lst_y"),
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    let tombstone = json!({"erased": true, "erased_at": "2026-10-20T10:00:00Z", "erased_by": "ops", "reason": "r",
+        "content_digest": format!("sha256:{}", "b".repeat(64))});
+    store
+        .compare_and_swap(&DocKey::new(tenant, DocKind::SharedExposure, "lst_d"), 1, &tombstone)
+        .await
+        .unwrap();
+    let all = store.list(tenant, DocKind::SharedExposure, None, 100).await.unwrap();
+    assert_eq!(all, ["lst_a", "lst_b", "lst_c"]);
+    let mut paged = Vec::new();
+    let mut after: Option<String> = None;
+    loop {
+        let page = store
+            .list(tenant, DocKind::SharedExposure, after.as_deref(), 2)
+            .await
+            .unwrap();
+        assert!(page.len() <= 2);
+        let Some(last) = page.last().cloned() else { break };
+        paged.extend(page);
+        after = Some(last);
+    }
+    assert_eq!(paged, all);
+    assert_eq!(
+        store
+            .list(tenant, DocKind::SharedExposure, Some("lst_c"), 10)
+            .await
+            .unwrap(),
+        Vec::<String>::new()
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn memory_store_suite() {
     append_log_semantics(&MemoryLog::new(), "tenant_a").await;
     let store = Arc::new(MemoryStore::new());
     basic_semantics(store.as_ref(), "tenant_a").await;
     expiry_semantics(store.as_ref(), "tenant_a").await;
+    listing_semantics(store.as_ref(), "tenant_a").await;
     concurrent_budget_is_conserved(store.clone(), "tenant_a").await;
     concurrent_claims_admit_one(store, "tenant_a").await;
 }
@@ -251,6 +300,7 @@ async fn postgres_store_suite() {
     let tenant = format!("tenant_{}", std::process::id());
     basic_semantics(&store, &tenant).await;
     expiry_semantics(&store, &tenant).await;
+    listing_semantics(&store, &tenant).await;
     append_log_semantics(&store, &tenant).await;
     let store = Arc::new(store);
     concurrent_budget_is_conserved(store.clone(), &tenant).await;

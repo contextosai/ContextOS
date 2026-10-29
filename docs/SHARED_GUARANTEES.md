@@ -102,11 +102,13 @@ hold; repeating reconciliation repairs settlement from protected evidence.
 
 ## Inspect and recover
 
-Both read routes require `audit:read`; the tenant always comes from authentication:
+The read routes require `audit:read`; the tenant always comes from authentication:
 
 ```text
 GET /v1/guarantees
 GET /v1/guarantees/{id}/resources/{resource_digest}
+GET /v1/guarantees/{id}/holds?after=<cursor>&scan=<n>
+GET /v1/guarantees/{id}/resources/{resource_digest}/holds
 ```
 
 The resource digest is SHA-256 of the RFC 8785 canonical JSON string, including its
@@ -124,6 +126,40 @@ An existing resource returns `guarantee_id`, `definition_digest`,
 `receipt_count`. Missing resources and other tenants' resources return 404.
 The view contains no raw resource value or tool arguments. Hashes are correlation
 identifiers, not anonymization; predictable identifiers may be guessed.
+
+### Find and explain holds
+
+`GET /v1/guarantees/{id}/holds` answers *which resources have capacity held*. It reads
+at most `scan` (default and maximum 1,000) of the tenant's ledgers after the `after`
+cursor and returns those under this guarantee with `held > 0`, each with the balance
+above and `open_holds`. Continue from `next` until it is `null`; a page can be empty
+while `next` is not. The store lists ledgers by key, so a tenant with many resources
+needs several pages.
+
+`GET /v1/guarantees/{id}/resources/{resource_digest}/holds` answers *why this resource
+is blocked and what can safely happen next*. It returns the balance, `as_of`, and each
+open hold, oldest attempt first: `run_id`, `operation_id`, `attempt_id`,
+`action_digest`, `amount`, `dispatch_started`, `attempt_started_at`,
+`operation_outcome`, `last_observation` (outcome, finality, `observed_at`,
+`external_ref`, observer and evidence reference), and `next_safe_step`:
+
+| `state` | `next_safe_step.action` | Meaning |
+| --- | --- | --- |
+| `reserved_not_sent` | `wait_or_reconcile` | Reserved but not sent. If the executor is gone, reconciling closes the dispatch gate first, so the attempt cannot be sent later, and releases the capacity. |
+| `dispatch_active` | `confirm_with_evidence_only` | Sent with nothing observed; it may still apply. Do not retry. Absence is refused (`shared_guarantee_dispatch_active`); an operator may confirm with evidence. |
+| `unknown_provider_reference` | `provider_query` | Unknown, with a provider reference: reconcile with `{"source":"provider"}`. |
+| `unknown` | `operator_reconcile` | Unknown, with nothing to query: check the provider's records, then reconcile as an operator citing them. |
+| `partial` | `operator_reconcile` | Part of the effect applied, so capacity cannot be released; an operator may confirm it, committing the full amount. |
+| `settlement_pending` | `reconcile_again` | The outcome is decided but the balance was not updated; reconciling again repairs it without sending anything. |
+| `conflicting_facts` | `incident` | Contradictory outcomes were recorded; capacity stays held. |
+| `unlinked` | `investigate` | No readable operation record; capacity stays held. |
+
+`next_safe_step.reconcile` is the reconcile route for that operation, called with
+the `reconcile` scope and the run's current executor generation as described below.
+Viewing never resolves anything: the inspection routes are read-only, their scope
+grants no reconciliation, and no state is resolved by waiting. The views contain no
+tool arguments. Run and operation identifiers and provider references are visible
+to `audit:read` holders, as they are in the audit log.
 
 Use the existing endpoint with the `reconcile` scope and the run's **current**
 executor generation, including after the run fails or is cancelled:

@@ -53,7 +53,7 @@ pub struct SharedGuarantee {
     pub unit: String,
 }
 
-fn identifier(s: &str) -> bool {
+pub(crate) fn identifier(s: &str) -> bool {
     !s.is_empty() && s.len() <= 256 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
 }
 
@@ -126,7 +126,7 @@ fn hash(value: &Value) -> Result<String, GatewayError> {
     sha256_canonical(value).map_err(|_| GatewayError::Guarantee("shared_guarantee_invalid".into()))
 }
 
-fn exposure_key(tenant: &str, id: &str, resource: &str) -> Result<DocKey, GatewayError> {
+pub(crate) fn exposure_key(tenant: &str, id: &str, resource: &str) -> Result<DocKey, GatewayError> {
     Ok(DocKey::new(
         tenant,
         DocKind::SharedExposure,
