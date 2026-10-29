@@ -3424,57 +3424,78 @@
                     "resources": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "required": [
-                          "guarantee_id",
-                          "definition_digest",
-                          "resource_digest",
-                          "unit",
-                          "limit",
-                          "committed",
-                          "held",
-                          "available",
-                          "receipt_count",
-                          "open_holds"
-                        ],
-                        "properties": {
-                          "guarantee_id": {
-                            "type": "string"
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "guarantee_id",
+                              "definition_digest",
+                              "resource_digest",
+                              "unit",
+                              "limit",
+                              "committed",
+                              "held",
+                              "available",
+                              "receipt_count",
+                              "open_holds"
+                            ],
+                            "properties": {
+                              "guarantee_id": {
+                                "type": "string"
+                              },
+                              "definition_digest": {
+                                "type": "string"
+                              },
+                              "resource_digest": {
+                                "type": "string"
+                              },
+                              "unit": {
+                                "type": "string"
+                              },
+                              "limit": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "committed": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "held": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "available": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "receipt_count": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "open_holds": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            }
                           },
-                          "definition_digest": {
-                            "type": "string"
-                          },
-                          "resource_digest": {
-                            "type": "string"
-                          },
-                          "unit": {
-                            "type": "string"
-                          },
-                          "limit": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "committed": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "held": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "available": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "receipt_count": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "open_holds": {
-                            "type": "integer",
-                            "minimum": 1
+                          {
+                            "type": "object",
+                            "description": "A ledger that could not be read; inspect it by resource digest or restore it.",
+                            "required": [
+                              "resource_digest",
+                              "unreadable"
+                            ],
+                            "properties": {
+                              "resource_digest": {
+                                "type": "string"
+                              },
+                              "unreadable": {
+                                "const": true
+                              }
+                            },
+                            "additionalProperties": false
                           }
-                        }
+                        ]
                       }
                     },
                     "next": {
@@ -3817,7 +3838,7 @@
       "put": {
         "operationId": "amendTaskAuthorization",
         "summary": "Correct what the run's principal authorized (narrow, or widen with confirmation)",
-        "description": "Replaces the run's own task authorization; inherited ones never change. Narrowing (every scope narrows a current one, reads no less scoped, `ask` not replacing `deny`) needs `dispatch` or `authorize`. Widening needs `authorize` held without `admit`/`dispatch`, a `confirmation_ref` and the same `issued_by`. The task reference is part of every action digest, so approvals and operation claims made under the previous authorization no longer match. Audited as `task_authorization_amended`.",
+        "description": "Replaces the run's own task authorization; inherited ones never change. Narrowing (every scope narrows a current one, reads no less scoped, `ask` not replacing `deny`) needs `dispatch` or `authorize`. Widening needs `authorize` held without `admit`/`dispatch`, a `confirmation_ref` and the same `issued_by`; an amendment changing `issued_by` or `confirmation_ref` counts as widening. The task reference is part of every action digest, so approvals and operation claims made under the previous authorization no longer match. Audited as `task_authorization_amended` before it takes effect (followed by `task_authorization_amendment_aborted` if the commit then fails).",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"

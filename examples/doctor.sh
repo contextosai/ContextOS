@@ -44,7 +44,10 @@ source_build="build_from_source"
 # on Apple Silicon.
 os="$(uname -s)" arch="$(uname -m)" platform_ok=true
 platform="$os $arch"
-if [ "$os" = Linux ]; then
+if [ "$os" = Linux ] && [ "$arch" != x86_64 ] && [ "$arch" != aarch64 ]; then
+  fail "$platform: the Linux archives are for x86_64 and aarch64" "$source_build"
+  platform_ok=false
+elif [ "$os" = Linux ]; then
   libc="$(getconf GNU_LIBC_VERSION 2>/dev/null)"
   if [ -z "$libc" ]; then
     fail "$platform without GNU libc (for example Alpine/musl): the Linux archives need glibc 2.28+" "$source_build"
@@ -59,8 +62,15 @@ if [ "$os" = Linux ]; then
       ok "$platform"
     fi
   fi
-else
+elif [ "$os" = Darwin ] && { [ "$arch" = arm64 ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; }; then
+  # A shell under Rosetta reports x86_64 on Apple Silicon, where the archive runs.
   ok "$platform"
+elif [ "$os" = Darwin ]; then
+  fail "$platform: the macOS archive is for Apple Silicon only" "$source_build"
+  platform_ok=false
+else
+  fail "$platform: no release archive for this platform" "$source_build"
+  platform_ok=false
 fi
 
 # Every binary starts. A binary built for a newer glibc or another platform fails

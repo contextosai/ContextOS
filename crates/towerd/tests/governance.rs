@@ -89,6 +89,20 @@ fn an_approval_stops_counting_when_it_expires() {
 }
 
 #[test]
+fn an_approval_by_the_current_owner_or_declarer_never_counts() {
+    let fleet = fleet();
+    let mut reviews = review("2027-06-01T00:00:00.000000Z", REFUND_RISK.clone());
+    reviews["acme/bot"]["reviewed_by"] = json!("usr_risk");
+    let declared = |owner: &str, by: &str| json!({"acme/bot": {"owner": owner, "declared_by": by}});
+    assert!(governance::views(&fleet, &declared("usr_dev", "usr_dev"), &reviews, NOW)[0].approved);
+    // A re-declaration racing the review made the reviewer the owner, or its declarer.
+    for declarations in [declared("usr_risk", "usr_dev"), declared("usr_dev", "usr_risk")] {
+        let view = &governance::views(&fleet, &declarations, &reviews, NOW)[0];
+        assert!(!view.approved && !view.review_expired);
+    }
+}
+
+#[test]
 fn a_pack_version_resolves_within_the_source_that_ran_it() {
     let mut fleet = fleet();
     // Another source publishes different content under the same id@version; it sorts

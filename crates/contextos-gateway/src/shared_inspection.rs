@@ -137,7 +137,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             if doc.body["binding"]["guarantee_id"] != guarantee_id {
                 continue;
             }
-            let mut view = exposure_summary(&doc.body).ok_or_else(invalid)?;
+            // One unreadable ledger is listed as such, not allowed to hide the rest.
+            let Some(mut view) = exposure_summary(&doc.body) else {
+                tracing::warn!(resource = %id, "shared exposure ledger unreadable");
+                resources.push(json!({"resource_digest": id, "unreadable": true}));
+                continue;
+            };
             if view["held"] == 0 {
                 continue;
             }

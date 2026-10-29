@@ -309,7 +309,10 @@ A guardrail is an organisation rule evaluated against every agent's facts:
   `collection_seq`, the collection's commit number, so a verifier can check that
   collection's commit order and completeness directly. Numbering starts at 1 with the
   collection's first change after upgrading to a version that numbers them, and has no
-  gaps from there. Entries written earlier carry no `collection_seq`.
+  gaps from there. Entries written earlier carry no `collection_seq`. A writer that
+  reaches its lease edge while recovery journals the same change can leave two
+  entries with one `collection_seq` and the same `change_id`; verifiers must treat
+  those as one change (duplicates, not a gap or a reordering).
 - **Waiver** (`POST /api/waivers`, owner role): one rule, one agent, a reason of at least
   10 characters, 1 to 180 days. A risk reviewer who is not the requester approves or
   rejects it; approval sets `expires_at`. Expired waivers no longer apply and are shown

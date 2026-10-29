@@ -338,9 +338,15 @@ says whether it `narrowed` or `widened` and gives the new revision.
   action digest, so an approval given under the previous authorization (say, for
   the old recipient) no longer matches. An operation claimed under it cannot be
   retried as the same operation; reconcile it instead.
+- **Who issued it is fixed.** An amendment that changes `issued_by` or
+  `confirmation_ref` counts as widening, however narrow its scopes, so whoever runs
+  the task cannot rewrite the record of who authorized it.
 - **What is recorded:** each amendment is audited as `task_authorization_amended`,
   with the old and new references, the change, the amending principal and the
-  confirmation. A delegated run's inherited authorizations never change; it may only
+  confirmation. The record is appended before the amendment takes effect, so none
+  goes live unrecorded; if the commit then fails, a best-effort
+  `task_authorization_amendment_aborted` follows, and the run's admission (its
+  revision and the referenced digest) is the authority on what applies. A delegated run's inherited authorizations never change; it may only
   amend its own.
 
 **Measuring it.** Proposals outside the task show up in

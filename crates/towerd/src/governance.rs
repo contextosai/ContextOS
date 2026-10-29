@@ -61,11 +61,17 @@ pub struct AgentView {
 }
 
 /// Whether a stored review approves its agent at `now`: an approval counts only until
-/// it expires, and one without an expiry never counts.
-pub fn approval(review: Option<&Value>, now: &str) -> (bool, bool) {
+/// it expires, and one without an expiry never counts. Nor does one by the agent's
+/// current owner or declarer: checked here, against the declaration as it is now,
+/// because a re-declaration racing the review is written to another collection.
+pub fn approval(review: Option<&Value>, declaration: Option<&Value>, now: &str) -> (bool, bool) {
     let Some(r) = review.filter(|r| r["decision"] == "approved") else {
         return (false, false);
     };
+    let reviewer = &r["reviewed_by"];
+    if declaration.is_some_and(|d| reviewer.is_string() && (&d["owner"] == reviewer || &d["declared_by"] == reviewer)) {
+        return (false, false);
+    }
     let current = r["expires_at"].as_str().is_some_and(|e| e > now);
     (current, !current)
 }
@@ -104,7 +110,7 @@ fn view(
     review: Option<Value>,
     now: &str,
 ) -> AgentView {
-    let (current, review_expired) = approval(review.as_ref(), now);
+    let (current, review_expired) = approval(review.as_ref(), declaration.as_ref(), now);
     let graph = authority::graph(&activity, packs);
     let contexts: Vec<String> = declaration
         .as_ref()
