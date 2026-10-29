@@ -3,7 +3,11 @@
 All notable changes are listed here. Versions follow Semantic Versioning; before 1.0,
 minor versions may break APIs and every break is listed.
 
-## Unreleased
+## 0.1.0-alpha.2 - 2026-10-29
+
+Second alpha. Linux archives now run on glibc 2.28 and later, and this release
+contains breaking changes to Tower reviews and HTTP capability manifests; see the
+[release notes](docs/releases/v0.1.0-alpha.2.md) before upgrading.
 
 ### Added
 - Linux release executables are built on AlmaLinux 8 against glibc 2.28, so the

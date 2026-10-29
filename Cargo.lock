@@ -471,7 +471,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "contextos-adapters"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-audit"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-contract"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "hex",
  "icu_collator",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-embed"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-contract",
  "contextos-kernel",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-gateway"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "contextos-audit",
@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-kernel"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-contract",
  "contextos-policy",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-node"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-embed",
  "napi",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-policy"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-contract",
  "proptest",
@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-py"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-embed",
  "pyo3",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "contextos-store"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-contract",
  "contextos-kernel",
@@ -612,14 +612,14 @@ dependencies = [
 
 [[package]]
 name = "contextos-wasm"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "contextos-embed",
 ]
 
 [[package]]
 name = "contextosd"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -798,7 +798,7 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "ctx"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -3415,7 +3415,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "towerd"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "axum",
