@@ -83,12 +83,16 @@ absence for a started dispatch. The capacity stays held until someone can show i
 not applied, which this provider cannot do for a call it never received.
 
 This is over-holding, not a conservation failure, and it is the documented behavior
-for orphaned dispatches. It is also avoidable for this window: the dispatch gate is
-the gateway's own fence. Creating the gate before marking the receipt started would
-leave a receipt that a store failure interrupts in the not-started state, which
-reconciliation can already release safely; the receipt's own start transition still
-fences a racing reconciliation. That change touches the enumerated crash-point
-ordering and is proposed separately rather than made here.
+for orphaned dispatches. It was also avoidable for this window, because the dispatch
+gate is the gateway's own fence. **Fixed after this record:** the gateway now creates
+the gate before marking the receipt started, so marking the receipt is the last write
+before the provider call. A store failure at the gate leaves the receipt not started,
+and reconciliation releases it as never sent. A reconciliation that races the dispatch
+is still fenced by the receipt's own start transition. A regression test
+(`crates/contextos-gateway/tests/shared_dispatch_gate.rs`) fails the gate write, before
+and after it commits, and asserts the hold is released. A store failure whose start
+transition commits but whose reply is lost remains indistinguishable from a send, and
+stays held.
 
 ## Limits of this evidence
 

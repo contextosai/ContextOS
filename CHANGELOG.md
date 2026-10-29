@@ -41,6 +41,15 @@ minor versions may break APIs and every break is listed.
   `receipts/shared-guarantees/` (`CONTEXTOS_RECEIPT_DIR`), with the command to verify
   them again.
 
+### Fixed
+- A store failure while a shared-guarantee dispatch wrote its dispatch gate no longer
+  strands the attempt's held capacity. The gateway now writes the gate before it marks
+  the shared receipt started, so marking the receipt is the last write before the
+  provider call. An attempt the failure stopped is recorded as not started, and
+  asserting `not_applied` releases its hold; before, that assertion was refused with
+  `shared_guarantee_dispatch_active` although nothing had been sent. Found by the
+  PostgreSQL drill.
+
 ## 0.1.0-alpha.2 - 2026-10-29
 
 Second alpha. Linux archives now run on glibc 2.28 and later, and this release
