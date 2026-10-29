@@ -35,7 +35,7 @@ Synthetic, loopback services only: no model key, cloud account or payment accoun
 3. **`SIGKILL` after send.** The provider applies an INR 400 refund and the sending
    process is killed before it records any answer, then restarted on the same store.
    The inspection API shows the hold as `dispatch_active`, next safe step
-   `confirm_with_evidence_only`. A fresh run asking INR 700 is withheld, INR 600 fits.
+   `confirm_or_attest_absence`. A fresh run asking INR 700 is withheld, INR 600 fits.
    A new executor takes the run over; asserting `not_applied` is refused
    (`shared_guarantee_dispatch_active`), confirming from the provider ledger resolves
    it.

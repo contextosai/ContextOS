@@ -66,8 +66,8 @@ fn diagnose(receipt: &Value, op: Option<&Value>, attempt_id: &str) -> (&'static 
     let Some(latest) = latest else {
         return (
             "dispatch_active",
-            "confirm_with_evidence_only",
-            "The call was sent and nothing was observed, so it may still apply. Do not retry. Absence cannot be asserted (shared_guarantee_dispatch_active); if the provider shows the effect applied, an operator can confirm it citing that evidence.",
+            "confirm_or_attest_absence",
+            "The call was sent and nothing was observed, so it may still apply. Do not retry. If the provider shows the effect applied, an operator confirms it citing that evidence. If it shows none, an attester (scope attest) may release the hold once the provider's records are checked through the attempt's start plus the timeout plus 5 minutes, citing them.",
         );
     };
     if latest["finality"] == "definitive"
@@ -229,6 +229,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
                 _ => Value::Null,
             };
+            let attest_absence = match (&run_id, &operation_id) {
+                (Some(run), Some(op)) if action == "confirm_or_attest_absence" => {
+                    json!(format!("/v1/runs/{run}/operations/{op}/attest-absence"))
+                }
+                _ => Value::Null,
+            };
             holds.push(json!({
                 "reservation_id": reservation_id, "run_id": run_id, "operation_id": operation_id,
                 "attempt_id": attempt_id, "action_digest": receipt["claim"]["action_digest"],
@@ -237,7 +243,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "attempt_started_at": attempt.map_or(Value::Null, |a| a["started_at"].clone()),
                 "operation_outcome": op.map_or(Value::Null, |o| o["outcome"].clone()),
                 "last_observation": last_observation,
-                "next_safe_step": {"action": action, "detail": detail, "reconcile": reconcile},
+                "next_safe_step": {"action": action, "detail": detail, "reconcile": reconcile,
+                    "attest_absence": attest_absence},
             }));
         }
         holds.sort_by(|a, b| {
@@ -285,7 +292,7 @@ mod tests {
         );
         assert_eq!(
             state(&receipt(true, false), Some(&none)),
-            ("dispatch_active", "confirm_with_evidence_only")
+            ("dispatch_active", "confirm_or_attest_absence")
         );
         let task = op(json!("unknown"), false, seen("unknown", "provisional", json!("task_1")));
         assert_eq!(
@@ -333,7 +340,7 @@ mod tests {
         );
         assert_eq!(
             state(&receipt(true, false), Some(&other)),
-            ("dispatch_active", "confirm_with_evidence_only")
+            ("dispatch_active", "confirm_or_attest_absence")
         );
     }
 }

@@ -506,6 +506,17 @@ impl Config {
                 key.principal_id
             )));
         }
+        // Whoever attests that a started effect did not apply does not also run it.
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "attest") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both attest absence and admit or dispatch",
+                key.principal_id
+            )));
+        }
         // Whoever proposes or approves configuration does not also run agents under it.
         if let Some(key) = self
             .api_keys
@@ -570,6 +581,10 @@ mod tests {
         let authorizer = second_key.replace(r#"scopes = ["evaluate"]"#, r#"scopes = ["authorize"]"#);
         let error = Config::parse(&authorizer).unwrap_err().to_string();
         assert!(error.contains("cannot both authorize tasks"), "{error}");
+        // Nor attest that its effects did not apply.
+        let attester = second_key.replace(r#"scopes = ["evaluate"]"#, r#"scopes = ["attest"]"#);
+        let error = Config::parse(&attester).unwrap_err().to_string();
+        assert!(error.contains("cannot both attest absence"), "{error}");
         // Published example keys are refused in production (the example file is).
         let published = EXAMPLE.replace(
             &format!("sha256:{}", "0".repeat(64)),

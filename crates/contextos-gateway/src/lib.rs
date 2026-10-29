@@ -21,6 +21,7 @@
 //! decide everything else.
 
 pub mod admission;
+mod attestation;
 mod checkpoints;
 mod compensation;
 mod coordination;
@@ -67,6 +68,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use attestation::ATTESTATION_MARGIN_SECONDS;
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, compensation_operation_id};
 pub use coordination::{MAX_WORK_BOARD_BYTES, MAX_WORK_TASKS, WorkCommand, WorkError, WorkEvidence, WorkTaskInput};

@@ -879,6 +879,93 @@
         "x-contextos-scope": "reconcile"
       }
     },
+    "/v1/runs/{run_id}/operations/{operation_id}/attest-absence": {
+      "post": {
+        "operationId": "attestAbsence",
+        "summary": "Release a started effect with no fact, on an evidenced attestation that it did not apply",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "evidence_ref",
+                  "checked_through"
+                ],
+                "properties": {
+                  "evidence_ref": {
+                    "type": "object",
+                    "description": "ArtifactRef for the provider records checked."
+                  },
+                  "checked_through": {
+                    "type": "string",
+                    "description": "Contract timestamp the provider's records were checked through."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "attest"
+            ]
+          }
+        ],
+        "x-contextos-scope": "attest",
+        "description": "For an attempt whose dispatch started and which has no definitive fact (its executor died, so reconcile refuses `dispatch_active` / `shared_guarantee_dispatch_active`). The attester states that the provider's records, checked through `checked_through`, show no effect, and cites them. Accepted only when `checked_through` is at least the attempt's start plus the capability's timeout plus 300 seconds, and not in the future (`attestation_too_early` reports the earliest acceptable time in `output.checked_through_not_before`). Needs `attest` held without `admit` or `dispatch`; no executor generation. Audited as `effect_absence_attested` before anything changes; the attestation becomes the attempt's definitive `not_applied` fact and releases its budget, task-limit charge and shared capacity. A later contrary report is refused (shared guarantees) or marks the operation conflicting."
+      }
+    },
     "/v1/runs/{run_id}/decisions": {
       "post": {
         "operationId": "record_decision",
@@ -3786,13 +3873,14 @@
                             "required": [
                               "action",
                               "detail",
-                              "reconcile"
+                              "reconcile",
+                              "attest_absence"
                             ],
                             "properties": {
                               "action": {
                                 "enum": [
                                   "wait_or_reconcile",
-                                  "confirm_with_evidence_only",
+                                  "confirm_or_attest_absence",
                                   "provider_query",
                                   "operator_reconcile",
                                   "reconcile_again",
@@ -3808,6 +3896,13 @@
                                   "string",
                                   "null"
                                 ]
+                              },
+                              "attest_absence": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The attest-absence route, when the hold may be released on an evidenced attestation."
                               }
                             }
                           }
