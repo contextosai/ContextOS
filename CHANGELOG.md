@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.3 - 2026-10-29
+
+Third alpha: the ten-minute path (preflight, configuration check, lost-response demo
+and receipt), hold inspection, the PostgreSQL failure drill and review fixes; see the
+[release notes](docs/releases/v0.1.0-alpha.3.md) before upgrading.
+
 ### Added
 - `examples/postgres-drill`: a failure drill for one shared limit on PostgreSQL.
   Three `contextosd` processes share one store; agents race refunds on hot orders, a

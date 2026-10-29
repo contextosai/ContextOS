@@ -26,7 +26,7 @@ fencing, adapters and shared business guarantees as an opt-in runtime extension.
 The [research and strategy](docs/research/2026-10-22-value-proposition.md) explain the
 chosen opportunity, competing approaches and unvalidated assumptions.
 
-> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.2](docs/releases/v0.1.0-alpha.2.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
+> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.3](docs/releases/v0.1.0-alpha.3.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
 ## Quickstart
 

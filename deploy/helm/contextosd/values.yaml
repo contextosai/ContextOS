@@ -26,7 +26,7 @@ config: |
 
   [support]
   implementation_id = "contextos-rs"
-  implementation_version = "0.1.0-alpha.2"
+  implementation_version = "0.1.0-alpha.3"
   profiles = ["contextos.core"]
   controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
 

@@ -34,7 +34,7 @@ key_id = "audit-2026-10"
 
 [support]
 implementation_id = "contextos-rs"
-implementation_version = "0.1.0-alpha.2"
+implementation_version = "0.1.0-alpha.3"
 # Declare only profiles and controls this deployment actually enforces through
 # its integrated providers. A declaration is a claim, not a grant.
 profiles = ["contextos.core"]
