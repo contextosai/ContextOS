@@ -219,10 +219,18 @@ protections and increased limits as loosenings. Lowering a limit is classified a
 tightening, but still needs an accounted migration because the pinned definition
 will refuse it. Review and coordinate deployment changes explicitly.
 
-Each resource retains at most 1,024 operation receipts, including released ones.
-Saturation refuses new operations; retries of an existing receipt do not consume
-another slot. There is no unsafe TTL or deletion-based rollover. Production
-rollover and trusted dynamic balances are future work.
+Each resource retains at most 1,024 operation receipts for its lifetime, including
+released and settled ones: settled receipts are not compacted. Saturation refuses
+new operations; retries of an existing receipt do not consume another slot. There
+is no unsafe TTL or deletion-based rollover. Production rollover and trusted
+dynamic balances are future work.
+
+Size resources to that cap. A resource bound to one order, one invoice or one
+ticket fits easily. A resource that accumulates without end, such as one per
+customer or one per merchant, reaches 1,024 operations and then refuses every new
+one, permanently. Until rollover exists, put a bounded period into the resource
+identity (for example customer and calendar day) only if a per-period limit is what
+you mean to enforce, and alert on `shared_guarantee_saturated` refusals.
 
 Audit events include reservation, refusal, settlement request, settlement completion
 and refused observations. Export the tenant chain and verify it with

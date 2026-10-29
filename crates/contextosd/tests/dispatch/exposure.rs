@@ -3,6 +3,7 @@
 use std::sync::atomic::Ordering;
 
 use contextos_contract::canonical::sha256_canonical;
+use contextos_store::DocumentStore;
 use contextosd::auth::hash_api_key;
 use serde_json::{Value, json};
 
@@ -118,4 +119,58 @@ async fn holds_are_listed_and_explained_without_arguments_until_reconciled() {
         (Some(777), Some(0))
     );
     assert_eq!(detail["holds"], json!([]));
+}
+
+#[tokio::test]
+async fn an_unreadable_ledger_is_listed_without_hiding_the_rest() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guarantees = vec![
+            serde_json::from_value(json!({"id":"refunds","capability_ids":["adp_payments.issue_refund"],
+            "resource_pointer":"/order_id","amount_pointer":"/amount_minor","limit":1000,"unit":"INR_minor"}))
+            .unwrap(),
+        ];
+    })
+    .await;
+    let http = executor_client(2);
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_held", 7))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_held/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_held", "pending", 777))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    let corrupt = "0".repeat(64);
+    w.state
+        .store
+        .create(
+            &contextos_store::DocKey::new(TENANT, contextos_store::DocKind::SharedExposure, &corrupt),
+            &json!({"binding": {"guarantee_id": "refunds"}, "receipts": "torn"}),
+        )
+        .await
+        .unwrap();
+
+    let page = http
+        .get(format!("{}/v1/guarantees/refunds/holds", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.status(), 200);
+    let page: Value = page.json().await.unwrap();
+    let resources = page["resources"].as_array().unwrap();
+    assert_eq!(resources.len(), 2, "{page}");
+    assert_eq!(resources[0], json!({"resource_digest": corrupt, "unreadable": true}));
+    assert_eq!(resources[1]["held"], 777);
 }

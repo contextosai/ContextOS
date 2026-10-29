@@ -42,6 +42,22 @@ minor versions may break APIs and every break is listed.
   them again.
 
 ### Fixed
+- Task-authorization amendments are audited before they take effect, so a widening
+  never goes live without its signed record; a failed commit afterwards appends
+  `task_authorization_amendment_aborted`.
+- An amendment that changes `issued_by` or `confirmation_ref` is classified as
+  widening, however narrow its scopes: whoever runs the task can no longer rewrite who
+  authorized it.
+- Tower: a review by the agent's current owner or declarer never counts as approval,
+  checked when approval is evaluated, so a re-declaration racing the review cannot
+  slip past separation of duties.
+- `GET /v1/guarantees/{id}/holds` lists an unreadable ledger as
+  `{"resource_digest", "unreadable": true}` instead of failing the whole page.
+- `examples/doctor.sh` fails on platforms without a release archive (Intel Macs
+  outside Rosetta, Linux other than x86_64/aarch64) instead of passing them.
+- Docs: the 1,024-receipt lifetime cap per shared resource and how to size resources
+  for it; Tower journal verifiers must treat two entries with one `collection_seq` and
+  `change_id` as one change.
 - A store failure while a shared-guarantee dispatch wrote its dispatch gate no longer
   strands the attempt's held capacity. The gateway now writes the gate before it marks
   the shared receipt started, so marking the receipt is the last write before the

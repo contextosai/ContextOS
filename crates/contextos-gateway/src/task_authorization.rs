@@ -325,9 +325,18 @@ impl TaskAuthorization {
     }
 
     /// The change from `current` (the run's own authorization, if any) to this one.
+    /// Who issued it and the evidence of their confirmation are not the runner's to
+    /// rewrite: an amendment changing either is classified as widening, so it needs
+    /// the principal's confirmation and the same issuer.
     pub fn change_from(&self, current: Option<&TaskAuthorization>) -> Change {
         match current {
-            Some(current) if !self.narrows(current) => Change::Widened,
+            Some(current)
+                if !self.narrows(current)
+                    || self.issued_by != current.issued_by
+                    || self.confirmation_ref != current.confirmation_ref =>
+            {
+                Change::Widened
+            }
             _ => Change::Narrowed,
         }
     }
@@ -555,6 +564,17 @@ mod tests {
         // The reverse is narrower too, but the delegation rule refuses it: conservative,
         // it only means asking the principal (proposal spec-0004).
         assert_eq!(no_amounts.change_from(Some(&current)), Change::Widened);
+        // Narrower scopes do not let the runner rewrite who issued it or its evidence.
+        let mut reissued = lower.clone();
+        reissued.issued_by["principal_id"] = json!("usr_999");
+        assert_eq!(reissued.change_from(Some(&current)), Change::Widened, "another issuer");
+        let mut reconfirmed = lower.clone();
+        reconfirmed.confirmation_ref = Some(json!({"artifact_type": "confirmation", "artifact_id": "c_1"}));
+        assert_eq!(
+            reconfirmed.change_from(Some(&current)),
+            Change::Widened,
+            "new confirmation evidence"
+        );
     }
 
     fn limits(max_effects: Option<u64>, total: Option<u64>) -> TaskLimits {

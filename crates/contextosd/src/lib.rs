@@ -19,6 +19,7 @@ pub mod oidc;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;
+pub mod task_amendment;
 pub mod telemetry;
 
 use std::collections::HashMap;
