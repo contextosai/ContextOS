@@ -97,6 +97,15 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: RUST_LOG=info cargo test --workspace --all-targets
+      - name: Shared-limit failure drill (three processes, SIGKILL, database restart)
+        env:
+          CONTEXTOS_DRILL_DATABASE_URL: postgres://contextos:contextos@localhost:5432/contextos_drill
+          CONTEXTOS_DRILL_PG_RESTART: docker restart -t 0 ${{ job.services.postgres.id }}
+          CONTEXTOS_BIN: ${{ github.workspace }}/target/debug
+        run: |
+          PGPASSWORD=contextos psql -h localhost -U contextos -d contextos_test -c 'CREATE DATABASE contextos_drill'
+          cargo build -q -p contextosd -p ctx
+          ./examples/postgres-drill/run.sh
       - name: Benchmarks against PostgreSQL (smoke)
         env:
           CONTEXTOS_BENCH_DATABASE_URL: ${{ env.CONTEXTOS_TEST_DATABASE_URL }}

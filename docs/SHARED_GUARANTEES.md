@@ -235,5 +235,8 @@ See [research](research/2026-10-22-value-proposition.md),
 [design](superpowers/specs/2026-10-22-shared-business-guarantees-design.md) and
 [threat model](security/THREAT_MODEL.md). The
 [validation record](research/2026-10-22-shared-guarantees-validation.md) records the
-checks and their limits. PostgreSQL contention benchmarks and
-dedicated Tower exposure views are planned; the runnable local demo uses memory.
+checks and their limits. The runnable local demo uses memory. The
+[PostgreSQL failure drill](../examples/postgres-drill) runs the limit across separate
+processes with SIGKILLs and a database restart, checked against the provider's own
+ledger; its [record](research/2026-10-29-postgres-shared-limit-drill.md) gives results
+and limits. Dedicated Tower exposure views are planned.

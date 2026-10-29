@@ -164,7 +164,9 @@ data. ContextOS adds the cross-system limit that counts unknown outcomes.
   existed before deployment.
 - **Hot resources serialize.** Each tenant, guarantee and resource has one ledger,
   updated by compare-and-swap. Concurrent effects on one order contend the way they
-  would on a row lock. PostgreSQL contention has not been benchmarked yet.
+  would on a row lock. A [failure drill](research/2026-10-29-postgres-shared-limit-drill.md)
+  raced twelve agents per order across three processes on PostgreSQL; contention at
+  hundreds of writers per resource has not been measured.
 - **One store is one enforcement domain.** There is no cross-region escrow
   allocation. A replica on another store, or missing the guarantee, escapes the limit.
 - **Finality is a trust assumption.** Reconciliation trusts the provider's answer or

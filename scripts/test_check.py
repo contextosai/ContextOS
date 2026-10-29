@@ -10,7 +10,7 @@ import unittest
 
 class CheckScriptTests(unittest.TestCase):
     def run_gate(self, *, agent_exit=0, tower_exit=0, guarantee_exit=0, archive_exit=0, marker=True,
-                 large_output=False, peer_exit=0, compensation_exit=0):
+                 large_output=False, peer_exit=0, compensation_exit=0, drill_url=None, drill_exit=0):
         with tempfile.TemporaryDirectory(prefix="contextos-check-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -26,7 +26,7 @@ class CheckScriptTests(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
             for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
-                         "compensation", "why-not-a-row-lock", "tower"):
+                         "compensation", "why-not-a-row-lock", "postgres-drill", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
@@ -38,6 +38,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += f"echo 'saga compensated'\nexit {compensation_exit}\n"
                 if name == "why-not-a-row-lock":
                     text += "echo 'row lock comparison complete'\n"
+                if name == "postgres-drill":
+                    text += f"echo 'No violations: the limit held'\nexit {drill_exit}\n"
                 if name in ("agent-loop", "tower"):
                     if marker:
                         text += "echo 'run completed'\n" if name == "agent-loop" else "echo 'tower sees the fleet'\n"
@@ -45,9 +47,13 @@ class CheckScriptTests(unittest.TestCase):
                         text += "for ((i=0; i<10000; i++)); do echo 'additional example output'; done\n"
                     text += f"exit {agent_exit if name == 'agent-loop' else tower_exit}\n"
                 (example / "run.sh").write_text(text)
+            # The drill runs only when a database is configured; never inherit one.
+            env = {k: v for k, v in os.environ.items() if k != "CONTEXTOS_DRILL_DATABASE_URL"}
+            if drill_url:
+                env["CONTEXTOS_DRILL_DATABASE_URL"] = drill_url
             return subprocess.run(
                 ["bash", str(root / "scripts/check.sh")],
-                env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"},
+                env={**env, "PATH": f"{tools}:{os.environ['PATH']}"},
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -86,6 +92,17 @@ class CheckScriptTests(unittest.TestCase):
         result = self.run_gate(compensation_exit=4)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("FAILED: compensation", result.stdout)
+
+    def test_drill_failure_fails_gate_when_a_database_is_configured(self):
+        result = self.run_gate(drill_url="postgres://drill", drill_exit=3)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("FAILED: postgres drill", result.stdout)
+        self.assertNotIn("ALL CHECKS PASSED", result.stdout)
+
+    def test_drill_is_skipped_without_a_database(self):
+        result = self.run_gate(drill_exit=3)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("postgres-drill", result.stdout)
 
     def test_missing_success_message_fails_gate(self):
         result = self.run_gate(marker=False)
