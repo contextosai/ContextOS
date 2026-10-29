@@ -1,13 +1,12 @@
-//! `contextosd --config <path>`, or `contextosd --version`
+//! `contextosd --config <path>`, `contextosd --check-config <path>` or `contextosd --version`
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use contextos_store::{MemoryLog, MemoryStore};
 use contextosd::config::StoreConfig;
 use contextosd::runtime::dispatch_setup_from_config;
-use contextosd::{Config, build_state, load_pack, router};
+use contextosd::{Config, build_state, router};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -26,19 +25,32 @@ async fn main() {
         println!("contextosd {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    if let [_, flag, path] = args.as_slice()
+        && flag == "--check-config"
+    {
+        match contextosd::check::check_config(std::path::Path::new(path)) {
+            Ok(report) => {
+                for line in report {
+                    println!("ok: {line}");
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("contextosd: {path}: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
     let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
-        _ => fail("usage: contextosd --config <path> | --version"),
+        _ => fail("usage: contextosd --config <path> | --check-config <path> | --version"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
     let signer = contextosd::audit_signer(&config).await.unwrap_or_else(|e| fail(e));
-    let mut packs = HashMap::new();
-    for pack_path in &config.packs {
-        let text = std::fs::read_to_string(pack_path).unwrap_or_else(|e| fail(format!("{}: {e}", pack_path.display())));
-        let (pack_ref, pack) = load_pack(&text).unwrap_or_else(|e| fail(format!("{}: {e}", pack_path.display())));
+    let packs = contextosd::load_packs(&config).unwrap_or_else(|e| fail(e));
+    for (pack_ref, pack) in &packs {
         tracing::info!(%pack_ref, tenant = %pack.tenant_id, "loaded context pack");
-        packs.insert(pack_ref, pack);
     }
     let dispatch = dispatch_setup_from_config(&config).unwrap_or_else(|e| fail(e));
     if config.server.mode == contextosd::config::Mode::Production {

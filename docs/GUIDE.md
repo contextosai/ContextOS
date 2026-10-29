@@ -148,8 +148,17 @@ and response bodies against it.
 
 ```sh
 ctx hash-key            # paste a ≥32-character key; configure only the hash
+contextosd --check-config deploy/contextosd.example.toml
 contextosd --config deploy/contextosd.example.toml
 ```
+
+`--check-config` runs the validation startup performs and exits: the configuration,
+its packs and pinned capability manifests, the dispatch gateway, that the signing seed
+or KMS token and the PostgreSQL URL variables are set, and that the listen address is
+free (it binds it once). It does not contact the key service or connect to the store.
+`examples/doctor.sh --config <path>` runs it after checking that this system can run
+the binaries at all (platform, glibc, Python for the examples), and names the
+alternative when it cannot.
 
 Callers authenticate with a bearer token: an API key (configured only as its hash),
 or a JWT from an OIDC issuer you configure:

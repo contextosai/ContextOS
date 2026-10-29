@@ -3,6 +3,25 @@
 All notable changes are listed here. Versions follow Semantic Versioning; before 1.0,
 minor versions may break APIs and every break is listed.
 
+## Unreleased
+
+### Added
+- `contextosd --check-config <path>` runs startup's validation without serving: the
+  configuration, packs and pinned manifests, the dispatch gateway, that the signing
+  seed or KMS token and PostgreSQL URL variables are set, and that the listen address
+  is free. It does not contact the key service or connect to the store.
+- `examples/doctor.sh`, a preflight that checks the platform and glibc, that every
+  binary starts and reports one version, Python 3.9+ for the examples and, with
+  `--config`, the configuration. It names one fix per failure (for example building
+  from source when the system's glibc is older than 2.28) and starts nothing. The
+  shared-guarantees demo runs it first, and release archives include it.
+- The shared-guarantees demo loses a provider response: the refund applies, the
+  reservation stays held as unknown, and an operator confirms it from the provider's
+  ledger export. Each step prints `limit / committed / held / available` and the next
+  safe step. The audit log, keys, balances and the cited ledger export stay in
+  `receipts/shared-guarantees/` (`CONTEXTOS_RECEIPT_DIR`), with the command to verify
+  them again.
+
 ## 0.1.0-alpha.2 - 2026-10-29
 
 Second alpha. Linux archives now run on glibc 2.28 and later, and this release
