@@ -544,7 +544,7 @@ where
     let parent = match delegation {
         Some(envelope) => {
             let parent =
-                load_admission(&state, &caller, envelope["parent_run_id"].as_str().unwrap_or_default()).await?;
+                load_owned_admission(&state, &caller, envelope["parent_run_id"].as_str().unwrap_or_default()).await?;
             // Delegating spends the parent's budget: only the parent's current executor may.
             require_owner(gateway, &parent, &headers).await?;
             Some(parent)
@@ -920,7 +920,7 @@ where
     })?;
     let gateway = dispatch_gateway(&state)?;
     let envelope = parse_body(&state, &body)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let generation = executor_generation(&headers)?;
     let (outcome, notices) = tokio::join!(
         gateway.dispatch_as(&admission, &envelope, generation),
@@ -985,6 +985,23 @@ async fn require_owner<S: DocumentStore + 'static, L: AppendLog + 'static>(
             "The store is unavailable.",
         )),
     }
+}
+
+/// As [`load_admission`], for the routes that drive a run (dispatch, lifecycle,
+/// takeover, status, decisions, usage, checkpoints, memory, peer work, findings,
+/// compensation, delegation): only the principal that admitted it may. Another
+/// principal's run is indistinguishable from a missing one. Keys and tokens of one
+/// deployment that share a principal id share its runs.
+pub(crate) async fn load_owned_admission<S: DocumentStore, L>(
+    state: &AppState<S, L>,
+    caller: &Caller,
+    run_id: &str,
+) -> Result<RunAdmission, ApiError> {
+    let admission = load_admission(state, caller, run_id).await?;
+    if admission.admitted_by.is_empty() || admission.admitted_by != caller.principal_id {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "run_not_found", "No such run."));
+    }
+    Ok(admission)
 }
 
 pub(crate) async fn load_admission<S: DocumentStore, L>(
@@ -1134,7 +1151,7 @@ where
             "Expected tool_call and input_responses.",
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let continuation = Continuation {
         operation_id,
         input_responses: request.input_responses,
@@ -1207,7 +1224,7 @@ where
             "Expected decision: accept or reject.",
         )
     })?;
-    let child = load_admission(&state, &caller, &run_id).await?;
+    let child = load_owned_admission(&state, &caller, &run_id).await?;
     let Some(lineage) = &child.lineage else {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -1215,7 +1232,7 @@ where
             "Only delegated runs are closed.",
         ));
     };
-    let parent = load_admission(&state, &caller, &lineage.parent_run_id).await?;
+    let parent = load_owned_admission(&state, &caller, &lineage.parent_run_id).await?;
     // The parent's executor closes its children.
     require_owner(gateway, &parent, &headers).await?;
     let outcome = gateway
@@ -1263,7 +1280,7 @@ where
             "Expected expected_generation.",
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     match gateway.take_over(&admission, request.expected_generation).await {
         Ok(Ownership::Current(generation)) => {
             Ok(axum::Json(json!({"run_id": run_id, "executor_generation": generation})).into_response())
@@ -1293,7 +1310,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let run = gateway
         .run_state(&admission)
         .await
@@ -1325,7 +1342,7 @@ where
     let scope = if action == "cancel" { "admit" } else { "dispatch" };
     let caller = authorize(&state, &headers, Some(scope))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let unavailable = |_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1376,7 +1393,7 @@ where
             format!("Invalid decision report: {e}"),
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     require_owner(gateway, &admission, &headers).await?;
     match gateway.record_decision(&admission, report, &caller.principal_id).await {
         Ok(recorded) => {
@@ -1596,7 +1613,7 @@ where
             format!("Invalid reservation: {e}"),
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     require_owner(gateway, &admission, &headers).await?;
     let kind = match request.kind {
         UsageKindBody::ModelCall => UsageKind::ModelCall,
@@ -1707,7 +1724,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .work_tasks(
             &admission,
@@ -1735,7 +1752,7 @@ where
     let gateway = dispatch_gateway(&state)?;
     let input: WorkTaskInput = serde_json::from_value(parse_body(&state, &body)?)
         .map_err(|_| work_error(WorkError::Refused("work_invalid")))?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let result = gateway
         .publish_work(&admission, &caller.principal_id, executor_generation(&headers)?, input)
         .await
@@ -1754,7 +1771,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     Ok(axum::Json(
         gateway
             .work_task(
@@ -1783,7 +1800,7 @@ where
     let gateway = dispatch_gateway(&state)?;
     let command: WorkCommand = serde_json::from_value(parse_body(&state, &body)?)
         .map_err(|_| work_error(WorkError::Refused("work_invalid")))?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     Ok(axum::Json(
         gateway
             .update_work(
@@ -1819,7 +1836,7 @@ where
             format!("Invalid checkpoint: {e}"),
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let generation = require_owner(gateway, &admission, &headers).await?;
     match gateway
         .save_checkpoint(&admission, generation, request.expected_revision, request.state)
@@ -1862,7 +1879,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     // Only the run's current executor reads its working state.
     require_owner(gateway, &admission, &headers).await?;
     let checkpoint = gateway
@@ -3220,7 +3237,7 @@ where
     let Ok(request) = parse_body(&state, &body) else {
         return Ok(crate::mcp::parse_error());
     };
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
         ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
@@ -3263,7 +3280,7 @@ where
             "Expected a record.",
         )
     })?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     require_owner(gateway, &admission, &headers).await?;
     let decision = gateway.govern_memory(&admission, &request.record).await.map_err(|_| {
         ApiError::new(

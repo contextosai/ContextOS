@@ -16,7 +16,9 @@
 //!   timeout plus [`ATTESTATION_MARGIN_SECONDS`], so a call still in flight had time to
 //!   land in the records checked, and is not in the future.
 //!
-//! `effect_absence_attested` is signed before anything changes. The attestation is
+//! A running run's executor generation is advanced first, fencing the executor that
+//! sent the call; a dispatch stalled past [`DISPATCH_STALL_SECONDS`] since its claim
+//! sends nothing. `effect_absence_attested` is then signed before anything else changes. The attestation is
 //! then recorded as the attempt's definitive `not_applied` fact, which seals it: a
 //! later contrary report from a revived executor is refused and audited
 //! (`shared_guarantee_observation_refused`) or marks the operation conflicting, for
@@ -34,7 +36,22 @@ use crate::{Gateway, GatewayError, ReconcileOutcome, Resolution, RunAdmission, o
 /// provider's records may be checked through for an attestation.
 pub const ATTESTATION_MARGIN_SECONDS: u64 = 300;
 
+/// Longest a dispatch may take from its claim to the adapter call. One stalled longer
+/// (a paused process, a stopped VM) sends nothing. Below the margin, so a send that
+/// starts in time ends, bounded by the timeout, before an attestation is accepted.
+pub const DISPATCH_STALL_SECONDS: u64 = 120;
+
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
+    /// Whether a dispatch claimed at `claimed_at` has stalled past
+    /// [`DISPATCH_STALL_SECONDS`], read just before it sends. What is left is a stall
+    /// between this check and the adapter's write; providers that fence on
+    /// `executor_generation` (which an attestation advances) close that too.
+    pub(crate) fn dispatch_stalled(&self, claimed_at: &str) -> bool {
+        add_contract_seconds(claimed_at, DISPATCH_STALL_SECONDS)
+            .and_then(|limit| compare_contract_times(&self.now(), &limit))
+            .is_none_or(|o| o == std::cmp::Ordering::Greater)
+    }
+
     /// Resolves a started attempt without a fact as not applied, on `principal_id`'s
     /// attestation citing `evidence_ref` (an `ArtifactRef`) for the provider's records
     /// checked through `checked_through`.
@@ -107,6 +124,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             _ => {}
         }
         let shared = self.has_exposure_link(admission, operation_id).await?;
+        // Fence the executor that sent the call, in case it is only stalled: it must take
+        // the run over before dispatching again, and providers see a stale generation.
+        let generation = match self.fence_executor(admission).await? {
+            crate::Ownership::Current(generation) => Some(generation),
+            crate::Ownership::Refused(_) => None,
+        };
         let entry = self
             .audit
             .append(
@@ -115,7 +138,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 json!({"run_id": admission.run_id, "operation_id": operation_id, "attempt_id": attempt_id,
                     "action_digest": op["intent"]["action_digest"], "attempt_started_at": started_at,
                     "checked_through": checked_through, "evidence_ref": evidence_ref,
-                    "principal_id": principal_id, "shared_guarantee": shared}),
+                    "principal_id": principal_id, "shared_guarantee": shared,
+                    "executor_generation": generation}),
                 &now,
             )
             .await?;

@@ -68,7 +68,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
-pub use attestation::ATTESTATION_MARGIN_SECONDS;
+pub use attestation::{ATTESTATION_MARGIN_SECONDS, DISPATCH_STALL_SECONDS};
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, compensation_operation_id};
 pub use coordination::{MAX_WORK_BOARD_BYTES, MAX_WORK_TASKS, WorkCommand, WorkError, WorkEvidence, WorkTaskInput};
@@ -1771,6 +1771,34 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // 6. Dispatch.
         let deadline = add_contract_seconds(&now, manifest.timeout_ms.div_ceil(1000))
             .unwrap_or_else(|| admission.deadline.clone());
+        if self.dispatch_stalled(&now) {
+            // Not sent: an attestation of absence may already have released what the
+            // attempt holds.
+            self.withhold_dispatch(
+                admission,
+                &operations_key,
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+                &now,
+                "dispatch_stalled",
+            )
+            .await?;
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            if guards_effect && new_operation {
+                loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
+            }
+            self.release_task_charges(&task_charges, &operation_id).await?;
+            p.report
+                .audit_sequences
+                .extend(self.settle_shared_exposure(admission, &operation_id).await?);
+            return Ok(p.stop(
+                "blocked",
+                vec!["dispatch_stalled".into()],
+                "The dispatch stalled before sending; it was not sent.",
+            ));
+        }
         let call = AdapterCall {
             tenant_id: admission.tenant_id.clone(),
             run_id: admission.run_id.clone(),

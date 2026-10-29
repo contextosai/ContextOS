@@ -99,6 +99,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await
     }
 
+    /// Advances a running run's executor generation without expecting one: the
+    /// current executor is fenced and must take the run over. `Refused` when the run
+    /// is not running (nothing to fence).
+    pub(crate) async fn fence_executor(&self, admission: &RunAdmission) -> Result<Ownership, GatewayError> {
+        if self
+            .run_state(admission)
+            .await?
+            .is_none_or(|s| s["status"] != "running")
+        {
+            return Ok(Ownership::Refused("run_not_running"));
+        }
+        self.advance(admission, &["suspend", "resume"], None).await
+    }
+
     async fn advance(
         &self,
         admission: &RunAdmission,

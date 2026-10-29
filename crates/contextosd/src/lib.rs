@@ -11,6 +11,7 @@ pub mod configs;
 pub mod exposure;
 pub mod feedback;
 pub mod findings;
+pub mod guards;
 pub mod kms;
 pub mod limits;
 pub mod mcp;

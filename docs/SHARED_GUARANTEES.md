@@ -227,9 +227,14 @@ POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence
   still in flight had time to land in what was checked
   (`attestation_too_early`, with `output.checked_through_not_before`), and not in
   the future (`attestation_checked_in_future`).
+- **Fencing:** a running run's executor generation is advanced first, so the executor
+  that sent the call must take the run over before dispatching again, and a provider
+  that fences on the forwarded generation refuses it. Independently, a dispatch that
+  stalls more than 120 seconds between its claim and the provider call sends nothing
+  (`dispatch_stalled`), so a stalled dispatcher cannot send after an attestation.
 - **What is recorded:** `effect_absence_attested` (run, operation, attempt, action
-  digest, attempt start, `checked_through`, evidence and attester) is signed before
-  anything changes. The attestation then becomes the attempt's definitive
+  digest, attempt start, `checked_through`, evidence, attester and the new executor
+  generation) is signed before anything else changes. The attestation then becomes the attempt's definitive
   `not_applied` fact, followed by the usual `effect_reconciliation` (`source:
   "attestation"`) and `shared_guarantee_settlement_requested`/`settled` entries. It
   releases the shared capacity, the run's budget reservation and any task-limit

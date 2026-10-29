@@ -2973,6 +2973,76 @@ async fn reconciliation_and_a_live_dispatch_race_on_the_dispatch_gate() {
     verify_tenant_chain(h.audit.log(), TENANT, &keys()).await.unwrap();
 }
 
+/// Three minutes after [`NOW`] once `jumped` is set: a process that stalled.
+struct StallClock(Arc<std::sync::atomic::AtomicBool>);
+impl Clock for StallClock {
+    fn now(&self) -> String {
+        if self.0.load(Ordering::SeqCst) {
+            "2026-10-20T10:03:00.000000Z"
+        } else {
+            NOW
+        }
+        .into()
+    }
+}
+
+/// ATTEST-2: a dispatch that stalls after opening its gate for longer than
+/// `DISPATCH_STALL_SECONDS` sends nothing when it resumes, so an attestation of absence
+/// (accepted only later) can never release a hold whose effect is still to be sent.
+#[tokio::test]
+async fn a_dispatch_stalled_past_its_bound_sends_nothing() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let mut admission = h.admission.clone();
+    admission.task_authorizations = vec![limited_task(&admission.run_id)];
+    let call = shared_call(&admission, "stalled_refund", 420_000);
+    let paused = Arc::new(GatePause {
+        inner: h.store.clone(),
+        kind: DocKind::DispatchGate,
+        entered: tokio::sync::Semaphore::new(0),
+        resume: tokio::sync::Semaphore::new(0),
+    });
+    let jumped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let live = Arc::new(process_at(
+        &h,
+        paused.clone(),
+        20_000,
+        false,
+        Arc::new(StallClock(jumped.clone())),
+    ));
+    let (dispatching, stalled_call, stalled_admission) = (live.clone(), call.clone(), admission.clone());
+    let pending = tokio::spawn(async move { dispatching.dispatch(&stalled_admission, &stalled_call).await });
+    paused.entered.acquire().await.unwrap().forget();
+    jumped.store(true, Ordering::SeqCst);
+    paused.resume.add_permits(1);
+    let out = pending.await.unwrap().unwrap();
+    assert_eq!(out.report.reason_codes, ["dispatch_stalled"]);
+    assert_eq!(
+        h.adapter.calls.load(Ordering::SeqCst),
+        0,
+        "the stalled attempt sent nothing"
+    );
+    let task = h
+        .store
+        .get(&contextos_gateway::task_authorization::exposure_key(
+            TENANT,
+            &admission.run_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(task["effects"], 0, "its task-limit charge was returned");
+    // Recorded as not dispatched, so a retry sends it exactly once.
+    let later = process_at(&h, h.store.clone(), 40_000, false, Arc::new(AttestClock));
+    let retried = later.dispatch(&admission, &call).await.unwrap();
+    assert_eq!(
+        retried.result["status"], "completed",
+        "{:?}",
+        retried.report.reason_codes
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 1);
+}
+
 /// A gateway process on `store`, with ids that do not collide with another process's.
 fn process<S: DocumentStore + 'static>(h: &Harness, store: Arc<S>, ids: u64, shared: bool) -> Gateway<S, MemoryLog> {
     process_at(h, store, ids, shared, Arc::new(FixedClock))
@@ -3309,7 +3379,16 @@ async fn crash_case(behavior: Behavior, guarded: bool, crashes: &[(usize, bool)]
                 ["attestation_checked_in_future"],
                 "ATTEST-1 {case}"
             );
+            let opened = later.open_run(&admission).await.unwrap();
             let attested = attest(&later, &admission, "2026-10-20T10:06:00.000000Z").await;
+            // The executor that sent the call is fenced: it must take the run over.
+            let fenced = later.run_state(&admission).await.unwrap().unwrap()["executor_generation"].clone();
+            match opened {
+                contextos_gateway::Ownership::Current(g) => {
+                    assert!(fenced.as_u64() > Some(g), "ATTEST-1 {case}: {fenced}");
+                }
+                contextos_gateway::Ownership::Refused(r) => panic!("ATTEST-1 {case}: {r}"),
+            }
             assert_eq!(
                 (attested.status.as_str(), attested.outcome.as_deref()),
                 ("resolved", Some("not_applied")),

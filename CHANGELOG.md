@@ -19,9 +19,34 @@ minor versions may break APIs and every break is listed.
   [docs/SHARED_GUARANTEES.md](docs/SHARED_GUARANTEES.md).
 
 ### Changed (breaking)
+- Runs are bound to the principal that admitted them. Tool calls, status, takeover,
+  complete/fail/cancel, decisions, usage reservation, checkpoints, memory, peer work,
+  findings, compensation and delegation from a parent now answer `404 run_not_found`
+  to any other principal in the tenant, instead of letting any `dispatch` key that
+  learned a run id drive it. Reconcile, attest, evaluate, meter, authorize and audit
+  keep their own roles. Give each agent service its own principal.
+- `[guards] require_completion_contracts` (on in production) refuses to start with an
+  effectful MCP capability that declares no `recovery.completion`. With one, a finished
+  MCP result is decided by the state at its `state_pointer` in `structuredContent`,
+  as for HTTP: a result reporting `pending` or `failed` without `isError` is no longer
+  a confirmed effect. `status_tool` is optional (MCP looks tasks up with `tasks/get`)
+  and still required for HTTP.
+
 - Hold inspection: `next_safe_step.action` `confirm_with_evidence_only` is now
   `confirm_or_attest_absence`, and `next_safe_step` carries `attest_absence` (the
   route, or `null`).
+
+### Fixed
+- An attestation of absence advances the run's executor generation before it is
+  recorded, and a dispatch that stalls more than 120 seconds between its claim and the
+  provider call sends nothing (`dispatch_stalled`), so an attestation cannot race a
+  paused dispatcher.
+- A guarded dispatch whose shared-guarantee link is missing when it marks its receipt
+  started is withheld (`shared_guarantee_link_missing`) instead of being sent unmarked.
+- The Tower console sets `X-Content-Type-Options: nosniff` and `Cache-Control:
+  no-store` itself, however it is mounted.
+- Guide: identical calls in one run share a derived operation key; how to make equal
+  calls separate effects.
 
 ## 0.1.0-alpha.3 - 2026-10-29
 

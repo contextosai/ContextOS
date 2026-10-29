@@ -43,6 +43,25 @@ async fn startup_can_require_schemas_on_effectful_tools() {
 }
 
 #[tokio::test]
+async fn effectful_mcp_tools_need_a_completion_contract_in_production() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    assert!(!config.require_completion_contracts(), "off in development");
+    config.server.mode = contextosd::config::Mode::Production;
+    assert!(config.require_completion_contracts(), "on in production");
+    config.server.mode = contextosd::config::Mode::Development;
+    config.guards.require_completion_contracts = Some(true);
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("require_completion_contracts"), "{refused}");
+
+    // With the state the tool reports and the states that settle it, it starts.
+    let path = &config.capabilities[0];
+    let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    manifest["recovery"]["completion"] = json!({"state_pointer": "/status", "confirmed": ["succeeded"]});
+    std::fs::write(path, manifest.to_string()).unwrap();
+    assert!(dispatch_setup_from_config(&config).is_ok());
+}
+
+#[tokio::test]
 async fn production_requires_pins_and_a_stated_role() {
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
     // Development defaults: neither required.
