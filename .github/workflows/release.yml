@@ -54,7 +54,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         if: ${{ !matrix.linux }}
         with:
           targets: ${{ matrix.target }}
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - run: cargo install --locked cargo-cyclonedx@0.5.7
       # Source inventories cover every target and feature, rather than describing
       # only the Linux host used by this job. One <crate>.cdx.json per member.
