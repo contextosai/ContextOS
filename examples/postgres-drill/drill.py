@@ -137,7 +137,7 @@ class Drill:
         step = hold.get("next_safe_step", {}).get("action")
         print(f"    after restart: held INR {hold.get('amount', 0) // 100}, state {hold.get('state')}, "
               f"next safe step {step}")
-        self.check(hold.get("state") == "dispatch_active" and step == "confirm_with_evidence_only",
+        self.check(hold.get("state") == "dispatch_active" and step == "confirm_or_attest_absence",
                    f"kill: unexpected diagnosis {hold}")
         # A different agent, a fresh run and key: the held INR 400 still counts.
         over = self.single(peer.base, f"kill_over_{PREFIX}", order, 70_000)

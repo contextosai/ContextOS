@@ -188,6 +188,7 @@ have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized
 | `POST /v1/schemas/{schema}/validate` | any | Validate a payload against a published schema |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | Answer a tool's input request and continue |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | Resolve an unknown effect |
+| `POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence` | `attest` | Release a started effect with no fact, on evidence it did not apply |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | Undo an applied effect with its declared compensation |
 | `POST /v1/runs/{run_id}/compensate` | `dispatch` | Compensate the run's effects newest first (saga) |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
@@ -511,6 +512,15 @@ resolve; conflicting facts need escalation) or `rejected` with reasons such as
 `reconcile_requires_operator`. A recorded fact cannot be overwritten by a later
 contradicting assertion. Grant `reconcile` only to operators and automation that verify
 outcomes at the provider.
+
+An attempt whose dispatch started and which recorded nothing (its executor died
+mid-call) is refused as `dispatch_active`: the call may still land. If the provider's
+records show no effect, a principal with the `attest` scope (never together with
+`admit` or `dispatch`) releases it with `POST
+…/operations/$OP/attest-absence`, citing the records and the time they were checked
+through: at least the attempt's start plus the capability's timeout plus 5 minutes.
+It is signed as `effect_absence_attested` before anything changes. See "Attesting
+absence" in [shared guarantees](SHARED_GUARANTEES.md).
 
 ### Compensating applied effects
 

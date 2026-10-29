@@ -1,5 +1,6 @@
 //! `contextosd`: the ContextOS runtime server.
 
+pub mod absence;
 pub mod app;
 pub mod attest;
 pub mod auth;

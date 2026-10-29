@@ -172,9 +172,11 @@ data. ContextOS adds the cross-system limit that counts unknown outcomes.
 - **Finality is a trust assumption.** Reconciliation trusts the provider's answer or
   an authorized operator's attributed assertion. The cited evidence is recorded, not
   independently fetched and checked.
-- **Orphaned dispatches stay held.** If a worker disappears after its dispatch started
-  and before it recorded an observation, the reservation cannot be released on an
-  assertion of absence. Fenced orphan recovery is future work.
+- **Orphaned dispatches stay held until attested.** If a worker disappears after its
+  dispatch started and before it recorded an observation, reconciliation cannot
+  release the reservation on an assertion of absence. A separate `attest` principal
+  can, after a quiet window and citing the provider's records; nothing releases it by
+  time alone.
 - **Ledger size.** Each resource keeps at most 1,024 receipts, and there is no
   rollover yet.
 

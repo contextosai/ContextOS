@@ -174,3 +174,58 @@ async fn an_unreadable_ledger_is_listed_without_hiding_the_rest() {
     assert_eq!(resources[0], json!({"resource_digest": corrupt, "unreadable": true}));
     assert_eq!(resources[1]["held"], 777);
 }
+
+#[tokio::test]
+async fn attesting_absence_needs_its_own_scope_and_a_started_attempt_without_a_fact() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guarantees = vec![
+            serde_json::from_value(json!({"id":"refunds","capability_ids":["adp_payments.issue_refund"],
+            "resource_pointer":"/order_id","amount_pointer":"/amount_minor","limit":1000,"unit":"INR_minor"}))
+            .unwrap(),
+        ];
+        c.api_keys.push(contextosd::config::ApiKey {
+            key_sha256: hash_api_key("attester-key"),
+            tenant_id: TENANT.into(),
+            principal_id: "svc_ledger_check".into(),
+            scopes: vec!["attest".into()],
+        });
+    })
+    .await;
+    let http = executor_client(2);
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_held", 7))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_held/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_held", "pending", 777))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+    let url = format!("{}/v1/runs/run_held/operations/refund:run_held/attest-absence", w.base);
+    let body = json!({"evidence_ref": {"artifact_type": "provider_ledger", "artifact_id": "export_1", "version": "1",
+        "sha256": format!("sha256:{}", "a".repeat(64))}, "checked_through": "2026-10-20T10:06:00.000000Z"});
+    let attest = |key: &'static str, body: Value| {
+        let (http, url) = (http.clone(), url.clone());
+        async move { http.post(url).bearer_auth(key).json(&body).send().await.unwrap() }
+    };
+    // The orchestrator that ran the effect cannot vouch that it did not apply.
+    assert_eq!(attest("acme-key", body.clone()).await.status(), 403);
+    assert_eq!(
+        attest("attester-key", json!({"checked_through": "x"})).await.status(),
+        422
+    );
+    // The provider answered (the task is pending): ordinary reconciliation applies.
+    let refused: Value = attest("attester-key", body).await.json().await.unwrap();
+    assert_eq!(refused["status"], "rejected", "{refused}");
+    assert_eq!(refused["reason_codes"], json!(["attestation_not_applicable"]));
+}

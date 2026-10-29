@@ -2837,6 +2837,26 @@ impl Clock for LaterClock {
     }
 }
 
+async fn attest(
+    gateway: &Gateway<MemoryStore, MemoryLog>,
+    admission: &contextos_gateway::RunAdmission,
+    through: &str,
+) -> contextos_gateway::ReconcileOutcome {
+    let evidence = artifact("provider_ledger", "export_1");
+    gateway
+        .attest_absence(admission, "crash_refund", evidence, through, "attester")
+        .await
+        .unwrap()
+}
+
+/// Ten minutes after [`NOW`]: past an attestation's quiet window.
+struct AttestClock;
+impl Clock for AttestClock {
+    fn now(&self) -> String {
+        "2026-10-20T10:10:00.000000Z".into()
+    }
+}
+
 /// Pauses a dispatch just before it creates a document of `kind`.
 struct GatePause {
     inner: Arc<MemoryStore>,
@@ -3278,6 +3298,35 @@ async fn crash_case(behavior: Behavior, guarded: bool, crashes: &[(usize, bool)]
                 resolved.status,
                 resolved.reason_codes
             );
+            // Nothing was sent (calls == 0): an attester who checked the provider's
+            // records long enough after the attempt started may release it.
+            let early = attest(&restarted, &admission, NOW).await;
+            assert_eq!(early.reason_codes, ["attestation_too_early"], "ATTEST-1 {case}");
+            let later = process_at(&h, h.store.clone(), ids + 20_000, guarded, Arc::new(AttestClock));
+            let future = attest(&later, &admission, "2026-10-20T11:00:00.000000Z").await;
+            assert_eq!(
+                future.reason_codes,
+                ["attestation_checked_in_future"],
+                "ATTEST-1 {case}"
+            );
+            let attested = attest(&later, &admission, "2026-10-20T10:06:00.000000Z").await;
+            assert_eq!(
+                (attested.status.as_str(), attested.outcome.as_deref()),
+                ("resolved", Some("not_applied")),
+                "ATTEST-1 {case}: {:?}",
+                attested.reason_codes
+            );
+            if guarded {
+                let digest = sha256_canonical(&json!("ord_881")).unwrap();
+                let view = later
+                    .shared_exposure(TENANT, "refunds", &digest)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(view["held"], 0, "ATTEST-1 {case}: shared exposure still held");
+            }
+            let again = attest(&later, &admission, "2026-10-20T10:06:00.000000Z").await;
+            assert_eq!(again.reason_codes, ["attestation_not_applicable"], "ATTEST-1 {case}");
             return Recovery::InFlight;
         }
         let later = process_at(&h, h.store.clone(), ids + 10_000, guarded, Arc::new(LaterClock));

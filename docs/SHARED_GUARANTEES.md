@@ -146,7 +146,7 @@ open hold, oldest attempt first: `run_id`, `operation_id`, `attempt_id`,
 | `state` | `next_safe_step.action` | Meaning |
 | --- | --- | --- |
 | `reserved_not_sent` | `wait_or_reconcile` | Reserved but not sent. If the executor is gone, reconciling closes the dispatch gate first, so the attempt cannot be sent later, and releases the capacity. |
-| `dispatch_active` | `confirm_with_evidence_only` | Sent with nothing observed; it may still apply. Do not retry. Absence is refused (`shared_guarantee_dispatch_active`); an operator may confirm with evidence. |
+| `dispatch_active` | `confirm_or_attest_absence` | Sent with nothing observed; it may still apply. Do not retry. Reconciling absence is refused (`shared_guarantee_dispatch_active`); an operator may confirm with evidence, or an attester may release it (see "Attesting absence"). |
 | `unknown_provider_reference` | `provider_query` | Unknown, with a provider reference: reconcile with `{"source":"provider"}`. |
 | `unknown` | `operator_reconcile` | Unknown, with nothing to query: check the provider's records, then reconcile as an operator citing them. |
 | `partial` | `operator_reconcile` | Part of the effect applied, so capacity cannot be released; an operator may confirm it, committing the full amount. |
@@ -156,6 +156,8 @@ open hold, oldest attempt first: `run_id`, `operation_id`, `attempt_id`,
 
 `next_safe_step.reconcile` is the reconcile route for that operation, called with
 the `reconcile` scope and the run's current executor generation as described below.
+`next_safe_step.attest_absence` is the attestation route, set only for
+`dispatch_active`.
 Viewing never resolves anything: the inspection routes are read-only, their scope
 grants no reconciliation, and no state is resolved by waiting. The views contain no
 tool arguments. Run and operation identifiers and provider references are visible
@@ -192,12 +194,52 @@ cannot still apply. Artifact references are attributed, audited assertions; this
 runtime does not independently fetch and validate an operator's cited artifact.
 
 If a worker vanished after dispatch started and before recording an observation,
-the first version refuses absence-based release with
-`shared_guarantee_dispatch_active`. A truthful confirmed assertion can commit the
-full amount conservatively. When usage was not observed, this also charges the
-protected original run-budget allocation in full. Establishing externally fenced
-absence and reclaiming an orphaned active dispatch requires additional recovery
-tooling; do not delete documents to make capacity available.
+reconciliation refuses absence-based release with
+`shared_guarantee_dispatch_active`: the call may still be in flight. A truthful
+confirmed assertion can commit the full amount conservatively. When usage was not
+observed, this also charges the protected original run-budget allocation in full.
+If the provider shows no effect, use an attestation. Never delete documents to make
+capacity available.
+
+### Attesting absence
+
+An attestation releases a hold whose dispatch started and recorded nothing, on a
+named principal's evidenced statement that the provider's records show no effect:
+
+```text
+POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence
+
+{"evidence_ref": {"artifact_type": "provider_ledger", "artifact_id": "export-2026-10-29",
+  "version": "1", "sha256": "sha256:…"},
+ "checked_through": "2026-10-29T10:20:00.000000Z"}
+```
+
+- **Who:** a key or token with the `attest` scope and neither `admit` nor
+  `dispatch`. Configuration refuses a principal holding both; give `attest` to the
+  team that reconciles against the provider (payments operations, finance), not to
+  the agent's orchestrator. No executor generation is needed: the executor that
+  sent the call is usually gone.
+- **When:** only for the latest attempt of an operation that was claimed, whose
+  dispatch gate is `started`, and that has no definitive fact; anything else is
+  `attestation_not_applicable` and goes through reconcile. `checked_through`, the
+  time the provider's records were checked up to, must be no earlier than the
+  attempt's start plus the capability's `timeout_ms` plus 300 seconds, so a call
+  still in flight had time to land in what was checked
+  (`attestation_too_early`, with `output.checked_through_not_before`), and not in
+  the future (`attestation_checked_in_future`).
+- **What is recorded:** `effect_absence_attested` (run, operation, attempt, action
+  digest, attempt start, `checked_through`, evidence and attester) is signed before
+  anything changes. The attestation then becomes the attempt's definitive
+  `not_applied` fact, followed by the usual `effect_reconciliation` (`source:
+  "attestation"`) and `shared_guarantee_settlement_requested`/`settled` entries. It
+  releases the shared capacity, the run's budget reservation and any task-limit
+  charge.
+- **If it was wrong:** the fact seals the attempt. A later contrary report (a
+  revived executor reporting the effect applied) is refused and audited as
+  `shared_guarantee_observation_refused`; outside a shared guarantee it marks the
+  operation conflicting, for escalation. The capacity already released is not
+  taken back automatically: treat such an entry as an incident. The audit proves
+  who attested and on what evidence, not that the attestation was true.
 
 After a recorded final observation, repeat reconciliation to repair a failed
 settlement write without dispatching again. Retain run admission and operation

@@ -5,6 +5,24 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Attesting absence: `POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence`
+  releases what an attempt holds when its dispatch started and it recorded no fact
+  (its executor died mid-call), which reconciliation refuses (`dispatch_active`,
+  `shared_guarantee_dispatch_active`) and nothing released before. It needs the new
+  `attest` scope held without `admit` or `dispatch` (configuration refuses the
+  combination), cites the provider's records, and is accepted only once they were
+  checked through the attempt's start plus the capability's timeout plus 300
+  seconds. `effect_absence_attested` is signed first; the attestation then seals the
+  attempt as `not_applied` and releases shared capacity, the budget reservation and
+  task-limit charges. See "Attesting absence" in
+  [docs/SHARED_GUARANTEES.md](docs/SHARED_GUARANTEES.md).
+
+### Changed (breaking)
+- Hold inspection: `next_safe_step.action` `confirm_with_evidence_only` is now
+  `confirm_or_attest_absence`, and `next_safe_step` carries `attest_absence` (the
+  route, or `null`).
+
 ## 0.1.0-alpha.3 - 2026-10-29
 
 Third alpha: the ten-minute path (preflight, configuration check, lost-response demo

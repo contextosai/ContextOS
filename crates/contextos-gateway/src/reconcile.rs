@@ -56,6 +56,10 @@ pub enum Resolution {
         evidence_ref: Value,
         principal_id: String,
     },
+    /// An attester states from the provider's records that an attempt whose dispatch
+    /// started, and which has no fact, did not apply. Checked and audited first by
+    /// [`Gateway::attest_absence`]; the only resolution that may skip the dispatch gate.
+    AttestAbsence { evidence_ref: Value, principal_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,7 +78,7 @@ pub struct ReconcileOutcome {
 }
 
 impl ReconcileOutcome {
-    fn new(operation_id: &str, status: &str) -> Self {
+    pub(crate) fn new(operation_id: &str, status: &str) -> Self {
         Self {
             status: status.into(),
             operation_id: operation_id.into(),
@@ -87,14 +91,14 @@ impl ReconcileOutcome {
         }
     }
 
-    fn rejected(mut self, reason: &str) -> Self {
+    pub(crate) fn rejected(mut self, reason: &str) -> Self {
         "rejected".clone_into(&mut self.status);
         self.reason_codes.push(reason.into());
         self
     }
 }
 
-fn artifact_ref(value: &Value) -> bool {
+pub(crate) fn artifact_ref(value: &Value) -> bool {
     let text = |k: &str| value[k].as_str().is_some_and(|s| !s.is_empty() && s.len() <= 256);
     let digest = value["sha256"]
         .as_str()
@@ -262,7 +266,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 };
                 (response, "operator", Some(principal_id))
             }
+            Resolution::AttestAbsence {
+                evidence_ref,
+                principal_id,
+            } => {
+                let output = Map::from_iter([("evidence_ref".to_owned(), evidence_ref)]);
+                let response = AdapterResponse {
+                    outcome: EffectOutcome::NotApplied,
+                    definitive: true,
+                    output,
+                    external_ref: None,
+                    cost_units: None,
+                };
+                (response, "attestation", Some(principal_id))
+            }
         };
+        let attested = source == "attestation";
         out.output.clone_from(&response.output);
         if !response.definitive || response.outcome == EffectOutcome::Unknown {
             "pending".clone_into(&mut out.status);
@@ -272,7 +291,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
         // A rejected assertion/query must not abort a live dispatch. At this point
         // the resolving response and operator evidence have been validated.
-        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && !shared {
+        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && !shared && !attested {
             // Close the dispatch gate first: if the attempt's dispatch already opened it,
             // the effect may be in flight and cannot be recorded as not applied.
             let gate = crate::dispatch_gate_key(admission, &attempt_id);
@@ -295,7 +314,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Err(e) => return Err(e.into()),
             }
         }
-        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && shared {
+        if claimed_without_fact && response.outcome != EffectOutcome::Confirmed && shared && !attested {
             let request = self
                 .audit
                 .append(
@@ -333,7 +352,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             add_contract_seconds(&observed_at, OBSERVATION_VALIDITY_SECONDS).unwrap_or_else(|| observed_at.clone());
         let observation_id = self.ports.ids.new_id("observation");
         let evidence_ref = match response.output.get("evidence_ref") {
-            Some(cited) if source == "operator" => cited.clone(),
+            Some(cited) if source == "operator" || attested => cited.clone(),
             _ => json!({"artifact_type": "effect_observation", "artifact_id": observation_id, "version": "1",
                 "sha256": sha256_canonical(&serde_json::to_value(&response).unwrap_or(Value::Null)).unwrap_or_default()}),
         };
