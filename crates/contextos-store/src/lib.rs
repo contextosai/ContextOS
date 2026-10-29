@@ -252,6 +252,20 @@ pub trait DocumentStore: Send + Sync {
         after: Option<&ScanCursor>,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<ScanCursor>, StoreError>> + Send;
+
+    /// Ids of one tenant's documents of `kind` that are not erasure tombstones,
+    /// ordered by id, strictly after `after`; at most `limit`. Stores that cannot
+    /// list refuse rather than return a partial answer.
+    fn list(
+        &self,
+        tenant_id: &str,
+        kind: DocKind,
+        after: Option<&str>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<String>, StoreError>> + Send {
+        let _ = (tenant_id, kind, after, limit);
+        std::future::ready(Err(StoreError::Backend("this store cannot list documents".into())))
+    }
 }
 
 /// Canonical text and digest of a body, computed once per write.

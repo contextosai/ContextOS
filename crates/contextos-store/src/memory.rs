@@ -153,6 +153,32 @@ impl DocumentStore for MemoryStore {
             Ok(found)
         })
     }
+
+    fn list(
+        &self,
+        tenant_id: &str,
+        kind: crate::DocKind,
+        after: Option<&str>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<String>, StoreError>> + Send {
+        deferred(move || {
+            let docs = self.docs.read().map_err(|_| Self::poisoned())?;
+            let mut found: Vec<String> = docs
+                .iter()
+                .filter(|(key, (_, body, _, _))| {
+                    key.tenant_id == tenant_id
+                        && key.kind == kind
+                        && after.is_none_or(|after| key.id.as_str() > after)
+                        && !crate::is_tombstone(body)
+                })
+                .map(|(key, _)| key.id.clone())
+                .collect();
+            drop(docs);
+            found.sort();
+            found.truncate(limit);
+            Ok(found)
+        })
+    }
 }
 
 /// `(sequence, record_hash, canonical body)`.

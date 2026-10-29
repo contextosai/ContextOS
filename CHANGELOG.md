@@ -6,6 +6,16 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Shared-guarantee hold inspection (`audit:read`, read-only).
+  `GET /v1/guarantees/{id}/holds` pages through the tenant's resources with capacity
+  held. `GET /v1/guarantees/{id}/resources/{resource_digest}/holds` explains each open
+  hold: its run, operation, attempt, action digest, amount, dispatch state, attempt
+  start, last observation and observer, and the next safe step with the reconcile
+  route to use. No tool arguments are returned, and nothing is released by viewing
+  or by elapsed time. See "Find and explain holds" in
+  [docs/SHARED_GUARANTEES.md](docs/SHARED_GUARANTEES.md).
+- `DocumentStore::list`: one tenant's documents of one kind by id, in pages, served
+  by the existing primary key on PostgreSQL. Stores that cannot list refuse.
 - `contextosd --check-config <path>` runs startup's validation without serving: the
   configuration, packs and pinned manifests, the dispatch gateway, that the signing
   seed or KMS token and PostgreSQL URL variables are set, and that the listen address

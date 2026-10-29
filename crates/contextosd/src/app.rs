@@ -3548,6 +3548,14 @@ where
             "/v1/guarantees/{id}/resources/{resource_digest}",
             get(shared_exposure::<S, L>),
         )
+        .route(
+            "/v1/guarantees/{id}/holds",
+            get(crate::exposure::resources_with_holds::<S, L>),
+        )
+        .route(
+            "/v1/guarantees/{id}/resources/{resource_digest}/holds",
+            get(crate::exposure::exposure_holds::<S, L>),
+        )
         .route("/v1/config", get(running_config::<S, L>))
         .route("/v1/config/validate", post(validate_config::<S, L>))
         .route("/v1/revocations", get(list_revocations::<S, L>).post(revoke::<S, L>))
