@@ -370,8 +370,9 @@ fn run_operation_key(tenant_id: &str, run_id: &str, operation_id: &str) -> DocKe
     DocKey::new(tenant_id, DocKind::OperationLedger, format!("op_{}", &digest[7..39]))
 }
 
-/// An attempt's dispatch gate, created once: `started` by the dispatch immediately
-/// before the provider is called, or `aborted` by a reconciliation recording that an
+/// An attempt's dispatch gate, created once: `started` by the dispatch before the
+/// provider is called (for a shared guarantee, before its receipt is marked started),
+/// or `aborted` by a reconciliation recording that an
 /// attempt claimed without any fact was never sent. Of a stranded dispatch resuming
 /// and an operator resolving it, exactly one creates the gate, so the attempt is either
 /// sent or provably not sent.
@@ -1657,33 +1658,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?
         {
-            Ok(sequences) => {
-                p.report.audit_sequences.extend(sequences);
-                if self.has_shared_guarantee(&manifest.capability_id)
-                    && let Err(reasons) = self
-                        .transition_shared_dispatch(admission, &operation_id, &attempt_id, "start")
-                        .await?
-                {
-                    self.withhold_dispatch(
-                        admission,
-                        &operations_key,
-                        &operation_id,
-                        &attempt_id,
-                        &action_digest,
-                        &now,
-                        "shared_guarantee_dispatch_closed",
-                    )
-                    .await?;
-                    self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
-                        .await?;
-                    if guards_effect && new_operation {
-                        loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id)
-                            .await?;
-                    }
-                    self.release_task_charges(&task_charges, &operation_id).await?;
-                    return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
-                }
-            }
+            Ok(sequences) => p.report.audit_sequences.extend(sequences),
             Err(reason) => {
                 self.withhold_dispatch(
                     admission,
@@ -1761,6 +1736,34 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
                 Err(e) => return Err(e.into()),
             }
+        }
+
+        // Marking the shared receipt started is the last write before the provider
+        // call. A store failure before it leaves the receipt not started, which
+        // reconciliation can release as never sent; a reconciliation that aborted the
+        // receipt first wins this transition, and nothing goes out.
+        if self.has_shared_guarantee(&manifest.capability_id)
+            && let Err(reasons) = self
+                .transition_shared_dispatch(admission, &operation_id, &attempt_id, "start")
+                .await?
+        {
+            self.withhold_dispatch(
+                admission,
+                &operations_key,
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+                &now,
+                "shared_guarantee_dispatch_closed",
+            )
+            .await?;
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            if guards_effect && new_operation {
+                loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
+            }
+            self.release_task_charges(&task_charges, &operation_id).await?;
+            return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
         }
 
         // 6. Dispatch.
