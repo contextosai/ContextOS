@@ -29,6 +29,7 @@ pub mod rollout;
 pub mod runtime;
 pub mod task_amendment;
 pub mod telemetry;
+pub mod upstream_check;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -238,6 +239,7 @@ where
                 leader.clone(),
                 std::time::Duration::from_secs(5),
             ));
+            runtime.spawn(upstream_check::run(gateway.clone(), metrics.clone()));
             runtime.spawn(governance_sweep::run(
                 gateway.clone(),
                 metrics.clone(),

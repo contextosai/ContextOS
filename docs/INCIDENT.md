@@ -196,6 +196,30 @@ Escalations have waited an hour. List them with `GET /v1/escalations` and route 
 to their owners. The calls they block stay blocked, which is safe, but the work
 waits too.
 
+### ContextOSUpstreamToolDrifted
+
+The provider's definition of a pinned capability changed (its input or output schema
+or annotations), or the tool disappeared. Every call to it is refused with
+`upstream_tool_drifted`. This is the runtime protecting you: a tool approved last
+month may not mean the same today. Find out who changed the server and why. If the
+change is expected, review the new definition, print its digests with
+`contextosd --pin-mcp-tools <config>`, and update the manifest through your normal
+review. Replicas pick it up when they restart with the new manifest. If it is not
+expected, treat the provider as compromised: revoke the adapter (*The kill switch*).
+
+### ContextOSUpstreamDescriptionChanged
+
+Only the upstream tool's description changed. Agents never see it (they get the
+manifest's reviewed description), so calls continue. Descriptions are an injection
+vector for hosts that do read them, and a change still means someone changed the
+server. Review it, then re-pin `upstream_description_digest`.
+
+### ContextOSUpstreamCheckUnavailable
+
+A replica has not been able to list the provider's tools for 30 minutes, so drift
+would go unnoticed. The last verdict stands. Check the provider's health and that
+its credential allows `tools/list`.
+
 ### ContextOSServerErrors
 
 More than 1% of requests are failing. The runtime fails closed, so agents get errors,

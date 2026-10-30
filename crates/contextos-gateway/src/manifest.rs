@@ -207,6 +207,15 @@ pub struct CapabilityManifest {
     /// `compensatable` capabilities may declare it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compensation: Option<Compensation>,
+    /// Reviewed digest of the upstream tool's definition (name, input and output
+    /// schemas, annotations); when it changes the capability refuses calls with
+    /// `upstream_tool_drifted` (see [`crate::upstream_drift`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_tool_digest: Option<String>,
+    /// Reviewed digest of the upstream tool's description; a change is reported, not
+    /// refused, since agents see the manifest's own description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_description_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

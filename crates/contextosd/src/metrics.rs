@@ -33,6 +33,8 @@ pub struct Metrics {
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
+    /// Gauges from this replica's last upstream drift check (see `upstream_check`).
+    upstream: Mutex<Option<String>>,
 }
 
 /// One labelled counter: label value to count.
@@ -104,6 +106,13 @@ impl Metrics {
     pub fn set_governance(&self, exposition: Option<String>) {
         if let Ok(mut governance) = self.governance.lock() {
             *governance = exposition;
+        }
+    }
+
+    /// Replaces the upstream drift gauges.
+    pub fn set_upstream(&self, exposition: Option<String>) {
+        if let Ok(mut upstream) = self.upstream.lock() {
+            *upstream = exposition;
         }
     }
 
@@ -207,10 +216,12 @@ impl Metrics {
                 }
             }
         }
-        if let Ok(governance) = self.governance.lock()
-            && let Some(text) = governance.as_deref()
-        {
-            out.push_str(text);
+        for block in [&self.governance, &self.upstream] {
+            if let Ok(block) = block.lock()
+                && let Some(text) = block.as_deref()
+            {
+                out.push_str(text);
+            }
         }
         out
     }

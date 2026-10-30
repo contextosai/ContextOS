@@ -750,6 +750,31 @@ scope = "payments.refund"          # optional
   endpoints: HTTPS, no redirects, bounded responses. Set either `token_env` or
   `oauth`, not both.
 
+An MCP server can change what a tool does without renaming it. Agents only ever see
+your reviewed manifest, but the calls still go to the server's current tool. Pin each
+capability to the upstream definition you reviewed:
+
+```sh
+contextosd --pin-mcp-tools contextosd.toml
+# adp_payments.issue_refund: "upstream_tool_digest": "sha256:…", "upstream_description_digest": "sha256:…"
+```
+
+Copy the digests into the capability manifest, and review them like any other change.
+
+- **When it is checked.** Each replica lists the server's tools at startup and every
+  5 minutes. `upstream_tool_digest` covers the name, input and output schemas and
+  annotations.
+- **Drift.** While the upstream tool differs from its pin, or is gone, the capability
+  refuses calls with `upstream_tool_drifted`, before anything is reserved or sent.
+- **Description changes.** A changed `upstream_description_digest` is reported but
+  not refused, because agents see the manifest's description, not the server's.
+- **Unreachable server.** The last verdict stands.
+- **Metrics and alerts.** `contextos_upstream_tool{capability,status}` reports each
+  status. `ContextOSUpstreamToolDrifted`, `…DescriptionChanged` and
+  `…CheckUnavailable` alert on them.
+- **Enterprise profile.** Every effectful MCP capability must pin
+  `upstream_tool_digest`. Elsewhere `--check-config` warns about each unpinned one.
+
 ## 5. Gate Context Pack releases
 
 A pack or policy change is a change to what agents may do, so gate it on replayed

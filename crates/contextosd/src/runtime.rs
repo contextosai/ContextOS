@@ -154,6 +154,12 @@ impl contextos_adapters::CredentialBroker for EnvCredential {
     ) -> Result<Option<contextos_adapters::Credential>, contextos_gateway::PortError> {
         Ok(Some(self.0.clone()))
     }
+
+    async fn discovery_credential(
+        &self,
+    ) -> Result<Option<contextos_adapters::Credential>, contextos_gateway::PortError> {
+        Ok(Some(self.0.clone()))
+    }
 }
 
 /// The adapter's OAuth client-credentials broker, with the secret from the environment.
@@ -324,6 +330,20 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             return Err(format!(
                 "{}: [guards] require_completion_contracts: {} is effectful on MCP adapter {} and needs \
                  recovery.completion (state_pointer into structuredContent and the states that settle it)",
+                path.display(),
+                manifest.capability_id,
+                manifest.adapter_id
+            ));
+        }
+        // An upstream MCP server can change what a tool does under the same name; the
+        // enterprise profile requires each effectful one to be pinned to its review.
+        if mcp
+            && effectful
+            && manifest.upstream_tool_digest.is_none()
+            && config.support.profiles.iter().any(|p| p == "contextos.enterprise")
+        {
+            return Err(format!(
+                "{}: {} is effectful on MCP adapter {} and needs upstream_tool_digest under the enterprise                  profile (print it with `contextosd --pin-mcp-tools <config>`)",
                 path.display(),
                 manifest.capability_id,
                 manifest.adapter_id

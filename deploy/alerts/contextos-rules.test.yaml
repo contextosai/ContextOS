@@ -240,3 +240,47 @@ tests:
               summary: 'Escalation notifications to oncall are being given up.'
               description: 2 escalation notifications to oncall were given up after their retries in the last hour, so approvers were not told.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosnotificationsfailing
+
+  - name: upstream drift pages per capability
+    interval: 1m
+    input_series:
+      - series: 'contextos_upstream_tool{capability="adp_payments.issue_refund",status="drifted",pod="a"}'
+        values: '1x40'
+      - series: 'contextos_upstream_tool{capability="adp_crm.lookup",status="description_changed",pod="a"}'
+        values: '1x40'
+      - series: 'contextos_upstream_tool{capability="adp_mail.send",status="unavailable",pod="a"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ContextOSUpstreamToolDrifted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              capability: adp_payments.issue_refund
+            exp_annotations:
+              summary: 'The upstream tool behind adp_payments.issue_refund changed; calls are refused.'
+              description: The provider's definition of adp_payments.issue_refund no longer matches its reviewed pin (schemas or annotations changed, or the tool is gone). Every call is refused with upstream_tool_drifted until the manifest is reviewed and re-pinned.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamtooldrifted
+      - eval_time: 5m
+        alertname: ContextOSUpstreamDescriptionChanged
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              capability: adp_crm.lookup
+            exp_annotations:
+              summary: 'The upstream description of adp_crm.lookup changed.'
+              description: Only the upstream tool's description changed. Agents see the reviewed manifest description, so calls continue, but someone changed the server; review it.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamdescriptionchanged
+      - eval_time: 10m
+        alertname: ContextOSUpstreamCheckUnavailable
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: ContextOSUpstreamCheckUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              capability: adp_mail.send
+            exp_annotations:
+              summary: 'The upstream tool behind adp_mail.send cannot be checked.'
+              description: The provider's tool list has not been readable for 30 minutes, so drift of adp_mail.send would go unnoticed. The last verdict stands.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamcheckunavailable

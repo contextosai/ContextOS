@@ -119,9 +119,8 @@ impl OAuthClientCredentials {
     }
 }
 
-#[async_trait]
-impl CredentialBroker for OAuthClientCredentials {
-    async fn credential(&self, _: &CapabilityManifest, _: &AdapterCall) -> Result<Option<Credential>, PortError> {
+impl OAuthClientCredentials {
+    async fn current(&self) -> Result<Option<Credential>, PortError> {
         let mut cached = self.cached.lock().await;
         if let Some((credential, refresh_at)) = cached.as_ref()
             && Instant::now() < *refresh_at
@@ -132,5 +131,16 @@ impl CredentialBroker for OAuthClientCredentials {
         let credential = fresh.0.clone();
         *cached = Some(fresh);
         Ok(Some(credential))
+    }
+}
+
+#[async_trait]
+impl CredentialBroker for OAuthClientCredentials {
+    async fn credential(&self, _: &CapabilityManifest, _: &AdapterCall) -> Result<Option<Credential>, PortError> {
+        self.current().await
+    }
+
+    async fn discovery_credential(&self) -> Result<Option<Credential>, PortError> {
+        self.current().await
     }
 }

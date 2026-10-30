@@ -12,8 +12,21 @@ minor versions may break APIs and every break is listed.
   an `admit`-scoped API key without `agent_ids`. Set them before upgrading, or set
   `[guards] agent_binding = "observe"` to roll out first. `ApiKey` and `Caller` gain
   fields, so Rust code building them literally needs `agent_ids` / `agents`.
+- Upstream pinning: with the `contextos.enterprise` profile, startup refuses an
+  effectful capability on an MCP adapter without `upstream_tool_digest`. Print the
+  digests with `contextosd --pin-mcp-tools <config>` and add them before upgrading.
+  `CapabilityManifest` gains two optional fields, and the `Adapter` and
+  `CredentialBroker` traits gain default methods (`upstream_tools`,
+  `discovery_credential`).
 
 ### Added
+- Upstream drift detection: a capability can pin `upstream_tool_digest` (name,
+  schemas and annotations of the upstream MCP tool) and `upstream_description_digest`.
+  Each replica checks them at startup and every 5 minutes. While the tool differs from
+  its pin, or is gone, calls are refused with `upstream_tool_drifted`; a changed
+  description is reported only. `contextosd --pin-mcp-tools <config>` prints the
+  digests to pin. `contextos_upstream_tool{capability,status}` and three alerts report
+  it.
 - OAuth for providers: an adapter's `[adapters.oauth]` obtains tokens with the client
   credentials grant (HTTP Basic client auth, RFC 8707 `resource` defaulting to the
   endpoint), caches them and refreshes them before expiry, one fetch at a time. A token
