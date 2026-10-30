@@ -695,6 +695,17 @@ minimal, development-only implementation):
   distinct recipients is refused. Then the kernel's
   `evaluate_data_flow` decides; the decision is audited. Unknown or unverifiable facts
   block.
+- **Result-screening service** (optional, `[providers.result_screening]`) — for each
+  confirmed effect, receives the run, capability, its risk and the tool's output, and
+  answers `{"verdict": "pass" | "withhold" | "redact", "pointers": [...],
+  "reason_codes": [...]}`. Use it for your prompt-injection, secret or personal-data
+  classifier; ContextOS ships the port, not a classifier.
+  - The effect stands either way; only what the agent sees changes.
+  - `withhold` returns no output and the obligation `verify_effect_out_of_band`.
+  - `redact` replaces each pointed-at value with `"[redacted]"`.
+  - A failing or malformed answer withholds.
+  - Every non-`pass` verdict is audited (`result_screened`) with pointers and reasons,
+    never content.
 
 Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); protocol
 discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or

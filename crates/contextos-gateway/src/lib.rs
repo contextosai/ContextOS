@@ -40,6 +40,7 @@ mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
+pub mod result_screening;
 mod retired;
 mod revocations;
 mod scores;
@@ -242,6 +243,8 @@ pub struct Gateway<S, L> {
     shared_guarantees: Vec<SharedGuarantee>,
     /// Capabilities refused because their upstream tool changed (see [`upstream_drift`]).
     drift: upstream_drift::DriftState,
+    /// Judges confirmed effects' output before the agent sees it (see [`result_screening`]).
+    result_screening: Option<Arc<dyn result_screening::ResultScreeningProvider>>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -450,7 +453,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             require_result_schemas: false,
             shared_guarantees: Vec::new(),
             drift: upstream_drift::DriftState::default(),
+            result_screening: None,
         }
+    }
+
+    /// Screens every confirmed effect's output with `provider` before it reaches the
+    /// agent (see [`result_screening`]).
+    pub fn set_result_screening(&mut self, provider: Arc<dyn result_screening::ResultScreeningProvider>) {
+        self.result_screening = Some(provider);
     }
 
     /// Enables the loop guard: after `limit` identical tool calls in a run, the next is
@@ -2064,6 +2074,38 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Some("The effect was applied, but the tool's output did not match its schema and was withheld.".into()),
                 mutations,
             ));
+        }
+        if matches!(response.outcome, EffectOutcome::Confirmed)
+            && known
+            && let Some(provider) = &self.result_screening
+        {
+            let (screened, audited) = self
+                .screen_result(
+                    provider,
+                    admission,
+                    manifest,
+                    &operation_id,
+                    std::mem::take(&mut response.output),
+                )
+                .await?;
+            p.report.audit_sequences.extend(audited);
+            match screened {
+                result_screening::Screened::Pass(output) => response.output = output,
+                result_screening::Screened::Redacted(output) => {
+                    p.report.reason_codes.push("result_redacted".into());
+                    response.output = output;
+                }
+                result_screening::Screened::Withheld => {
+                    p.report.reason_codes.push("result_withheld".into());
+                    p.report.obligations.push("verify_effect_out_of_band".into());
+                    return Ok(p.finish(
+                        if read_only { "ok" } else { "completed" },
+                        Map::new(),
+                        Some("The effect was applied, but its output was withheld by result screening.".into()),
+                        mutations,
+                    ));
+                }
+            }
         }
         Ok(match (response.outcome, known) {
             (EffectOutcome::Confirmed, true) => p.finish(

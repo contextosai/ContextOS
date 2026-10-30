@@ -195,6 +195,30 @@ impl DataFlowProvider for RemoteDataFlow {
     }
 }
 
+/// Result-screening service: judges a confirmed effect's output and returns
+/// `{"verdict", "pointers", "reason_codes"}` (see
+/// [`contextos_gateway::result_screening`]).
+#[derive(Debug, Clone)]
+pub struct RemoteResultScreening(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl contextos_gateway::result_screening::ResultScreeningProvider for RemoteResultScreening {
+    async fn screen(
+        &self,
+        admission: &RunAdmission,
+        manifest: &contextos_gateway::CapabilityManifest,
+        output: &Value,
+    ) -> Result<Value, PortError> {
+        self.0
+            .call(
+                "result_screening",
+                &json!({"run": run_summary(admission), "capability_id": manifest.capability_id,
+                    "action_risk": manifest.action_risk, "output": output}),
+            )
+            .await
+    }
+}
+
 /// Execution-boundary controller: returns `{"requirement", "observation"}` for a run.
 #[derive(Debug, Clone)]
 pub struct RemoteBoundary(pub Arc<RemoteFacts>);

@@ -55,6 +55,8 @@ pub struct DispatchSetup {
     /// Production: every delegation names a registered result schema.
     pub require_result_schemas: bool,
     pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
+    /// `[providers.result_screening]`.
+    pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -95,6 +97,9 @@ where
     gateway.set_completion_floor(setup.completion_floor);
     gateway.require_result_schemas(setup.require_result_schemas);
     gateway.set_shared_guarantees(setup.guarantees)?;
+    if let Some(screening) = setup.result_screening {
+        gateway.set_result_screening(screening);
+    }
     Ok(gateway)
 }
 
@@ -373,6 +378,10 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .map(|f| (f.policy_floor, f.safety_floor)),
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
         guarantees: config.guarantees.clone(),
+        result_screening: match &providers.result_screening {
+            Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
+            None => None,
+        },
     }))
 }
 

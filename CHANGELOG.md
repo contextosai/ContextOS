@@ -20,6 +20,11 @@ minor versions may break APIs and every break is listed.
   `discovery_credential`).
 
 ### Added
+- Result screening: `[providers.result_screening]` judges every confirmed effect's
+  output before the agent sees it (`pass`, `withhold`, or `redact` by JSON pointer).
+  The effect stands either way. A failing or malformed answer withholds, and non-pass
+  verdicts are audited as `result_screened` with pointers and reasons, never content.
+  `Gateway::set_result_screening` for embedders.
 - Upstream drift detection: a capability can pin `upstream_tool_digest` (name,
   schemas and annotations of the upstream MCP tool) and `upstream_description_digest`.
   Each replica checks them at startup and every 5 minutes. While the tool differs from
