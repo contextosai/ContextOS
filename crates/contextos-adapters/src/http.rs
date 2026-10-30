@@ -169,7 +169,11 @@ impl Adapter for HttpAdapter {
         call: &AdapterCall,
         external_ref: &str,
     ) -> Option<AdapterResponse> {
-        let check = manifest.recovery.completion.as_ref()?;
+        let check = manifest
+            .recovery
+            .completion
+            .as_ref()
+            .filter(|c| !c.status_tool.is_empty())?;
         Some(self.completion(manifest, call, check, external_ref).await)
     }
 }

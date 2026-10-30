@@ -12,7 +12,7 @@ use contextos_gateway::{FindingInput, WorkError};
 use contextos_store::{AppendLog, DocumentStore};
 
 use crate::app::{
-    ApiError, ApiResult, AppState, authorize, dispatch_gateway, executor_generation, load_admission, parse_body,
+    ApiError, ApiResult, AppState, authorize, dispatch_gateway, executor_generation, load_owned_admission, parse_body,
 };
 
 fn findings_error(error: WorkError) -> ApiError {
@@ -76,7 +76,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .findings(
             &admission,
@@ -104,7 +104,7 @@ where
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
     let input: FindingInput = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| invalid())?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .publish_finding(&admission, &caller.principal_id, executor_generation(&headers)?, input)
         .await
@@ -126,7 +126,7 @@ where
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
     let request: InvalidateBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| invalid())?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .invalidate_finding(
             &admission,
@@ -160,7 +160,7 @@ where
 {
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .notices(
             &admission,
@@ -187,7 +187,7 @@ where
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let gateway = dispatch_gateway(&state)?;
     let request: AckBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| invalid())?;
-    let admission = load_admission(&state, &caller, &run_id).await?;
+    let admission = load_owned_admission(&state, &caller, &run_id).await?;
     let body = gateway
         .acknowledge_notices(
             &admission,

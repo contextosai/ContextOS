@@ -53,10 +53,11 @@ pub struct Recovery {
     pub retry_delays_seconds: Vec<u64>,
     #[serde(default)]
     pub idempotency: Option<ProviderIdempotency>,
-    /// The provider's reported-state contract, for adapters that have no
-    /// protocol-level task status (HTTP). It decides a finished `2xx` from the state in
-    /// its body, and how to look up an accepted, unfinished effect. Required for every
-    /// effectful capability on an HTTP adapter.
+    /// The provider's reported-state contract. It decides a finished `2xx` (HTTP) or a
+    /// finished tool result (MCP, read from `structuredContent`) from the state it
+    /// reports, and for HTTP how to look up an accepted, unfinished effect. Required
+    /// for every effectful capability on an HTTP adapter, and on MCP with `[guards]
+    /// require_completion_contracts` (on in production).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion: Option<CompletionCheck>,
     /// HTTP client-error statuses the provider guarantees it returns only when it did
@@ -78,6 +79,8 @@ pub const MAX_NOT_APPLIED_STATUSES: usize = 16;
 #[serde(deny_unknown_fields)]
 pub struct CompletionCheck {
     /// Path segment of the status endpoint, queried as `{status_tool}/{external_ref}`.
+    /// Required for HTTP; MCP looks tasks up with `tasks/get` and leaves it empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub status_tool: String,
     /// JSON Pointer to the job state (a string) in the status response.
     pub state_pointer: String,
@@ -232,7 +235,7 @@ pub enum ManifestError {
 
 impl CompletionCheck {
     fn validate(&self) -> Result<(), &'static str> {
-        if !is_path_segment(&self.status_tool) {
+        if !self.status_tool.is_empty() && !is_path_segment(&self.status_tool) {
             return Err("status_tool must be a path segment of letters, digits, '.', '_' or '-'");
         }
         if !self.state_pointer.starts_with('/') {

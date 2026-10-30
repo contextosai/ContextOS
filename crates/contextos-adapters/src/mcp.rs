@@ -12,7 +12,8 @@
 //!
 //! | Response | Outcome |
 //! |---|---|
-//! | result, `isError` false | confirmed (definitive) |
+//! | result, `isError` false, no `recovery.completion` | confirmed (definitive) |
+//! | result, `isError` false, `recovery.completion` | the state at its `state_pointer` in `structuredContent`: a listed state decides (definitive); a missing or unlisted one is unknown |
 //! | result, `isError` true, read-only capability | not applied (definitive) |
 //! | result, `isError` true, effectful capability | unknown (the tool may have partially acted) |
 //! | `input_required` result | not applied (definitive): the tool has not run; requests in `output` |
@@ -268,12 +269,28 @@ fn tool_result(projection: ResultProjection, manifest: &CapabilityManifest, resu
             cost_units: None,
         };
     }
-    AdapterResponse {
-        outcome: EffectOutcome::Confirmed,
-        definitive: true,
-        output,
-        external_ref: None,
-        cost_units: None,
+    // A finished call is not proof of the effect when the tool reports a state: under
+    // the reviewed contract that state decides, as it does for HTTP.
+    let outcome = match &manifest.recovery.completion {
+        None => Some(EffectOutcome::Confirmed),
+        Some(check) => result
+            .get("structuredContent")
+            .and_then(|s| s.pointer(&check.state_pointer))
+            .and_then(Value::as_str)
+            .and_then(|state| check.outcome(state)),
+    };
+    match outcome {
+        Some(outcome) => AdapterResponse {
+            outcome,
+            definitive: true,
+            output,
+            external_ref: None,
+            cost_units: None,
+        },
+        None => AdapterResponse {
+            output,
+            ..AdapterResponse::unknown()
+        },
     }
 }
 
