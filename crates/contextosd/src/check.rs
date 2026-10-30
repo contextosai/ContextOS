@@ -46,10 +46,16 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         }
         mode => format!("agent binding: {}", mode.as_str()),
     });
+    let unpinned = dispatch
+        .as_ref()
+        .map(|d| crate::upstream_check::unpinned(&config, d))
+        .unwrap_or_default();
     for note in dispatch
         .as_ref()
         .map(runtime::unbounded_capabilities)
         .unwrap_or_default()
+        .into_iter()
+        .chain(unpinned)
     {
         report.push(format!("warning: {note}"));
     }

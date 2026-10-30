@@ -73,7 +73,17 @@ fn reports_an_unreadable_pack() {
 #[test]
 fn warns_about_an_effectful_capability_limits_cannot_bound() {
     let (ok, text) = check(&config("check-bounded.toml", "127.0.0.1:0"), Some(&"11".repeat(32)));
-    assert!(ok && !text.contains("warning:"), "{text}");
+    // The example's MCP capability is not pinned to an upstream definition (its local
+    // provider is a fixture); that is the only caveat.
+    let caveats: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("warning:") && !l.contains("pins no upstream_tool_digest"))
+        .collect();
+    assert!(ok && caveats.is_empty(), "{text}");
+    assert!(
+        text.contains("adp_payments.issue_refund is effectful on an MCP adapter and pins no upstream_tool_digest"),
+        "{text}"
+    );
 
     // The same refund without its amount pointer: a task's amount ceiling passes it.
     let mut manifest: serde_json::Value = serde_json::from_str(

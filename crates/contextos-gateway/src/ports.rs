@@ -178,4 +178,11 @@ pub trait Adapter: Send + Sync {
     ) -> Option<AdapterResponse> {
         None
     }
+
+    /// The provider's current tool definitions (for MCP, `tools/list`), so pinned
+    /// capabilities can be checked for upstream drift. Listing sends no effect. `None`
+    /// when the protocol has no discovery.
+    async fn upstream_tools(&self) -> Option<Result<Vec<Value>, PortError>> {
+        None
+    }
 }

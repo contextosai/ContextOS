@@ -46,6 +46,7 @@ mod scores;
 mod shared_guarantees;
 mod shared_inspection;
 pub mod task_authorization;
+pub mod upstream_drift;
 mod usage;
 
 use std::collections::{HashMap, HashSet};
@@ -239,6 +240,8 @@ pub struct Gateway<S, L> {
     /// registered (production).
     require_result_schemas: bool,
     shared_guarantees: Vec<SharedGuarantee>,
+    /// Capabilities refused because their upstream tool changed (see [`upstream_drift`]).
+    drift: upstream_drift::DriftState,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -446,6 +449,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             completion_floor: None,
             require_result_schemas: false,
             shared_guarantees: Vec::new(),
+            drift: upstream_drift::DriftState::default(),
         }
     }
 
@@ -901,6 +905,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .await?;
             p.report.audit_sequences.push(entry.sequence);
             return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
+        }
+        if self.drift.drifted(&manifest.capability_id) {
+            return Ok(p.stop(
+                "blocked",
+                vec!["upstream_tool_drifted".into()],
+                "The upstream tool changed since this capability was reviewed.",
+            ));
         }
         if let Some(Err(reasons)) = boundary {
             let entry = self

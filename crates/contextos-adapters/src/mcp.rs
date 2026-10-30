@@ -43,19 +43,21 @@ use std::time::Duration;
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
 use contextos_contract::types::ActionEffect;
-use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome};
+use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome, PortError};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::{Map, Value, json};
 use url::Url;
 
 use crate::http::{not_dispatched, object, rejected_before_execution};
 use crate::transport::{
-    CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers, pinned_endpoint, send,
-    traceparent,
+    Credential, CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers,
+    pinned_endpoint, send, traceparent,
 };
 
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
 const PRE_EXECUTION_ERRORS: [i64; 4] = [-32700, -32600, -32601, -32602];
+/// `tools/list` pages read at most when checking for upstream drift.
+const MAX_TOOL_PAGES: usize = 20;
 
 /// How a finished `CallToolResult` becomes the tool output object.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -228,6 +230,59 @@ impl McpAdapter {
     }
 }
 
+impl McpAdapter {
+    /// The server's tool definitions (`tools/list`, following `nextCursor`).
+    pub async fn list_tools(&self) -> Result<Vec<Value>, PortError> {
+        let failed = |why: &str| PortError::new("upstream_tools", why);
+        let credential = self.credentials.discovery_credential().await?;
+        let mut tools = Vec::new();
+        let mut cursor: Option<String> = None;
+        for page in 0..MAX_TOOL_PAGES {
+            let id = format!("contextos-tools-{page}");
+            let mut params = json!({"_meta": {
+                "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {"name": self.client_name, "version": env!("CARGO_PKG_VERSION")},
+            }});
+            if let Some(cursor) = &cursor {
+                params["cursor"] = json!(cursor);
+            }
+            let mut request = self
+                .client
+                .post(self.endpoint.clone())
+                .header(ACCEPT, "application/json, text/event-stream")
+                .header("mcp-protocol-version", PROTOCOL_VERSION)
+                .json(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params}));
+            if let Some(value) = credential.as_ref().and_then(Credential::header) {
+                request = request.header(reqwest::header::AUTHORIZATION, value);
+            }
+            let Exchange::Response {
+                status,
+                content_type,
+                body,
+            } = send(request, Duration::from_secs(10), self.policy.max_response_bytes).await
+            else {
+                return Err(failed("tools/list unreachable"));
+            };
+            if !(200..300).contains(&status) {
+                return Err(failed(&format!("tools/list answered {status}")));
+            }
+            let response = rpc_response(&content_type, &body, &id, self.policy.max_response_bytes)
+                .ok_or_else(|| failed("tools/list returned no matching response"))?;
+            let result = &response["result"];
+            let page_tools = result["tools"]
+                .as_array()
+                .ok_or_else(|| failed("tools/list returned no tools"))?;
+            tools.extend(page_tools.iter().cloned());
+            match result["nextCursor"].as_str() {
+                Some(next) if !next.is_empty() => cursor = Some(next.to_owned()),
+                _ => return Ok(tools),
+            }
+        }
+        Err(failed("tools/list has too many pages"))
+    }
+}
+
 /// Maps a finished `CallToolResult`.
 fn tool_result(projection: ResultProjection, manifest: &CapabilityManifest, result: &Value) -> AdapterResponse {
     let is_error = result["isError"] == true;
@@ -304,6 +359,10 @@ fn task_id(result: &Value) -> Option<String> {
 
 #[async_trait]
 impl Adapter for McpAdapter {
+    async fn upstream_tools(&self) -> Option<Result<Vec<Value>, PortError>> {
+        Some(self.list_tools().await)
+    }
+
     async fn invoke(&self, manifest: &CapabilityManifest, call: &AdapterCall) -> AdapterResponse {
         let mut body = json!({
             "jsonrpc": "2.0", "id": call.attempt_id, "method": "tools/call",

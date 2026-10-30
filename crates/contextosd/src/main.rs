@@ -1,4 +1,5 @@
-//! `contextosd --config <path>`, `contextosd --check-config <path>` or `contextosd --version`
+//! `contextosd --config <path>`, `contextosd --check-config <path>`,
+//! `contextosd --pin-mcp-tools <path>` or `contextosd --version`
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,10 +46,27 @@ async fn main() {
             }
         }
     }
+    if let [_, flag, path] = args.as_slice()
+        && flag == "--pin-mcp-tools"
+    {
+        let config = Config::load(std::path::Path::new(path)).unwrap_or_else(|e| fail(e));
+        match contextosd::upstream_check::pin_report(&config).await {
+            Ok(lines) => {
+                for line in lines {
+                    println!("{line}");
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("contextosd: {path}: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
     let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
-        _ => fail("usage: contextosd --config <path> | --check-config <path> | --version"),
+        _ => fail("usage: contextosd --config <path> | --check-config <path> | --pin-mcp-tools <path> | --version"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
     let signer = contextosd::audit_signer(&config).await.unwrap_or_else(|e| fail(e));

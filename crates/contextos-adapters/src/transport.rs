@@ -48,6 +48,12 @@ pub trait CredentialBroker: Send + Sync {
         manifest: &CapabilityManifest,
         call: &AdapterCall,
     ) -> Result<Option<Credential>, PortError>;
+
+    /// A credential for reading the provider's tool definitions (discovery, no effect).
+    /// `None` by default: discovery is sent without one.
+    async fn discovery_credential(&self) -> Result<Option<Credential>, PortError> {
+        Ok(None)
+    }
 }
 
 /// A broker for providers that need no credential.

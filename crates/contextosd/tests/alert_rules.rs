@@ -43,6 +43,13 @@ fn exposition() -> String {
     metrics.notification("oncall", "abandoned");
     // The leader's governance gauges.
     metrics.set_governance(Some(Census::empty_exposition(vec!["refunds".into()])));
+    metrics.set_upstream(Some(contextosd::upstream_check::exposition(
+        &[(
+            "adp_payments.issue_refund".to_owned(),
+            contextos_gateway::upstream_drift::UpstreamStatus::Drifted,
+        )]
+        .into(),
+    )));
     // `contextos_replicas` is appended by the `/metrics` handler.
     format!("{}# TYPE contextos_replicas gauge\n", metrics.render())
 }
