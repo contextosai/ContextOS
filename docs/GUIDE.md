@@ -723,6 +723,33 @@ result_projection = "mcp_result_v1"
 #          "content", "is_error"}}
 ```
 
+Providers that require OAuth, as MCP servers increasingly do, get tokens through the
+client credentials grant instead of a fixed `token_env`:
+
+```toml
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"
+endpoint = "https://payments.internal/mcp"
+[adapters.oauth]
+token_url = "https://idp.internal/oauth2/token"
+client_id = "contextos-gateway"
+client_secret_env = "CONTEXTOS_PAYMENTS_CLIENT_SECRET"
+scope = "payments.refund"          # optional
+# resource = "…"                   # RFC 8707 audience; defaults to the endpoint
+# refresh_before_seconds = 60
+```
+
+- **The grant.** The client authenticates with HTTP Basic, and the token is requested
+  for the provider as its `resource`.
+- **Caching.** Tokens are cached and replaced before they expire (halfway through the
+  lifetime for short-lived ones). One fetch runs at a time.
+- **Failure.** A token that cannot be obtained fails the call before anything is sent
+  (`not_dispatched`), so it is safe to retry.
+- **Rules.** The token endpoint follows the same transport rules as provider
+  endpoints: HTTPS, no redirects, bounded responses. Set either `token_env` or
+  `oauth`, not both.
+
 ## 5. Gate Context Pack releases
 
 A pack or policy change is a change to what agents may do, so gate it on replayed

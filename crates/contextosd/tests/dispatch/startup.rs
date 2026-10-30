@@ -180,3 +180,24 @@ async fn a_retired_capability_version_is_loaded_for_recovery_only() {
     let refused = dispatch_setup_from_config(&config).err().unwrap();
     assert!(refused.contains("issue_refund@3.json"), "{refused}");
 }
+
+#[tokio::test]
+async fn an_oauth_adapter_needs_its_secret_and_no_fixed_token() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    config.adapters[0].oauth = Some(contextosd::config::OAuthClientConfig {
+        token_url: "https://idp.internal.example/oauth/token".into(),
+        client_id: "contextos-gateway".into(),
+        client_secret_env: "CONTEXTOS_TEST_UNSET_OAUTH_SECRET".into(),
+        scope: None,
+        resource: None,
+        refresh_before_seconds: 60,
+    });
+    let missing = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(
+        missing.contains("CONTEXTOS_TEST_UNSET_OAUTH_SECRET is not set"),
+        "{missing}"
+    );
+    config.adapters[0].token_env = Some("CONTEXTOS_PAYMENTS_TOKEN".into());
+    let both = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(both.contains("set token_env or oauth, not both"), "{both}");
+}

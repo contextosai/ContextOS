@@ -195,10 +195,36 @@ pub struct AdapterConfig {
     /// Environment variable holding the provider credential issued by your broker.
     #[serde(default)]
     pub token_env: Option<String>,
+    /// Obtain provider tokens with the OAuth client credentials grant instead of a
+    /// fixed token (see [`crate::runtime::oauth_broker`]).
+    #[serde(default)]
+    pub oauth: Option<OAuthClientConfig>,
     /// MCP only: how a tool result becomes the tool output. `flat` (the default) is the
     /// original mapping; `mcp_result_v1` preserves structured content losslessly.
     #[serde(default)]
     pub result_projection: Option<ResultProjectionConfig>,
+}
+
+/// OAuth 2.0 client credentials for one adapter's provider.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthClientConfig {
+    pub token_url: String,
+    pub client_id: String,
+    /// Environment variable holding the client secret.
+    pub client_secret_env: String,
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// RFC 8707 resource the token is for; defaults to the adapter's endpoint.
+    #[serde(default)]
+    pub resource: Option<String>,
+    /// Replace a cached token this long before it expires.
+    #[serde(default = "default_refresh_before")]
+    pub refresh_before_seconds: u64,
+}
+
+fn default_refresh_before() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

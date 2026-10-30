@@ -156,6 +156,29 @@ impl contextos_adapters::CredentialBroker for EnvCredential {
     }
 }
 
+/// The adapter's OAuth client-credentials broker, with the secret from the environment.
+pub fn oauth_broker(
+    adapter: &crate::config::AdapterConfig,
+    oauth: &crate::config::OAuthClientConfig,
+    policy: &contextos_adapters::TransportPolicy,
+) -> Result<contextos_adapters::OAuthClientCredentials, String> {
+    if adapter.token_env.is_some() {
+        return Err(format!("{}: set token_env or oauth, not both", adapter.id));
+    }
+    let secret =
+        std::env::var(&oauth.client_secret_env).map_err(|_| format!("{} is not set", oauth.client_secret_env))?;
+    contextos_adapters::OAuthClientCredentials::new(
+        &oauth.token_url,
+        &oauth.client_id,
+        secret,
+        oauth.scope.clone(),
+        oauth.resource.clone().unwrap_or_else(|| adapter.endpoint.clone()),
+        std::time::Duration::from_secs(oauth.refresh_before_seconds),
+        policy,
+    )
+    .map_err(|e| format!("{}: oauth token_url: {e}", adapter.id))
+}
+
 fn env_credential(var: Option<&String>) -> Result<Option<contextos_adapters::Credential>, String> {
     var.map(|var| {
         std::env::var(var)
@@ -218,9 +241,12 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
     };
     let mut adapters: Vec<(String, Arc<dyn Adapter>)> = Vec::new();
     for adapter in &config.adapters {
-        let broker: Arc<dyn contextos_adapters::CredentialBroker> = match env_credential(adapter.token_env.as_ref())? {
-            Some(credential) => Arc::new(EnvCredential(credential)),
-            None => Arc::new(NoCredentials),
+        let broker: Arc<dyn contextos_adapters::CredentialBroker> = match &adapter.oauth {
+            Some(oauth) => Arc::new(oauth_broker(adapter, oauth, &policy)?),
+            None => match env_credential(adapter.token_env.as_ref())? {
+                Some(credential) => Arc::new(EnvCredential(credential)),
+                None => Arc::new(NoCredentials),
+            },
         };
         let projection = match adapter.result_projection {
             None | Some(crate::config::ResultProjectionConfig::Flat) => ResultProjection::Flat,
