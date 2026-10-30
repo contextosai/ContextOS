@@ -46,6 +46,7 @@ mod revocations;
 mod scores;
 mod shared_guarantees;
 mod shared_inspection;
+pub mod step_up;
 pub mod task_authorization;
 pub mod upstream_drift;
 mod usage;
@@ -245,6 +246,8 @@ pub struct Gateway<S, L> {
     drift: upstream_drift::DriftState,
     /// Judges confirmed effects' output before the agent sees it (see [`result_screening`]).
     result_screening: Option<Arc<dyn result_screening::ResultScreeningProvider>>,
+    /// Approvals that count only after the approver's step-up (see [`step_up`]).
+    approval_step_up: Option<step_up::StepUpPolicy>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -454,7 +457,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             shared_guarantees: Vec::new(),
             drift: upstream_drift::DriftState::default(),
             result_screening: None,
+            approval_step_up: None,
         }
+    }
+
+    /// Requires approvers' step-up for the approvals `policy` covers (see [`step_up`]).
+    pub fn set_approval_step_up(&mut self, policy: Option<step_up::StepUpPolicy>) {
+        self.approval_step_up = policy;
     }
 
     /// Screens every confirmed effect's output with `provider` before it reaches the
@@ -1045,6 +1054,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             Ok(material) => material,
             Err(e) => return Ok(p.stop("blocked", vec!["approval_unavailable".into()], &e.to_string())),
         };
+        // The approval service reports approvers' sign-in beside the decisions
+        // (`assurance`); the kernel's input never carries it. An approval that needed a
+        // step-up it lacks is not used at all.
+        let mut step_up_refused = None;
+        let approval_material = approval_material.and_then(|material| {
+            let Value::Object(mut material) = material else {
+                return Some(material);
+            };
+            let assurance = material.remove("assurance");
+            if let Some(policy) = &self.approval_step_up
+                && policy.applies(&manifest.capability_id, &binding)
+                && !policy.satisfied(&material, assurance.as_ref())
+            {
+                step_up_refused = Some(
+                    material
+                        .get("request")
+                        .map_or(Value::Null, |r| r["approval_request_id"].clone()),
+                );
+                return None;
+            }
+            Some(Value::Object(material))
+        });
         let mut approval_input = Value::Null;
         let mut redemption_key = None;
         if let Some(Value::Object(mut material)) = approval_material {
@@ -1097,6 +1128,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         p.report.audit_sequences.push(entry.sequence);
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
         p.report.reason_codes.extend(outside_task);
+        if let Some(request_id) = step_up_refused {
+            let entry = self
+                .audit
+                .append(
+                    &admission.tenant_id,
+                    "approval_step_up_refused",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "approval_request_id": request_id}),
+                    &now,
+                )
+                .await?;
+            p.report.audit_sequences.push(entry.sequence);
+            p.report.reason_codes.push("approval_step_up_required".into());
+            p.report.obligations.push("approve_with_step_up".into());
+        }
         // Policy obligations go back to the orchestrator whatever the verdict; they are
         // discharged independently of it.
         p.report

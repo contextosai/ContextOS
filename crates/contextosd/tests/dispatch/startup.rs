@@ -201,3 +201,17 @@ async fn an_oauth_adapter_needs_its_secret_and_no_fixed_token() {
     let both = dispatch_setup_from_config(&config).err().unwrap();
     assert!(both.contains("set token_env or oauth, not both"), "{both}");
 }
+
+#[tokio::test]
+async fn approval_step_up_is_configured_and_checked_at_startup() {
+    let (config, _) = world_setup(&ALL_CONTROLS).await;
+    let with = |table: &str| Config::parse(&format!("{}\n{table}", config.source));
+    let parsed = with(
+        "[guards.approval_step_up]\namount_at_least = 100000\namr_values = [\"mfa\", \"hwk\"]\nmax_age_seconds = 300",
+    )
+    .unwrap();
+    let policy = parsed.guards.approval_step_up.unwrap();
+    assert_eq!(policy.amount_at_least, Some(100_000));
+    let refused = with("[guards.approval_step_up]\namount_at_least = 100000").unwrap_err();
+    assert!(refused.to_string().contains("acr_values or amr_values"), "{refused}");
+}
