@@ -177,6 +177,10 @@ pub struct ProvidersConfig {
     /// Memory-governance service; enables governed memory lifecycle operations.
     #[serde(default)]
     pub memory: Option<RemoteProvider>,
+    /// Result-screening service; judges every confirmed effect's output before the
+    /// agent sees it.
+    #[serde(default)]
+    pub result_screening: Option<RemoteProvider>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

@@ -201,6 +201,9 @@ to do.
 
 ### F. Result screening port (after D, platform engineer)
 
+**Built** (GUIDE section 4, threat T33). It runs only for confirmed effects. Other
+outcomes already return no raw output when an output schema is reviewed.
+
 Add a `ResultScreeningProvider` port next to `DataFlowProvider`. It is called after an
 effect is confirmed and before output reaches the agent, and returns
 `pass | withhold | redact(pointers)`. It is enforced like `output_schema`: the effect is

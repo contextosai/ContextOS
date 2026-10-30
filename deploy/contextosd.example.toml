@@ -73,6 +73,10 @@ token_env = "CONTEXTOS_CONTROLS_TOKEN"
 url = "https://approvals.internal.example/contextos/facts"
 token_env = "CONTEXTOS_APPROVALS_TOKEN"
 
+# [providers.result_screening]  # optional: your classifier judges tool output before the agent sees it
+# url = "https://screening.internal.example/contextos/facts"
+# token_env = "CONTEXTOS_SCREENING_TOKEN"
+
 [[adapters]]
 id = "adp_payments"
 kind = "mcp"                   # stateless MCP 2026-07-28 over Streamable HTTP
