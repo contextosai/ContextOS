@@ -14,6 +14,10 @@ minor versions may break APIs and every break is listed.
   fields, so Rust code building them literally needs `agent_ids` / `agents`.
 
 ### Added
+- OAuth for providers: an adapter's `[adapters.oauth]` obtains tokens with the client
+  credentials grant (HTTP Basic client auth, RFC 8707 `resource` defaulting to the
+  endpoint), caches them and refreshes them before expiry, one fetch at a time. A token
+  that cannot be obtained fails the call before anything is sent.
 - Escalation notifications: `[[notifications]]` webhooks receive a signed CloudEvent
   for every `escalation_opened` and `escalation_resolved`. The leader delivers them
   from the audit chain with a per-webhook cursor, so none is lost or invented; delivery

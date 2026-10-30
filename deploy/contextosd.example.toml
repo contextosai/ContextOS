@@ -78,6 +78,12 @@ id = "adp_payments"
 kind = "mcp"                   # stateless MCP 2026-07-28 over Streamable HTTP
 endpoint = "https://payments-mcp.internal.example/mcp"
 token_env = "CONTEXTOS_PAYMENTS_TOKEN"
+# Or, for providers that require OAuth, the client credentials grant instead of token_env:
+# [adapters.oauth]
+# token_url = "https://idp.internal.example/oauth2/token"
+# client_id = "contextos-gateway"
+# client_secret_env = "CONTEXTOS_PAYMENTS_CLIENT_SECRET"
+# scope = "payments.refund"
 
 # Callers may also authenticate with JWTs from your identity provider.
 # [[oidc]]

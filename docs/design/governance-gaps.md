@@ -158,7 +158,7 @@ credential, and the adapter tests assert the brokered one.
 - Never pass the caller's token upstream. Credentials already come from the broker;
   add a test that pins this.
 
-**D2. Outbound OAuth broker.** Add `OAuthClientCredentials` as a `CredentialBroker`
+**D2. Outbound OAuth broker.** *Built* (`contextos-adapters/src/oauth.rs`, GUIDE section 4). Add `OAuthClientCredentials` as a `CredentialBroker`
 for each adapter: a token endpoint, a client secret from an environment variable, the
 RFC 8707 `resource` parameter, and a cache that refreshes before expiry. Fetch errors
 surface as `PortError`, which the gateway already treats as fail-closed. On-behalf-of
