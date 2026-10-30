@@ -229,3 +229,121 @@ async fn attesting_absence_needs_its_own_scope_and_a_started_attempt_without_a_f
     assert_eq!(refused["status"], "rejected", "{refused}");
     assert_eq!(refused["reason_codes"], json!(["attestation_not_applicable"]));
 }
+
+#[tokio::test]
+async fn the_governance_sweep_counts_holds_by_state_until_reconciled() {
+    use contextosd::governance_sweep::{Census, SweepConfig};
+
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guarantees = vec![
+            serde_json::from_value(json!({"id":"refunds","capability_ids":["adp_payments.issue_refund"],
+            "resource_pointer":"/order_id","amount_pointer":"/amount_minor","limit":1000,"unit":"INR_minor"}))
+            .unwrap(),
+        ];
+    })
+    .await;
+    let gateway = w.state.gateway.clone().unwrap();
+    let config = SweepConfig {
+        page: 1,
+        ledgers_per_tick: 1,
+        ..SweepConfig::default()
+    };
+    let mut census = Census::new(vec![TENANT.into(), TENANT.into()], gateway.shared_guarantee_ids());
+    let quiet = census
+        .step(&gateway, &config)
+        .await
+        .unwrap()
+        .expect("no ledgers: one tick is a pass");
+    assert!(
+        quiet.contains("contextos_shared_holds{guarantee=\"refunds\",state=\"unknown\"} 0"),
+        "{quiet}"
+    );
+    assert!(
+        quiet.contains("contextos_shared_hold_oldest_seconds{guarantee=\"refunds\"} 0\n"),
+        "{quiet}"
+    );
+    assert!(quiet.contains("contextos_escalations_open 0\n"), "{quiet}");
+
+    let http = executor_client(2);
+    let admitted = http
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_held", 7))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admitted.status(), 201);
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_held/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_held", "pending", 777))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "paused", "{out}");
+
+    // One ledger per tick: the first tick reads it, the second finds no more and publishes.
+    assert_eq!(census.step(&gateway, &config).await.unwrap(), None);
+    let held = census.step(&gateway, &config).await.unwrap().expect("pass complete");
+    assert!(
+        held.contains("contextos_shared_holds{guarantee=\"refunds\",state=\"unknown_provider_reference\"} 1\n"),
+        "{held}"
+    );
+    assert!(
+        held.contains("contextos_shared_holds{guarantee=\"refunds\",state=\"unknown\"} 0\n"),
+        "{held}"
+    );
+    assert!(
+        held.contains("contextos_shared_receipts_fill_ratio{guarantee=\"refunds\"} 0.0009765625\n"),
+        "{held}"
+    );
+    assert!(!held.contains(TENANT) && !held.contains("ord_881"), "{held}");
+
+    let reconciled: Value = http
+        .post(format!(
+            "{}/v1/runs/run_held/operations/refund:run_held/reconcile",
+            w.base
+        ))
+        .bearer_auth("acme-key")
+        .json(&json!({"source":"provider"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reconciled["status"], "resolved", "{reconciled}");
+    assert_eq!(census.step(&gateway, &config).await.unwrap(), None);
+    let settled = census.step(&gateway, &config).await.unwrap().expect("pass complete");
+    assert!(
+        settled.contains("contextos_shared_holds{guarantee=\"refunds\",state=\"unknown_provider_reference\"} 0\n"),
+        "{settled}"
+    );
+    assert!(
+        settled.contains("contextos_shared_hold_oldest_seconds{guarantee=\"refunds\"} 0\n"),
+        "{settled}"
+    );
+    // The settled receipt stays live until it is archived, so the ledger is still counted.
+    assert!(
+        settled.contains("contextos_shared_receipts_fill_ratio{guarantee=\"refunds\"} 0.0009765625\n"),
+        "{settled}"
+    );
+
+    // What the sweep publishes is what /metrics serves.
+    w.state.metrics.set_governance(Some(settled));
+    let metrics = http
+        .get(format!("{}/metrics", w.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains("# TYPE contextos_governance_sweep_completed_timestamp_seconds gauge"),
+        "{metrics}"
+    );
+}

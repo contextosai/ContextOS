@@ -81,6 +81,81 @@ groups:
             minutes. Expected while an incident is contained; otherwise check who revoked what.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosrevocationenforced
 
+  # Gauges from the leader's governance sweep: only the leader exports them, so
+  # aggregate with max, which survives a leader change.
+  - name: contextos.holds
+    rules:
+      - alert: ContextOSHeldEffectsAging
+        expr: max by (guarantee) (contextos_shared_hold_oldest_seconds) > 900
+        labels:
+          severity: warning
+        annotations:
+          summary: 'A hold under {{ $labels.guarantee }} has waited more than 15 minutes.'
+          description: >-
+            The oldest held effect under {{ $labels.guarantee }} started more than 15 minutes
+            ago and still holds capacity. Waiting resolves nothing; follow its next safe step.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosheldeffectsaging
+
+      - alert: ContextOSConflictingFacts
+        expr: max by (guarantee) (contextos_shared_holds{state="conflicting_facts"}) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Contradictory outcomes were recorded for an effect under {{ $labels.guarantee }}.'
+          description: >-
+            An operation under {{ $labels.guarantee }} has contradictory recorded outcomes.
+            Its capacity stays held; treat it as an incident and resolve it with the provider.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosconflictingfacts
+
+      - alert: ContextOSReceiptsNearCap
+        expr: max by (guarantee) (contextos_shared_receipts_fill_ratio) > 0.8
+        labels:
+          severity: warning
+        annotations:
+          summary: 'A resource under {{ $labels.guarantee }} is close to its receipt cap.'
+          description: >-
+            The fullest ledger under {{ $labels.guarantee }} uses more than 80% of its 1024
+            live receipts. At the cap every new effect on that resource is refused.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosreceiptsnearcap
+
+      - alert: ContextOSUnreadableLedgers
+        expr: max(contextos_shared_ledgers_unreadable) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: An exposure ledger cannot be read.
+          description: >-
+            The governance sweep found exposure ledgers it cannot read. Their resources refuse
+            effects and their holds are unknown; the store may have been changed outside the runtime.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosunreadableledgers
+
+      - alert: ContextOSGovernanceSweepStale
+        expr: |
+          (time() - max(contextos_governance_sweep_completed_timestamp_seconds) > 900)
+            or (absent(contextos_governance_sweep_completed_timestamp_seconds)
+              and on() count(contextos_dispatch_outcomes_total) > 0)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: The governance sweep has not completed for 15 minutes.
+          description: >-
+            No replica has published hold gauges recently, so the hold alerts above cannot
+            fire. Check that a leader replica is running and can read the store.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosgovernancesweepstale
+
+      - alert: ContextOSEscalationsWaiting
+        expr: max(contextos_escalations_open) > 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: Policy escalations have been waiting for a human for an hour.
+          description: >-
+            {{ $value | humanize }} escalations are open. The calls they block stay blocked
+            until someone handles them.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosescalationswaiting
+
   - name: contextos.service
     rules:
       - alert: ContextOSServerErrors

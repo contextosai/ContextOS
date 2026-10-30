@@ -12,6 +12,15 @@ minor versions may break APIs and every break is listed.
   guards, enforced revocations and server errors. Each alert links a new runbook section
   in `docs/INCIDENT.md` ("Alerts"); the rules have promtool unit tests in
   `deploy/alerts/`, and a test keeps their metric names in step with `/metrics`.
+- Governance gauges from the leader replica's sweep of exposure ledgers: held receipts
+  by diagnosed state, the oldest hold's age, the fullest ledger's receipt fill,
+  unreadable ledgers, open escalations and sweep completion. New alerts use them:
+  `ContextOSHeldEffectsAging`, `ContextOSConflictingFacts`, `ContextOSReceiptsNearCap`,
+  `ContextOSUnreadableLedgers`, `ContextOSGovernanceSweepStale` and
+  `ContextOSEscalationsWaiting`. A hold older than 15 minutes is logged once with its
+  tenant for the SIEM; tenants stay off metric labels. A Grafana dashboard
+  (`deploy/grafana/contextos-governance.json`) shows the same three questions: is
+  governance blocking traffic, is capacity held, is anyone waiting on a human.
 - Docs: [what ContextOS does not govern](docs/SCOPE.md), and the plan for the remaining
   governance gaps (`docs/design/governance-gaps.md`).
 

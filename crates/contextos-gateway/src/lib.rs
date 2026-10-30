@@ -31,6 +31,7 @@ mod erasure;
 mod escalation;
 mod findings;
 mod findings_api;
+pub mod hold_census;
 mod input;
 mod lifecycle;
 mod loop_guard;

@@ -11,6 +11,7 @@ pub mod configs;
 pub mod exposure;
 pub mod feedback;
 pub mod findings;
+pub mod governance_sweep;
 pub mod guards;
 pub mod http;
 pub mod kms;
@@ -202,6 +203,7 @@ where
         .map(|c| oidc::OidcIssuer::new(c.clone(), development).map(Arc::new))
         .collect::<Result<Vec<_>, _>>()?;
     let limits = Arc::new(limits::Limiter::new(config.limits.clone()));
+    let metrics = Arc::new(metrics::Metrics::default());
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         for issuer in &issuers {
             runtime.spawn(issuer.clone().run_refresh());
@@ -217,8 +219,16 @@ where
             runtime.spawn(retention::run(
                 store.clone(),
                 gateway.clone(),
-                leader,
+                leader.clone(),
                 config.retention.clone(),
+            ));
+            let tenants = packs.values().map(|p| p.tenant_id.clone()).collect();
+            runtime.spawn(governance_sweep::run(
+                gateway.clone(),
+                metrics.clone(),
+                leader,
+                tenants,
+                governance_sweep::SweepConfig::default(),
             ));
         }
     }
@@ -227,7 +237,7 @@ where
         audit,
         audit_keys: keys,
         auth: auth::Authenticator::new(&config.api_keys).with_issuers(issuers),
-        metrics: Arc::default(),
+        metrics,
         packs,
         support: support_declaration(config),
         deployment: deployment_summary(config),

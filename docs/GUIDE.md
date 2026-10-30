@@ -1185,6 +1185,15 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   `contextos_decisions_total{status}`. Labels are bounded: capabilities and packs are
   those pinned at startup (anything else counts as `unpinned`); tenants are not a label
   (per-tenant evidence is in the audit chain).
+- **Governance gauges** (leader replica only, refreshed each full sweep of the exposure
+  ledgers): `contextos_shared_holds{guarantee,state}` (state as in hold inspection),
+  `contextos_shared_hold_oldest_seconds{guarantee}`,
+  `contextos_shared_receipts_fill_ratio{guarantee}`, `contextos_shared_ledgers_unreadable`,
+  `contextos_escalations_open` and `contextos_governance_sweep_completed_timestamp_seconds`.
+  Aggregate them with `max`. A hold older than 15 minutes is logged once with its tenant
+  and resource digest for your SIEM.
+- **Alerts:** the Helm chart's `prometheusRule.enabled` installs rules for all of the
+  above; each links its runbook in [INCIDENT.md](INCIDENT.md#alerts).
 - **Spans:** `http.request`, with `contextos.compile`, `contextos.admit`,
   `contextos.delegate`, `contextos.dispatch` (run, operation, capability, digest,
   status, reasons), `contextos.continue`, `contextos.reconcile`, `contextos.decision`,
