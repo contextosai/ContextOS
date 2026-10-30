@@ -97,11 +97,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             // Not sent, already resolved, or resolvable by an ordinary reconciliation.
             return Ok(out.rejected("attestation_not_applicable"));
         }
-        let Some(manifest) = self
-            .manifests
-            .values()
-            .find(|m| serde_json::to_value(&m.capability_ref).ok().as_ref() == Some(&op["intent"]["capability_ref"]))
-        else {
+        let Some(manifest) = self.manifest_for_ref(&op["intent"]["capability_ref"]) else {
             return Ok(out.rejected("capability_not_pinned"));
         };
         let started_at = attempt["started_at"].as_str().unwrap_or_default();

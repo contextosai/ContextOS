@@ -231,6 +231,8 @@ pub enum ManifestError {
     Compensation(String, &'static str),
     #[error("capability {0} not_applied_statuses must list at most 16 distinct 4xx statuses")]
     NotAppliedStatuses(String),
+    #[error("capability {0} repeats the capability_ref of a pinned or retired version")]
+    DuplicateCapabilityRef(String),
 }
 
 impl CompletionCheck {

@@ -548,6 +548,30 @@ changes. A dispatch that stalls more than 120 seconds before calling the provide
 sends nothing (`dispatch_stalled`). See "Attesting absence" in
 [shared guarantees](SHARED_GUARANTEES.md).
 
+### Upgrading a capability with operations open
+
+An operation keeps the `capability_ref` it was claimed under, and a retry under any
+other version is refused (`operation_binding_mismatch`): the new version may read the
+same arguments differently, and an approval of the old action does not cover it. The
+new version starts new operations only. Before pinning it, list the old version's
+open operations (hold inspection, or runs still `running`) and decide for each:
+resolve it under the old version, or let it be refused and start new, separately
+approved work.
+
+To resolve operations after the upgrade, keep the old manifest in
+`retired_capabilities`:
+
+```toml
+capabilities = ["deploy/capabilities/issue_refund-v4.json"]
+retired_capabilities = ["deploy/capabilities/issue_refund-v3.json"]
+```
+
+A retired version is used only to reconcile, attest and record operations claimed
+under it, with its own adapter, protocol tool, completion contract and timeout. It is
+never dispatched, and the startup guards for dispatched tools do not apply to it.
+Without it, those operations are refused as `capability_not_pinned` and what they hold
+stays held. Remove it once none of its operations is open.
+
 ### Compensating applied effects
 
 When a workflow fails after some effects applied, undo them with the compensations

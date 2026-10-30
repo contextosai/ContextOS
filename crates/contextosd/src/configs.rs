@@ -394,6 +394,7 @@ fn classify(path: &str, from: &Value, to: &Value) -> (&'static str, Option<&'sta
             if added { "loosens" } else { "tightens" },
             Some("capabilities and packs pinned at startup"),
         ),
+        "retired_capabilities" => ("changes", Some("replaced versions, for their operations only")),
         _ if path.starts_with("limits") => match more() {
             Some(true) => ("loosens", Some("higher limits admit more load")),
             Some(false) => ("tightens", None),

@@ -3,6 +3,15 @@
 All notable changes are listed here. Versions follow Semantic Versioning; before 1.0,
 minor versions may break APIs and every break is listed.
 
+## Unreleased
+
+### Added
+- `retired_capabilities`: manifests of versions an upgrade replaced. Operations
+  claimed under a retired version are reconciled, attested and recorded with it; it is
+  never dispatched. Before, upgrading a capability left those operations refused as
+  `capability_not_pinned`, holding their budget and shared capacity. See "Upgrading a
+  capability with operations open" in [docs/GUIDE.md](docs/GUIDE.md).
+
 ## 0.1.0-alpha.4 - 2026-10-30
 
 Fourth alpha: an audited release for holds whose dispatch started and recorded no

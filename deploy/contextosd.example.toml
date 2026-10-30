@@ -5,6 +5,9 @@
 packs = []
 # Reviewed capability manifests pinned at startup (see deploy/capabilities/).
 capabilities = []
+# Versions those replaced, kept so operations claimed under them can still be
+# reconciled and attested; never dispatched (docs/GUIDE.md, "Upgrading a capability").
+# retired_capabilities = []
 
 [server]
 listen = "0.0.0.0:8080"

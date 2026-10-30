@@ -39,6 +39,7 @@ mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
+mod retired;
 mod revocations;
 mod scores;
 mod shared_guarantees;
@@ -216,6 +217,8 @@ pub struct Gateway<S, L> {
     ports: Ports,
     adapters: HashMap<String, Arc<dyn Adapter>>,
     manifests: HashMap<String, CapabilityManifest>,
+    /// Replaced versions, read only for operations claimed under them (see [`retired`]).
+    retired: Vec<CapabilityManifest>,
     schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
     output_schemas: HashMap<String, contextos_contract::schema::ArgumentSchema>,
     /// Schemas delegated runs' results must meet, by `output_schema_ref`.
@@ -432,6 +435,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             ports,
             adapters: HashMap::new(),
             manifests: HashMap::new(),
+            retired: Vec::new(),
             schemas: HashMap::new(),
             output_schemas: HashMap::new(),
             result_schemas: HashMap::new(),

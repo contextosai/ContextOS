@@ -155,3 +155,28 @@ async fn effectful_http_capabilities_need_a_reported_state_contract() {
     std::fs::write(&path, manifest.to_string()).unwrap();
     assert!(dispatch_setup_from_config(&config).is_ok());
 }
+
+#[tokio::test]
+async fn a_retired_capability_version_is_loaded_for_recovery_only() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    config.guards.require_completion_contracts = Some(true);
+    let path = config.capabilities[0].clone();
+    let old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut current = old.clone();
+    current["capability_version"] = json!("4");
+    current["capability_ref"] = artifact("capability", "issue_refund@4");
+    current["recovery"]["completion"] = json!({"state_pointer": "/status", "confirmed": ["succeeded"]});
+    std::fs::write(&path, current.to_string()).unwrap();
+    let retired = path.with_file_name("issue_refund@3.json");
+    std::fs::write(&retired, old.to_string()).unwrap();
+    config.retired_capabilities = vec![retired.clone()];
+    // Startup guards cover what is dispatched; the retired version has no completion
+    // contract and still loads.
+    let setup = dispatch_setup_from_config(&config).unwrap().unwrap();
+    assert_eq!(setup.retired.len(), 1);
+    assert_eq!(setup.manifests.len(), 1);
+
+    std::fs::write(&retired, "{}").unwrap();
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("issue_refund@3.json"), "{refused}");
+}
