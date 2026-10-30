@@ -21,6 +21,11 @@ pub struct Caller {
     pub tenant_id: String,
     pub principal_id: String,
     pub scopes: Vec<String>,
+    /// The agent ids this credential is issued for, if it names any (see
+    /// [`crate::agent_binding`]).
+    pub agents: Option<Vec<String>>,
+    /// Where `agents` came from: `api_key`, or `oidc:<issuer>#<claim>`.
+    pub agent_source: Option<String>,
 }
 
 impl Caller {
@@ -52,6 +57,8 @@ impl Authenticator {
                         tenant_id: k.tenant_id.clone(),
                         principal_id: k.principal_id.clone(),
                         scopes: k.scopes.clone(),
+                        agents: k.agent_ids.clone(),
+                        agent_source: k.agent_ids.as_ref().map(|_| "api_key".to_owned()),
                     },
                 ))
             })

@@ -33,6 +33,12 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         ),
         None => "no dispatch gateway configured".into(),
     });
+    report.push(match crate::agent_binding::mode(&config) {
+        crate::agent_binding::AgentBinding::Off => {
+            "warning: agent binding is off: runs may declare any agent (development only)".into()
+        }
+        mode => format!("agent binding: {}", mode.as_str()),
+    });
     for note in dispatch
         .as_ref()
         .map(runtime::unbounded_capabilities)

@@ -13,6 +13,7 @@ async fn another_principal_in_the_tenant_cannot_drive_or_see_a_run() {
             tenant_id: TENANT.into(),
             principal_id: "svc_other_agent".into(),
             scopes: vec!["admit".into(), "dispatch".into()],
+            agent_ids: None,
         });
     })
     .await;
@@ -75,6 +76,7 @@ async fn only_an_independent_principal_asserts_that_an_effect_did_not_apply() {
             tenant_id: TENANT.into(),
             principal_id: "svc_reconciler".into(),
             scopes: vec!["reconcile".into()],
+            agent_ids: None,
         });
     })
     .await;

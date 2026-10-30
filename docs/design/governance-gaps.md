@@ -128,34 +128,19 @@ Effort: about 1 day.
 
 ### C. Agent bound to the workload (next quarter, platform engineer)
 
-Add `agent_claim` to `OidcConfig` (for example `sub`, `azp` or `client_id`) and, per
-issuer, `agent_binding = "required" | "observe" | "off"` (see decision 2 for defaults;
-`observe` admits but records and counts each mismatch). With `required`, admission refuses with
-`agent_not_bound` unless `run_context.agent.agent_id` equals the claim value, or is
-mapped to it by an optional `agents` table (claim value to allowed agent ids). The
-admission records `actor.attested = {issuer, claim, value}`, so the decision record and
-audit chain show that the agent was proven, not just named. Static-key callers can't be
-bound and are marked `attested: null`. The enterprise profile can then require a new
-control, `identity.agent_bound`.
+**Built** (see GUIDE, "Bind runs to the agent the credential is issued for", and
+threat T30). How it differs from the first draft:
+- **One deployment-level setting.** `[guards] agent_binding` replaces a per-issuer
+  setting, because a deployment's identity posture should be one decision.
+- **API keys can be bound too.** An API key names its agents with `agent_ids`; a key
+  issued to one agent service is a workload credential.
+- **No new kernel control.** `identity.agent_bound` is not in the profile registry: the
+  registry is parity-locked with the spec. The enterprise default is enforced by
+  contextosd, and the control belongs in a spec proposal.
+- **The verdict goes in `run_admitted`** (`agent_binding`), not in the admission's
+  `actor`, whose shape is the spec's `PrincipalRef`.
 
-SPIFFE: JWT-SVIDs are JWTs from an issuer with a JWKS (the SPIRE OIDC discovery
-provider). They work with the existing verifier when `agent_claim = "sub"` and agent ids
-are SPIFFE IDs. Ship a documented example and a test with a SPIFFE-shaped token. X.509
-SVIDs and mTLS are deferred: they need TLS termination in contextosd, which deployments
-usually leave to a mesh.
-
-Delegated child runs inherit the binding through `lineage`. Revoking a bound agent then
-revokes a proven workload.
-
-Tests:
-- bound vs unbound admission;
-- the mapping table;
-- revocation of a bound agent;
-- the audit record shape;
-- a conformance vector for `agent_not_bound` if the spec maintainers accept it (write it
-  up as `docs/proposals/spec-0005-agent-binding.md`, following spec-0003).
-
-Effort: about 5 days.
+X.509 SVIDs (mTLS) and build attestation remain out of scope.
 
 ### D. MCP authorization and drift (next quarter, platform engineer)
 

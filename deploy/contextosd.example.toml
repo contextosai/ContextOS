@@ -84,6 +84,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # audience = "contextosd"
 # jwks_url = "https://login.example.com/.well-known/jwks.json"
 # tenants = ["tenant_acme_prod"]
+# agent_claim = "sub"         # the claim naming the agent the token is issued for
 
 # Overload protection (defaults shown).
 # [limits]
@@ -103,6 +104,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # required_release_refs = ["model_profile", "evaluator_suite"]   # the production default; [] opts out
 # require_user_role = true      # the production default: runs must state user.role
 # require_tool_schemas = true   # capabilities need input and output schemas
+# agent_binding = "required"  # declared agents must be ones the credential names (default: required with contextos.enterprise, observe otherwise)
 # require_completion_contracts = true  # the production default: effectful MCP tools declare recovery.completion
 # completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }   # the production default; false opts out
 # trust_supplied_memory = false  # without [providers.memory], admit caller-supplied memory?

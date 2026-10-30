@@ -99,6 +99,9 @@ pub struct ApiKey {
     pub tenant_id: String,
     pub principal_id: String,
     pub scopes: Vec<String>,
+    /// The agent ids this key is issued for (see [`crate::agent_binding`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -317,6 +320,7 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
+        crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
         text.clone_into(&mut config.source);
         Ok(config)
     }

@@ -16,6 +16,7 @@ async fn peer_work_is_shared_through_trusted_lineage_and_claimed_atomically_over
             tenant_id: TENANT.into(),
             principal_id: "different-principal".into(),
             scopes: vec!["dispatch".into()],
+            agent_ids: None,
         });
     })
     .await;
@@ -234,6 +235,7 @@ async fn shared_guarantees_coordinate_replicas_and_expose_only_tenant_scoped_rea
             tenant_id: "tenant_other".into(),
             principal_id: "other_reader".into(),
             scopes: vec!["audit:read".into()],
+            agent_ids: None,
         });
     })
     .await;

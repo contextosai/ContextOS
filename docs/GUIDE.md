@@ -184,6 +184,40 @@ Keys are fetched in the background (every `refresh_seconds`, and soon after an u
 have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized:
 `compile`, `admit`, `dispatch`, `audit:read`.
 
+#### Bind runs to the agent the credential is issued for
+
+A token proves the principal; the agent a run declares (`run_context.agent.agent_id`)
+is named by the caller. Agent binding checks the declared agent against the agents the
+credential is issued for:
+
+```toml
+[[oidc]]
+# …
+agent_claim = "sub"          # e.g. a SPIFFE JWT-SVID: agent ids are SPIFFE IDs
+# or map client ids to agent ids:
+# agent_claim = "azp"
+# [oidc.agents]
+# support-client = ["agt_support"]
+
+[[api_keys]]
+# …
+agent_ids = ["agt_support"]  # a key issued to one agent service
+
+[guards]
+agent_binding = "required"   # or "observe", "off"
+```
+
+`required` refuses an unbound agent (`403 agent_not_bound`); it is the default when
+`[support] profiles` includes `contextos.enterprise`, and startup then refuses an OIDC
+issuer without `agent_claim` or an `admit` key without `agent_ids`. `observe`, the
+default otherwise, admits the run, counts it in
+`contextos_agent_binding_mismatches_total{mode}` and records `bound: false`: turn it on,
+watch the counter reach zero, then switch to `required`. Every `run_admitted` entry
+records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit their
+parent's binding (`bound: "inherited"`). SPIRE's OIDC discovery provider publishes the
+JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
+accepted.
+
 | Route | Scope | Use |
 |---|---|---|
 | `POST /v1/compile` | `compile` | Compile a pinned pack |

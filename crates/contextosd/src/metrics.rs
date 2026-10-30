@@ -29,6 +29,7 @@ pub struct Metrics {
     admissions: Mutex<BTreeMap<String, u64>>,
     decisions: Mutex<BTreeMap<String, u64>>,
     task_amendments: Mutex<BTreeMap<String, u64>>,
+    agent_binding_mismatches: Mutex<BTreeMap<String, u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
 }
@@ -79,6 +80,12 @@ impl Metrics {
     /// Counts an amended task authorization by its change (`narrowed`, `widened`).
     pub fn task_amendment(&self, change: &str) {
         bump(&self.task_amendments, change.to_owned());
+    }
+
+    /// Counts a run admitted or refused whose agent its credential does not name, by
+    /// binding mode (`observe` admits it, `required` refuses it).
+    pub fn agent_binding_mismatch(&self, mode: &str) {
+        bump(&self.agent_binding_mismatches, mode.to_owned());
     }
 
     /// Counts a recorded decision by its status.
@@ -143,7 +150,7 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 4] = [
+        let counters: [(&str, &str, &str, &Counter); 5] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -167,6 +174,12 @@ impl Metrics {
                 "Amended task authorizations by change.",
                 "change",
                 &self.task_amendments,
+            ),
+            (
+                "contextos_agent_binding_mismatches_total",
+                "Runs whose declared agent their credential does not name, by binding mode.",
+                "mode",
+                &self.agent_binding_mismatches,
             ),
         ];
         for (name, help, label, map) in counters {
