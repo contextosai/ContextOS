@@ -25,6 +25,10 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     #[serde(default)]
     pub mode: Mode,
+    /// The URL clients reach this server at, for OAuth protected resource metadata
+    /// (see [`crate::protected_resource`]). Unset: no metadata is published.
+    #[serde(default)]
+    pub public_url: Option<String>,
 }
 
 fn default_max_body() -> usize {
@@ -321,6 +325,10 @@ impl Config {
         let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
+        if let Some(url) = &config.server.public_url {
+            crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)
+                .map_err(ConfigError::Invalid)?;
+        }
         text.clone_into(&mut config.source);
         Ok(config)
     }

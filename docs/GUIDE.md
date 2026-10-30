@@ -108,6 +108,16 @@ the executor generation as headers, for example:
 }
 ```
 
+Hosts that implement MCP authorization can discover where to get that token. Set
+`[server] public_url` to the URL clients reach the server at. A `401` then names the
+run's OAuth protected resource metadata (RFC 9728) in `WWW-Authenticate`
+(`resource_metadata="…/.well-known/oauth-protected-resource/v1/runs/{run_id}/mcp"`).
+The metadata lists your OIDC issuers as `authorization_servers` and `dispatch` as the
+scope, and a `403` for a missing scope says which one (`error="insufficient_scope"`).
+Set the issuer's `audience` to the public URL so tokens are bound to this server
+(RFC 8707). The caller's token never reaches providers: adapters get their own
+credentials from the broker.
+
 The host sees only the run's surfaced capabilities, with their reviewed input schemas
 and risk annotations, under tool names model APIs accept (`[A-Za-z0-9_-]{1,64}`:
 `adp_payments.issue_refund` is listed as `adp_payments_issue_refund`, with the

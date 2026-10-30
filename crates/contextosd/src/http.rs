@@ -24,6 +24,8 @@ pub struct ApiError {
     message: String,
     detail: Option<Value>,
     retry_after_seconds: Option<u64>,
+    /// `WWW-Authenticate` value; a `401` without one sends `Bearer`.
+    challenge: Option<String>,
 }
 
 impl ApiError {
@@ -34,12 +36,18 @@ impl ApiError {
             message: message.into(),
             detail: None,
             retry_after_seconds: None,
+            challenge: None,
         }
     }
 
     pub(crate) fn retry_after(mut self, wait: std::time::Duration) -> Self {
         // Whole seconds, rounded up, at least one.
         self.retry_after_seconds = Some((wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1));
+        self
+    }
+
+    pub(crate) fn with_challenge(mut self, challenge: String) -> Self {
+        self.challenge = Some(challenge);
         self
     }
 
@@ -77,10 +85,12 @@ impl IntoResponse for ApiError {
                 .headers_mut()
                 .insert(header::RETRY_AFTER, header::HeaderValue::from(seconds));
         }
-        if self.status == StatusCode::UNAUTHORIZED {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, "Bearer".parse().expect("static header"));
+        let challenge = match self.challenge {
+            Some(challenge) => header::HeaderValue::from_str(&challenge).ok(),
+            None => (self.status == StatusCode::UNAUTHORIZED).then(|| header::HeaderValue::from_static("Bearer")),
+        };
+        if let Some(challenge) = challenge {
+            response.headers_mut().insert(header::WWW_AUTHENTICATE, challenge);
         }
         response
     }
@@ -93,12 +103,32 @@ pub(crate) fn authorize<S, L>(
     headers: &HeaderMap,
     scope: Option<&str>,
 ) -> Result<Caller, ApiError> {
+    authorize_resource(state, headers, scope, "")
+}
+
+/// As [`authorize`], naming `resource_path`'s protected resource metadata in the
+/// challenge of a refusal (see [`crate::protected_resource`]).
+pub(crate) fn authorize_resource<S, L>(
+    state: &AppState<S, L>,
+    headers: &HeaderMap,
+    scope: Option<&str>,
+    resource_path: &str,
+) -> Result<Caller, ApiError> {
+    let public_url = state.public_url.as_deref();
     let header = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
-    let caller = state.auth.authenticate(header).ok_or_else(ApiError::unauthorized)?;
+    let caller = state.auth.authenticate(header).ok_or_else(|| {
+        ApiError::unauthorized().with_challenge(crate::protected_resource::challenge(public_url, resource_path, None))
+    })?;
     if let Some(scope) = scope
         && !caller.has(scope)
     {
-        return Err(ApiError::forbidden());
+        return Err(
+            ApiError::forbidden().with_challenge(crate::protected_resource::challenge(
+                public_url,
+                resource_path,
+                Some(scope),
+            )),
+        );
     }
     state.limits.take(&caller.tenant_id).map_err(|wait| {
         ApiError::new(

@@ -144,7 +144,10 @@ X.509 SVIDs (mTLS) and build attestation remain out of scope.
 
 ### D. MCP authorization and drift (next quarter, platform engineer)
 
-**D1. Inbound discovery.**
+**D1. Inbound discovery.** *Built* (GUIDE, "Or connect any MCP host"). The audience is not
+forced to the public URL. The operator sets each issuer's `audience` to it, because one issuer
+may serve the API and MCP alike. No passthrough is structural: `AdapterCall` carries no caller
+credential, and the adapter tests assert the brokered one.
 - Add `server.public_url` to config.
 - Serve `GET /.well-known/oauth-protected-resource` and the path-suffixed form for
   `/v1/runs/{run_id}/mcp`. The response lists `resource`, `authorization_servers` (the
