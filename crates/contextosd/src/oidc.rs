@@ -57,6 +57,14 @@ pub struct OidcConfig {
     /// Space-separated string or array of scopes.
     #[serde(default = "default_scope_claim")]
     pub scope_claim: String,
+    /// Claim naming the agent the token is issued for (for example `sub` of a SPIFFE
+    /// JWT-SVID, or `azp`), checked against the run's declared agent at admission.
+    #[serde(default)]
+    pub agent_claim: Option<String>,
+    /// Maps an `agent_claim` value to the agent ids it may run as. Empty: the claim
+    /// value itself is the agent id.
+    #[serde(default)]
+    pub agents: std::collections::BTreeMap<String, Vec<String>>,
     #[serde(default = "default_algorithms")]
     pub algorithms: Vec<String>,
     #[serde(default = "default_leeway")]
@@ -285,10 +293,24 @@ impl OidcIssuer {
             .filter(|s| granted.contains(s))
             .map(|s| (*s).to_owned())
             .collect();
+        let agents = self.config.agent_claim.as_ref().map(|claim| {
+            let value = claims[claim].as_str().filter(|v| !v.is_empty());
+            match value {
+                Some(v) if self.config.agents.is_empty() => vec![v.to_owned()],
+                Some(v) => self.config.agents.get(v).cloned().unwrap_or_default(),
+                None => Vec::new(),
+            }
+        });
         Ok(Caller {
             tenant_id: tenant_id.to_owned(),
             principal_id: principal_id.to_owned(),
             scopes,
+            agents,
+            agent_source: self
+                .config
+                .agent_claim
+                .as_ref()
+                .map(|claim| format!("oidc:{}#{claim}", self.config.issuer)),
         })
     }
 }

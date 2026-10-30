@@ -57,6 +57,11 @@ async fn serve(app: axum::Router) -> String {
 }
 
 async fn start(issuer: &Issuer) -> String {
+    start_with(issuer, "").await.0
+}
+
+/// Serves a runtime trusting `issuer`, with `extra` added to its `[[oidc]]` table.
+async fn start_with(issuer: &Issuer, extra: &str) -> (String, Arc<contextosd::AppState<MemoryStore, MemoryLog>>) {
     let jwks = issuer.jwks();
     let jwks_base = serve(axum::Router::new().route(
         "/jwks.json",
@@ -87,6 +92,7 @@ async fn start(issuer: &Issuer) -> String {
         jwks_url = "{jwks_base}/jwks.json"
         tenants = ["tenant_acme_prod"]
         algorithms = ["EdDSA"]
+        {extra}
         "#
     ))
     .unwrap();
@@ -99,11 +105,11 @@ async fn start(issuer: &Issuer) -> String {
         None,
     )
     .unwrap();
-    let base = serve(router(state, Duration::from_secs(5))).await;
+    let base = serve(router(state.clone(), Duration::from_secs(5))).await;
     let http = reqwest::Client::new();
     for _ in 0..100 {
         if http.get(format!("{base}/readyz")).send().await.unwrap().status() == 200 {
-            return base;
+            return (base, state);
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -220,4 +226,48 @@ fn configuration_refuses_unsafe_issuers() {
     assert!(
         with("jwks_url = \"https://login.example.test/jwks\"\ntenants = [\"t\"]\nalgorithms = [\"none\"]").is_err()
     );
+}
+
+#[tokio::test]
+async fn an_agent_claim_names_the_agents_a_token_is_issued_for() {
+    let issuer = Issuer::new();
+    let (_, state) = start_with(&issuer, "agent_claim = \"sub\"").await;
+    let caller = |claims: &Value| {
+        state
+            .auth
+            .authenticate(Some(&format!("Bearer {}", issuer.sign("k1", claims))))
+    };
+    let mut svid = claims();
+    svid["sub"] = json!("spiffe://contextos.test/agents/support");
+    let found = caller(&svid).unwrap();
+    assert_eq!(
+        found.agents,
+        Some(vec!["spiffe://contextos.test/agents/support".to_owned()])
+    );
+    assert_eq!(
+        found.agent_source.as_deref(),
+        Some("oidc:https://login.example.test#sub")
+    );
+
+    // A mapping table translates claim values; a value it does not list names no agent.
+    let issuer = Issuer::new();
+    let (_, state) = start_with(
+        &issuer,
+        "agent_claim = \"azp\"\n[oidc.agents]\nsupport-client = [\"agt_support\", \"agt_support_v2\"]",
+    )
+    .await;
+    let caller = |claims: &Value| {
+        state
+            .auth
+            .authenticate(Some(&format!("Bearer {}", issuer.sign("k1", claims))))
+    };
+    let mut mapped = claims();
+    mapped["azp"] = json!("support-client");
+    assert_eq!(
+        caller(&mapped).unwrap().agents,
+        Some(vec!["agt_support".to_owned(), "agt_support_v2".to_owned()])
+    );
+    mapped["azp"] = json!("billing-client");
+    assert_eq!(caller(&mapped).unwrap().agents, Some(Vec::new()));
+    assert_eq!(caller(&claims()).unwrap().agents, Some(Vec::new()), "no azp claim");
 }

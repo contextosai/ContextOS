@@ -5,7 +5,21 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Changed (breaking)
+- Agent binding: with the `contextos.enterprise` profile, a run's declared agent must
+  be one its caller's credential is issued for, or admission is refused
+  (`403 agent_not_bound`), and startup refuses an OIDC issuer without `agent_claim` or
+  an `admit`-scoped API key without `agent_ids`. Set them before upgrading, or set
+  `[guards] agent_binding = "observe"` to roll out first. `ApiKey` and `Caller` gain
+  fields, so Rust code building them literally needs `agent_ids` / `agents`.
+
 ### Added
+- Agent binding (`[guards] agent_binding = "required" | "observe" | "off"`): OIDC
+  issuers name a token's agents with `agent_claim` (SPIFFE JWT-SVIDs work with
+  `agent_claim = "sub"`) and an optional `agents` map; API keys with `agent_ids`.
+  Without the enterprise profile the default is `observe`: unbound agents are admitted,
+  counted in `contextos_agent_binding_mismatches_total{mode}` and recorded as
+  `bound: false`. Every `run_admitted` entry records the verdict (`agent_binding`).
 - Alerting: the Helm chart installs Prometheus alerting rules with
   `prometheusRule.enabled` (`files/contextos-rules.yaml`, also a plain rules file) for
   shared-guarantee saturation, unknown outcomes, blocked-dispatch spikes, saturated

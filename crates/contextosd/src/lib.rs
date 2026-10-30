@@ -1,6 +1,7 @@
 //! `contextosd`: the ContextOS runtime server.
 
 pub mod absence;
+pub mod agent_binding;
 pub mod app;
 pub mod attest;
 pub mod auth;
@@ -253,5 +254,6 @@ where
         require_user_role: config.require_user_role(),
         require_task_authorization: config.guards.require_task_authorization,
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
+        agent_binding: agent_binding::mode(config),
     }))
 }

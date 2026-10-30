@@ -22,6 +22,7 @@ async fn holds_are_listed_and_explained_without_arguments_until_reconciled() {
             tenant_id: "tenant_other".into(),
             principal_id: "other_reader".into(),
             scopes: vec!["audit:read".into()],
+            agent_ids: None,
         });
     })
     .await;
@@ -188,6 +189,7 @@ async fn attesting_absence_needs_its_own_scope_and_a_started_attempt_without_a_f
             tenant_id: TENANT.into(),
             principal_id: "svc_ledger_check".into(),
             scopes: vec!["attest".into()],
+            agent_ids: None,
         });
     })
     .await;

@@ -48,6 +48,11 @@ pub struct GuardsConfig {
     /// those floors, `false` opts out explicitly, a table sets them.
     #[serde(default)]
     pub completion_requires_scores: Option<CompletionScores>,
+    /// Whether a run's declared agent must be one its caller's credential is issued
+    /// for (`required`, `observe`, `off`; see [`crate::agent_binding`]). Unset:
+    /// `required` with the `contextos.enterprise` profile, `observe` otherwise.
+    #[serde(default)]
+    pub agent_binding: Option<crate::agent_binding::AgentBinding>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -108,6 +113,7 @@ impl Default for GuardsConfig {
             completion_requires_scores: None,
             require_task_authorization: false,
             require_completion_contracts: None,
+            agent_binding: None,
         }
     }
 }

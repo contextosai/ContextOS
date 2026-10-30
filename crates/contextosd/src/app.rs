@@ -132,6 +132,8 @@ pub struct AppState<S, L> {
     pub require_task_authorization: bool,
     /// Whether recalled memory without a memory-governance service is admitted.
     pub trust_supplied_memory: bool,
+    /// Whether a run's declared agent must be one its caller's credential names.
+    pub agent_binding: crate::agent_binding::AgentBinding,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
     pub deployment: Value,
     /// The configuration this replica runs (see [`crate::configs`]).
@@ -472,6 +474,23 @@ where
                 ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "compile_invalid", message)
             }
         })?;
+    // The declared agent must be one the caller's credential is issued for.
+    let binding = crate::agent_binding::evaluate(
+        state.agent_binding,
+        &caller,
+        &run_context.agent.agent_id,
+        parent.is_some(),
+    );
+    if binding.unbound {
+        state.metrics.agent_binding_mismatch(state.agent_binding.as_str());
+    }
+    if binding.refuse {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "agent_not_bound",
+            "The run's agent is not one the caller's credential is issued for.",
+        ));
+    }
     // Kill switch: no new runs of a revoked tenant, pack, principal or agent, and no
     // delegation from a run that is itself revoked.
     match gateway
@@ -665,6 +684,7 @@ where
                 "release_refs": admission.release_refs, "surfaced_capabilities": surfaced,
                 "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
                 "compiled_context_hash": admission.compiled_context_hash,
+                "agent_binding": binding.record,
                 "task_authorization_refs": admission.task_authorizations.iter()
                     .map(|t| t.bundle_ref(&admission.run_id)).collect::<Vec<_>>()}),
             &admission.admitted_at,
