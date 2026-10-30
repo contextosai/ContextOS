@@ -291,6 +291,11 @@ age out; retries of an existing receipt take no new slot. Alert on that refusal:
 means more than about a thousand effects an hour on one resource, or holds that are
 not being reconciled.
 
+If a process crashes after a settlement commits and before
+`shared_guarantee_settled` is audited, reconciling within the hour repairs the audit;
+later, the receipt is archived and the repair finds nothing to do. The balance is
+right either way, and `shared_guarantee_settlement_requested` records the outcome.
+
 A limit is still a lifetime limit: archived commitments keep counting. A per-period
 limit (for example per customer per day) still needs the period in the resource
 identity.
