@@ -1,0 +1,119 @@
+# Unit tests for the alerting rules: promtool test rules deploy/alerts/contextos-rules.test.yaml
+rule_files:
+  - ../helm/contextosd/files/contextos-rules.yaml
+evaluation_interval: 1m
+
+tests:
+  - name: saturation and unknown outcomes page
+    interval: 1m
+    input_series:
+      - series: 'contextos_dispatch_refusals_total{reason="shared_guarantee_saturated",pod="a"}'
+        values: '0x10 3x20'
+      - series: 'contextos_dispatch_outcomes_total{capability="adp_payments.issue_refund",status="unknown",pod="a"}'
+        values: '0x10 6x20'
+      - series: 'contextos_dispatch_outcomes_total{capability="adp_payments.issue_refund",status="completed",pod="a"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ContextOSSharedGuaranteeSaturated
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: ContextOSUnknownOutcomes
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ContextOSSharedGuaranteeSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: A shared guarantee refuses new effects because a resource has too many live receipts.
+              description: 3 dispatches were refused with shared_guarantee_saturated in the last 10 minutes. Every new effect on the saturated resource is refused until held receipts are reconciled.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextossharedguaranteesaturated
+      - eval_time: 15m
+        alertname: ContextOSUnknownOutcomes
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Tool responses are being lost; each one holds capacity until reconciled.
+              description: 6 dispatches ended with an unknown outcome in the last 15 minutes. Do not retry them; reconcile.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosunknownoutcomes
+
+  - name: a blocked spike against a quiet baseline pages after 10 minutes
+    interval: 1m
+    input_series:
+      # Six hours at 10 completed and 0.1 blocked a minute, then half of all dispatches blocked.
+      - series: 'contextos_dispatch_outcomes_total{capability="adp_payments.issue_refund",status="completed",pod="a"}'
+        values: '0+10x360 3600+5x30'
+      - series: 'contextos_dispatch_outcomes_total{capability="adp_payments.issue_refund",status="blocked",pod="a"}'
+        values: '0+0.1x360 36+5x30'
+    alert_rule_test:
+      - eval_time: 360m
+        alertname: ContextOSBlockedSpike
+        exp_alerts: []
+      - eval_time: 385m
+        alertname: ContextOSBlockedSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Governance is blocking far more dispatches than usual.
+              description: More than 5% of dispatches were blocked over 15 minutes, and more than three times the 6-hour rate. A policy, pack or limit change may be refusing legitimate work.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosblockedspike
+
+  - name: low volume is never a blocked spike
+    interval: 1m
+    input_series:
+      - series: 'contextos_dispatch_outcomes_total{capability="x.y",status="blocked",pod="a"}'
+        values: '0+0.5x60'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: ContextOSBlockedSpike
+        exp_alerts: []
+
+  - name: guard saturation and revocations are reported per reason
+    interval: 1m
+    input_series:
+      - series: 'contextos_dispatch_refusals_total{reason="loop_guard_saturated",pod="a"}'
+        values: '0 2x10'
+      - series: 'contextos_dispatch_refusals_total{reason="revoked_capability",pod="b"}'
+        values: '0 4x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ContextOSGuardSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              reason: loop_guard_saturated
+            exp_annotations:
+              summary: 'Runs are hitting a hard cap: loop_guard_saturated.'
+              description: 2 dispatches were refused with loop_guard_saturated in the last 15 minutes.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosguardsaturated
+      - eval_time: 5m
+        alertname: ContextOSRevocationEnforced
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              reason: revoked_capability
+            exp_annotations:
+              summary: 'The kill switch is refusing dispatches (revoked_capability).'
+              description: 4 dispatches were refused by a revocation in the last 15 minutes. Expected while an incident is contained; otherwise check who revoked what.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosrevocationenforced
+
+  - name: server errors above 1% for 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'contextos_http_requests_total{route="/v1/runs/{run_id}/dispatch",status="200",pod="a"}'
+        values: '0+100x30'
+      - series: 'contextos_http_requests_total{route="/v1/runs/{run_id}/dispatch",status="503",pod="a"}'
+        values: '0+5x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ContextOSServerErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: More than 1% of contextosd requests fail with a server error.
+              description: Server errors have been above 1% of requests for 10 minutes. Governed calls fail closed, so agents see errors, not unchecked effects.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosservererrors

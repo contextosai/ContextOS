@@ -5,6 +5,16 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Alerting: the Helm chart installs Prometheus alerting rules with
+  `prometheusRule.enabled` (`files/contextos-rules.yaml`, also a plain rules file) for
+  shared-guarantee saturation, unknown outcomes, blocked-dispatch spikes, saturated
+  guards, enforced revocations and server errors. Each alert links a new runbook section
+  in `docs/INCIDENT.md` ("Alerts"); the rules have promtool unit tests in
+  `deploy/alerts/`, and a test keeps their metric names in step with `/metrics`.
+- Docs: [what ContextOS does not govern](docs/SCOPE.md), and the plan for the remaining
+  governance gaps (`docs/design/governance-gaps.md`).
+
 ## 0.1.0-alpha.5 - 2026-10-30
 
 Fifth alpha: capability upgrades with operations open, resources that outlive their
