@@ -10013,7 +10013,7 @@ SOFTWARE.
 
 
 ======================================================================
-Tower: @tanstack/query-core 5.104.5
+Tower: @tanstack/query-core 5.105.0
 
 LICENSE
 MIT License
@@ -10040,7 +10040,7 @@ SOFTWARE.
 
 
 ======================================================================
-Tower: @tanstack/react-query 5.104.5
+Tower: @tanstack/react-query 5.105.0
 
 LICENSE
 MIT License
