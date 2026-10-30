@@ -122,8 +122,9 @@ PY
 ```
 
 An existing resource returns `guarantee_id`, `definition_digest`,
-`resource_digest`, `unit`, `limit`, `committed`, `held`, `available` and
-`receipt_count`. Missing resources and other tenants' resources return 404.
+`resource_digest`, `unit`, `limit`, `committed`, `held`, `available`,
+`receipt_count` (receipts held now or settled within the retention) and
+`archived_receipts`. Missing resources and other tenants' resources return 404.
 The view contains no raw resource value or tool arguments. Hashes are correlation
 identifiers, not anonymization; predictable identifiers may be guessed.
 
@@ -266,18 +267,33 @@ protections and increased limits as loosenings. Lowering a limit is classified a
 tightening, but still needs an accounted migration because the pinned definition
 will refuse it. Review and coordinate deployment changes explicitly.
 
-Each resource retains at most 1,024 operation receipts for its lifetime, including
-released and settled ones: settled receipts are not compacted. Saturation refuses
-new operations; retries of an existing receipt do not consume another slot. There
-is no unsafe TTL or deletion-based rollover. Production rollover and trusted
-dynamic balances are future work.
+### Receipts and their retention
 
-Size resources to that cap. A resource bound to one order, one invoice or one
-ticket fits easily. A resource that accumulates without end, such as one per
-customer or one per merchant, reaches 1,024 operations and then refuses every new
-one, permanently. Until rollover exists, put a bounded period into the resource
-identity (for example customer and calendar day) only if a per-period limit is what
-you mean to enforce, and alert on `shared_guarantee_saturated` refusals.
+Each operation leaves one receipt on its resource. A held receipt is what keeps
+capacity held; a settled one (committed or released) is a fence: it refuses a
+dispatcher that stalled before sending and later comes back for its attempt, so a
+released hold cannot be spent twice.
+
+That fence is needed only while such a dispatcher could still send. One that stalls
+more than 120 seconds between its claim and the provider call sends nothing
+(`dispatch_stalled`), so a settled receipt is archived once
+`EXPOSURE_RECEIPT_RETENTION_SECONDS` (3,600) have passed since it was first seen
+settled. Archiving happens in the same commit as a later reservation on the resource:
+the first reservation after a receipt settles stamps it, and one at least an hour
+later removes it, keeping its committed amount in `committed` (and in
+`archived_committed` in the ledger). Held receipts are never archived, whatever their
+age: nothing releases capacity by time.
+
+So a resource is not limited over its lifetime. At most 1,024 receipts are live at
+once: held ones plus those settled within the last hour or so. A resource past that
+refuses new operations (`shared_guarantee_saturated`) until older settled receipts
+age out; retries of an existing receipt take no new slot. Alert on that refusal: it
+means more than about a thousand effects an hour on one resource, or holds that are
+not being reconciled.
+
+A limit is still a lifetime limit: archived commitments keep counting. A per-period
+limit (for example per customer per day) still needs the period in the resource
+identity.
 
 Audit events include reservation, refusal, settlement request, settlement completion
 and refused observations. Export the tenant chain and verify it with

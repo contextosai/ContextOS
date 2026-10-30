@@ -5,14 +5,22 @@ use std::collections::HashSet;
 use contextos_contract::canonical::sha256_canonical;
 use contextos_contract::types::ActionEffect;
 use contextos_kernel::shared_exposure::{
-    ExposureBinding, ExposureClaim, MAX_EXACT_EXPOSURE, empty_exposure, exposure_digest, exposure_summary,
-    reserve_exposure, settle_exposure, transition_exposure_dispatch,
+    ExposureBinding, ExposureClaim, MAX_EXACT_EXPOSURE, compact_exposure, empty_exposure, exposure_digest,
+    exposure_summary, reserve_exposure, settle_exposure, transition_exposure_dispatch,
 };
 use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{Gateway, GatewayError, RunAdmission, operation_ledger_key};
+
+/// How long a settled receipt stays in its resource's ledger after it is first seen
+/// settled. It fences a dispatcher that stalled before sending and comes back for its
+/// attempt; one that stalled past [`crate::DISPATCH_STALL_SECONDS`] sends nothing, so
+/// the fence is needed for that long at most. Archived receipts leave only their
+/// committed amount behind.
+pub const EXPOSURE_RECEIPT_RETENTION_SECONDS: u64 = 3600;
+const _: () = assert!(EXPOSURE_RECEIPT_RETENTION_SECONDS > 10 * crate::DISPATCH_STALL_SECONDS);
 
 /// Shared attempts seal their first definitive fact. A stale concurrent resolver
 /// may not append contradictory evidence after capacity has become releasable.
@@ -283,8 +291,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(Err("shared_guarantee_binding_mismatch"));
         }
         let claim = link.claim(attempt);
+        let now = self.now();
+        // Archive settled receipts past their retention in the same commit, so a
+        // resource's lifetime is not bounded by its receipt count.
         let commit = transact(self.store.as_ref(), &key, |state| {
-            reserve_exposure(state, &link.binding, &claim)
+            let compacted = compact_exposure(state, &link.binding, &now, EXPOSURE_RECEIPT_RETENTION_SECONDS);
+            if !compacted.is_accepted() {
+                return compacted;
+            }
+            reserve_exposure(&compacted.state, &link.binding, &claim)
         })
         .await?;
         if let Commit::Rejected { reason_codes } = commit {

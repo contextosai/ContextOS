@@ -66,8 +66,11 @@ Resource canonicalization, prior exposure accounting and trusted finality eviden
 are deployment responsibilities. Removing/renaming rules, omitting them from a
 replica, changing stores or bypassing the gateway changes the enforcement domain.
 
-The initial ledger retains 1,024 receipts per resource and blocks on saturation.
-Static ceilings, accounted rollover/migration, dynamic system-of-record balances,
+The ledger keeps at most 1,024 live receipts per resource and blocks on saturation.
+Settled receipts are archived an hour after they are first seen settled
+(`EXPOSURE_RECEIPT_RETENTION_SECONDS`, well past the 120-second stall bound after
+which a dispatch sends nothing), their committed amount kept in the total; held
+receipts never are. Static ceilings, accounted migration, dynamic system-of-record balances,
 externally fenced orphan recovery, PostgreSQL contention measurements and dedicated
 Tower exposure views remain separate work. No worldwide novelty, universal AI
 safety, external outcome proof or compliance certification is asserted.

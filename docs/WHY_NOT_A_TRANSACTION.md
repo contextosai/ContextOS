@@ -177,8 +177,9 @@ data. ContextOS adds the cross-system limit that counts unknown outcomes.
   release the reservation on an assertion of absence. A separate `attest` principal
   can, after a quiet window and citing the provider's records; nothing releases it by
   time alone.
-- **Ledger size.** Each resource keeps at most 1,024 receipts, and there is no
-  rollover yet.
+- **Ledger size.** Each resource keeps at most 1,024 live receipts. Settled ones are
+  archived an hour after they settle, so the cap bounds effects in flight or recently
+  settled, not a resource's lifetime.
 
 [Shared guarantees](SHARED_GUARANTEES.md) has configuration, recovery and the full
 state table. [ADR-0005](adr/0005-shared-business-exposure.md) records the decision and

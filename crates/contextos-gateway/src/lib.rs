@@ -95,7 +95,7 @@ pub use ports::{
 pub use reconcile::{ReconcileOutcome, Resolution};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
-pub use shared_guarantees::SharedGuarantee;
+pub use shared_guarantees::{EXPOSURE_RECEIPT_RETENTION_SECONDS, SharedGuarantee};
 pub use shared_inspection::MAX_INSPECTION_SCAN;
 pub use task_authorization::{Amount, Change, OutOfScope, ReadOnly, TaskAuthorization, TaskLimits};
 pub use usage::{UsageKind, UsageRefusal};
