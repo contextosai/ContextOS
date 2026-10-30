@@ -33,6 +33,7 @@ from contextos.client import Client, ToolPaused, ToolRejected  # noqa: E402
 BIN = Path(os.environ.get("CONTEXTOS_BIN", ROOT / "target/debug"))
 EXAMPLE = ROOT / "examples/support-refund"
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
+OPS_KEY = "dev-ops-0123456789abcdef0123456789abcdef"
 RISK = {"effect": "external_state", "authority": "service", "interaction": "api", "data_scope": "CONFIDENTIAL"}
 
 
@@ -210,7 +211,9 @@ def main():
                 print("Saga refused: ship:ord_881 may have shipped; nothing is undone while it is in doubt.")
                 evidence = {"artifact_type": "fulfillment_ticket", "artifact_id": "FUL-4471", "version": "1",
                             "sha256": "sha256:" + hashlib.sha256(b"FUL-4471: not shipped").hexdigest()}
-                resolved = run.reconcile("ship:ord_881", outcome="not_applied", evidence_ref=evidence)
+                oncall = Client(base, token=OPS_KEY)
+                resolved = oncall.reconcile(run.run_id, "ship:ord_881", outcome="not_applied",
+                                            evidence_ref=evidence)
                 assert resolved["status"] == "resolved", resolved
                 print("On-call reconciles it with ticket FUL-4471: not shipped.")
                 print("The case cannot be completed; compensating its applied effects, newest first:")

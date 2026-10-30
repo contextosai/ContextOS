@@ -9,7 +9,8 @@ use std::path::Path;
 use crate::config::{Mode, StoreConfig};
 use crate::{Config, guarantees_need_dispatch, load_packs, runtime, signer_from_env};
 
-/// One line per passing check, or the first failure.
+/// One line per passing check (`warning: ` for a check that passes with a caveat), or
+/// the first failure.
 pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     let config = Config::load(path).map_err(|e| e.to_string())?;
     let mut report = vec![format!(
@@ -32,6 +33,13 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         ),
         None => "no dispatch gateway configured".into(),
     });
+    for note in dispatch
+        .as_ref()
+        .map(runtime::unbounded_capabilities)
+        .unwrap_or_default()
+    {
+        report.push(format!("warning: {note}"));
+    }
 
     report.push(if let Some(kms) = &config.audit.kms {
         if std::env::var_os(&kms.token_env).is_none() {

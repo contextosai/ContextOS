@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[2]
 BIN = Path(os.environ.get("CONTEXTOS_BIN", ROOT / "target/release"))
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
+# On call: did not admit the runs, so it may record an effect as not applied.
+OPS_KEY = "dev-ops-0123456789abcdef0123456789abcdef"
 LIMIT = 100_000  # INR 1,000 per order, in minor units
 TEMPLATE = json.loads((ROOT / "examples/support-refund/requests/run.json").read_text())
 TOOL = json.loads((ROOT / "examples/support-refund/requests/tool_call.json").read_text())
@@ -53,9 +55,9 @@ unit = "INR_minor"
 '''
 
 
-def call(base, path, body=None, generation=None, timeout=30):
+def call(base, path, body=None, generation=None, timeout=30, key=KEY):
     """(HTTP status, JSON body or text). Connection failures are status 0."""
-    headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if generation is not None:
         headers["contextos-executor-generation"] = str(generation)
     req = Request(base + path, headers=headers,
@@ -178,8 +180,12 @@ def evidence(entries):
 
 
 def reconcile(base, run, operation, result, entries, generation):
-    return call(base, f"/v1/runs/{run}/operations/{operation}/reconcile",
-                {"source": "operator", "outcome": result, "evidence_ref": evidence(entries)}, generation)
+    """The agent's own key confirms; recording an effect as not applied is on call's."""
+    body = {"source": "operator", "outcome": result, "evidence_ref": evidence(entries)}
+    path = f"/v1/runs/{run}/operations/{operation}/reconcile"
+    if result == "confirmed":
+        return call(base, path, body, generation)
+    return call(base, path, body, key=OPS_KEY)
 
 
 def balance(base, guarantee_id, order):

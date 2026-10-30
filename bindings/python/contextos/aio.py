@@ -65,8 +65,8 @@ class AsyncClient(_Async):
     """``Client`` for asyncio; see the module docstring."""
 
     def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3,
-                 executor: Optional[Executor] = None):
-        super().__init__(Client(base_url, token, timeout, max_retries), executor)
+                 executor: Optional[Executor] = None, *, allow_http: bool = False):
+        super().__init__(Client(base_url, token, timeout, max_retries, allow_http=allow_http), executor)
 
     def __repr__(self) -> str:
         return f"Async{self._target!r}"

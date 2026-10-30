@@ -338,3 +338,30 @@ fn read_manifest(path: &std::path::Path) -> Result<CapabilityManifest, String> {
     manifest.validate().map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(manifest)
 }
+
+/// Effectful capabilities whose actions carry no amount, or name no resource: a task
+/// scope's `amount_ceiling` or `resource_ids`, and a task's `amount_total`, pass them
+/// whatever they move. Declare `amount` and `resource_pointers` for money-moving tools.
+pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
+    let mut notes = Vec::new();
+    for m in &setup.manifests {
+        if m.action_risk.effect == contextos_contract::types::ActionEffect::None {
+            continue;
+        }
+        let missing: Vec<&str> = [
+            ("amount", m.amount.is_none()),
+            ("resource_pointers", m.resource_pointers.is_empty()),
+        ]
+        .into_iter()
+        .filter_map(|(name, absent)| absent.then_some(name))
+        .collect();
+        if !missing.is_empty() {
+            notes.push(format!(
+                "{} is effectful and declares no {}: task amount and resource limits do not bound it",
+                m.capability_id,
+                missing.join(" or ")
+            ));
+        }
+    }
+    notes
+}

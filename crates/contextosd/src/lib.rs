@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod membership;
 pub mod metrics;
 pub mod oidc;
+pub mod reconcile;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;

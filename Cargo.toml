@@ -83,4 +83,5 @@ float_cmp = "allow"
 [profile.release]
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# Panics unwind (the default): the servers' CatchPanic layers and the bindings'
+# catch_unwind isolate a panic to one request. `abort` would end the process instead.

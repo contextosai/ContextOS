@@ -5,6 +5,29 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Changed (breaking)
+- Reconciliation: the principal that admitted a run can no longer assert its effect
+  `not_applied` or `partial` (`403 reconcile_not_independent`), which released holds on
+  its own word without the checks attest-absence makes. It may still query the provider
+  or assert `confirmed`. Give on-call or reconciliation automation its own `reconcile`
+  key; a principal that did not admit the run sends no executor generation. The Python
+  client adds `Client.reconcile(run_id, operation_id, …)` for it, and the examples'
+  on-call key (`svc_oncall`) now holds `reconcile`.
+- Python client: redirects are no longer followed (they resent the bearer token), and
+  a plain `http` URL to a non-loopback host is refused unless `allow_http=True`.
+
+### Fixed
+- Release builds unwind on panic again (`panic = "abort"` is gone), so the servers'
+  panic layers and the bindings' `catch_unwind` contain a panic to one request instead
+  of ending the process.
+- Tower's AI assistant client no longer follows redirects, which carried its
+  `x-api-key` to the redirect target.
+- `--check-config` and startup warn about each effectful capability that declares no
+  `amount` or no `resource_pointers`, which task amount and resource limits cannot
+  bound.
+- Docs: evidence gates trust the caller's labels; rollouts are steerable by run id;
+  overage is lost, not doubled, by a crash between its two commits.
+
 ### Added
 - `retired_capabilities`: manifests of versions an upgrade replaced. Operations
   claimed under a retired version are reconciled, attested and recorded with it; it is

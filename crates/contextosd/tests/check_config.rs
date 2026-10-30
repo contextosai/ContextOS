@@ -69,3 +69,30 @@ fn reports_an_unreadable_pack() {
     assert!(!ok);
     assert!(text.contains("missing.json"), "{text}");
 }
+
+#[test]
+fn warns_about_an_effectful_capability_limits_cannot_bound() {
+    let (ok, text) = check(&config("check-bounded.toml", "127.0.0.1:0"), Some(&"11".repeat(32)));
+    assert!(ok && !text.contains("warning:"), "{text}");
+
+    // The same refund without its amount pointer: a task's amount ceiling passes it.
+    let mut manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root().join("examples/support-refund/capabilities/issue_refund.json")).unwrap(),
+    )
+    .unwrap();
+    manifest.as_object_mut().unwrap().remove("amount");
+    let refund = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("issue_refund_unbounded.json");
+    std::fs::write(&refund, manifest.to_string()).unwrap();
+    let path = config("check-unbounded.toml", "127.0.0.1:0");
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        "examples/support-refund/capabilities/issue_refund.json",
+        refund.to_str().unwrap(),
+    );
+    std::fs::write(&path, text).unwrap();
+    let (ok, text) = check(&path, Some(&"11".repeat(32)));
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("warning: adp_payments.issue_refund is effectful and declares no amount:"),
+        "{text}"
+    );
+}

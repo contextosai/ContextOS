@@ -62,7 +62,55 @@ def start_world():
     return server, base
 
 
+def transport() -> None:
+    """The token goes only to base_url: no redirects, and no plain http off the host."""
+    import http.server
+    import threading
+
+    seen = []
+
+    class Sink(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_):
+            pass
+
+    sink = http.server.HTTPServer(("127.0.0.1", 0), Sink)
+
+    class Redirect(Sink):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink.server_port}/stolen")
+            self.end_headers()
+
+    redirect = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+    for server in (sink, redirect):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        Client(f"http://127.0.0.1:{redirect.server_port}", token="secret").request("GET", "/v1/runs/x")
+        raise AssertionError("a redirect was followed")
+    except ContextOSHTTPError as error:
+        assert error.status == 302, error.status
+    finally:
+        sink.shutdown()
+        redirect.shutdown()
+    assert seen == [], seen
+    for url in ("http://contextos.internal", "ftp://127.0.0.1", "not a url"):
+        try:
+            Client(url, token="secret")
+            raise AssertionError(f"{url} was accepted")
+        except ValueError:
+            pass
+    Client("http://contextos.internal", token="secret", allow_http=True)
+    Client("https://contextos.internal", token="secret")
+    print("ok: client transport")
+
+
 def main() -> None:
+    transport()
     if not BINARY.exists():
         print(f"skipped: {BINARY} not built")
         return
