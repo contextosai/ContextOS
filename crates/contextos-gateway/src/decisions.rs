@@ -201,11 +201,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return Err(DecisionRefusal::UnknownToolCall(call.tool_call_id.clone()));
             };
             let capability_id = self
-                .manifests
-                .values()
-                .find(|m| {
-                    serde_json::to_value(&m.capability_ref).ok().as_ref() == Some(&op["intent"]["capability_ref"])
-                })
+                .manifest_for_ref(&op["intent"]["capability_ref"])
                 .map(|m| m.capability_id.clone());
             transcript.push(
                 json!({"tool_call_id": call.tool_call_id, "operation_id": call.operation_id,

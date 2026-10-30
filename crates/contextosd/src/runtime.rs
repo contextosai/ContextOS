@@ -38,6 +38,8 @@ pub struct DispatchSetup {
     pub ports: Ports,
     pub adapters: Vec<(String, Arc<dyn Adapter>)>,
     pub manifests: Vec<CapabilityManifest>,
+    /// Replaced versions (`retired_capabilities`), read for recovery only.
+    pub retired: Vec<CapabilityManifest>,
     pub trust_domain: String,
     pub gateway_principal_id: String,
     /// Loop guard limit (`[guards] identical_tool_calls`); `None` disables it.
@@ -78,6 +80,9 @@ where
     }
     for manifest in setup.manifests {
         gateway.pin_capability(manifest)?;
+    }
+    for manifest in setup.retired {
+        gateway.retire_capability(manifest)?;
     }
     for (schema_ref, schema) in &setup.result_schemas {
         gateway
@@ -251,12 +256,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
     }
     let mut manifests = Vec::new();
     for path in &config.capabilities {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let value = contextos_contract::ingress::parse_strict(text.as_bytes(), 1 << 20)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        let manifest: CapabilityManifest =
-            serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
-        manifest.validate().map_err(|e| format!("{}: {e}", path.display()))?;
+        let manifest = read_manifest(path)?;
         // Read-only tools included: what they return is where injected content arrives.
         if config.guards.require_tool_schemas && (manifest.input_schema.is_none() || manifest.output_schema.is_none()) {
             return Err(format!(
@@ -296,7 +296,8 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .any(|a| a.id == manifest.adapter_id && a.kind == crate::config::AdapterKind::Mcp);
         if mcp && effectful && manifest.recovery.completion.is_none() && config.require_completion_contracts() {
             return Err(format!(
-                "{}: [guards] require_completion_contracts: {} is effectful on MCP adapter {} and needs                  recovery.completion (state_pointer into structuredContent and the states that settle it)",
+                "{}: [guards] require_completion_contracts: {} is effectful on MCP adapter {} and needs \
+                 recovery.completion (state_pointer into structuredContent and the states that settle it)",
                 path.display(),
                 manifest.capability_id,
                 manifest.adapter_id
@@ -304,10 +305,17 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         }
         manifests.push(manifest);
     }
+    // Startup guards are for what is dispatched; a retired version only recovers.
+    let retired = config
+        .retired_capabilities
+        .iter()
+        .map(|path| read_manifest(path))
+        .collect::<Result<_, _>>()?;
     Ok(Some(DispatchSetup {
         ports,
         adapters,
         manifests,
+        retired,
         trust_domain: identity.trust_domain.clone(),
         gateway_principal_id: identity.gateway_principal_id.clone(),
         loop_limit: Some(config.guards.identical_tool_calls).filter(|n| *n > 0),
@@ -320,4 +328,13 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
         guarantees: config.guarantees.clone(),
     }))
+}
+
+fn read_manifest(path: &std::path::Path) -> Result<CapabilityManifest, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let value = contextos_contract::ingress::parse_strict(text.as_bytes(), 1 << 20)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let manifest: CapabilityManifest = serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
+    manifest.validate().map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(manifest)
 }

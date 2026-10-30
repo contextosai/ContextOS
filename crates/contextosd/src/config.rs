@@ -247,6 +247,10 @@ pub struct Config {
     /// Reviewed capability manifest JSON files to pin at startup.
     #[serde(default)]
     pub capabilities: Vec<PathBuf>,
+    /// Manifests of versions `capabilities` replaced, kept while operations claimed
+    /// under them may still need reconciliation or attestation. Never dispatched.
+    #[serde(default)]
+    pub retired_capabilities: Vec<PathBuf>,
     #[serde(default)]
     pub identity: Option<IdentityConfig>,
     /// Remote fact services; dispatch is disabled without them.

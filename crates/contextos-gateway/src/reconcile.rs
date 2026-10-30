@@ -194,11 +194,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let attempt_id = attempt["attempt_id"].as_str().unwrap_or_default().to_owned();
         out.attempt_id = Some(attempt_id.clone());
         let intent = &op["intent"];
-        let Some(manifest) = self
-            .manifests
-            .values()
-            .find(|m| serde_json::to_value(&m.capability_ref).ok().as_ref() == Some(&intent["capability_ref"]))
-        else {
+        let Some(manifest) = self.manifest_for_ref(&intent["capability_ref"]) else {
             return Ok(out.rejected("capability_not_pinned"));
         };
         let now = self.now();
