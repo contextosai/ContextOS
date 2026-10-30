@@ -3565,11 +3565,17 @@
                               },
                               "receipt_count": {
                                 "type": "integer",
-                                "minimum": 0
+                                "minimum": 0,
+                                "description": "Receipts held now or settled within the retention (at most 1,024)."
                               },
                               "open_holds": {
                                 "type": "integer",
                                 "minimum": 1
+                              },
+                              "archived_receipts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
                               }
                             }
                           },
@@ -3697,7 +3703,13 @@
                     },
                     "receipt_count": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 0,
+                      "description": "Receipts held now or settled within the retention (at most 1,024)."
+                    },
+                    "archived_receipts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
                     }
                   }
                 }
@@ -3799,7 +3811,8 @@
                     },
                     "receipt_count": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 0,
+                      "description": "Receipts held now or settled within the retention (at most 1,024)."
                     },
                     "as_of": {
                       "type": "string"
@@ -3916,6 +3929,11 @@
                           }
                         }
                       }
+                    },
+                    "archived_receipts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
                     }
                   }
                 }

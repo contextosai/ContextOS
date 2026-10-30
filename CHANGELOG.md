@@ -17,6 +17,12 @@ minor versions may break APIs and every break is listed.
   a plain `http` URL to a non-loopback host is refused unless `allow_http=True`.
 
 ### Fixed
+- Shared guarantees: a resource is no longer limited to 1,024 operations over its
+  lifetime. A settled receipt is archived an hour after it is first seen settled
+  (`EXPOSURE_RECEIPT_RETENTION_SECONDS`), in the same commit as a later reservation on
+  the resource, and its committed amount stays in the total; held receipts are never
+  archived. The cap now bounds receipts live at once. Resource views add
+  `archived_receipts`. Existing ledgers need no migration.
 - Release builds unwind on panic again (`panic = "abort"` is gone), so the servers'
   panic layers and the bindings' `catch_unwind` contain a panic to one request instead
   of ending the process.

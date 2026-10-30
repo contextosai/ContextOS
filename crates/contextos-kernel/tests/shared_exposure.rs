@@ -1,5 +1,6 @@
 use contextos_kernel::shared_exposure::{
-    ExposureBinding, ExposureClaim, empty_exposure, reserve_exposure, settle_exposure,
+    ExposureBinding, ExposureClaim, compact_exposure, empty_exposure, exposure_summary, reserve_exposure,
+    settle_exposure,
 };
 use serde_json::{Value, json};
 
@@ -141,4 +142,98 @@ fn dispatch_activation_and_abort_are_mutually_exclusive_even_before_reservation(
     assert!(!settle_exposure(&started, &b, &c, "released").is_accepted());
     let observed = accepted(phase(&started, &b, &c, "observe"));
     assert!(settle_exposure(&observed, &b, &c, "released").is_accepted());
+}
+
+const T0: &str = "2026-10-30T10:00:00Z";
+const T1: &str = "2026-10-30T10:59:59Z";
+const T2: &str = "2026-10-30T11:00:00Z";
+
+#[test]
+fn settled_receipts_are_archived_after_their_retention_and_totals_are_kept() {
+    let b = binding();
+    let (done, gone, open) = (
+        claim("op_done", 3_000),
+        claim("op_gone", 2_000),
+        claim("op_open", 1_000),
+    );
+    let mut state = empty_exposure(&b);
+    for c in [&done, &gone, &open] {
+        state = accepted(reserve_exposure(&state, &b, c));
+    }
+    state = accepted(settle_exposure(&state, &b, &done, "committed"));
+    state = accepted(settle_exposure(&state, &b, &gone, "released"));
+
+    // First seen settled: stamped, nothing archived; a second pass changes nothing.
+    let stamped = accepted(compact_exposure(&state, &b, T0, 3600));
+    assert_eq!(stamped["receipts"]["op_done"]["settled_seen_at"], T0);
+    assert!(
+        stamped["receipts"]["op_open"].get("settled_seen_at").is_none(),
+        "held is never stamped"
+    );
+    assert_eq!(accepted(compact_exposure(&stamped, &b, T1, 3600)), stamped);
+    // Within retention the fence still holds: the released attempt cannot reserve again.
+    assert!(!reserve_exposure(&stamped, &b, &gone).is_accepted());
+
+    let archived = accepted(compact_exposure(&stamped, &b, T2, 3600));
+    let receipts = archived["receipts"].as_object().unwrap();
+    assert_eq!(receipts.keys().collect::<Vec<_>>(), ["op_open"], "held stays");
+    let summary = exposure_summary(&archived).unwrap();
+    assert_eq!(
+        (&summary["committed"], &summary["held"], &summary["available"]),
+        (&json!(3_000), &json!(1_000), &json!(6_000))
+    );
+    assert_eq!(
+        (&summary["receipt_count"], &summary["archived_receipts"]),
+        (&json!(1), &json!(2))
+    );
+    assert_eq!(archived["archived_committed"], 3_000);
+    // The archived commitment still counts against the limit.
+    assert!(!reserve_exposure(&archived, &b, &claim("op_new", 6_001)).is_accepted());
+    assert!(reserve_exposure(&archived, &b, &claim("op_new", 6_000)).is_accepted());
+}
+
+#[test]
+fn a_resource_outlives_its_receipt_cap_when_settled_receipts_are_archived() {
+    let b = binding();
+    let mut state = empty_exposure(&b);
+    for i in 0..1024 {
+        let c = claim(&format!("op_{i}"), 1);
+        state = accepted(reserve_exposure(&state, &b, &c));
+        state = accepted(settle_exposure(
+            &state,
+            &b,
+            &c,
+            if i % 2 == 0 { "committed" } else { "released" },
+        ));
+    }
+    assert!(!reserve_exposure(&state, &b, &claim("new", 1)).is_accepted());
+    state = accepted(compact_exposure(&state, &b, T0, 3600));
+    state = accepted(compact_exposure(&state, &b, T2, 3600));
+    state = accepted(reserve_exposure(&state, &b, &claim("new", 1)));
+    let summary = exposure_summary(&state).unwrap();
+    assert_eq!((&summary["committed"], &summary["held"]), (&json!(512), &json!(1)));
+    assert_eq!(
+        (&summary["receipt_count"], &summary["archived_receipts"]),
+        (&json!(1), &json!(1024))
+    );
+}
+
+#[test]
+fn archival_state_is_validated() {
+    let b = binding();
+    let c = claim("op_a", 1_000);
+    let held = accepted(reserve_exposure(&empty_exposure(&b), &b, &c));
+    let mut forged = held.clone();
+    forged["receipts"]["op_a"]["settled_seen_at"] = json!(T0);
+    assert!(
+        !compact_exposure(&forged, &b, T2, 3600).is_accepted(),
+        "a held receipt is never stamped"
+    );
+    let mut forged = held.clone();
+    forged["archived_committed"] = json!(500);
+    assert!(
+        !reserve_exposure(&forged, &b, &claim("op_b", 1)).is_accepted(),
+        "totals must add up"
+    );
+    assert!(!compact_exposure(&held, &b, "not a time", 3600).is_accepted());
 }
