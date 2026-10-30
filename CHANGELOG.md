@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.5 - 2026-10-30
+
+Fifth alpha: capability upgrades with operations open, resources that outlive their
+receipt cap, and independent reconciliation. Two changes are breaking; see the
+[release notes](docs/releases/v0.1.0-alpha.5.md) before upgrading.
+
 ### Changed (breaking)
 - Reconciliation: the principal that admitted a run can no longer assert its effect
   `not_applied` or `partial` (`403 reconcile_not_independent`), which released holds on
