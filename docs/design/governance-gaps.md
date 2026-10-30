@@ -187,32 +187,17 @@ Effort: D1 about 3 days, D2 about 3 days, D3 about 4 days.
 
 ### E. Escalation delivery (next quarter, business approver)
 
-Approvals stay in Tower, where SSO identifies the approver and the approval binds the
-action digest. Chat buttons would bypass that binding, so this workstream delivers
-**notifications that link to the decision**, not approve-in-Slack.
+**Built** (GUIDE, policy escalations; `contextosd/src/notifications.rs`). The audit chain
+is the outbox. `escalation_opened` and `escalation_resolved` are appended exactly when
+a transition commits. The leader delivers them with a cursor per webhook and tenant
+(`Escalation` document `delivery:<webhook>`). Nothing needed to change in the
+escalation records, and a notification can neither be lost nor sent for a transition
+that did not happen.
 
-- **The record is the outbox.** The store has no multi-document transactions:
-  `open_escalation` writes the record and the open index with separate
-  `create`/`compare_and_swap` calls. So no separate outbox document is added. Instead
-  each escalation record carries `delivery: {opened, resolved}` state, updated by
-  compare-and-swap on the record itself. A notification can then never exist without
-  its record or be lost once the record exists.
-- **Dispatcher.** A leader-only dispatcher walks the open index (and records resolved
-  since the last pass) for undelivered transitions. It posts each one as a CloudEvents
-  JSON payload to the configured webhooks. Delivery is at least once: retries back off,
-  the event id (escalation id plus transition) is the dedupe key, and a transition is
-  given up after N attempts with a finding and a metric.
-- **Signing.** Each request carries `ContextOS-Signature`, an HMAC-SHA256 over the
-  timestamp and body under a per-webhook secret from an environment variable.
-- **Payload.** Run, capability, reasons and a Tower deep link only. It never includes
-  raw arguments, matching the inspection API.
-- **Relay examples.** Ship Slack incoming-webhook and PagerDuty Events v2 relays in
-  `examples/notify/`, under 100 lines each, rather than as core integrations.
-
-Tests: delivery state survives leader change, retry and dedupe, signature verification vector,
-payload redaction.
-
-Effort: about 5 days.
+Approvals stay where SSO identifies the approver. Notifications carry a link and grant
+nothing. Slack and PagerDuty are relays in `examples/notify/`, not core integrations.
+Step-up authentication for large approvals (decision 4) belongs to Tower and is still
+to do.
 
 ### F. Result screening port (after D, platform engineer)
 

@@ -18,6 +18,7 @@ mod findings;
 mod harness;
 mod load;
 mod memory;
+mod notifications;
 mod operations;
 mod ownership;
 mod startup;

@@ -20,6 +20,7 @@ pub mod limits;
 pub mod mcp;
 pub mod membership;
 pub mod metrics;
+pub mod notifications;
 pub mod oidc;
 pub mod protected_resource;
 pub mod reconcile;
@@ -224,7 +225,19 @@ where
                 leader.clone(),
                 config.retention.clone(),
             ));
-            let tenants = packs.values().map(|p| p.tenant_id.clone()).collect();
+            let tenants: Vec<String> = packs.values().map(|p| p.tenant_id.clone()).collect();
+            runtime.spawn(notifications::run(
+                notifications::Dispatcher::new(
+                    store.clone(),
+                    audit.clone(),
+                    metrics.clone(),
+                    notifications::webhooks(config)?,
+                    tenants.clone(),
+                    development,
+                ),
+                leader.clone(),
+                std::time::Duration::from_secs(5),
+            ));
             runtime.spawn(governance_sweep::run(
                 gateway.clone(),
                 metrics.clone(),

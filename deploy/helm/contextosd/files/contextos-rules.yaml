@@ -144,6 +144,17 @@ groups:
             fire. Check that a leader replica is running and can read the store.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosgovernancesweepstale
 
+      - alert: ContextOSNotificationsFailing
+        expr: sum by (webhook) (increase(contextos_notifications_total{outcome="abandoned"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Escalation notifications to {{ $labels.webhook }} are being given up.'
+          description: >-
+            {{ $value | humanize }} escalation notifications to {{ $labels.webhook }} were given
+            up after their retries in the last hour, so approvers were not told.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosnotificationsfailing
+
       - alert: ContextOSEscalationsWaiting
         expr: max(contextos_escalations_open) > 0
         for: 1h
