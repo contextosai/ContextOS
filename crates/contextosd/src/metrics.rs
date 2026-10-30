@@ -29,6 +29,8 @@ pub struct Metrics {
     admissions: Mutex<BTreeMap<String, u64>>,
     decisions: Mutex<BTreeMap<String, u64>>,
     task_amendments: Mutex<BTreeMap<String, u64>>,
+    /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
+    governance: Mutex<Option<String>>,
 }
 
 /// One labelled counter: label value to count.
@@ -82,6 +84,13 @@ impl Metrics {
     /// Counts a recorded decision by its status.
     pub fn decision(&self, status: &str) {
         bump(&self.decisions, status.to_owned());
+    }
+
+    /// Replaces the governance gauges (`None` on a replica that is not the leader).
+    pub fn set_governance(&self, exposition: Option<String>) {
+        if let Ok(mut governance) = self.governance.lock() {
+            *governance = exposition;
+        }
     }
 
     pub fn render(&self) -> String {
@@ -167,6 +176,11 @@ impl Metrics {
                     let _ = writeln!(out, "{name}{{{label}=\"{value}\"}} {n}");
                 }
             }
+        }
+        if let Ok(governance) = self.governance.lock()
+            && let Some(text) = governance.as_deref()
+        {
+            out.push_str(text);
         }
         out
     }

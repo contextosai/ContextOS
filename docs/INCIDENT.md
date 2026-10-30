@@ -142,6 +142,51 @@ Informational: revocations are refusing dispatches. During an incident this conf
 containment. Outside one, list `GET /v1/revocations` and check each `reason` names an
 incident or change.
 
+### ContextOSHeldEffectsAging
+
+A held effect under a shared guarantee has waited more than 15 minutes. The leader
+replica's sweep also logged it once, with its tenant, guarantee, resource digest and
+reservation id ("shared-guarantee hold is aging"), so your log search names the
+tenant. Look the hold up with
+`GET /v1/guarantees/{id}/resources/{resource_digest}/holds` and follow its
+`next_safe_step`. Age alone proves nothing about whether the effect applied, so never
+release a hold because it is old.
+
+### ContextOSConflictingFacts
+
+Sev 2. Contradictory outcomes were recorded for one operation, for example a provider
+reporting it applied and an attestation that it did not. The runtime keeps the
+capacity held and refuses to choose. Find the hold (state `conflicting_facts`) as
+above, preserve the run's evidence, and establish with the provider what happened
+before anyone reconciles.
+
+### ContextOSReceiptsNearCap
+
+A resource's ledger is using more than 80% of its 1024 live receipts. Settled receipts
+are archived an hour after settling, so the usual cause is many holds on one resource.
+Reconcile them before the cap refuses new effects (see
+*ContextOSSharedGuaranteeSaturated*).
+
+### ContextOSUnreadableLedgers
+
+Sev 1 candidate. An exposure ledger does not parse, so its resource refuses every
+effect and its holds are unknown. Ledgers are only written by the runtime, so suspect
+access around it, as for a failed audit verification. Do not repair it by hand.
+Export the audit chain and restore the document from backup.
+
+### ContextOSGovernanceSweepStale
+
+No replica has completed the governance sweep for 15 minutes, so the hold alerts
+cannot fire. The leader replica runs it. Check that replicas are up and heartbeating
+(`contextos_replicas`), that the store is reachable (`GET /readyz`), and the leader's
+logs for "governance sweep failed".
+
+### ContextOSEscalationsWaiting
+
+Escalations have waited an hour. List them with `GET /v1/escalations` and route them
+to their owners. The calls they block stay blocked, which is safe, but the work
+waits too.
+
 ### ContextOSServerErrors
 
 More than 1% of requests are failing. The runtime fails closed, so agents get errors,

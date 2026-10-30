@@ -16,7 +16,7 @@ fn invalid() -> GatewayError {
     GatewayError::Guarantee("shared_guarantee_invalid".into())
 }
 
-fn held_receipts(ledger: &Value) -> impl Iterator<Item = (&String, &Value)> {
+pub(crate) fn held_receipts(ledger: &Value) -> impl Iterator<Item = (&String, &Value)> {
     ledger["receipts"]
         .as_object()
         .into_iter()
@@ -27,7 +27,11 @@ fn held_receipts(ledger: &Value) -> impl Iterator<Item = (&String, &Value)> {
 /// The state of one hold and the step that can resolve it without risking a
 /// duplicate effect. Elapsed time never appears here: it proves nothing about an
 /// effect, so no state is resolved by waiting.
-fn diagnose(receipt: &Value, op: Option<&Value>, attempt_id: &str) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn diagnose(
+    receipt: &Value,
+    op: Option<&Value>,
+    attempt_id: &str,
+) -> (&'static str, &'static str, &'static str) {
     let Some(op) = op else {
         return (
             "unlinked",
@@ -104,7 +108,49 @@ fn diagnose(receipt: &Value, op: Option<&Value>, attempt_id: &str) -> (&'static 
     }
 }
 
+/// The run and operation a hold belongs to, from its link, and that operation's record.
+pub(crate) struct HoldContext {
+    pub run_id: Option<String>,
+    pub operation_id: Option<String>,
+    pub operation: Option<Value>,
+}
+
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
+    /// Reads the link of the hold `reservation_id` and the operation it names.
+    pub(crate) async fn hold_context(&self, tenant: &str, reservation_id: &str) -> Result<HoldContext, GatewayError> {
+        // The link's key is the reservation id: both hash (run, operation).
+        let link = self
+            .store
+            .get(&DocKey::new(tenant, DocKind::ExposureLink, reservation_id))
+            .await?
+            .map(|d| d.body);
+        let run_id = link.as_ref().and_then(|l| l["run_id"].as_str()).map(str::to_owned);
+        let operation_id = link
+            .as_ref()
+            .and_then(|l| l["operation_id"].as_str())
+            .map(str::to_owned);
+        let ops = match (&run_id, &operation_id) {
+            (Some(run), Some(op)) => self
+                .store
+                .get(&run_operation_key(tenant, run, op))
+                .await?
+                .map(|d| d.body),
+            _ => None,
+        };
+        let operation = ops.and_then(|mut ops| {
+            let list = ops["operations"].as_array_mut()?;
+            let at = list.iter().position(|o| {
+                Some(o["intent"]["operation_id"].as_str().unwrap_or_default()) == operation_id.as_deref()
+            })?;
+            Some(list.swap_remove(at))
+        });
+        Ok(HoldContext {
+            run_id,
+            operation_id,
+            operation,
+        })
+    }
+
     fn configured(&self, guarantee_id: &str) -> bool {
         self.shared_guarantees.iter().any(|r| r.id == guarantee_id)
     }
@@ -178,31 +224,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let mut holds = Vec::new();
         for (reservation_id, receipt) in held_receipts(&doc.body) {
             let attempt_id = receipt["claim"]["attempt_id"].as_str().unwrap_or_default();
-            // The link's key is the reservation id: both hash (run, operation).
-            let link = self
-                .store
-                .get(&DocKey::new(tenant, DocKind::ExposureLink, reservation_id))
-                .await?
-                .map(|d| d.body);
-            let run_id = link.as_ref().and_then(|l| l["run_id"].as_str()).map(str::to_owned);
-            let operation_id = link
-                .as_ref()
-                .and_then(|l| l["operation_id"].as_str())
-                .map(str::to_owned);
-            let ops = match (&run_id, &operation_id) {
-                (Some(run), Some(op)) => self
-                    .store
-                    .get(&run_operation_key(tenant, run, op))
-                    .await?
-                    .map(|d| d.body),
-                _ => None,
-            };
-            let op =
-                ops.as_ref().and_then(|ops| {
-                    ops["operations"].as_array().into_iter().flatten().find(|o| {
-                        Some(o["intent"]["operation_id"].as_str().unwrap_or_default()) == operation_id.as_deref()
-                    })
-                });
+            let HoldContext {
+                run_id,
+                operation_id,
+                operation,
+            } = self.hold_context(tenant, reservation_id).await?;
+            let op = operation.as_ref();
             let attempt = op.and_then(|op| {
                 op["attempts"]
                     .as_array()

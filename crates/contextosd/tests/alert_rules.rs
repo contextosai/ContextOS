@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use contextosd::governance_sweep::Census;
 use contextosd::metrics::Metrics;
 
 fn rules() -> String {
@@ -34,20 +35,56 @@ fn referenced(rules: &str) -> BTreeSet<String> {
     names
 }
 
-#[test]
-fn every_metric_in_the_rules_is_exported() {
+/// Everything `/metrics` can export, with each labelled family present.
+fn exposition() -> String {
     let metrics = Metrics::default();
     metrics.observe("/v1/runs/{run_id}/dispatch", 200, Duration::from_millis(3));
     metrics.dispatch_outcome("x.y", "blocked", &["shared_guarantee_saturated".into()]);
+    // The leader's governance gauges.
+    metrics.set_governance(Some(Census::empty_exposition(vec!["refunds".into()])));
     // `contextos_replicas` is appended by the `/metrics` handler.
-    let exposition = format!("{}# TYPE contextos_replicas gauge\n", metrics.render());
+    format!("{}# TYPE contextos_replicas gauge\n", metrics.render())
+}
+
+fn assert_exported(names: &BTreeSet<String>, source: &str) {
+    let exposition = exposition();
+    for name in names {
+        assert!(
+            exposition.contains(&format!("# TYPE {name} ")),
+            "{source} references {name}, which /metrics does not export"
+        );
+    }
+}
+
+#[test]
+fn every_metric_in_the_rules_is_exported() {
     let rules = rules();
     let names = referenced(&rules);
     assert!(names.contains("contextos_dispatch_outcomes_total"), "{names:?}");
-    for name in &names {
+    assert!(names.contains("contextos_shared_hold_oldest_seconds"), "{names:?}");
+    assert_exported(&names, "the alerting rules");
+}
+
+#[test]
+fn every_metric_on_the_dashboard_is_exported_or_recorded() {
+    let dashboard = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/grafana/contextos-governance.json"
+    ))
+    .expect("dashboard");
+    let names = referenced(&dashboard);
+    assert!(names.contains("contextos_shared_holds"), "{names:?}");
+    assert_exported(&names, "the dashboard");
+    let rules = rules();
+    for line in dashboard.lines().filter(|l| l.contains("contextos:")) {
+        let start = line.find("contextos:").unwrap();
+        let end = line[start..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+            .map_or(line.len(), |n| start + n);
+        let record = &line[start..end];
         assert!(
-            exposition.contains(&format!("# TYPE {name} ")),
-            "the rules reference {name}, which /metrics does not export"
+            rules.contains(&format!("record: {record}\n")),
+            "the dashboard uses {record}, which no rule records"
         );
     }
 }
@@ -61,7 +98,7 @@ fn every_alert_links_its_runbook_section() {
         .lines()
         .filter_map(|l| l.trim().strip_prefix("- alert: "))
         .collect();
-    assert!(alerts.len() >= 6, "{alerts:?}");
+    assert!(alerts.len() >= 12, "{alerts:?}");
     for alert in alerts {
         let anchor = format!("INCIDENT.md#{}", alert.to_ascii_lowercase());
         assert!(rules.contains(&anchor), "{alert} has no runbook_url to {anchor}");
