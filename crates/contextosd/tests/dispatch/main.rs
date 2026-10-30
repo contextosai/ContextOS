@@ -8,6 +8,7 @@ mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
+mod discovery;
 mod effects;
 mod erasure;
 mod evaluation;

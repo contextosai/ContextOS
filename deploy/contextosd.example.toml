@@ -14,6 +14,7 @@ listen = "0.0.0.0:8080"
 max_body_bytes = 4194304
 request_timeout_ms = 15000
 mode = "production"
+# public_url = "https://contextos.internal"  # publishes OAuth protected resource metadata for MCP hosts
 
 [store]
 kind = "postgres"

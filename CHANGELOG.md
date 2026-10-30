@@ -14,6 +14,11 @@ minor versions may break APIs and every break is listed.
   fields, so Rust code building them literally needs `agent_ids` / `agents`.
 
 ### Added
+- MCP authorization discovery: with `[server] public_url`, the server publishes OAuth
+  protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource`
+  and, per run, `…/v1/runs/{run_id}/mcp`, naming the OIDC issuers as authorization
+  servers. A `401` names that document in `WWW-Authenticate` (`resource_metadata`),
+  and a `403` for a missing scope carries `error="insufficient_scope"` and the scope.
 - Agent binding (`[guards] agent_binding = "required" | "observe" | "off"`): OIDC
   issuers name a token's agents with `agent_claim` (SPIFFE JWT-SVIDs work with
   `agent_claim = "sub"`) and an optional `agents` map; API keys with `agent_ids`.

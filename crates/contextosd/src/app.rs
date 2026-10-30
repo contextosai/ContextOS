@@ -134,6 +134,8 @@ pub struct AppState<S, L> {
     pub trust_supplied_memory: bool,
     /// Whether a run's declared agent must be one its caller's credential names.
     pub agent_binding: crate::agent_binding::AgentBinding,
+    /// `[server] public_url`, for protected resource metadata.
+    pub public_url: Option<String>,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
     pub deployment: Value,
     /// The configuration this replica runs (see [`crate::configs`]).
@@ -2987,7 +2989,8 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    let caller = authorize(&state, &headers, Some("dispatch"))?;
+    let resource = format!("/v1/runs/{run_id}/mcp");
+    let caller = crate::http::authorize_resource(&state, &headers, Some("dispatch"), &resource)?;
     let gateway = dispatch_gateway(&state)?;
     let Ok(request) = parse_body(&state, &body) else {
         return Ok(crate::mcp::parse_error());
@@ -3200,6 +3203,14 @@ where
         .route("/v1/runs/{run_id}/memory", post(govern_memory::<S, L>))
         .route("/v1/memory/{record_id}", get(memory_state::<S, L>))
         .route("/v1/runs/{run_id}/mcp", post(mcp_endpoint::<S, L>))
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(crate::protected_resource::api_metadata::<S, L>),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/v1/runs/{run_id}/mcp",
+            get(crate::protected_resource::mcp_metadata::<S, L>),
+        )
         .route("/v1/runs/{run_id}/decisions", post(record_decision::<S, L>))
         .route("/v1/runs/{run_id}/evidence", get(run_evidence::<S, L>))
         .route(

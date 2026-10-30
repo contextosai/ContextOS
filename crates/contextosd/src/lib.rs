@@ -21,6 +21,7 @@ pub mod mcp;
 pub mod membership;
 pub mod metrics;
 pub mod oidc;
+pub mod protected_resource;
 pub mod reconcile;
 pub mod retention;
 pub mod rollout;
@@ -255,5 +256,6 @@ where
         require_task_authorization: config.guards.require_task_authorization,
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
         agent_binding: agent_binding::mode(config),
+        public_url: config.server.public_url.clone(),
     }))
 }

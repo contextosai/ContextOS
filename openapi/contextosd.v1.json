@@ -5171,6 +5171,128 @@
         ],
         "x-contextos-scope": "dispatch"
       }
+    },
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "operationId": "protected_resource_metadata",
+        "summary": "OAuth protected resource metadata (RFC 9728) for the API",
+        "description": "Which authorization servers (the configured OIDC issuers) issue tokens for this server, and the scopes it recognizes. Published only when `[server] public_url` is set. A `401` names this document in `WWW-Authenticate` (`resource_metadata`).",
+        "responses": {
+          "200": {
+            "description": "Metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "resource",
+                    "authorization_servers",
+                    "scopes_supported",
+                    "bearer_methods_supported"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "scopes_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "bearer_methods_supported": {
+                      "type": "array",
+                      "items": {
+                        "const": "header"
+                      }
+                    },
+                    "resource_name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`[server] public_url` is not set"
+          }
+        },
+        "security": []
+      }
+    },
+    "/.well-known/oauth-protected-resource/v1/runs/{run_id}/mcp": {
+      "get": {
+        "operationId": "mcp_protected_resource_metadata",
+        "summary": "OAuth protected resource metadata (RFC 9728) for a run's MCP endpoint",
+        "description": "As the API's metadata, for `/v1/runs/{run_id}/mcp`, with `scopes_supported` `[\"dispatch\"]`. MCP hosts discover it from the `401` challenge.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "resource",
+                    "authorization_servers",
+                    "scopes_supported",
+                    "bearer_methods_supported"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "scopes_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "bearer_methods_supported": {
+                      "type": "array",
+                      "items": {
+                        "const": "header"
+                      }
+                    },
+                    "resource_name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`[server] public_url` is not set, or the run id is not an identifier"
+          }
+        },
+        "security": []
+      }
     }
   },
   "components": {
