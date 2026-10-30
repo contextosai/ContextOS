@@ -3,7 +3,12 @@
 All notable changes are listed here. Versions follow Semantic Versioning; before 1.0,
 minor versions may break APIs and every break is listed.
 
-## Unreleased
+## 0.1.0-alpha.4 - 2026-10-30
+
+Fourth alpha: an audited release for holds whose dispatch started and recorded no
+fact, runs bound to the principal that admitted them, and MCP completion contracts.
+Two changes are breaking; see the [release notes](docs/releases/v0.1.0-alpha.4.md)
+before upgrading.
 
 ### Added
 - Attesting absence: `POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence`
@@ -31,7 +36,6 @@ minor versions may break APIs and every break is listed.
   as for HTTP: a result reporting `pending` or `failed` without `isError` is no longer
   a confirmed effect. `status_tool` is optional (MCP looks tasks up with `tasks/get`)
   and still required for HTTP.
-
 - Hold inspection: `next_safe_step.action` `confirm_with_evidence_only` is now
   `confirm_or_attest_absence`, and `next_safe_step` carries `attest_absence` (the
   route, or `null`).
