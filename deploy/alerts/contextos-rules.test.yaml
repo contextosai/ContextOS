@@ -218,3 +218,25 @@ tests:
               summary: Policy escalations have been waiting for a human for an hour.
               description: 2 escalations are open. The calls they block stay blocked until someone handles them.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosescalationswaiting
+
+  - name: abandoned notifications page per webhook
+    interval: 1m
+    input_series:
+      - series: 'contextos_notifications_total{webhook="oncall",outcome="abandoned",pod="a"}'
+        values: '0x10 2x20'
+      - series: 'contextos_notifications_total{webhook="oncall",outcome="delivered",pod="a"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ContextOSNotificationsFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ContextOSNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              webhook: oncall
+            exp_annotations:
+              summary: 'Escalation notifications to oncall are being given up.'
+              description: 2 escalation notifications to oncall were given up after their retries in the last hour, so approvers were not told.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosnotificationsfailing

@@ -1008,6 +1008,32 @@ operator records the outcome, `handled` or `dismissed`, with a reason:
 grants nothing: if the human decides the action should go ahead, it is retried and
 goes through policy and approvals like any other call.
 
+To reach approvers where they are, configure webhooks. The leader replica posts each
+`escalation_opened` and `escalation_resolved` from the audit chain:
+
+```toml
+[[notifications]]
+id = "refund-approvers"
+url = "https://hooks.internal.example/contextos"
+secret_env = "CONTEXTOS_NOTIFY_SECRET"           # at least 32 bytes
+link_template = "https://tower.example/escalations/{escalation_id}"
+# max_attempts = 12
+```
+
+- **Payload.** Each event is a CloudEvent (`io.contextos.escalation.opened` or
+  `.resolved`) with the escalation, run, capability, reason codes or outcome, and the
+  link. It never includes tool arguments.
+- **Verifying.** Check `ContextOS-Signature: t=<unix>,v1=<hex>`: HMAC-SHA256 over
+  `"<t>.<body>"` with the secret. Reject stale timestamps.
+- **Duplicates.** Delivery is at least once, so drop repeated event `id`s.
+- **History.** A new webhook starts at the chain's head and does not replay history.
+- **Failures.** Failed posts back off, and after `max_attempts` the event is given up.
+  It is logged and counted in `contextos_notifications_total{webhook,outcome}`, and
+  `ContextOSNotificationsFailing` pages.
+- **What a notification is.** It tells a person a decision is waiting and grants
+  nothing. Approve where approvers sign in, never from the message.
+- **Relays.** `examples/notify/` relays events to Slack and PagerDuty.
+
 ### Require scores before a run completes
 
 Scores are evidence after the fact unless something waits for them. With

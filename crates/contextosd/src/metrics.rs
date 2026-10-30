@@ -30,6 +30,7 @@ pub struct Metrics {
     decisions: Mutex<BTreeMap<String, u64>>,
     task_amendments: Mutex<BTreeMap<String, u64>>,
     agent_binding_mismatches: Mutex<BTreeMap<String, u64>>,
+    notifications: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
 }
@@ -86,6 +87,12 @@ impl Metrics {
     /// binding mode (`observe` admits it, `required` refuses it).
     pub fn agent_binding_mismatch(&self, mode: &str) {
         bump(&self.agent_binding_mismatches, mode.to_owned());
+    }
+
+    /// Counts a notification attempt by webhook and outcome (`delivered`, `failed`,
+    /// `abandoned`).
+    pub fn notification(&self, webhook: &str, outcome: &str) {
+        bump(&self.notifications, (webhook.to_owned(), outcome.to_owned()));
     }
 
     /// Counts a recorded decision by its status.
@@ -147,6 +154,16 @@ impl Metrics {
                 let _ = writeln!(
                     out,
                     "contextos_dispatch_outcomes_total{{capability=\"{capability}\",status=\"{status}\"}} {n}"
+                );
+            }
+        }
+        out.push_str("# HELP contextos_notifications_total Escalation notification attempts by webhook and outcome.\n");
+        out.push_str("# TYPE contextos_notifications_total counter\n");
+        if let Ok(notifications) = self.notifications.lock() {
+            for ((webhook, outcome), n) in notifications.iter() {
+                let _ = writeln!(
+                    out,
+                    "contextos_notifications_total{{webhook=\"{webhook}\",outcome=\"{outcome}\"}} {n}"
                 );
             }
         }

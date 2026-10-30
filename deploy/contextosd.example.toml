@@ -99,6 +99,13 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # ref = "schema://orders/refund-evidence.v1"
 # path = "/etc/contextos/schemas/refund-evidence.v1.json"
 
+# Tell approvers when escalations open and resolve (signed CloudEvents; see GUIDE).
+# [[notifications]]
+# id = "refund-approvers"
+# url = "https://hooks.internal.example/contextos"
+# secret_env = "CONTEXTOS_NOTIFY_SECRET"
+# link_template = "https://tower.example/escalations/{escalation_id}"
+
 # [guards]
 # identical_tool_calls = 5     # loop guard: refuse the next identical call in a run
 # refuse_repeated_effects = true  # refuse an effect identical to one the run applied, under a new key

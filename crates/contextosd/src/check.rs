@@ -33,6 +33,13 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         ),
         None => "no dispatch gateway configured".into(),
     });
+    let hooks = crate::notifications::webhooks(&config)?;
+    if !hooks.is_empty() {
+        report.push(format!(
+            "{} notification webhook(s); signing secrets set (not contacted)",
+            hooks.len()
+        ));
+    }
     report.push(match crate::agent_binding::mode(&config) {
         crate::agent_binding::AgentBinding::Off => {
             "warning: agent binding is off: runs may declare any agent (development only)".into()

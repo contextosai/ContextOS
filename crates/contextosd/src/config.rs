@@ -238,6 +238,9 @@ pub struct Config {
     /// Trusted business-resource limits shared by unrelated agent runs.
     #[serde(default)]
     pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
+    /// Webhooks told when escalations open and resolve (see [`crate::notifications`]).
+    #[serde(default)]
+    pub notifications: Vec<crate::notifications::WebhookConfig>,
     /// Trust anchors for conformance assessment (`POST /v1/conformance/assess`).
     #[serde(default)]
     pub conformance: ConformanceConfig,
@@ -325,6 +328,7 @@ impl Config {
         let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
+        crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         if let Some(url) = &config.server.public_url {
             crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)
                 .map_err(ConfigError::Invalid)?;

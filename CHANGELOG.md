@@ -14,6 +14,13 @@ minor versions may break APIs and every break is listed.
   fields, so Rust code building them literally needs `agent_ids` / `agents`.
 
 ### Added
+- Escalation notifications: `[[notifications]]` webhooks receive a signed CloudEvent
+  for every `escalation_opened` and `escalation_resolved`. The leader delivers them
+  from the audit chain with a per-webhook cursor, so none is lost or invented; delivery
+  is at least once. Payloads carry identifiers, reason codes and an optional link,
+  never tool arguments. Failures back off and are counted in
+  `contextos_notifications_total{webhook,outcome}`; `ContextOSNotificationsFailing`
+  alerts on given-up events. `examples/notify/` relays to Slack and PagerDuty.
 - MCP authorization discovery: with `[server] public_url`, the server publishes OAuth
   protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource`
   and, per run, `…/v1/runs/{run_id}/mcp`, naming the OIDC issuers as authorization

@@ -181,6 +181,15 @@ cannot fire. The leader replica runs it. Check that replicas are up and heartbea
 (`contextos_replicas`), that the store is reachable (`GET /readyz`), and the leader's
 logs for "governance sweep failed".
 
+### ContextOSNotificationsFailing
+
+Escalation notifications to a webhook failed every retry and were given up, so
+approvers were not told about those decisions. The escalations themselves are intact:
+list them with `GET /v1/escalations`. Check the receiver (its URL, TLS, and that it
+accepts the signature) and the leader's logs ("notification delivery failed").
+Delivery resumes with new events. Given-up events are not resent, so route the open
+escalations by hand.
+
 ### ContextOSEscalationsWaiting
 
 Escalations have waited an hour. List them with `GET /v1/escalations` and route them

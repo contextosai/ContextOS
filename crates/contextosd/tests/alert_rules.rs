@@ -40,6 +40,7 @@ fn exposition() -> String {
     let metrics = Metrics::default();
     metrics.observe("/v1/runs/{run_id}/dispatch", 200, Duration::from_millis(3));
     metrics.dispatch_outcome("x.y", "blocked", &["shared_guarantee_saturated".into()]);
+    metrics.notification("oncall", "abandoned");
     // The leader's governance gauges.
     metrics.set_governance(Some(Census::empty_exposition(vec!["refunds".into()])));
     // `contextos_replicas` is appended by the `/metrics` handler.
