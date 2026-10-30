@@ -33,6 +33,8 @@ from refund_service import LockAroundCall, ReserveThenCall, StoreCreditService  
 BIN = Path(os.environ.get("CONTEXTOS_BIN", ROOT / "target/debug"))
 EXAMPLE = ROOT / "examples/support-refund"
 KEY = "dev-key-0123456789abcdef0123456789abcdef"
+# On call: reconciles, and as a principal that admitted no run may record an effect absent.
+OPS_KEY = "dev-ops-0123456789abcdef0123456789abcdef"
 CEILING = 100_000  # INR 1,000 in minor units, per order
 TIMEOUT_MS = 500
 
@@ -265,7 +267,8 @@ def governed(provider, client, tmp):
     assert balance("ord_882") == (0, 50_000, 50_000), balance("ord_882")
     absent = {**evidence, "artifact_id": "psp-settlement-2026-10-28-b",
               "sha256": "sha256:" + hashlib.sha256(b"no refund for ord_882").hexdigest()}
-    stalled.reconcile(operation, outcome="not_applied", evidence_ref=absent)
+    oncall = Client(client.base_url, token=OPS_KEY)
+    oncall.reconcile(stalled.run_id, operation, outcome="not_applied", evidence_ref=absent)
     assert balance("ord_882") == (0, 0, CEILING), balance("ord_882")
     retry = admit("run_stalled_retry", "support_email")
     call(retry, "adp_payments.issue_refund", 50_000, "refund:stalled:retry", order="ord_882")

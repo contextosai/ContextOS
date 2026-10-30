@@ -165,10 +165,32 @@ def task_authorization(issued_by: dict, scopes: List[dict], *, out_of_scope: str
 _OUTCOMES = {"paused": ToolPaused, "blocked": ToolBlocked, "rejected": ToolRejected, "failed": ToolFailed}
 
 
-class Client:
-    """A connection to one ``contextosd`` deployment, authenticated as one caller."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses redirects: urllib would resend the bearer token to wherever one points."""
 
-    def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
+
+class Client:
+    """A connection to one ``contextosd`` deployment, authenticated as one caller.
+
+    The token is sent only to ``base_url``: redirects are not followed (a ``3xx`` raises
+    ``ContextOSHTTPError``), and plain ``http`` is refused except to a loopback address
+    unless ``allow_http=True`` (for example inside a private network you trust)."""
+
+    def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3, *,
+                 allow_http: bool = False):
+        parsed = urllib.parse.urlsplit(base_url)
+        if parsed.scheme not in ("https", "http") or not parsed.hostname:
+            raise ValueError("base_url must be an http(s) URL")
+        if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK and not allow_http:
+            raise ValueError("base_url is plain http to a remote host: the token would travel in the clear; "
+                             "use https, or pass allow_http=True")
         self.base_url = base_url.rstrip("/")
         self._token = token
         self.timeout = timeout
@@ -191,7 +213,7 @@ class Client:
         for attempt in range(self.max_retries + 1):
             request = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with _OPENER.open(request, timeout=self.timeout) as response:
                     payload = response.read()
                     return json.loads(payload) if payload else None
             except urllib.error.HTTPError as error:
@@ -233,6 +255,15 @@ class Client:
         ``confirmation_ref`` and the same ``issued_by``. Returns the new revision."""
         return self.request("PUT", f"/v1/runs/{_quote(run_id)}/task-authorization",
                             {"expected_revision": expected_revision, "task_authorization": task})
+
+    def reconcile(self, run_id: str, operation_id: str, *, outcome: Optional[str] = None,
+                  evidence_ref: Optional[dict] = None) -> dict:
+        """Resolves another principal's unknown effect as an independent reconciler (a
+        token with ``reconcile`` that did not admit the run): by provider query, or by
+        asserting ``outcome`` with evidence. No executor generation is sent."""
+        body = {"source": "provider"} if outcome is None else \
+            {"source": "operator", "outcome": outcome, "evidence_ref": evidence_ref}
+        return self.request("POST", f"/v1/runs/{_quote(run_id)}/operations/{_quote(operation_id)}/reconcile", body)
 
     def score(self, run_id: str, record_id: str, evaluator_ref: str, *, policy: float, utility: float,
               safety: float) -> dict:
@@ -349,7 +380,9 @@ class Run:
 
     def reconcile(self, operation_id: str, *, outcome: Optional[str] = None,
                   evidence_ref: Optional[dict] = None) -> dict:
-        """Resolves an unknown effect: by provider query, or by asserting ``outcome`` with evidence."""
+        """Resolves an unknown effect: by provider query, or by asserting ``outcome`` with evidence.
+        The run's own principal may only assert ``confirmed``; ``not_applied`` and ``partial``
+        need an independent reconciler (``Client.reconcile``)."""
         body = {"source": "provider"} if outcome is None else \
             {"source": "operator", "outcome": outcome, "evidence_ref": evidence_ref}
         return self._post(f"/operations/{_quote(operation_id)}/reconcile", body)

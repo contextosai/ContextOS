@@ -772,6 +772,7 @@
       "post": {
         "operationId": "reconcile",
         "summary": "Resolve an unknown effect by provider query or evidenced operator assertion",
+        "description": "The run's own principal (the one that admitted it) reconciles at the current executor generation and may ask the provider or assert `confirmed`; asserting `not_applied` or `partial` is refused with 403 `reconcile_not_independent`. Another principal holding `reconcile` may assert any outcome and sends no executor generation. Asserting `not_applied` for an attempt whose dispatch started and recorded nothing is refused (`dispatch_active`) whoever asserts it; see attest-absence.",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"
@@ -780,7 +781,14 @@
             "$ref": "#/components/parameters/OperationId"
           },
           {
-            "$ref": "#/components/parameters/ExecutorGeneration"
+            "name": "ContextOS-Executor-Generation",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Required from the run's own principal: the generation returned by admission or takeover (stale is refused with 409). Others send none."
           }
         ],
         "requestBody": {

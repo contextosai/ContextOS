@@ -5,7 +5,8 @@
 //! a percentage. A run that asks for the baseline is admitted on the candidate when its
 //! routing bucket (a hash of tenant and run id; a delegated child uses its parent's
 //! run id, so a lane stays on its parent's pack) is below the percentage; the run pins
-//! whichever pack it was admitted on. Routing is sticky and reproducible.
+//! whichever pack it was admitted on. Routing is sticky and reproducible, and steerable:
+//! the caller chooses the run id, so a rollout is a canary, never an enforcement point.
 //!
 //! With `shadow`, every run kept on the baseline is also compiled under the candidate
 //! off the request path, and the governance difference (capabilities, policy, evidence

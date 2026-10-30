@@ -85,9 +85,9 @@ use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use contextos_contract::validation::is_contract_timestamp;
 use contextos_gateway::{
     AdmissionError, AdmissionRequest, BudgetLimits, CheckpointRefusal, CloseDecision, Continuation, DecisionRefusal,
-    DecisionReport, EffectOutcome, ErasureError, Gateway, MAX_CHECKPOINT_BYTES, Ownership, REVOCATION_KINDS,
-    Resolution, RevocationError, RunAdmission, ScoreRefusal, ScoreReport, TaskAuthorization, UsageKind, UsageRefusal,
-    WorkCommand, WorkError, WorkTaskInput, admit_run, is_erased,
+    DecisionReport, ErasureError, Gateway, MAX_CHECKPOINT_BYTES, Ownership, REVOCATION_KINDS, RevocationError,
+    RunAdmission, ScoreRefusal, ScoreReport, TaskAuthorization, UsageKind, UsageRefusal, WorkCommand, WorkError,
+    WorkTaskInput, admit_run, is_erased,
 };
 use contextos_kernel::{
     CompileDeps, CompileError, ContextPackCompiler, STANDARD_PROFILE_REGISTRY, negotiate_execution_contract,
@@ -1028,93 +1028,6 @@ pub(crate) async fn load_admission<S: DocumentStore, L>(
             "The stored admission is unreadable.",
         )
     })
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields, tag = "source", rename_all = "snake_case")]
-enum ReconcileBody {
-    /// Ask the provider about the attempt (for example an MCP task).
-    Provider,
-    /// Assert a definitive outcome with evidence; the caller is recorded as the source.
-    Operator { outcome: String, evidence_ref: Value },
-}
-
-async fn reconcile<S, L>(
-    State(state): State<Arc<AppState<S, L>>>,
-    Path((run_id, operation_id)): Path<(String, String)>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> ApiResult
-where
-    S: DocumentStore + 'static,
-    L: AppendLog + 'static,
-{
-    let caller = authorize(&state, &headers, Some("reconcile"))?;
-    let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "dispatch_concurrency_limited",
-            "The tenant has the maximum number of governed effects in progress.",
-        )
-        .retry_after(std::time::Duration::from_secs(1))
-    })?;
-    let gateway = dispatch_gateway(&state)?;
-    let request: ReconcileBody = serde_json::from_value(parse_body(&state, &body)?).map_err(|_| {
-        ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "request_invalid",
-            "The reconcile request is invalid.",
-        )
-    })?;
-    let resolution = match request {
-        ReconcileBody::Provider => Resolution::Query,
-        ReconcileBody::Operator { outcome, evidence_ref } => Resolution::Assert {
-            outcome: match outcome.as_str() {
-                "confirmed" => EffectOutcome::Confirmed,
-                "not_applied" => EffectOutcome::NotApplied,
-                "partial" => EffectOutcome::Partial,
-                _ => {
-                    return Err(ApiError::new(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "request_invalid",
-                        "outcome must be confirmed, not_applied or partial.",
-                    ));
-                }
-            },
-            evidence_ref,
-            principal_id: caller.principal_id.clone(),
-        },
-    };
-    let admission = load_admission(&state, &caller, &run_id).await?;
-    // Reconciliation creates no new effect. Terminal runs still need to resolve
-    // retained exposure; fence against their current generation without requiring
-    // a running lifecycle status.
-    let generation = executor_generation(&headers)?;
-    let current = gateway.run_state(&admission).await.map_err(|_| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "store_unavailable",
-            "The store is unavailable.",
-        )
-    })?;
-    if current.as_ref().and_then(|s| s["executor_generation"].as_u64()) != Some(generation) {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "executor_stale",
-            "Use the run's current executor generation.",
-        ));
-    }
-    let outcome = gateway
-        .reconcile(&admission, &operation_id, resolution)
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "reconcile_unavailable",
-                "Reconciliation is temporarily unavailable.",
-            )
-        })?;
-    Ok(axum::Json(outcome).into_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -3491,7 +3404,7 @@ where
         )
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/reconcile",
-            post(reconcile::<S, L>),
+            post(crate::reconcile::reconcile::<S, L>),
         )
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/attest-absence",

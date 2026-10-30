@@ -238,6 +238,12 @@ admission and usage from the run's budget ledger, refuses `DECIDED`/`CLOSED` whi
 compiled context's evidence gate for that decision is open (`evidence_gate_open`),
 signs the record into the audit chain and returns it with a replay packet.
 
+The gate checks what the run request supplied, not the evidence itself: a requirement
+is met by a truthy key in the request's `context` or by an evidence entry labelled
+`verified` and `current` by whoever admitted the run. Build the context and evidence in
+a service you trust (not the agent), or treat the gate as a check on the agent's
+reasoning rather than a proof.
+
 `GET /v1/runs/{run_id}/evidence` returns the run's admission, lifecycle state, budget
 ledger with its compaction archives, and its decisions with replay packets.
 `GET /v1/audit/entries?from=&limit=` pages the tenant's signed chain out for SIEM
@@ -311,7 +317,11 @@ reply"), add `limits`:
 
 - **What counts:** every effect of the run that issued the task authorization and of
   the runs delegated from it, inside the scopes or approved outside them. Reads are not
-  counted. An effect in another currency than `amount_total` exceeds it.
+  counted. An effect in another currency than `amount_total` exceeds it. Amounts and
+  resources are read through the capability's `amount` and `resource_pointers`: a
+  capability that declares no amount passes every ceiling and total, and one with no
+  resource pointers passes every resource list. `--check-config` warns about each
+  effectful capability missing either.
 - **When it is checked:** at authorization (an effect past a limit is outside the task:
   `task_scope_extent`, denied or, with `ask`, waiting for an exact approval), and again
   when the effect is charged, after its operation is claimed and before it is sent. The
@@ -536,6 +546,14 @@ resolve; conflicting facts need escalation) or `rejected` with reasons such as
 contradicting assertion. Grant `reconcile` only to operators and automation that verify
 outcomes at the provider.
 
+Whoever ran the agent cannot release what its effect holds on its own word: the
+principal that admitted the run may ask the provider or assert `confirmed`, and its
+assertion of `not_applied` or `partial` is refused (`403 reconcile_not_independent`).
+Give on-call or reconciliation automation its own key with `reconcile`; it does not
+admit the run, so it sends no executor generation (`Client.reconcile(run_id, …)` in
+the Python client). Either way, `not_applied` for an attempt whose dispatch started and
+recorded nothing is refused (`dispatch_active`) and needs an attestation of absence.
+
 An attempt whose dispatch started and which recorded nothing (its executor died
 mid-call) is refused as `dispatch_active`: the call may still land. If the provider's
 records show no effect, a principal with the `attest` scope (never together with
@@ -699,7 +717,10 @@ is sticky and reproducible; each run pins the pack it was admitted on, and admis
 reports `pack_ref` and `rollout`. With `shadow`, runs kept on the baseline are also
 compiled under the candidate off the request path and the governance difference
 (capabilities, policy, evidence gates) is audited as `shadow_diff`: live evidence for
-the next stage that changes no outcome.
+the next stage that changes no outcome. The run id is chosen by whoever admits the run,
+so a caller can steer its runs into or out of the candidate: a rollout is a canary for
+the pack's quality, not a control. Never rely on the baseline's rules to restrict a
+caller during a rollout.
 
 Before a candidate takes live traffic (`percent > 0`), the server runs the release
 gate itself: the replay cases of the runs named in `gate_runs`, plus the case of every
@@ -818,7 +839,10 @@ metering service holding the `meter` scope (and neither `admit` nor `dispatch`) 
 the usage it measured and releases the rest (usage above the reservation is charged as
 audited overage, up to the run's remaining capacity), while the run's own executor
 settling is charged the whole reservation, because self-reported usage is not evidence.
-The principal that admitted the run cannot meter it.
+The principal that admitted the run cannot meter it. Overage is settled in a second
+step after the reservation: a crash between them charges the reservation only (a retry
+is refused, since the reservation is no longer open), so a crash can undercharge by the
+overage, never overcharge.
 
 To charge measured usage, send each model request through an LLM gateway that holds
 the `meter` scope, with the run and reservation in two headers, `ContextOS-Run-Id` and

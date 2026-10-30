@@ -31,7 +31,11 @@ async fn main() {
         match contextosd::check::check_config(std::path::Path::new(path)) {
             Ok(report) => {
                 for line in report {
-                    println!("ok: {line}");
+                    if line.starts_with("warning: ") {
+                        println!("{line}");
+                    } else {
+                        println!("ok: {line}");
+                    }
                 }
                 return;
             }
@@ -53,6 +57,13 @@ async fn main() {
         tracing::info!(%pack_ref, tenant = %pack.tenant_id, "loaded context pack");
     }
     let dispatch = dispatch_setup_from_config(&config).unwrap_or_else(|e| fail(e));
+    for note in dispatch
+        .as_ref()
+        .map(contextosd::runtime::unbounded_capabilities)
+        .unwrap_or_default()
+    {
+        tracing::warn!("{note}");
+    }
     if config.server.mode == contextosd::config::Mode::Production {
         let guards = &config.guards;
         if guards.required_release_refs.as_ref().is_some_and(Vec::is_empty) {

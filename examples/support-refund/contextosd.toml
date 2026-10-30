@@ -57,12 +57,14 @@ principal_id = "svc_quality_judge"
 scopes = ["evaluate"]
 
 # Development operator, key "dev-ops-0123456789abcdef0123456789abcdef": holds the kill
-# switch (revoke and restore tenants, packs, agents, adapters, capabilities).
+# switch (revoke and restore tenants, packs, agents, adapters, capabilities) and
+# reconciles effects in doubt: only a principal that did not admit a run may record
+# that its effect did not apply.
 [[api_keys]]
 key_sha256 = "sha256:93a97c917366b95209ee98b66dfa87597d8b960ad13a8ef0fac1776d37c24385"
 tenant_id = "tenant_acme_prod"
 principal_id = "svc_oncall"
-scopes = ["control"]
+scopes = ["control", "reconcile"]
 
 # Development LLM gateway, key "dev-meter-0123456789abcdef0123456789abcd": holds only
 # `meter`, so the usage it reports settles as measured (examples/metering-proxy).
