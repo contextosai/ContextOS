@@ -53,6 +53,10 @@ pub struct GuardsConfig {
     /// `required` with the `contextos.enterprise` profile, `observe` otherwise.
     #[serde(default)]
     pub agent_binding: Option<crate::agent_binding::AgentBinding>,
+    /// Approvals above an amount, or of named capabilities, count only after the
+    /// approver's recent strong sign-in (see [`contextos_gateway::step_up`]).
+    #[serde(default)]
+    pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -114,6 +118,7 @@ impl Default for GuardsConfig {
             require_task_authorization: false,
             require_completion_contracts: None,
             agent_binding: None,
+            approval_step_up: None,
         }
     }
 }

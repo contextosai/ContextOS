@@ -20,6 +20,12 @@ minor versions may break APIs and every break is listed.
   `discovery_credential`).
 
 ### Added
+- Approval step-up: `[guards.approval_step_up]` makes approvals above an amount, or of
+  named capabilities, count only when the approval service reports a strong, recent
+  sign-in for every approver (`assurance` beside the decisions: `acr`, `amr`,
+  `auth_time`). Otherwise the call waits for approval again
+  (`approval_step_up_required`) and the refusal is audited. Proposed to the spec as
+  [spec-0005](docs/proposals/spec-0005-approval-assurance.md).
 - Result screening: `[providers.result_screening]` judges every confirmed effect's
   output before the agent sees it (`pass`, `withhold`, or `redact` by JSON pointer).
   The effect stands either way. A failing or malformed answer withholds, and non-pass

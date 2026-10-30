@@ -654,7 +654,24 @@ minimal, development-only implementation):
 - **Control plane** — attests that each required independent control (isolation, egress
   mediation, data-flow policy…) is active for this action digest and pinned policy.
 - **Approval service** — opens requests bound to the action digest and returns verified
-  decisions and approver entitlements.
+  decisions and approver entitlements. With `[guards.approval_step_up]`, approvals
+  above an amount, or of named capabilities, count only after a strong, recent
+  sign-in by every approver.
+  - **What the service reports.** Beside the decisions, an `assurance` map keyed by
+    `approval_id`: `{"acr", "amr", "auth_time"}` from the approver's ID token.
+  - **Rule.** Each approved decision needs an accepted `acr` or `amr` value, and an
+    `auth_time` at most `max_age_seconds` before it.
+  - **Otherwise.** The approval is not used. The call waits for an approval again
+    (`approval_step_up_required`, obligation `approve_with_step_up`), and the refusal
+    is audited (`approval_step_up_refused`).
+
+  ```toml
+  [guards.approval_step_up]
+  amount_at_least = 100000        # minor units of the action's bound amount
+  # capabilities = ["adp_iam.grant_admin"]   # always, whatever the amount
+  amr_values = ["mfa", "hwk"]     # or acr_values = ["phr"]
+  max_age_seconds = 300
+  ```
 - **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
   run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
   ceilings, required controls) and a current verified `BoundaryObservation`. With it,

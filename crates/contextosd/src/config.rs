@@ -359,6 +359,9 @@ impl Config {
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
+        if let Some(step_up) = &config.guards.approval_step_up {
+            step_up.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(url) = &config.server.public_url {
             crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)
                 .map_err(ConfigError::Invalid)?;

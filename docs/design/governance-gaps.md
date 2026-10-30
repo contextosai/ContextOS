@@ -196,8 +196,10 @@ that did not happen.
 
 Approvals stay where SSO identifies the approver. Notifications carry a link and grant
 nothing. Slack and PagerDuty are relays in `examples/notify/`, not core integrations.
-Step-up authentication for large approvals (decision 4) belongs to Tower and is still
-to do.
+Step-up for large approvals (decision 4) is enforced on the approval service's facts
+(`[guards.approval_step_up]`, threat T34, [spec-0005](../proposals/spec-0005-approval-assurance.md)),
+chosen over an approver surface in Tower so that it works with every deployment's
+approval service.
 
 ### F. Result screening port (after D, platform engineer)
 

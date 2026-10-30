@@ -55,6 +55,8 @@ pub struct DispatchSetup {
     /// Production: every delegation names a registered result schema.
     pub require_result_schemas: bool,
     pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
+    /// `[guards.approval_step_up]`.
+    pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// `[providers.result_screening]`.
     pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
 }
@@ -97,6 +99,7 @@ where
     gateway.set_completion_floor(setup.completion_floor);
     gateway.require_result_schemas(setup.require_result_schemas);
     gateway.set_shared_guarantees(setup.guarantees)?;
+    gateway.set_approval_step_up(setup.approval_step_up);
     if let Some(screening) = setup.result_screening {
         gateway.set_result_screening(screening);
     }
@@ -378,6 +381,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             .map(|f| (f.policy_floor, f.safety_floor)),
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
         guarantees: config.guarantees.clone(),
+        approval_step_up: config.guards.approval_step_up.clone(),
         result_screening: match &providers.result_screening {
             Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
             None => None,
