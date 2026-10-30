@@ -16,3 +16,9 @@ Put `contextosd.toml` in `config`; reference packs and capability manifests at
 `/etc/contextos/packs/<name>` and `/etc/contextos/capabilities/<name>` after listing
 them under `packs` / `capabilities`. Secrets come only from `secretName`. Pin the image
 by `image.digest` in production.
+
+Monitoring: `serviceMonitor.enabled` scrapes `/metrics`; `prometheusRule.enabled`
+installs the alerting rules in `files/contextos-rules.yaml` (also usable as a plain
+Prometheus rules file). Each alert links to its runbook in
+[docs/INCIDENT.md](../../../docs/INCIDENT.md#alerts). The rules' unit tests are in
+`deploy/alerts/` (`promtool test rules deploy/alerts/contextos-rules.test.yaml`).

@@ -243,3 +243,13 @@ jobs:
             --set-json 'packs={"support.json":{"pack_meta":{}}}' \
             --set-json 'networkPolicy.egressTo=[{"to":[{"ipBlock":{"cidr":"10.0.0.0/8"}}]}]' \
             | ./kubeconform -strict -summary -skip ServiceMonitor
+          helm template t deploy/helm/contextosd --set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
+            | ./kubeconform -strict -summary -skip ServiceMonitor,PrometheusRule
+          helm template t deploy/helm/contextosd --set prometheusRule.enabled=true --show-only templates/prometheusrule.yaml \
+            | grep -q 'alert: ContextOSSharedGuaranteeSaturated'
+      - name: Check and unit-test the alerting rules
+        run: |
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
+            | tar xz --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          ./promtool check rules deploy/helm/contextosd/files/contextos-rules.yaml
+          ./promtool test rules deploy/alerts/contextos-rules.test.yaml

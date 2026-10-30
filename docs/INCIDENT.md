@@ -91,6 +91,63 @@ effects*). Never re-run an effect to find out whether it happened.
 Policy escalations are listed at `GET /v1/escalations`; a growing list is a signal in
 itself. Resolve each with what was done (`POST /v1/escalations/{id}/resolve`).
 
+## Alerts
+
+The Helm chart ships alerting rules (`prometheusRule.enabled`, or load
+`deploy/helm/contextosd/files/contextos-rules.yaml` directly). Each alert links here.
+Metrics carry no tenant label, so the tenant and resource come from the APIs below,
+called with `$AUDIT_TOKEN` for each tenant you operate.
+
+### ContextOSSharedGuaranteeSaturated
+
+A resource under a shared guarantee has 1024 live receipts, and every new effect on it
+is refused (`shared_guarantee_saturated`) until some settle. Usually holds are piling
+up because responses were lost and nobody reconciled them. Find the resources with
+`GET /v1/guarantees/{id}/holds` and each hold's next safe step with
+`GET /v1/guarantees/{id}/resources/{resource_digest}/holds`, then follow that step
+(see *Unknown effects*). Raising the cap or deleting ledger rows by hand is never the
+fix: a held receipt is capacity that may already be spent at the provider.
+
+### ContextOSUnknownOutcomes
+
+Calls are ending with an unknown outcome: the provider timed out, failed mid-call or
+its response was lost. Each one holds its reservation and blocks retries of that
+operation. Check the provider's health first; a burst usually means a degraded
+provider (Sev 2 at scale). Reconcile the operations (*Unknown effects*). Do not ask
+agents or executors to retry.
+
+### ContextOSBlockedSpike
+
+Governance is blocking far more dispatches than its 6-hour norm. Read
+`contextos_dispatch_refusals_total` by `reason` to see why:
+- `revoked_*`: the kill switch is working (see the alert below);
+- policy or approval reasons, after a pack or rollout change: roll the release back
+  (*Roll back a release*);
+- limits, budgets or authority reasons: a limit is set too tight or an executor is
+  misbehaving.
+
+Blocks are the system working as configured, so fix the configuration. Bypassing
+governance is never the fix.
+
+### ContextOSGuardSaturated
+
+Runs are hitting a hard cap: the loop guard or effect guard is full, task limits are
+saturated, or a run has too many unresolved effects. One runaway run is the usual
+cause. Find it in `GET /v1/audit/entries`, cancel it if it is looping
+(*Stop runs*), and reconcile its unresolved effects.
+
+### ContextOSRevocationEnforced
+
+Informational: revocations are refusing dispatches. During an incident this confirms
+containment. Outside one, list `GET /v1/revocations` and check each `reason` names an
+incident or change.
+
+### ContextOSServerErrors
+
+More than 1% of requests are failing. The runtime fails closed, so agents get errors,
+not ungoverned effects. Check `GET /readyz` (store and identity keys), the store's
+health, and the logs (see *Store or provider outage*).
+
 ## Evidence
 
 - **Audit chain**: page it out with `GET /v1/audit/entries?from=1&limit=1000` (follow

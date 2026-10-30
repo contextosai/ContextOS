@@ -81,6 +81,12 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
+# Alerting rules from files/contextos-rules.yaml (runbooks in docs/INCIDENT.md, "Alerts").
+# `labels` are added to the PrometheusRule so your Prometheus rule selector picks it up.
+prometheusRule:
+  enabled: false
+  labels: {}
+
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []

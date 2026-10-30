@@ -1,0 +1,98 @@
+# Prometheus alerting rules for contextosd, built only on metrics the server exports.
+# This file is a plain Prometheus rules file (load it with `rule_files`); the chart
+# wraps the same groups in a PrometheusRule when `prometheusRule.enabled` is set.
+# Runbooks: docs/INCIDENT.md, section "Alerts". Thresholds are starting points; tune
+# them to your traffic.
+groups:
+  - name: contextos.recording
+    rules:
+      - record: contextos:dispatches:rate15m
+        expr: sum(rate(contextos_dispatch_outcomes_total[15m]))
+      - record: contextos:dispatches_blocked:ratio_rate15m
+        expr: |
+          sum(rate(contextos_dispatch_outcomes_total{status="blocked"}[15m]))
+            / sum(rate(contextos_dispatch_outcomes_total[15m]))
+      - record: contextos:dispatches_blocked:ratio_rate6h
+        expr: |
+          sum(rate(contextos_dispatch_outcomes_total{status="blocked"}[6h]))
+            / sum(rate(contextos_dispatch_outcomes_total[6h]))
+
+  - name: contextos.governance
+    rules:
+      - alert: ContextOSSharedGuaranteeSaturated
+        expr: sum(increase(contextos_dispatch_refusals_total{reason="shared_guarantee_saturated"}[10m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: A shared guarantee refuses new effects because a resource has too many live receipts.
+          description: >-
+            {{ $value | humanize }} dispatches were refused with shared_guarantee_saturated in
+            the last 10 minutes. Every new effect on the saturated resource is refused until
+            held receipts are reconciled.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextossharedguaranteesaturated
+
+      - alert: ContextOSUnknownOutcomes
+        expr: sum(increase(contextos_dispatch_outcomes_total{status="unknown"}[15m])) >= 5
+        labels:
+          severity: warning
+        annotations:
+          summary: Tool responses are being lost; each one holds capacity until reconciled.
+          description: >-
+            {{ $value | humanize }} dispatches ended with an unknown outcome in the last 15
+            minutes. Do not retry them; reconcile.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosunknownoutcomes
+
+      - alert: ContextOSBlockedSpike
+        expr: |
+          contextos:dispatches_blocked:ratio_rate15m > 0.05
+            and contextos:dispatches_blocked:ratio_rate15m > 3 * contextos:dispatches_blocked:ratio_rate6h
+            and contextos:dispatches:rate15m * 900 >= 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Governance is blocking far more dispatches than usual.
+          description: >-
+            More than 5% of dispatches were blocked over 15 minutes, and more than three
+            times the 6-hour rate. A policy, pack or limit change may be
+            refusing legitimate work.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosblockedspike
+
+      - alert: ContextOSGuardSaturated
+        expr: |
+          sum by (reason) (increase(contextos_dispatch_refusals_total{reason=~"loop_guard_saturated|effect_guard_saturated|task_limits_saturated|too_many_unresolved_effects"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Runs are hitting a hard cap: {{ $labels.reason }}.'
+          description: >-
+            {{ $value | humanize }} dispatches were refused with {{ $labels.reason }} in the
+            last 15 minutes.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosguardsaturated
+
+      - alert: ContextOSRevocationEnforced
+        expr: sum by (reason) (increase(contextos_dispatch_refusals_total{reason=~"revoked_.+"}[15m])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: 'The kill switch is refusing dispatches ({{ $labels.reason }}).'
+          description: >-
+            {{ $value | humanize }} dispatches were refused by a revocation in the last 15
+            minutes. Expected while an incident is contained; otherwise check who revoked what.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosrevocationenforced
+
+  - name: contextos.service
+    rules:
+      - alert: ContextOSServerErrors
+        expr: |
+          sum(rate(contextos_http_requests_total{status=~"5.."}[10m]))
+            / sum(rate(contextos_http_requests_total[10m])) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 1% of contextosd requests fail with a server error.
+          description: >-
+            Server errors have been above 1% of requests for 10 minutes.
+            Governed calls fail closed, so agents see errors, not unchecked effects.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosservererrors

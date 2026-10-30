@@ -179,7 +179,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
-- Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md)
+- Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md), [what ContextOS does not govern](docs/SCOPE.md)
 - Public release checklist: [docs/PUBLIC_RELEASE.md](docs/PUBLIC_RELEASE.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - Contributing and governance: [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [CHANGELOG.md](CHANGELOG.md)
