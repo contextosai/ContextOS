@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.6 - 2026-10-30
+
+Sixth alpha: governance you can operate. Alerts and gauges for held effects,
+agents bound to their credentials, MCP authorization discovery and upstream drift
+detection, signed escalation notifications, OAuth for providers, result screening and
+approval step-up. Two changes are breaking for deployments with the enterprise
+profile; see the [release notes](docs/releases/v0.1.0-alpha.6.md) before upgrading.
+
 ### Changed (breaking)
 - Agent binding: with the `contextos.enterprise` profile, a run's declared agent must
   be one its caller's credential is issued for, or admission is refused
