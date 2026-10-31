@@ -17,7 +17,7 @@ try:
 except ImportError:  # the HTTP client (contextos.client) works without the extension
     _native = None
 
-__version__ = getattr(_native, "__version__", "0.1.0-alpha.6")
+__version__ = getattr(_native, "__version__", "0.1.0-alpha.7")
 
 
 class ContextOSError(Exception):
