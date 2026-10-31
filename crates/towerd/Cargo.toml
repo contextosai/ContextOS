@@ -18,6 +18,7 @@ contextos-kernel.workspace = true
 contextos-policy.workspace = true
 contextos-store.workspace = true
 contextos-audit.workspace = true
+contextos-adapters.workspace = true
 ed25519-dalek.workspace = true
 base64.workspace = true
 serde.workspace = true

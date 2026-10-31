@@ -70,6 +70,7 @@ async fn main() {
     if let [_, flag, path] = args.as_slice()
         && flag == "--pin-mcp-tools"
     {
+        contextos_adapters::tls::init().unwrap_or_else(|e| fail(e));
         let config = Config::load(std::path::Path::new(path)).unwrap_or_else(|e| fail(e));
         match contextosd::upstream_check::pin_report(&config).await {
             Ok(lines) => {
@@ -87,6 +88,7 @@ async fn main() {
     if let [_, flag, path] = args.as_slice()
         && flag == "--migrate"
     {
+        contextos_adapters::tls::init().unwrap_or_else(|e| fail(e));
         let config = Config::load(std::path::Path::new(path)).unwrap_or_else(|e| fail(e));
         let StoreConfig::Postgres { url_env, .. } = &config.store else {
             fail("--migrate needs a PostgreSQL store; the in-memory store has no schema")
@@ -99,7 +101,15 @@ async fn main() {
         println!("contextosd: schema is current");
         return;
     }
+    // Before any client exists: every one trusts the private CAs it names.
+    let private_cas = contextos_adapters::tls::init().unwrap_or_else(|e| fail(e));
     let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
+    if private_cas > 0 {
+        tracing::info!(
+            certificates = private_cas,
+            "trusting private CAs from CONTEXTOS_CA_BUNDLE"
+        );
+    }
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
         _ => unreachable!("arguments were checked above"),

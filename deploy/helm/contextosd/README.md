@@ -78,6 +78,19 @@ Secret named by `secretName` must exist before install; pods wait in
 `CreateContainerConfigError` until it does. CI installs the chart this way on a kind
 cluster (`deploy/kind/e2e.sh`).
 
+**Private CAs.** Providers, adapters, the KMS and OIDC issuers behind your own CA are
+trusted once the server can read that CA:
+
+```yaml
+extraVolumes:
+  - name: corp-ca
+    configMap: { name: corp-ca }        # kubectl create configmap corp-ca --from-file=ca.pem
+extraVolumeMounts:
+  - { name: corp-ca, mountPath: /etc/contextos/ca, readOnly: true }
+extraEnv:
+  - { name: CONTEXTOS_CA_BUNDLE, value: /etc/contextos/ca/ca.pem }
+```
+
 Sidecars go in `extraContainers` (with `extraVolumes`): they share the pod's network,
 so contextosd reaches them on loopback, for example a database proxy or a secrets
 agent.

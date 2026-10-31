@@ -23,6 +23,12 @@ async fn main() {
         .json()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    // Before any client exists: every one trusts the private CAs it names.
+    match contextos_adapters::tls::init() {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(certificates = n, "trusting private CAs from CONTEXTOS_CA_BUNDLE"),
+        Err(e) => fail(e),
+    }
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
         _ => fail("usage: towerd --config <path> | --version"),

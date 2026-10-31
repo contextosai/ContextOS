@@ -71,6 +71,7 @@ fn named_env(config: &Config) -> Vec<(&str, String)> {
 /// the first failure. Missing environment variables are reported together.
 pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     let config = Config::load(path).map_err(|e| e.to_string())?;
+    let private_cas = contextos_adapters::tls::init()?;
     let missing: Vec<String> = named_env(&config)
         .into_iter()
         .filter(|(var, _)| std::env::var_os(var).is_none())
@@ -87,6 +88,11 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         }
     )];
 
+    if private_cas > 0 {
+        report.push(format!(
+            "{private_cas} private CA certificate(s) trusted from CONTEXTOS_CA_BUNDLE"
+        ));
+    }
     let packs = load_packs(&config)?;
     report.push(format!("{} context pack(s) valid", packs.len()));
 

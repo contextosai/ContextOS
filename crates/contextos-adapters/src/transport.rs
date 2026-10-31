@@ -115,7 +115,7 @@ pub fn pinned_endpoint(endpoint: &str, policy: &TransportPolicy) -> Result<Url, 
 }
 
 pub fn client(policy: &TransportPolicy) -> reqwest::Client {
-    reqwest::Client::builder()
+    crate::tls::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(policy.connect_timeout)
         .https_only(!policy.allow_loopback_http)

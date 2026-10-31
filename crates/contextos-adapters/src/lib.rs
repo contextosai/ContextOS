@@ -8,6 +8,7 @@ pub mod http;
 pub mod mcp;
 pub mod oauth;
 pub mod remote;
+pub mod tls;
 pub mod transport;
 
 pub use http::HttpAdapter;

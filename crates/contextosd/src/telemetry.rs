@@ -123,7 +123,7 @@ mod otlp {
             return Ok(None);
         }
         let client = ExportClient {
-            inner: reqwest::Client::builder()
+            inner: contextos_adapters::tls::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(10))
                 .build()

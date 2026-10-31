@@ -45,7 +45,7 @@ impl Source {
         let token =
             std::env::var(&config.token_env).map_err(|_| SourceError::MissingToken(config.token_env.clone()))?;
         let control_token = config.control_token_env.as_ref().and_then(|v| std::env::var(v).ok());
-        let http = reqwest::Client::builder()
+        let http = contextos_adapters::tls::builder()
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -60,7 +60,7 @@ impl Source {
 
     /// A source with its keys given directly (tests and embedding).
     pub fn with_tokens(config: SourceConfig, token: String, control_token: Option<String>) -> Self {
-        let http = reqwest::Client::builder()
+        let http = contextos_adapters::tls::builder()
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
             .build()

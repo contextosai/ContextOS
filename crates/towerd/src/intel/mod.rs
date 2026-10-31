@@ -57,7 +57,7 @@ impl Anthropic {
     pub fn from_config(config: &IntelligenceConfig) -> Result<Self, String> {
         let key = std::env::var(&config.api_key_env).map_err(|_| format!("{} is not set", config.api_key_env))?;
         // reqwest drops `Authorization` on a cross-origin redirect, not `x-api-key`.
-        let http = reqwest::Client::builder()
+        let http = contextos_adapters::tls::builder()
             .timeout(Duration::from_secs(600))
             .redirect(reqwest::redirect::Policy::none())
             .build()

@@ -6,6 +6,15 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `CONTEXTOS_CA_BUNDLE`: a PEM file of private CA certificates that every outgoing TLS
+  connection trusts besides the bundled public roots (providers, adapters, the KMS,
+  OIDC issuers, notification webhooks, the OTLP exporter, Tower's sources and model
+  API). Production requires HTTPS for providers and adapters, so services behind an
+  organisation's own CA could not be reached before. Read once at startup, which fails
+  on a file without certificates; `--check-config` reports it. The Helm chart gains
+  `extraEnv` and `extraVolumeMounts` to mount it.
+
+### Added
 - The Helm chart can migrate the schema as its owner before every install and
   upgrade (`migration.enabled`, `migration.secretName`): a hook Job runs
   `contextosd --migrate`, so the server's own role needs no DDL rights.

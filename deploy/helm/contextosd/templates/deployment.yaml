@@ -37,6 +37,9 @@ spec:
             - { name: http, containerPort: 8080, protocol: TCP }
           env:
             - { name: RUST_LOG, value: {{ .Values.logLevel | quote }} }
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           envFrom:
             - secretRef: { name: {{ .Values.secretName | quote }} }
           securityContext:
@@ -72,6 +75,9 @@ spec:
               mountPath: /etc/contextos/capabilities/{{ $name }}
               subPath: capability--{{ $name }}
               readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
         {{- with .Values.extraContainers }}
         {{- toYaml . | nindent 8 }}

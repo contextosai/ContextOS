@@ -119,7 +119,7 @@ pub async fn vault_transit_signer(config: &KmsConfig, key_id: &str, development:
         .and_then(|b| ed25519_dalek::VerifyingKey::from_bytes(&b).ok())
         .ok_or_else(|| "[audit.kms] public_key must be a base64url Ed25519 public key".to_owned())?;
     let token = std::env::var(&config.token_env).map_err(|_| format!("{} is not set", config.token_env))?;
-    let http = reqwest::Client::builder()
+    let http = contextos_adapters::tls::builder()
         .https_only(!development)
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())

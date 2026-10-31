@@ -140,3 +140,41 @@ fn warns_about_an_effectful_capability_limits_cannot_bound() {
         "{text}"
     );
 }
+
+#[test]
+fn a_private_ca_bundle_is_checked() {
+    let path = config("check-ca.toml", "127.0.0.1:0");
+    let run = |bundle: &std::path::Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_contextosd"))
+            .arg("--check-config")
+            .arg(&path)
+            .current_dir(root())
+            .env("CONTEXTOS_AUDIT_SEED", "11".repeat(32))
+            .env("CONTEXTOS_CA_BUNDLE", bundle)
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).into_owned() + &String::from_utf8_lossy(&output.stderr),
+        )
+    };
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let empty = dir.join("no-certificates.pem");
+    std::fs::write(&empty, "not a certificate\n").unwrap();
+    let (ok, text) = run(&empty);
+    assert!(!ok && text.contains("CONTEXTOS_CA_BUNDLE"), "{text}");
+    // Any PEM certificate counts; the repository's test vectors have none, so reuse a
+    // public root from the platform when there is one.
+    let system = ["/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"]
+        .into_iter()
+        .map(std::path::Path::new)
+        .find(|p| p.exists());
+    if let Some(bundle) = system {
+        let (ok, text) = run(bundle);
+        assert!(ok, "{text}");
+        assert!(
+            text.contains("private CA certificate(s) trusted from CONTEXTOS_CA_BUNDLE"),
+            "{text}"
+        );
+    }
+}
