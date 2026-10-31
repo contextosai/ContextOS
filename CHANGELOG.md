@@ -5,6 +5,10 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+- The OAuth client-credentials broker no longer panics when a token endpoint answers
+  an unrepresentably large `expires_in`; tokens are cached for at most 24 hours.
+
 ## 0.1.0-alpha.6 - 2026-10-30
 
 Sixth alpha: governance you can operate. Alerts and gauges for held effects,
