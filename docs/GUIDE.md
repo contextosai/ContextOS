@@ -230,6 +230,28 @@ names it too. SPIRE's OIDC discovery provider publishes the
 JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
 accepted.
 
+#### Hold runs to the intents their pack governs
+
+A rule scoped to an intent (`applies_to.intent`) is evaluated only for runs that
+declare that intent, and the caller declares it. A pack whose refund rules are scoped
+to `support.refund` restricts nothing for a run that declares `general.query`, yet its
+refund tool is still surfaced. So admission checks the intent the compiler resolved
+against the intents the pack's rules name:
+
+```toml
+[guards]
+pack_intents = "required"    # or "observe", "off"
+```
+
+`required` refuses any other intent (`422 intent_not_governed`); it is the default
+with the `contextos.enterprise` profile. `observe`, the default otherwise, admits the
+run, counts it in `contextos_pack_intent_mismatches_total{mode}` and records
+`pack_intent: {"mode", "governed": false}` in `run_admitted`. A pack with no
+intent-scoped rules governs every intent alike. A pack that serves more than one intent
+should give each one its own rules: a run that declares one intent is not held to
+another's, and `--check-config` warns about packs whose restrictive rules span
+intents.
+
 | Route | Scope | Use |
 |---|---|---|
 | `POST /v1/compile` | `compile` | Compile a pinned pack |
@@ -800,7 +822,10 @@ Copy the digests into the capability manifest, and review them like any other ch
   refuses calls with `upstream_tool_drifted`, before anything is reserved or sent.
 - **Description changes.** A changed `upstream_description_digest` is reported but
   not refused, because agents see the manifest's description, not the server's.
-- **Unreachable server.** The last verdict stands.
+- **Before the first check.** Until a replica has checked a pinned tool once since it
+  started, calls are refused with `upstream_tool_unverified` (retryable), so a restart
+  never serves a tool nobody checked.
+- **Unreachable server.** After that, the last verdict stands.
 - **Metrics and alerts.** `contextos_upstream_tool{capability,status}` reports each
   status. `ContextOSUpstreamToolDrifted`, `…DescriptionChanged` and
   `…CheckUnavailable` alert on them.

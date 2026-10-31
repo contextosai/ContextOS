@@ -53,6 +53,11 @@ pub struct GuardsConfig {
     /// `required` with the `contextos.enterprise` profile, `observe` otherwise.
     #[serde(default)]
     pub agent_binding: Option<crate::agent_binding::AgentBinding>,
+    /// Whether a run's intent must be one its Context Pack's rules name (`required`,
+    /// `observe`, `off`; see [`crate::pack_intents`]). Unset: `required` with the
+    /// `contextos.enterprise` profile, `observe` otherwise.
+    #[serde(default)]
+    pub pack_intents: Option<crate::pack_intents::PackIntents>,
     /// Approvals above an amount, or of named capabilities, count only after the
     /// approver's recent strong sign-in (see [`contextos_gateway::step_up`]).
     #[serde(default)]
@@ -118,6 +123,7 @@ impl Default for GuardsConfig {
             require_task_authorization: false,
             require_completion_contracts: None,
             agent_binding: None,
+            pack_intents: None,
             approval_step_up: None,
         }
     }

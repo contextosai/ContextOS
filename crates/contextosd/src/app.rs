@@ -134,6 +134,8 @@ pub struct AppState<S, L> {
     pub trust_supplied_memory: bool,
     /// Whether a run's declared agent must be one its caller's credential names.
     pub agent_binding: crate::agent_binding::AgentBinding,
+    /// Whether a run's intent must be one its Context Pack governs.
+    pub pack_intents: crate::pack_intents::PackIntents,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -493,6 +495,22 @@ where
             "The run's agent is not one the caller's credential is issued for.",
         ));
     }
+    // Intent-scoped rules restrict only runs that declare their intent.
+    let intent = crate::pack_intents::evaluate(
+        state.pack_intents,
+        pack.compiler.pack(),
+        &compiled.context_ledger.intent,
+    );
+    if intent.outside {
+        state.metrics.pack_intent_mismatch(state.pack_intents.as_str());
+    }
+    if intent.refuse {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "intent_not_governed",
+            "The run's intent is not one its Context Pack's rules govern.",
+        ));
+    }
     // Kill switch: no new runs of a revoked tenant, pack, principal or agent, and no
     // delegation from a run that is itself revoked.
     match gateway
@@ -686,7 +704,7 @@ where
                 "release_refs": admission.release_refs, "surfaced_capabilities": surfaced,
                 "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
                 "compiled_context_hash": admission.compiled_context_hash,
-                "agent_binding": binding.record,
+                "agent_binding": binding.record, "pack_intent": intent.record,
                 "task_authorization_refs": admission.task_authorizations.iter()
                     .map(|t| t.bundle_ref(&admission.run_id)).collect::<Vec<_>>()}),
             &admission.admitted_at,

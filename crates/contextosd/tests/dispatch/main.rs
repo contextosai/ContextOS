@@ -21,5 +21,6 @@ mod memory;
 mod notifications;
 mod operations;
 mod ownership;
+mod pack_intents;
 mod startup;
 mod task_authorization;

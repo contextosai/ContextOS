@@ -7,10 +7,13 @@
 //! reported but not refused: agents see the manifest's reviewed description, never
 //! the upstream one.
 //!
-//! An unreachable provider keeps the last verdict. Its calls fail on their own, and
-//! refusing them for unavailability would hide which problem it is.
+//! Until this process has checked a pinned tool once, the capability refuses calls
+//! with `upstream_tool_unverified` (retryable), so neither the first moments after
+//! startup nor a restart while the provider is unreachable serve an unchecked tool.
+//! Once checked, an unreachable provider keeps the last verdict: its calls fail on
+//! their own, and refusing them for unavailability would hide which problem it is.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{AppendLog, DocumentStore};
@@ -45,7 +48,8 @@ pub enum UpstreamStatus {
     Drifted,
     /// Only the description changed: reported, calls continue.
     DescriptionChanged,
-    /// The provider could not be asked; the previous verdict stands.
+    /// The provider could not be asked; the previous verdict stands (unverified if
+    /// there is none).
     Unavailable,
 }
 
@@ -61,22 +65,29 @@ impl UpstreamStatus {
     }
 }
 
-/// The capability ids currently refused for drift.
+/// Each checked capability's verdict: whether it is refused for drift. A capability
+/// pinned with `upstream_tool_digest` and not yet here is unverified.
 #[derive(Debug, Default)]
-pub(crate) struct DriftState(std::sync::RwLock<HashSet<String>>);
+pub(crate) struct DriftState(std::sync::RwLock<HashMap<String, bool>>);
 
 impl DriftState {
-    pub(crate) fn drifted(&self, capability_id: &str) -> bool {
-        self.0.read().is_ok_and(|set| set.contains(capability_id))
+    /// The reason calls to this capability are refused, if they are.
+    pub(crate) fn refusal(&self, manifest: &crate::CapabilityManifest) -> Option<&'static str> {
+        manifest.upstream_tool_digest.as_ref()?;
+        match self.0.read().ok()?.get(&manifest.capability_id) {
+            None => Some("upstream_tool_unverified"),
+            Some(true) => Some("upstream_tool_drifted"),
+            Some(false) => None,
+        }
+    }
+
+    fn drifted(&self, capability_id: &str) -> bool {
+        self.0.read().is_ok_and(|map| map.get(capability_id) == Some(&true))
     }
 
     fn set(&self, capability_id: &str, drifted: bool) {
-        if let Ok(mut set) = self.0.write() {
-            if drifted {
-                set.insert(capability_id.to_owned());
-            } else {
-                set.remove(capability_id);
-            }
+        if let Ok(mut map) = self.0.write() {
+            map.insert(capability_id.to_owned(), drifted);
         }
     }
 }
@@ -100,14 +111,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             };
             let tools = match listed {
                 Some(Ok(tools)) => tools,
-                Some(Err(error)) => {
-                    tracing::warn!(adapter = adapter_id, error = %error.message, "upstream tool check failed");
+                failed => {
+                    let error = match failed {
+                        Some(Err(error)) => error.message,
+                        _ => "the adapter cannot list its tools".to_owned(),
+                    };
+                    tracing::warn!(adapter = adapter_id, error = %error, "upstream tool check failed");
                     for manifest in manifests {
                         statuses.insert(manifest.capability_id.clone(), UpstreamStatus::Unavailable);
                     }
                     continue;
                 }
-                None => continue,
             };
             for manifest in manifests {
                 let tool = tools.iter().find(|t| t["name"] == manifest.protocol_tool.as_str());

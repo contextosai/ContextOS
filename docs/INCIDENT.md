@@ -217,8 +217,9 @@ server. Review it, then re-pin `upstream_description_digest`.
 ### ContextOSUpstreamCheckUnavailable
 
 A replica has not been able to list the provider's tools for 30 minutes, so drift
-would go unnoticed. The last verdict stands. Check the provider's health and that
-its credential allows `tools/list`.
+would go unnoticed. The last verdict stands; a replica that has not checked the tool
+since it started refuses calls with `upstream_tool_unverified`. Check the provider's
+health and that its credential allows `tools/list`.
 
 ### ContextOSServerErrors
 

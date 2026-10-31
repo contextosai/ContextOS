@@ -351,7 +351,8 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             && config.support.profiles.iter().any(|p| p == "contextos.enterprise")
         {
             return Err(format!(
-                "{}: {} is effectful on MCP adapter {} and needs upstream_tool_digest under the enterprise                  profile (print it with `contextosd --pin-mcp-tools <config>`)",
+                "{}: {} is effectful on MCP adapter {} and needs upstream_tool_digest under the enterprise \
+                 profile (print it with `contextosd --pin-mcp-tools <config>`)",
                 path.display(),
                 manifest.capability_id,
                 manifest.adapter_id

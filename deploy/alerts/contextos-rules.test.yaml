@@ -282,5 +282,5 @@ tests:
               capability: adp_mail.send
             exp_annotations:
               summary: 'The upstream tool behind adp_mail.send cannot be checked.'
-              description: The provider's tool list has not been readable for 30 minutes, so drift of adp_mail.send would go unnoticed. The last verdict stands.
+              description: The provider's tool list has not been readable for 30 minutes, so drift of adp_mail.send would go unnoticed. The last verdict stands; a replica that has not checked it since it started refuses its calls.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamcheckunavailable
