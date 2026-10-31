@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+- Tower caps the whole fleet at 500,000 agents behind the per-tenant bound, so many
+  tenants cannot grow its agent map without limit.
+- The 0.1.0-alpha.10 notes say it is the first published release since alpha.5
+  (alpha.6 was tagged only) and point alpha.5 users to the alpha.6 upgrade notes.
+
 ### Added
 - `CONTEXTOS_CA_BUNDLE`: a PEM file of private CA certificates that every outgoing TLS
   connection trusts besides the bundled public roots (providers, adapters, the KMS,
@@ -29,7 +35,8 @@ minor versions may break APIs and every break is listed.
 ## 0.1.0-alpha.10 - 2026-10-31
 
 Tenth alpha: the fixes below from reviewing alpha.9, which was tagged but not
-published. The first release to use after 0.1.0-alpha.6; see the
+published. The first published release since 0.1.0-alpha.5 (alpha.6 to alpha.9 were tagged
+only); see the
 [release notes](docs/releases/v0.1.0-alpha.10.md) before upgrading.
 
 ### Fixed

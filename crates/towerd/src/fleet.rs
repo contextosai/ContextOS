@@ -9,7 +9,8 @@
 //! the newest [`MAX_ATTEMPTS`], each agent tracks at most [`MAX_UNRESOLVED`] unresolved
 //! effects by id (the rest are counted), and past [`MAX_AGENTS`] agents in one source
 //! tenant that tenant's new agents share one [`OVERFLOW_AGENT`], so one tenant's agent
-//! ids cannot crowd out another's.
+//! ids cannot crowd out another's. [`MAX_FLEET_AGENTS`] caps the whole fleet as a
+//! backstop: past it, every tenant's new agents share its overflow agent.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
@@ -206,6 +207,7 @@ pub struct Fleet {
     max_attempts: usize,
     max_unresolved: usize,
     max_agents: usize,
+    max_fleet_agents: usize,
     /// Agents created per `(source, tenant)`, for the per-tenant bound.
     agents_per_tenant: HashMap<(String, String), usize>,
 }
@@ -215,6 +217,8 @@ pub const MAX_ATTEMPTS: usize = 200_000;
 pub const MAX_UNRESOLVED: usize = 1_000;
 /// Agents per source tenant.
 pub const MAX_AGENTS: usize = 50_000;
+/// Agents in the whole fleet, whatever the number of tenants.
+pub const MAX_FLEET_AGENTS: usize = 500_000;
 /// The agent id that a tenant's agents past [`MAX_AGENTS`] are counted under.
 pub const OVERFLOW_AGENT: &str = "(other agents)";
 
@@ -273,6 +277,7 @@ impl Fleet {
             max_attempts: MAX_ATTEMPTS,
             max_unresolved: MAX_UNRESOLVED,
             max_agents: MAX_AGENTS,
+            max_fleet_agents: MAX_FLEET_AGENTS,
             agents_per_tenant: HashMap::new(),
         }
     }
@@ -672,7 +677,9 @@ impl Fleet {
                 .agents_per_tenant
                 .entry((source.to_owned(), entry.tenant_id.clone()))
                 .or_default();
-            if *created >= self.max_agents {
+            // The overflow agent itself may still be created past the fleet cap: at
+            // most one per tenant.
+            if *created >= self.max_agents || self.agents.len() >= self.max_fleet_agents {
                 agent_id = OVERFLOW_AGENT;
                 key = agent_key(&entry.tenant_id, agent_id, None);
             } else {
