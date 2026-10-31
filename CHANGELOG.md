@@ -9,9 +9,12 @@ minor versions may break APIs and every break is listed.
 - The Helm chart can migrate the schema as its owner before every install and
   upgrade (`migration.enabled`, `migration.secretName`): a hook Job runs
   `contextosd --migrate`, so the server's own role needs no DDL rights.
-- CI installs the chart on a kind cluster the way the docs describe a production
-  deployment (`deploy/kind/e2e.sh`): PostgreSQL with owner and least-privilege runtime
-  roles, the migration hook, audit signing and verification, a rolling restart and an
+- The Helm chart takes `extraContainers` and `extraVolumes` for sidecars (a database
+  proxy, a secrets agent), which contextosd reaches on loopback.
+- CI installs the chart on a kind cluster (`deploy/kind/e2e.sh`): PostgreSQL with
+  owner and least-privilege runtime roles, the migration hook, a run admitted and a
+  refund dispatched against the quickstart's providers (as a sidecar), the kill switch,
+  audit verification, a rolling restart (the same operation is not sent twice) and an
   upgrade.
 
 ## 0.1.0-alpha.10 - 2026-10-31

@@ -78,6 +78,10 @@ Secret named by `secretName` must exist before install; pods wait in
 `CreateContainerConfigError` until it does. CI installs the chart this way on a kind
 cluster (`deploy/kind/e2e.sh`).
 
+Sidecars go in `extraContainers` (with `extraVolumes`): they share the pod's network,
+so contextosd reaches them on loopback, for example a database proxy or a secrets
+agent.
+
 Put `contextosd.toml` in `config`; reference packs and capability manifests at
 `/etc/contextos/packs/<name>` and `/etc/contextos/capabilities/<name>` after listing
 them under `packs` / `capabilities`. Secrets come only from `secretName`. Pin the image

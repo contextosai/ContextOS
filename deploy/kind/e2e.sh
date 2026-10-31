@@ -68,8 +68,11 @@ psql "REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public T
 psql "ALTER DEFAULT PRIVILEGES FOR ROLE contextos_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE ON TABLES TO contextos_runtime" >/dev/null
 
 echo "== Secrets and values"
-KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-HASH="sha256:$(printf %s "$KEY" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+# The quickstart's configuration and development keys, on PostgreSQL, with its
+# synthetic providers as a sidecar: development mode reaches providers over plain HTTP
+# on loopback only, which a sidecar shares.
+KEY="dev-key-0123456789abcdef0123456789abcdef"
+OPS="dev-ops-0123456789abcdef0123456789abcdef"
 SEED="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 kubectl -n "$NS" create secret generic contextosd \
   --from-literal=CONTEXTOS_DATABASE_URL="postgres://contextos_runtime:runtime-pw@postgres:5432/contextos" \
@@ -77,66 +80,103 @@ kubectl -n "$NS" create secret generic contextosd \
 kubectl -n "$NS" create secret generic contextosd-owner \
   --from-literal=CONTEXTOS_DATABASE_URL="postgres://contextos_owner:owner-pw@postgres:5432/contextos" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-cat > "$WORK/values.yaml" <<VALUES
-image: { repository: "${IMAGE%:*}", tag: "${IMAGE##*:}", pullPolicy: Never }
-replicaCount: 2
-migration: { enabled: true, secretName: contextosd-owner }
-config: |
-  packs = ["/etc/contextos/packs/support.json"]
-  capabilities = []
-  [server]
-  listen = "0.0.0.0:8080"
-  [store]
-  kind = "postgres"
-  url_env = "CONTEXTOS_DATABASE_URL"
-  [audit]
-  key_id = "audit-e2e"
-  signing_seed_env = "CONTEXTOS_AUDIT_SEED"
-  [support]
-  implementation_id = "contextos-rs"
-  implementation_version = "e2e"
-  profiles = ["contextos.core"]
-  controls = []
-  [[api_keys]]
-  key_sha256 = "$HASH"
-  tenant_id = "tenant_acme_prod"
-  principal_id = "oncall"
-  scopes = ["control", "audit:read"]
-VALUES
+kubectl -n "$NS" create configmap dev-services --from-file=examples/support-refund/dev_services.py \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+python3 - "$KEY" "$WORK/contextosd.toml" <<'PY'
+import hashlib, sys
+key, out = sys.argv[1], sys.argv[2]
+text = open("examples/support-refund/contextosd.toml").read()
+for old, new in [
+    ('packs = ["examples/support-refund/pack.json"]', 'packs = ["/etc/contextos/packs/support.json"]'),
+    ('"examples/support-refund/capabilities/', '"/etc/contextos/capabilities/'),
+    ('listen = "127.0.0.1:8080"', 'listen = "0.0.0.0:8080"'),
+    ('kind = "memory"', 'kind = "postgres"\nurl_env = "CONTEXTOS_DATABASE_URL"'),
+    ("sha256:REPLACED_BY_RUN_SH", "sha256:" + hashlib.sha256(key.encode()).hexdigest()),
+]:
+    assert old in text, old
+    text = text.replace(old, new)
+open(out, "w").write(text)
+PY
+python3 - "$WORK/contextosd.toml" "$IMAGE" > "$WORK/values.yaml" <<'PY'
+import json, sys
+config, image = open(sys.argv[1]).read(), sys.argv[2]
+repo, tag = image.rsplit(":", 1)
+print(json.dumps({
+    "image": {"repository": repo, "tag": tag, "pullPolicy": "Never"},
+    "replicaCount": 2,
+    "migration": {"enabled": True, "secretName": "contextosd-owner"},
+    "config": config,
+    "extraContainers": [{
+        "name": "dev-services", "image": "python:3.12-slim",
+        "command": ["python3", "/dev-services/dev_services.py"],
+        "volumeMounts": [{"name": "dev-services", "mountPath": "/dev-services", "readOnly": True}],
+        "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+    }],
+    "extraVolumes": [{"name": "dev-services", "configMap": {"name": "dev-services"}}],
+}))
+PY
+files=(--set-file 'packs.support\.json=examples/support-refund/pack.json'
+       --set-file 'capabilities.issue_refund\.json=examples/support-refund/capabilities/issue_refund.json'
+       --set-file 'capabilities.lookup_order\.json=examples/support-refund/capabilities/lookup_order.json')
 
 echo "== helm install (the migration hook runs first)"
-helm install contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" \
-  --set-file 'packs.support\.json=examples/support-refund/pack.json' --wait --timeout 5m
+helm install contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" "${files[@]}" --wait --timeout 5m
 owner="$(psql "SELECT tableowner FROM pg_tables WHERE tablename = 'contextos_documents'")"
 [ "$owner" = contextos_owner ] || { echo "schema owned by $owner, expected contextos_owner" >&2; exit 1; }
 [ "$(psql "SELECT version FROM contextos_schema_version")" -ge 4 ]
 
+URL=http://127.0.0.1:18080
 forward() {
   [ -n "$PF" ] && kill "$PF" 2>/dev/null || true
   kubectl -n "$NS" port-forward svc/contextosd 18080:8080 >/dev/null 2>&1 & PF=$!
-  for _ in $(seq 50); do curl -sf http://127.0.0.1:18080/readyz >/dev/null && return; sleep 0.2; done
+  for _ in $(seq 50); do curl -sf "$URL/readyz" >/dev/null && return; sleep 0.2; done
   echo "the service did not answer" >&2; exit 1
 }
-api() { curl -sf -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' "$@"; }
-verified() { api http://127.0.0.1:18080/v1/audit/verify | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["verified"], d; print(len(d["entries"]) if isinstance(d["entries"], list) else d["entries"])'; }
+api() { local key="$1"; shift; curl -sS --fail-with-body -H "Authorization: Bearer $key" -H 'Content-Type: application/json' "$@"; }
+verified() { api "$KEY" "$URL/v1/audit/verify" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["verified"], d; e=d["entries"]; print(len(e) if isinstance(e, list) else e)'; }
 
-echo "== Serving as the runtime role"
+echo "== Serving as the runtime role: admit, dispatch, kill switch, audit"
 forward
-api -X POST http://127.0.0.1:18080/v1/revocations \
-  -d '{"kind": "capability", "target": "adp_payments.issue_refund", "reason": "E2E-1"}' >/dev/null
+RUN="$(python3 -c '
+import json
+run = json.load(open("examples/support-refund/requests/run.json"))
+run["task_authorization"] = {
+    "issued_by": {"principal_id": "usr_771", "principal_type": "person", "trust_domain": "contextos.dev",
+                  "tenant_id": "tenant_acme_prod"},
+    "scopes": [{"root_run_id": "run_demo_1", "purpose_ids": ["support.refund"],
+                "capability_ids": ["adp_payments.issue_refund"], "resource_ids": ["ord_881"],
+                "destination_ids": ["cus_77"], "classification_labels": ["CONFIDENTIAL"], "argument_constraints": [],
+                "amount_ceiling": {"minor_units": 120000, "currency": "INR"}}]}
+print(json.dumps(run))')"
+ADMITTED=""
+for _ in $(seq 20); do ADMITTED="$(api "$KEY" -X POST "$URL/v1/runs" --data "$RUN" 2>/dev/null)" && break; sleep 1; done
+[ -n "$ADMITTED" ] || api "$KEY" -X POST "$URL/v1/runs" --data "$RUN"
+GENERATION="$(echo "$ADMITTED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["executor_generation"])')"
+status="$(api "$KEY" -H "contextos-executor-generation: $GENERATION" -X POST "$URL/v1/runs/run_demo_1/tool-calls" \
+  --data @examples/support-refund/requests/tool_call.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["status"])')"
+[ "$status" = completed ] || { echo "refund dispatch: $status" >&2; exit 1; }
+api "$OPS" -X POST "$URL/v1/revocations" \
+  -d '{"kind": "capability", "target": "adp_orders.lookup", "reason": "E2E-1"}' >/dev/null
 before="$(verified)"
-echo "audit verifies ($before)"
+echo "admitted, refunded, revoked; audit verifies ($before entries)"
 
 echo "== Rolling restart: state persists, no DDL needed"
 kubectl -n "$NS" rollout restart deployment/contextosd >/dev/null
 kubectl -n "$NS" rollout status deployment/contextosd --timeout=180s
 forward
-api http://127.0.0.1:18080/v1/revocations | grep -q 'E2E-1'
-[ "$(verified)" = "$before" ]
+api "$KEY" "$URL/v1/runs/run_demo_1" >/dev/null
+api "$OPS" "$URL/v1/revocations" | grep -q 'E2E-1'
+# The same operation again is not sent twice, by any replica.
+again="$(api "$KEY" -H "contextos-executor-generation: $GENERATION" -X POST "$URL/v1/runs/run_demo_1/tool-calls" \
+  --data @examples/support-refund/requests/tool_call.json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["result"]["status"], r["report"]["reason_codes"])')"
+echo "replayed after restart: $again"
+case "$again" in completed*\[\]) echo "the refund was dispatched again" >&2; exit 1;; esac
+[ "$(verified)" -ge "$before" ]
 
 echo "== helm upgrade re-runs the migration hook"
-helm upgrade contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" \
-  --set-file 'packs.support\.json=examples/support-refund/pack.json' --set logLevel=debug --wait --timeout 5m
+helm upgrade contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" "${files[@]}" \
+  --set logLevel=debug --wait --timeout 5m
 forward
-api http://127.0.0.1:18080/v1/revocations | grep -q 'E2E-1'
+api "$OPS" "$URL/v1/revocations" | grep -q 'E2E-1'
+verified >/dev/null
 echo "kubernetes e2e passed"
