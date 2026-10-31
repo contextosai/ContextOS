@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.9 - 2026-10-31
+
+Ninth alpha: deployable as documented (container under the Helm chart,
+least-privilege database role) and the operator documentation and tools below. The
+first release to use after 0.1.0-alpha.6; see the
+[release notes](docs/releases/v0.1.0-alpha.9.md) before upgrading.
+
 ### Fixed
 - The container image ran `contextosd --config … --config …` under the Helm chart and
   exited, because the chart's `args` were appended to an entrypoint that already
