@@ -796,7 +796,10 @@ Copy the digests into the capability manifest, and review them like any other ch
   refuses calls with `upstream_tool_drifted`, before anything is reserved or sent.
 - **Description changes.** A changed `upstream_description_digest` is reported but
   not refused, because agents see the manifest's description, not the server's.
-- **Unreachable server.** The last verdict stands.
+- **Before the first check.** Until a replica has checked a pinned tool once since it
+  started, calls are refused with `upstream_tool_unverified` (retryable), so a restart
+  never serves a tool nobody checked.
+- **Unreachable server.** After that, the last verdict stands.
 - **Metrics and alerts.** `contextos_upstream_tool{capability,status}` reports each
   status. `ContextOSUpstreamToolDrifted`, `…DescriptionChanged` and
   `…CheckUnavailable` alert on them.

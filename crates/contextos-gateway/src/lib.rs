@@ -925,12 +925,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             p.report.audit_sequences.push(entry.sequence);
             return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
         }
-        if self.drift.drifted(&manifest.capability_id) {
-            return Ok(p.stop(
-                "blocked",
-                vec!["upstream_tool_drifted".into()],
-                "The upstream tool changed since this capability was reviewed.",
-            ));
+        if let Some(reason) = self.drift.refusal(manifest) {
+            let message = if reason == "upstream_tool_drifted" {
+                "The upstream tool changed since this capability was reviewed."
+            } else {
+                "The upstream tool has not been checked against its review yet; retry shortly."
+            };
+            return Ok(p.stop("blocked", vec![reason.into()], message));
         }
         if let Some(Err(reasons)) = boundary {
             let entry = self
