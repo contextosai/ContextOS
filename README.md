@@ -67,6 +67,26 @@ also needs Node.js 24 to build the UI, while release archives include it prebuil
 Follow the [Tower guide](docs/tower/README.md).
 Framework examples have their own prerequisites in [examples/frameworks](examples/frameworks/README.md).
 
+Examples build `contextosd` and `ctx` from source on first use, which takes a few
+minutes; later examples reuse that build.
+
+### Govern your own agent
+
+```sh
+./examples/dev-server.sh          # prints CONTEXTOS_URL and CONTEXTOS_TOKEN; Ctrl-C stops it
+export PYTHONPATH=$PWD/bindings/python
+```
+
+That serves the quickstart's support pack with synthetic providers on loopback. Admit
+a run from [`run.json`](examples/support-refund/requests/run.json), wrap your tool
+functions with `governed_tool`, and register them with your framework: the
+[integration guides](docs/integrations/README.md) cover LangGraph, the OpenAI Agents
+SDK, Google ADK, the Claude Agent SDK, CrewAI and six more, each with a runnable
+example. To serve your own tools, write a Context Pack and capability manifests
+([GUIDE section 3](docs/GUIDE.md#3-run-contextosd)); the [glossary](docs/GLOSSARY.md)
+explains the terms. The Python client is not on PyPI yet: see
+[bindings/python](bindings/python/README.md).
+
 ## Why not a database transaction?
 
 If the refund is a write to a database you own and every caller goes through one

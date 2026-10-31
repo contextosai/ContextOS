@@ -35,7 +35,7 @@ tool issue_refund: ALREADY REQUESTED (retry_unsafe): this exact action was submi
 agent: Refunded ord_881 ({'refund_id': 'rf_ord_881'}). The repeated refund was refused by the gateway: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c565b3e73f5a2a705b236d5bb28 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 Four model requests reserved 4,000 tokens; two tool calls were dispatched. The
@@ -71,7 +71,7 @@ tool issue_refund: ALREADY REQUESTED (retry_unsafe): this exact action was submi
 agent: Refunded ord_881 ({'refund_id': 'rf_ord_881'}). The repeated refund was refused by the gateway: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6c418e708b83168e9c159e448c (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 **With a real model**: set `ANTHROPIC_API_KEY` (uses `anthropic:claude-sonnet-5-5`)

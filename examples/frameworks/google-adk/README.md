@@ -19,7 +19,7 @@ tool issue_refund: ALREADY REQUESTED (retry_unsafe): this exact action was submi
 agent: Refunded order ord_881 in full; the repeated refund was refused, so it was issued once.
 decision decision_01a15c5792a2756eac9b39ca6d1f7d56 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## Approval
@@ -54,7 +54,7 @@ tool issue_refund: ALREADY REQUESTED (retry_unsafe): this exact action was submi
 agent: Refunded order ord_881 in full; the repeated refund was refused, so it was issued once.
 decision decision_01a15c6c5341731bb5bacf3b4b6cf5ed (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## What is governed

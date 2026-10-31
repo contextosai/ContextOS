@@ -10,14 +10,20 @@ contextos_binaries() {
     if [ -x bin/contextosd ]; then
       CONTEXTOS_BIN="$PWD/bin"
     else
+      local target="${CARGO_TARGET_DIR:-$PWD/target}" other=release has_other=1
+      [ "$profile" = release ] && other=debug
+      for binary in "$@"; do [ -x "$target/$other/$binary" ] || has_other=""; done
+      # Reuse a profile another example already built rather than compile a second.
+      if [ -n "$has_other" ] && [ ! -x "$target/$profile/$1" ]; then profile="$other"; fi
       CONTEXTOS_BUILD_PROFILE="$profile"
-      CONTEXTOS_BIN="$PWD/target/$profile"
+      CONTEXTOS_BIN="$target/$profile"
     fi
   fi
   # Once building, later calls build what they need into the same profile.
   if [ -n "${CONTEXTOS_BUILD_PROFILE:-}" ]; then
     local packages=()
     for binary in "$@"; do packages+=(-p "$binary"); done
+    echo "Building $* ($CONTEXTOS_BUILD_PROFILE); the first build takes a few minutes..." >&2
     if [ "$CONTEXTOS_BUILD_PROFILE" = release ]; then
       cargo build --release -q "${packages[@]}"
     else

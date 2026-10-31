@@ -18,6 +18,22 @@ minor versions may break APIs and every break is listed.
   in one currency is not applied to another's minor units. An amount in a currency
   without a threshold, or without a currency, always needs step-up.
 
+### Added
+- `examples/dev-server.sh` runs `contextosd` locally with the quickstart's pack and
+  synthetic providers and prints `CONTEXTOS_URL` and `CONTEXTOS_TOKEN`, so you can point
+  your own agent at it. The README has a "Govern your own agent" section.
+- `docs/GLOSSARY.md`, and `bindings/python/README.md` on installing the Python client
+  (standard library only) and the embedded kernel (built with maturin). Neither package
+  is on PyPI or npm yet.
+- `contextosd --help`.
+
+### Changed
+- `contextosd --check-config` reports every missing environment variable at once, with
+  what each holds, and warns about the example configuration's placeholder API key.
+- The examples honour `CARGO_TARGET_DIR`, say when they are building, and reuse a
+  profile another example already built instead of compiling a second one.
+- `examples/frameworks/run.sh` names uv or Node.js when they are missing.
+
 ### Fixed
 - The OAuth client-credentials broker no longer panics when a token endpoint answers
   an unrepresentably large `expires_in`; tokens are cached for at most 24 hours.

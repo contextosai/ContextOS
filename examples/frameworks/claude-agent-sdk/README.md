@@ -29,7 +29,7 @@ model turn 4: Refunded ord_881 in full; the repeated refund was refused, so it w
 model turns reserved: 4
 decision decision_01a15c59981c7311986dc6b621c24068 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## Approval
@@ -65,7 +65,7 @@ model turn 4: Refunded ord_881 in full; the repeated refund was refused, so it w
 model turns reserved: 4
 decision decision_01a15c6cf17f7727a36989a9dd5a6ca9 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## What is governed

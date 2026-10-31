@@ -15,7 +15,7 @@ issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 12
 agent: Refunded ord_881 in full. The repeated refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c55bb137555a967bf4e3ec3eb71 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 What is governed:
@@ -61,7 +61,7 @@ issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 12
 agent: Refunded ord_881 in full. The repeated refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6f5f0f73cdbd99dbcbbdf4daf9 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## With a real model

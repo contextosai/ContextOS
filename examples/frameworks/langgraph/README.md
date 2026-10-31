@@ -22,7 +22,7 @@ checkpoint revision 1: thread run_langgraph_1792550477081
 agent: Order ord_881 was refundable; I refunded it once. A repeat refund was refused and did not happen.
 decision decision_01a15c559d47735db4259794ea890767 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 11 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## Approval
@@ -54,7 +54,7 @@ resuming thread run_langgraph_1792551959534
 agent: Order ord_881 was refundable; I refunded it once. A repeat refund was refused and did not happen.
 decision decision_01a15c6c3c30758ea0966e9d233ea25a (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 13 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## What is governed

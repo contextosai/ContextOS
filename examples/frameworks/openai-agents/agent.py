@@ -168,7 +168,7 @@ async def main() -> int:
         while result.interruptions:
             state = result.to_state()
             for item in result.interruptions:
-                print(f"approval requested: {item.tool_name}({item.arguments})")
+                print(f"SDK approval requested (local, before ContextOS): {item.tool_name}({item.arguments})")
                 state.approve(item)  # a real reviewer decides here
             # Save the approved state with the run: another executor, or this one after a
             # gateway pause, resumes from it and re-sends the same governed call.

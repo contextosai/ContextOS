@@ -24,7 +24,7 @@ crew answer: Refunded order ord_881 (120000 minor units) to cus_77. A repeated r
 crewai recorded a failed call: issue_refund {'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000} (paused)
 decision decision_01a15c56f18572de9446aefd8694bb84 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## Approval
@@ -62,7 +62,7 @@ crewai recorded a failed call: issue_refund {'order_id': 'ord_881', 'customer_id
 crewai recorded a failed call: issue_refund {'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 120000} (paused)
 decision decision_01a15c6c4a0b76c79cbd418fe648454c (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 8000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 8000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 Eight model calls reserved 8,000 tokens: the agent answers once per pause (that it is

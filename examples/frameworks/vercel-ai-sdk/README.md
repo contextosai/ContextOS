@@ -21,7 +21,7 @@ issueRefund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted
 agent (4 steps): Refunded 120000 minor units for ord_881. A second refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c55c3e674cfaeee92153df5b796 (refunded)
 run completed
-evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 10 signed audit entries
+evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, <n> signed audit entries
 ```
 
 ## What is governed
@@ -72,7 +72,7 @@ issueRefund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted
 agent (2 steps): Refunded 120000 minor units for ord_881. A second refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6f72b37027abac766a2dfa9365 (refunded)
 run completed
-evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 12 signed audit entries
+evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, <n> signed audit entries
 ```
 
 ## With a real model

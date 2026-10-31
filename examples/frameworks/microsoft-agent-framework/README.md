@@ -17,7 +17,7 @@ issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 12
 agent: Refunded ord_881 in full. The repeated refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c55bfbc77d68fb9b43838f2c4ca (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 10 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 (The first line is the framework's own log of the refused call, on stderr.)
@@ -69,7 +69,7 @@ issue_refund({'order_id': 'ord_881', 'customer_id': 'cus_77', 'amount_minor': 12
 agent: Refunded ord_881 in full. The repeated refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6f6a49741b986874946e68eec1 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## With a real model

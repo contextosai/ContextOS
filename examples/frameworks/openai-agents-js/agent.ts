@@ -146,7 +146,7 @@ try {
   while (result.interruptions.length > 0) {
     const state = result.state;
     for (const item of result.interruptions) {
-      console.log(`approval requested: ${item.name}(${item.arguments})`);
+      console.log(`SDK approval requested (local, before ContextOS): ${item.name}(${item.arguments})`);
       state.approve(item); // a real reviewer decides here
     }
     // Save the approved state with the run: another executor, or this one after a

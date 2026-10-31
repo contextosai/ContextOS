@@ -32,7 +32,7 @@ class ContextOSError(Exception):
 def call(operation: str, payload: Any) -> Any:
     """Runs one kernel operation; see the embed facade for the operation list."""
     if _native is None:
-        raise ContextOSError("native_unavailable", "the in-process kernel is not built; install the wheel or run maturin develop")
+        raise ContextOSError("native_unavailable", "the in-process kernel is not built: run `pip install ./bindings/python` (needs maturin and Rust); contextos.client works without it")
     response = json.loads(_native.call(operation, json.dumps(payload, allow_nan=False)))
     if "error" in response:
         error = response["error"]
