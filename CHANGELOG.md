@@ -24,6 +24,10 @@ minor versions may break APIs and every break is listed.
   `contextosd --migrate`, so the server's own role needs no DDL rights.
 - The Helm chart takes `extraContainers` and `extraVolumes` for sidecars (a database
   proxy, a secrets agent), which contextosd reaches on loopback.
+- The kind e2e runs `contextosd` in production mode, with generated keys and its
+  providers over HTTPS behind a CA generated per run and trusted through
+  `CONTEXTOS_CA_BUNDLE`. The quickstart's development services serve HTTPS when
+  `CONTEXTOS_DEV_TLS_CERT` and `CONTEXTOS_DEV_TLS_KEY` are set.
 - CI installs the chart on a kind cluster (`deploy/kind/e2e.sh`): PostgreSQL with
   owner and least-privilege runtime roles, the migration hook, a run admitted and a
   refund dispatched against the quickstart's providers (as a sidecar), the kill switch,

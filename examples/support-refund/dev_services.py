@@ -17,6 +17,8 @@ mandate; a real control plane observes enforcement.
 
 import hashlib
 import json
+import os
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -173,12 +175,16 @@ def serve(port, handler):
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # CONTEXTOS_DEV_TLS_CERT and _KEY (PEM) serve HTTPS instead, as production requires.
+    cert, key = os.environ.get("CONTEXTOS_DEV_TLS_CERT"), os.environ.get("CONTEXTOS_DEV_TLS_KEY")
+    if cert and key:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 
 if __name__ == "__main__":
-    import os
-
     # CONTEXTOS_DEV_PORTS="a,b,c,d" moves the services (authority, constraints, approvals, payments).
     ports = [int(p) for p in os.environ.get("CONTEXTOS_DEV_PORTS", "7701,7702,7703,7704").split(",")]
     for port, handler in zip(ports, [authority, constraints, approvals, payments]):
