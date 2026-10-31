@@ -1,5 +1,6 @@
-//! A capability pinned to its reviewed upstream tool refuses calls while the upstream
-//! definition differs, and only a description change is reported without refusing.
+//! A capability pinned to its reviewed upstream tool refuses calls until it has been
+//! checked, and while the upstream definition differs; only a description change is
+//! reported without refusing.
 
 mod support;
 
@@ -100,6 +101,41 @@ async fn a_changed_upstream_tool_is_refused_until_it_matches_its_pin_again() {
     assert_eq!(status(&g).await, UpstreamStatus::Matches);
     let out = g
         .dispatch(&h.admission, &call("tc_2", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(out.report.status, "completed", "{:?}", out.report.reason_codes);
+}
+
+#[tokio::test]
+async fn a_pinned_tool_is_refused_until_checked_even_if_the_provider_is_unreachable() {
+    let h = harness("allow", Behavior::Confirm).await;
+    // A restart while the provider is unreachable: nothing has been verified yet.
+    let upstream = Arc::new(Upstream {
+        inner: h.adapter.clone(),
+        tools: Mutex::new(None),
+    });
+    let g = pinned_gateway(&h, upstream.clone());
+    let before = g
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(before.report.reason_codes, vec!["upstream_tool_unverified".to_owned()]);
+    assert_eq!(status(&g).await, UpstreamStatus::Unavailable);
+    let unreachable = g
+        .dispatch(&h.admission, &call("tc_2", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(
+        unreachable.report.reason_codes,
+        vec!["upstream_tool_unverified".to_owned()]
+    );
+    assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0, "nothing was sent");
+
+    // The first successful check verifies it.
+    *upstream.tools.lock().unwrap() = Some(vec![reviewed()]);
+    assert_eq!(status(&g).await, UpstreamStatus::Matches);
+    let out = g
+        .dispatch(&h.admission, &call("tc_3", Some("refund_ord_881")))
         .await
         .unwrap();
     assert_eq!(out.report.status, "completed", "{:?}", out.report.reason_codes);

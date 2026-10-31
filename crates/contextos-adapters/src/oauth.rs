@@ -22,6 +22,9 @@ use crate::transport::{Credential, CredentialBroker, Exchange, TransportPolicy, 
 const MAX_TOKEN_RESPONSE: usize = 64 * 1024;
 /// When a token response omits `expires_in`.
 const DEFAULT_LIFETIME: Duration = Duration::from_secs(300);
+/// The longest a token is cached, whatever `expires_in` claims; it also keeps the
+/// refresh instant representable.
+const MAX_LIFETIME: Duration = Duration::from_secs(86_400);
 
 pub struct OAuthClientCredentials {
     token_url: Url,
@@ -112,7 +115,8 @@ impl OAuthClientCredentials {
         }
         let lifetime = token["expires_in"]
             .as_u64()
-            .map_or(DEFAULT_LIFETIME, Duration::from_secs);
+            .map_or(DEFAULT_LIFETIME, Duration::from_secs)
+            .min(MAX_LIFETIME);
         // Refreshed `refresh_before` ahead of expiry, or halfway for short-lived tokens.
         let refresh_at = Instant::now() + lifetime.saturating_sub(self.refresh_before.min(lifetime / 2));
         Ok((Credential::bearer(access), refresh_at))
