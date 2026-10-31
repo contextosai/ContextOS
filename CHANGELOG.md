@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.11 - 2026-10-31
+
+Eleventh alpha: services behind a private CA, a chart that migrates its own schema,
+and Kubernetes in CI. The first published release since 0.1.0-alpha.5 (alpha.6 to
+alpha.10 were tagged only); see the [release notes](docs/releases/v0.1.0-alpha.11.md)
+before upgrading.
+
 ### Fixed
 - Tower caps the whole fleet at 500,000 agents behind the per-tenant bound, so many
   tenants cannot grow its agent map without limit.
