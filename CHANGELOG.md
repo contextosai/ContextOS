@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- The Helm chart can migrate the schema as its owner before every install and
+  upgrade (`migration.enabled`, `migration.secretName`): a hook Job runs
+  `contextosd --migrate`, so the server's own role needs no DDL rights.
+- CI installs the chart on a kind cluster the way the docs describe a production
+  deployment (`deploy/kind/e2e.sh`): PostgreSQL with owner and least-privilege runtime
+  roles, the migration hook, audit signing and verification, a rolling restart and an
+  upgrade.
+
 ## 0.1.0-alpha.10 - 2026-10-31
 
 Tenth alpha: the fixes below from reviewing alpha.9, which was tagged but not

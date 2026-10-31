@@ -1335,6 +1335,9 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   CONTEXTOS_DATABASE_URL=postgres://contextos_owner@db/contextos contextosd --migrate contextosd.toml
   ```
 
+  The Helm chart runs this as a pre-install and pre-upgrade hook with
+  `migration.enabled` (see its README).
+
   Then run the server as a runtime role with `USAGE` on the schema, `SELECT, INSERT,
   UPDATE` on `contextos_documents`, `SELECT, INSERT` only on `contextos_audit_log`
   (updates and deletes are also blocked by trigger) and `SELECT` on

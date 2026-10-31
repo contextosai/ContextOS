@@ -1,0 +1,85 @@
+{{- if .Values.migration.enabled }}
+{{- if not .Values.migration.secretName }}
+{{- fail "migration.enabled needs migration.secretName: a Secret with the URL of a role that owns the schema" }}
+{{- end }}
+# Creates or upgrades the PostgreSQL schema before the server starts or is upgraded,
+# as a role that owns it, so the runtime role needs no DDL rights. Hooks run before
+# the chart's ConfigMap exists, so the job has its own minimal configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "contextosd.fullname" . }}-migrate
+  labels: {{- include "contextosd.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  contextosd.toml: |
+    packs = []
+    capabilities = []
+    [server]
+    listen = "127.0.0.1:8080"
+    [store]
+    kind = "postgres"
+    url_env = {{ .Values.migration.urlEnv | quote }}
+    [audit]
+    key_id = "migrate"
+    signing_seed_env = "CONTEXTOS_MIGRATE_UNUSED"
+    [support]
+    implementation_id = "contextos-rs"
+    implementation_version = {{ .Chart.AppVersion | quote }}
+    profiles = ["contextos.core"]
+    controls = []
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "contextosd.fullname" . }}-migrate
+  labels: {{- include "contextosd.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        # Not the server's selector labels: the Service and PodDisruptionBudget must
+        # not count this pod.
+        app.kubernetes.io/name: {{ .Chart.Name }}-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: {{ include "contextosd.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--migrate", "/etc/contextos-migrate/contextosd.toml"]
+          envFrom:
+            - secretRef: { name: {{ .Values.migration.secretName | quote }} }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/contextos-migrate
+              readOnly: true
+      volumes:
+        - name: config
+          configMap: { name: {{ include "contextosd.fullname" . }}-migrate }
+{{- end }}

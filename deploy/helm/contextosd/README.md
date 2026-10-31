@@ -60,17 +60,23 @@ Validate it before installing: render the `config` value to a file and run
 
 **Database schema.** The server creates or upgrades its schema on start only if its
 database role may; a least-privilege runtime role (docs/GUIDE.md section 12, *Store*)
-cannot. Run the migration with an owner role before installing or upgrading, for
-example as a one-off pod from the same image:
+cannot. Let the chart migrate as the schema's owner before every install and upgrade:
 
 ```sh
-kubectl run contextosd-migrate --rm -i --restart=Never --image=<image> \
-  --env CONTEXTOS_DATABASE_URL='postgres://owner@…' -- --migrate /etc/contextos/contextosd.toml
+kubectl create secret generic contextosd-owner \
+  --from-literal=CONTEXTOS_DATABASE_URL='postgres://contextos_owner:…@db/contextos'
+helm install contextosd deploy/helm/contextosd -f my-values.yaml \
+  --set migration.enabled=true --set migration.secretName=contextosd-owner
 ```
 
-(mount the same config, or pass one that names the store). The Secret named by
-`secretName` must exist before install; pods wait in `CreateContainerConfigError`
-until it does.
+The pre-install and pre-upgrade hook runs `contextosd --migrate` as a Job and the
+release waits for it. The runtime role then needs only data rights (`USAGE` on the
+schema; `SELECT, INSERT, UPDATE` on `contextos_documents`, `SELECT, INSERT` on
+`contextos_audit_log`, `SELECT` on `contextos_schema_version`); grant them after the
+first migration, or in advance with `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`. The
+Secret named by `secretName` must exist before install; pods wait in
+`CreateContainerConfigError` until it does. CI installs the chart this way on a kind
+cluster (`deploy/kind/e2e.sh`).
 
 Put `contextosd.toml` in `config`; reference packs and capability manifests at
 `/etc/contextos/packs/<name>` and `/etc/contextos/capabilities/<name>` after listing

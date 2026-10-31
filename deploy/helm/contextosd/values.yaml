@@ -52,6 +52,16 @@ secretName: contextosd
 
 logLevel: info
 
+# Schema migration as a pre-install/pre-upgrade hook, run as a role that owns the
+# schema so the runtime role (in `secretName`) needs no DDL rights. `secretName` here
+# names a Secret holding that owner role's URL under `urlEnv`.
+migration:
+  enabled: false
+  secretName: ""
+  urlEnv: CONTEXTOS_DATABASE_URL
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+
 resources:
   requests: { cpu: 500m, memory: 256Mi }
   limits: { memory: 1Gi }
