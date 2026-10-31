@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.8 - 2026-10-31
+
+Release archives include `examples/dev-server.sh` and `bindings/python/README.md`,
+which the README's "Govern your own agent" section names; the archive check now fails
+when any of those paths is missing and starts the dev server from the archive.
+0.1.0-alpha.7 was tagged but not published for this reason.
+
 ## 0.1.0-alpha.7 - 2026-10-31
 
 Seventh alpha: a newcomer path from clone to your own governed agent, and the fixes
