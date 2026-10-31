@@ -6,6 +6,8 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Fixed
+- The OAuth client-credentials broker no longer panics when a token endpoint answers
+  an unrepresentably large `expires_in`; tokens are cached for at most 24 hours.
 - Upstream drift no longer fails open across restarts: a capability pinned with
   `upstream_tool_digest` refuses calls with `upstream_tool_unverified` (retryable)
   until the replica has checked it once, so neither the moments after startup nor a
