@@ -1,7 +1,7 @@
 {
   "name": "contextos-tower",
   "private": true,
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "description": "ContextOS Tower: the operator console for contextosd",
   "license": "Apache-2.0",
   "type": "module",
