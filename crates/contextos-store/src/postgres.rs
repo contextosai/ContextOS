@@ -12,6 +12,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_documents.sql"),
     include_str!("../migrations/0002_audit_log.sql"),
     include_str!("../migrations/0003_document_age.sql"),
+    include_str!("../migrations/0004_schema_version.sql"),
 ];
 
 #[derive(Debug, Clone)]
@@ -47,7 +48,8 @@ impl PostgresStore {
         Self { pool }
     }
 
-    /// Applies idempotent schema migrations.
+    /// Applies idempotent schema migrations and records the schema version. Needs a
+    /// role that may create tables; see [`PostgresStore::schema_current`].
     pub async fn migrate(&self) -> Result<(), StoreError> {
         for statement in MIGRATIONS {
             sqlx::raw_sql(statement)
@@ -55,7 +57,30 @@ impl PostgresStore {
                 .await
                 .map_err(|e| backend(&e))?;
         }
+        sqlx::query(
+            "INSERT INTO contextos_schema_version (singleton, version) VALUES (TRUE, $1) \
+             ON CONFLICT (singleton) DO UPDATE SET version = GREATEST(contextos_schema_version.version, $1)",
+        )
+        .bind(i32::try_from(MIGRATIONS.len()).unwrap_or(i32::MAX))
+        .execute(&self.pool)
+        .await
+        .map_err(|e| backend(&e))?;
         Ok(())
+    }
+
+    /// Whether the schema is migrated at least as far as this build needs, read
+    /// without DDL rights, so a least-privilege runtime role can start without
+    /// migrating.
+    pub async fn schema_current(&self) -> Result<bool, StoreError> {
+        let version: Option<i32> = sqlx::query_scalar("SELECT version FROM contextos_schema_version")
+            .fetch_optional(&self.pool)
+            .await
+            .or_else(|e| match &e {
+                // The table does not exist yet: the schema predates versioning.
+                sqlx::Error::Database(db) if db.code().as_deref() == Some("42P01") => Ok(None),
+                _ => Err(backend(&e)),
+            })?;
+        Ok(version.is_some_and(|v| usize::try_from(v).is_ok_and(|v| v >= MIGRATIONS.len())))
     }
 
     async fn current_revision(&self, key: &DocKey) -> Result<Option<u64>, StoreError> {

@@ -5,6 +5,35 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+- The container image ran `contextosd --config … --config …` under the Helm chart and
+  exited, because the chart's `args` were appended to an entrypoint that already
+  named the configuration. The image's entrypoint is now the bare binary and its
+  default arguments are `CMD`; a test keeps the image and chart in step.
+- A least-privilege PostgreSQL role, as the guide recommends, can run the server: it
+  no longer runs DDL when the schema is already current (a new
+  `contextos_schema_version` table records it). `contextosd --migrate <config>` creates
+  or upgrades the schema as an owner role; a server that cannot migrate says so.
+- `scripts/dev-postgres.sh` keeps its socket in `/tmp` (a deep checkout exceeded the
+  socket path limit) and exports `CONTEXTOS_DATABASE_URL`.
+
+### Added
+- `examples/ops/unresolved.py` lists a tenant's unknown, partial and unobserved
+  effects from its audit chain (or an export), with the reconcile call for each.
+- GUIDE: backup and restore (what to back up, and what to do before serving after a
+  restore), the production refusals the quickstart's files meet with their settings,
+  and the PostgreSQL grants including the schema version table.
+- The Helm chart README has a worked values file, the migration step and the
+  NetworkPolicy note for Prometheus in another namespace; the example configuration
+  shows an on-call operator key.
+
+### Changed
+- `--check-config` warns when no caller can authenticate, when a capability names an
+  adapter no `[[adapters]]` entry configures, and when production signs the audit
+  chain with a seed instead of a KMS; startup logs the last as a warning too.
+- `memory_unverified` and `release_ref_missing` refusals name the setting that
+  resolves them.
+
 ## 0.1.0-alpha.8 - 2026-10-31
 
 Release archives include `examples/dev-server.sh` and `bindings/python/README.md`,

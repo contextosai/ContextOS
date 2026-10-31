@@ -63,7 +63,7 @@ For the original authorization and duplicate-operation walkthrough, run
 `./examples/support-refund/run.sh`; see its [quickstart](examples/support-refund/README.md).
 
 For the governance console, run `./examples/tower/run.sh --serve`; a source checkout
-also needs Node.js 24 to build the UI, while release archives include it prebuilt.
+also needs Node.js 24 or newer to build the UI, while release archives include it prebuilt.
 Follow the [Tower guide](docs/tower/README.md).
 Framework examples have their own prerequisites in [examples/frameworks](examples/frameworks/README.md).
 

@@ -19,6 +19,7 @@ usage: contextosd <command>
   --config <path>         serve with this configuration
   --check-config <path>   validate the configuration and its environment, then exit
   --pin-mcp-tools <path>  print upstream MCP tool digests to pin in capability manifests
+  --migrate <path>        create or upgrade the PostgreSQL schema (as a role that owns it)
   --version               print the version
   --help                  print this help
 
@@ -41,7 +42,7 @@ async fn main() {
         println!("{USAGE}");
         return;
     }
-    let known = ["--config", "--check-config", "--pin-mcp-tools"];
+    let known = ["--config", "--check-config", "--pin-mcp-tools", "--migrate"];
     if !matches!(args.as_slice(), [_, flag, _] if known.contains(&flag.as_str())) {
         eprintln!("{USAGE}");
         std::process::exit(2);
@@ -83,6 +84,21 @@ async fn main() {
             }
         }
     }
+    if let [_, flag, path] = args.as_slice()
+        && flag == "--migrate"
+    {
+        let config = Config::load(std::path::Path::new(path)).unwrap_or_else(|e| fail(e));
+        let StoreConfig::Postgres { url_env, .. } = &config.store else {
+            fail("--migrate needs a PostgreSQL store; the in-memory store has no schema")
+        };
+        let url = std::env::var(url_env).unwrap_or_else(|_| fail(format!("{url_env} is not set")));
+        let store = contextos_store::postgres::PostgresStore::connect(&url, 1)
+            .await
+            .unwrap_or_else(|e| fail(e));
+        store.migrate().await.unwrap_or_else(|e| fail(e));
+        println!("contextosd: schema is current");
+        return;
+    }
     let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
@@ -104,6 +120,11 @@ async fn main() {
     }
     if config.server.mode == contextosd::config::Mode::Production {
         let guards = &config.guards;
+        if config.audit.kms.is_none() {
+            tracing::warn!(
+                "production: the audit signing key is a seed in the environment; keep it in a KMS ([audit.kms])"
+            );
+        }
         if guards.required_release_refs.as_ref().is_some_and(Vec::is_empty) {
             tracing::warn!("production: required_release_refs = [] opts out of model and evaluator pins");
         }
@@ -139,7 +160,16 @@ async fn main() {
             let store = contextos_store::postgres::PostgresStore::connect(&url, *max_connections)
                 .await
                 .unwrap_or_else(|e| fail(e));
-            store.migrate().await.unwrap_or_else(|e| fail(e));
+            // A current schema needs no DDL, so the runtime role may lack the right to
+            // create tables; otherwise migrate now, which needs that right.
+            if !store.schema_current().await.unwrap_or_else(|e| fail(e)) {
+                store.migrate().await.unwrap_or_else(|e| {
+                    fail(format!(
+                        "{e}; the schema needs migrating: run `contextosd --migrate <config>` with \
+                         {url_env} naming a role that owns the schema"
+                    ))
+                });
+            }
             let store = Arc::new(store);
             router(
                 build_state(&config, store.clone(), (*store).clone(), signer, packs, dispatch)

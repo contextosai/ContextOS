@@ -3,7 +3,8 @@
 How to contain, investigate and close an incident in a `contextosd` deployment. Every
 action here is an API call the runtime audits, so the response itself becomes evidence.
 Commands assume `$CONTEXTOS` is the server URL, `$OPS_TOKEN` a credential with the
-`control` scope, and `$AUDIT_TOKEN` one with `audit:read`.
+`control` and `reconcile` scopes, and `$AUDIT_TOKEN` one with `audit:read`
+(`deploy/contextosd.example.toml` shows such an operator key).
 
 Report suspected vulnerabilities in the runtime itself privately (see
 [SECURITY.md](../SECURITY.md)); this runbook is for operating a deployment.
@@ -81,7 +82,14 @@ takeover fences its generation (`executor_stale`).
 ### Unknown effects
 
 When a provider times out or fails mid-call, the effect is `unknown`, retries are
-refused, and the run cannot complete until it is reconciled. Query the provider
+refused, and the run cannot complete until it is reconciled. Find them from the audit
+chain, with the reconcile call for each:
+
+```sh
+CONTEXTOS_URL=$CONTEXTOS AUDIT_TOKEN=$AUDIT_TOKEN python3 examples/ops/unresolved.py
+```
+
+Tower lists them per agent too (the `unresolved_effects` finding). Query the provider
 (`POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` with
 `{"source": "provider"}`) or, with provider evidence, assert it as an operator (see the guide's *Reconciling unknown
 effects*). Never re-run an effect to find out whether it happened.
@@ -103,7 +111,8 @@ called with `$AUDIT_TOKEN` for each tenant you operate.
 A resource under a shared guarantee has 1024 live receipts, and every new effect on it
 is refused (`shared_guarantee_saturated`) until some settle. Usually holds are piling
 up because responses were lost and nobody reconciled them. Find the resources with
-`GET /v1/guarantees/{id}/holds` and each hold's next safe step with
+`GET /v1/guarantees/{id}/holds` (`GET /v1/guarantees` lists the ids) and each hold's
+next safe step with
 `GET /v1/guarantees/{id}/resources/{resource_digest}/holds`, then follow that step
 (see *Unknown effects*). Raising the cap or deleting ledger rows by hand is never the
 fix: a held receipt is capacity that may already be spent at the provider.
@@ -172,7 +181,8 @@ Reconcile them before the cap refuses new effects (see
 Sev 1 candidate. An exposure ledger does not parse, so its resource refuses every
 effect and its holds are unknown. Ledgers are only written by the runtime, so suspect
 access around it, as for a failed audit verification. Do not repair it by hand.
-Export the audit chain and restore the document from backup.
+Export the audit chain and restore from backup as in GUIDE section 12, *Backup and
+restore*: restore the whole database, never one document, so ledgers and audit agree.
 
 ### ContextOSGovernanceSweepStale
 
@@ -253,7 +263,8 @@ history to distrust. With a KMS-held key, also revoke the Vault token and the ke
 version. Re-verify every tenant's chain.
 
 **Audit verification fails.** Sev 1. Do not write to the store by hand. Export the
-chain, verify offline to find the first failing sequence, and compare with backups.
+chain, verify offline to find the first failing sequence, and compare with backups
+and your external audit export (GUIDE section 12, *Backup and restore*).
 The table rejects updates and deletes by trigger; a failure means access around the
 runtime, so treat the database credentials as compromised.
 

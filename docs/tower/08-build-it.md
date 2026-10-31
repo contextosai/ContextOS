@@ -32,7 +32,7 @@ What the script does, so you can reproduce it by hand:
 Keep it running in one terminal. In another:
 
 ```sh
-export TOWER=http://127.0.0.1:8090/api
+export TOWER=http://127.0.0.1:8090
 as() { local k=$1; shift; curl -s -H "authorization: Bearer $k" -H 'content-type: application/json' "$@"; }
 CISO=dev-ciso-0123456789abcdef0123456789abcde
 MAYA=dev-owner-0123456789abcdef0123456789abcd
@@ -47,8 +47,8 @@ AGENT=tenant_acme_prod%2Fagt_support
 Open <http://127.0.0.1:8090/tower/> and sign in with `$CISO`, or:
 
 ```sh
-as $CISO $TOWER/posture | jq '{agents, findings: .findings.by_severity}'
-as $CISO "$TOWER/findings" | jq -r '.findings[] | "\(.severity)\t\(.rule)"'
+as $CISO $TOWER/api/posture | jq '{agents, findings: .findings.by_severity}'
+as $CISO "$TOWER/api/findings" | jq -r '.findings[] | "\(.severity)\t\(.rule)"'
 ```
 
 ```text
@@ -71,7 +71,7 @@ runtime does not declare.
 Sign in as maya (`$MAYA`) and press **Declare**, or:
 
 ```sh
-as $MAYA -X PUT "$TOWER/agents/$AGENT/declaration" -d '{
+as $MAYA -X PUT "$TOWER/api/agents/$AGENT/declaration" -d '{
   "owner": "maya", "team": "support-ai", "business_unit": "Customer Operations",
   "purpose": "Refunds damaged deliveries up to the order amount; never without identity verification.",
   "users_served": "customers", "lifecycle": "production",
@@ -87,7 +87,7 @@ Sign in as risk-a. The **Review** tab shows the current state; with intelligence
 **Draft** asks Claude for an intake review first. Record the decision:
 
 ```sh
-as $RA -X POST "$TOWER/agents/$AGENT/review" -d '{
+as $RA -X POST "$TOWER/api/agents/$AGENT/review" -d '{
   "decision": "approved",
   "notes": "Refunds are compensatable, human_approved, behind the finance gate above 3000.",
   "conditions": ["request enterprise and durable-delegated profiles", "pin model_profile"],
@@ -109,10 +109,10 @@ The runtime team needs a sprint to enable the controls. Maya requests a waiver; 
 decides it:
 
 ```sh
-W=$(as $MAYA -X POST $TOWER/waivers -d '{"rule": "controls_missing",
+W=$(as $MAYA -X POST $TOWER/api/waivers -d '{"rule": "controls_missing",
   "agent": "tenant_acme_prod/agt_support",
   "reason": "Runtime team enabling the enterprise controls in CHG-118", "days": 14}' | jq -r .id)
-as $RB -X POST "$TOWER/waivers/$W/decide" -d '{"approve": true, "reason": "Tracked in CHG-118"}'
+as $RB -X POST "$TOWER/api/waivers/$W/decide" -d '{"approve": true, "reason": "Tracked in CHG-118"}'
 ```
 
 The finding stays visible as *waived until …* and returns by itself after 14 days.
@@ -120,13 +120,13 @@ The finding stays visible as *waived until …* and returns by itself after 14 d
 ### A6. Risk reviewers: set a rule for every agent
 
 ```sh
-G=$(as $RA -X POST $TOWER/guardrails -d '{
+G=$(as $RA -X POST $TOWER/api/guardrails -d '{
   "title": "Customer-facing agents pin their model", "severity": "high",
   "rule": {"and": [{"==": [{"var": "declaration.users_served"}, "customers"]},
                    {"!": {"var": "agent.models.0"}}]},
   "remediation": "Pin model_profile in the execution contract release_refs."}' | jq -r .id)
-as $RA -X POST $TOWER/guardrails/$G/activate   # 403: the author cannot activate it
-as $RB -X POST $TOWER/guardrails/$G/activate   # active
+as $RA -X POST $TOWER/api/guardrails/$G/activate   # 403: the author cannot activate it
+as $RB -X POST $TOWER/api/guardrails/$G/activate   # active
 ```
 
 With intelligence on, Guardrails → **Draft from intent** writes the rule from a
@@ -135,7 +135,7 @@ sentence and shows which agents it would flag before anyone can save it.
 ### A7. Operator: stop something everywhere
 
 ```sh
-as $ONCALL -X POST $TOWER/fleet/restore -d '{"kind": "capability",
+as $ONCALL -X POST $TOWER/api/fleet/restore -d '{"kind": "capability",
   "target": "adp_payments.issue_refund", "reason": "INC-7 resolved"}'
 ```
 
@@ -146,8 +146,8 @@ Tower's change feed picks it up on the next poll.
 ### A8. Auditor: verify the record
 
 ```sh
-as $CISO "$TOWER/journal?from=1&limit=500" | jq .entries > /tmp/journal.json
-curl -s $TOWER/journal/keys > /tmp/keys.json
+as $CISO "$TOWER/api/journal?from=1&limit=500" | jq .entries > /tmp/journal.json
+curl -s $TOWER/api/journal/keys > /tmp/keys.json
 ./target/release/ctx audit-verify --entries /tmp/journal.json --keys /tmp/keys.json
 ```
 

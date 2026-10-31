@@ -297,6 +297,8 @@ async fn postgres_store_suite() {
         .await
         .unwrap();
     store.migrate().await.unwrap();
+    // Migrating records the version, so a role without DDL rights can start.
+    assert!(store.schema_current().await.unwrap());
     let tenant = format!("tenant_{}", std::process::id());
     basic_semantics(&store, &tenant).await;
     expiry_semantics(&store, &tenant).await;
