@@ -47,7 +47,8 @@ spec:
             - { name: POSTGRES_DB, value: contextos }
           ports: [{ containerPort: 5432 }]
           readinessProbe:
-            exec: { command: ["pg_isready", "-U", "contextos_owner", "-d", "contextos"] }
+            # Over TCP: the image's init phase runs a socket-only server, then restarts.
+            exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "contextos_owner", "-d", "contextos"] }
             periodSeconds: 2
 ---
 apiVersion: v1
@@ -58,7 +59,8 @@ spec:
   ports: [{ port: 5432 }]
 YAML
 kubectl -n "$NS" rollout status deployment/postgres --timeout=180s
-psql() { kubectl -n "$NS" exec deploy/postgres -- psql -v ON_ERROR_STOP=1 -U contextos_owner -d contextos -tAc "$1"; }
+psql() { kubectl -n "$NS" exec deploy/postgres -- psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U contextos_owner -d contextos -tAc "$1"; }
+for _ in $(seq 30); do psql "SELECT 1" >/dev/null 2>&1 && break; sleep 2; done
 # The runtime role gets the documented data rights on tables the owner creates later,
 # and no right to create anything.
 psql "CREATE ROLE contextos_runtime LOGIN PASSWORD 'runtime-pw'" >/dev/null
