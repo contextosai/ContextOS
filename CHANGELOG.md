@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.10 - 2026-10-31
+
+Tenth alpha: the fixes below from reviewing alpha.9, which was tagged but not
+published. The first release to use after 0.1.0-alpha.6; see the
+[release notes](docs/releases/v0.1.0-alpha.10.md) before upgrading.
+
 ### Fixed
 - A capability pinned to an upstream tool (`upstream_tool_digest`) on an adapter that
   cannot list its tools was refused forever as unverified; startup now refuses such a
