@@ -479,11 +479,13 @@ dependencies = [
  "contextos-gateway",
  "hex",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "url",
 ]
 
@@ -3420,6 +3422,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.23.1",
+ "contextos-adapters",
  "contextos-audit",
  "contextos-contract",
  "contextos-kernel",

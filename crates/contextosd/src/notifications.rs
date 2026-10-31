@@ -221,7 +221,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Dispatcher<S, L> {
     ) -> Self {
         tenants.sort();
         tenants.dedup();
-        let client = reqwest::Client::builder()
+        let client = contextos_adapters::tls::builder()
             .https_only(!development)
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))

@@ -1416,6 +1416,13 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   status, reasons), `contextos.continue`, `contextos.reconcile`, `contextos.decision`,
   `contextos.score`, `contextos.memory` and `contextos.erase` inside it, each carrying the
   tenant, run and trace ids. Logs are JSON with the same spans.
+- **Private CAs:** outgoing TLS (providers, adapters, the KMS, OIDC issuers,
+  notification webhooks, the OTLP exporter, Tower's sources) trusts the public roots
+  bundled in the binary. For services behind your own CA, set `CONTEXTOS_CA_BUNDLE` to
+  a PEM file of its certificates; it is read once at startup, which fails on a file
+  that holds none, and `--check-config` reports it. PostgreSQL takes its CA in the URL
+  (`?sslmode=verify-full&sslrootcert=/path/ca.pem`). The Helm chart mounts the bundle
+  with `extraVolumes`, `extraVolumeMounts` and `extraEnv` (see its README).
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).

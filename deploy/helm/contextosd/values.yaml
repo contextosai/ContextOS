@@ -57,6 +57,10 @@ logLevel: info
 # loopback.
 extraContainers: []
 extraVolumes: []
+# Environment and mounts for the contextosd container itself, for example a private CA
+# bundle (a ConfigMap in extraVolumes, mounted here, named by CONTEXTOS_CA_BUNDLE).
+extraEnv: []
+extraVolumeMounts: []
 
 # Schema migration as a pre-install/pre-upgrade hook, run as a role that owns the
 # schema so the runtime role (in `secretName`) needs no DDL rights. `secretName` here

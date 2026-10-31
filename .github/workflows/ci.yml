@@ -276,6 +276,12 @@ jobs:
             | grep -q 'alert: ContextOSSharedGuaranteeSaturated'
           helm template t deploy/helm/contextosd --set migration.enabled=true --set migration.secretName=owner \
             | ./kubeconform -strict -summary -skip ServiceMonitor
+          helm template t deploy/helm/contextosd \
+            --set-json 'extraVolumes=[{"name":"corp-ca","configMap":{"name":"corp-ca"}}]' \
+            --set-json 'extraVolumeMounts=[{"name":"corp-ca","mountPath":"/etc/contextos/ca","readOnly":true}]' \
+            --set-json 'extraEnv=[{"name":"CONTEXTOS_CA_BUNDLE","value":"/etc/contextos/ca/ca.pem"}]' \
+            | tee rendered.yaml | ./kubeconform -strict -summary -skip ServiceMonitor
+          grep -q 'CONTEXTOS_CA_BUNDLE' rendered.yaml && grep -q 'mountPath: /etc/contextos/ca' rendered.yaml
       - name: Check and unit-test the alerting rules
         run: |
           curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \

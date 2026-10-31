@@ -164,7 +164,7 @@ impl OidcIssuer {
             .iter()
             .filter_map(|a| Algorithm::from_str(a).ok())
             .collect();
-        let client = reqwest::Client::builder()
+        let client = contextos_adapters::tls::builder()
             .https_only(!development)
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))

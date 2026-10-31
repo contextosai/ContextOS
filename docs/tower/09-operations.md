@@ -93,7 +93,9 @@ towerd --config /etc/contextos/towerd.toml
 With the container image: `--entrypoint /usr/local/bin/towerd` and
 `[tower] dir = "/usr/share/contextos/tower"`. Run it as its own Deployment, separate
 from runtimes, with network access to each runtime's API and to PostgreSQL. Put TLS in
-front of it (an ingress or a sidecar); `towerd` serves plain HTTP.
+front of it (an ingress or a sidecar); `towerd` serves plain HTTP. When runtimes or the
+model API sit behind your own CA, set `CONTEXTOS_CA_BUNDLE` to a PEM file of its
+certificates, as for `contextosd` (GUIDE section 12, *Private CAs*).
 
 ## Sizing
 
