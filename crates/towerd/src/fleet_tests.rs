@@ -208,3 +208,22 @@ fn one_tenant_past_its_agent_bound_does_not_crowd_out_another() {
         "the other tenant keeps its own agents"
     );
 }
+
+#[test]
+fn the_fleet_has_a_ceiling_beyond_the_per_tenant_bound() {
+    let mut fleet = Fleet::new(10, 48);
+    (fleet.max_agents, fleet.max_fleet_agents) = (10, 2);
+    for (seq, tenant, agent) in [(1, "t1", "a"), (2, "t2", "b"), (3, "t3", "c"), (4, "t3", "d")] {
+        let mut e = entry(
+            seq,
+            "run_admitted",
+            json!({"run_id": format!("r{seq}"), "agent_id": agent, "trace_id": format!("t{seq}")}),
+        );
+        e.tenant_id = tenant.into();
+        fleet.apply("eu", &e);
+    }
+    // Two real agents, then t3's new agents share its overflow agent.
+    assert!(fleet.agents.contains_key("t1/a") && fleet.agents.contains_key("t2/b"));
+    assert_eq!(fleet.agents[&format!("t3/{OVERFLOW_AGENT}")].runs, 2);
+    assert_eq!(fleet.agents.len(), 3);
+}
