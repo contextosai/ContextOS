@@ -52,6 +52,22 @@ secretName: contextosd
 
 logLevel: info
 
+# Sidecars beside contextosd in each pod (a database proxy, a secrets agent), and the
+# volumes they mount. They share the pod's network, so contextosd reaches them on
+# loopback.
+extraContainers: []
+extraVolumes: []
+
+# Schema migration as a pre-install/pre-upgrade hook, run as a role that owns the
+# schema so the runtime role (in `secretName`) needs no DDL rights. `secretName` here
+# names a Secret holding that owner role's URL under `urlEnv`.
+migration:
+  enabled: false
+  secretName: ""
+  urlEnv: CONTEXTOS_DATABASE_URL
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+
 resources:
   requests: { cpu: 500m, memory: 256Mi }
   limits: { memory: 1Gi }

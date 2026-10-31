@@ -227,6 +227,33 @@ jobs:
             bin=/src/target/baseline/x86_64-unknown-linux-gnu/release &&
             for b in contextosd ctx towerd; do "$bin/$b" --version; done &&
             CONTEXTOS_BIN="$bin" env PATH=/usr/bin:/bin ./examples/shared-guarantees/run.sh'
+  # The chart and image installed the way the docs describe a production deployment:
+  # a schema-owner migration hook, a least-privilege runtime role, rolling restart and
+  # upgrade. Rendering alone missed an image that exited under the chart's arguments.
+  kubernetes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: contextosd:e2e
+          cache-from: type=gha,scope=kubernetes-e2e
+          cache-to: type=gha,mode=max,scope=kubernetes-e2e
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.2
+      - name: Create a kind cluster and load the image
+        run: |
+          curl -sSLo kind https://github.com/kubernetes-sigs/kind/releases/download/v0.29.0/kind-linux-amd64
+          chmod +x kind
+          ./kind create cluster --wait 120s
+          ./kind load docker-image contextosd:e2e
+      - name: Install and exercise the chart
+        run: IMAGE=contextosd:e2e ./deploy/kind/e2e.sh
   helm:
     runs-on: ubuntu-24.04
     steps:
@@ -247,6 +274,8 @@ jobs:
             | ./kubeconform -strict -summary -skip ServiceMonitor,PrometheusRule
           helm template t deploy/helm/contextosd --set prometheusRule.enabled=true --show-only templates/prometheusrule.yaml \
             | grep -q 'alert: ContextOSSharedGuaranteeSaturated'
+          helm template t deploy/helm/contextosd --set migration.enabled=true --set migration.secretName=owner \
+            | ./kubeconform -strict -summary -skip ServiceMonitor
       - name: Check and unit-test the alerting rules
         run: |
           curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
