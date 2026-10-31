@@ -46,6 +46,19 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         }
         mode => format!("agent binding: {}", mode.as_str()),
     });
+    report.push(match crate::pack_intents::mode(&config) {
+        crate::pack_intents::PackIntents::Off => {
+            "warning: pack intents are off: intent-scoped rules restrict only runs that declare their intent".into()
+        }
+        mode => format!("pack intents: {}", mode.as_str()),
+    });
+    let mut refs: Vec<_> = packs.keys().collect();
+    refs.sort();
+    for pack_ref in refs {
+        if let Some(note) = crate::pack_intents::spread(pack_ref, packs[pack_ref].compiler.pack()) {
+            report.push(format!("warning: {note}"));
+        }
+    }
     let unpinned = dispatch
         .as_ref()
         .map(|d| crate::upstream_check::unpinned(&config, d))

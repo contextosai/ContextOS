@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Changed (breaking)
+- Pack intents: a run's intent must be one its Context Pack's rules name
+  (`applies_to.intent`), when they name any, so a caller cannot step around
+  intent-scoped restrictions by declaring another intent. With the
+  `contextos.enterprise` profile, other intents are refused (`422 intent_not_governed`);
+  otherwise they are admitted and counted (`contextos_pack_intent_mismatches_total`).
+  `run_admitted` records `pack_intent`. Set `[guards] pack_intents` to choose.
+  `--check-config` warns about packs whose restrictive rules span intents.
+
 ### Fixed
 - The OAuth client-credentials broker no longer panics when a token endpoint answers
   an unrepresentably large `expires_in`; tokens are cached for at most 24 hours.
