@@ -4,7 +4,9 @@
 #
 # - PostgreSQL with a schema-owner role and a least-privilege runtime role;
 # - the chart's migration hook creates the schema as the owner;
-# - the server starts as the runtime role (no DDL), serves, signs and verifies audit;
+# - the server starts in production mode as the runtime role (no DDL), with its own
+#   keys, and reaches its providers over HTTPS behind a private CA it trusts through
+#   CONTEXTOS_CA_BUNDLE: it admits a run, dispatches a refund, signs and verifies audit;
 # - the data survives a rolling restart, and `helm upgrade` re-runs the hook.
 #
 # Needs kubectl, helm, curl and python3, and the image already loaded into the
@@ -68,12 +70,19 @@ psql "REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public T
 psql "ALTER DEFAULT PRIVILEGES FOR ROLE contextos_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE ON TABLES TO contextos_runtime" >/dev/null
 
 echo "== Secrets and values"
-# The quickstart's configuration and development keys, on PostgreSQL, with its
-# synthetic providers as a sidecar: development mode reaches providers over plain HTTP
-# on loopback only, which a sidecar shares.
-KEY="dev-key-0123456789abcdef0123456789abcdef"
-OPS="dev-ops-0123456789abcdef0123456789abcdef"
+# Production mode, as the docs describe it: the operator's own keys (production refuses
+# the published development ones), providers over HTTPS behind a private CA the test
+# generates and the server trusts through CONTEXTOS_CA_BUNDLE. The quickstart's
+# synthetic providers run as a sidecar, serving TLS on loopback.
+KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+OPS="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 SEED="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+(cd "$WORK" \
+  && openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.pem -days 2 -subj "/CN=ContextOS e2e CA" \
+  && openssl req -newkey rsa:2048 -nodes -keyout tls.key -out tls.csr -subj "/CN=127.0.0.1" \
+  && printf 'subjectAltName=IP:127.0.0.1\n' > san.ext \
+  && openssl x509 -req -in tls.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out tls.pem -days 2 -extfile san.ext) \
+  >/dev/null 2>&1
 kubectl -n "$NS" create secret generic contextosd \
   --from-literal=CONTEXTOS_DATABASE_URL="postgres://contextos_runtime:runtime-pw@postgres:5432/contextos" \
   --from-literal=CONTEXTOS_AUDIT_SEED="$SEED" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -82,21 +91,11 @@ kubectl -n "$NS" create secret generic contextosd-owner \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n "$NS" create configmap dev-services --from-file=examples/support-refund/dev_services.py \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-python3 - "$KEY" "$WORK/contextosd.toml" <<'PY'
-import hashlib, sys
-key, out = sys.argv[1], sys.argv[2]
-text = open("examples/support-refund/contextosd.toml").read()
-for old, new in [
-    ('packs = ["examples/support-refund/pack.json"]', 'packs = ["/etc/contextos/packs/support.json"]'),
-    ('"examples/support-refund/capabilities/', '"/etc/contextos/capabilities/'),
-    ('listen = "127.0.0.1:8080"', 'listen = "0.0.0.0:8080"'),
-    ('kind = "memory"', 'kind = "postgres"\nurl_env = "CONTEXTOS_DATABASE_URL"'),
-    ("sha256:REPLACED_BY_RUN_SH", "sha256:" + hashlib.sha256(key.encode()).hexdigest()),
-]:
-    assert old in text, old
-    text = text.replace(old, new)
-open(out, "w").write(text)
-PY
+kubectl -n "$NS" create secret generic provider-tls --from-file="$WORK/tls.pem" --from-file="$WORK/tls.key" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$NS" create configmap provider-ca --from-file="$WORK/ca.pem" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+python3 deploy/kind/config.py "$KEY" "$OPS" > "$WORK/contextosd.toml"
 python3 - "$WORK/contextosd.toml" "$IMAGE" > "$WORK/values.yaml" <<'PY'
 import json, sys
 config, image = open(sys.argv[1]).read(), sys.argv[2]
@@ -106,13 +105,20 @@ print(json.dumps({
     "replicaCount": 2,
     "migration": {"enabled": True, "secretName": "contextosd-owner"},
     "config": config,
+    "extraEnv": [{"name": "CONTEXTOS_CA_BUNDLE", "value": "/etc/contextos/ca/ca.pem"}],
+    "extraVolumeMounts": [{"name": "provider-ca", "mountPath": "/etc/contextos/ca", "readOnly": True}],
     "extraContainers": [{
         "name": "dev-services", "image": "python:3.12-slim",
         "command": ["python3", "/dev-services/dev_services.py"],
-        "volumeMounts": [{"name": "dev-services", "mountPath": "/dev-services", "readOnly": True}],
+        "env": [{"name": "CONTEXTOS_DEV_TLS_CERT", "value": "/tls/tls.pem"},
+                {"name": "CONTEXTOS_DEV_TLS_KEY", "value": "/tls/tls.key"}],
+        "volumeMounts": [{"name": "dev-services", "mountPath": "/dev-services", "readOnly": True},
+                         {"name": "provider-tls", "mountPath": "/tls", "readOnly": True}],
         "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
     }],
-    "extraVolumes": [{"name": "dev-services", "configMap": {"name": "dev-services"}}],
+    "extraVolumes": [{"name": "dev-services", "configMap": {"name": "dev-services"}},
+                     {"name": "provider-tls", "secret": {"secretName": "provider-tls", "defaultMode": 0o444}},
+                     {"name": "provider-ca", "configMap": {"name": "provider-ca"}}],
 }))
 PY
 files=(--set-file 'packs.support\.json=examples/support-refund/pack.json'
@@ -135,11 +141,14 @@ forward() {
 api() { local key="$1"; shift; curl -sS --fail-with-body -H "Authorization: Bearer $key" -H 'Content-Type: application/json' "$@"; }
 verified() { api "$KEY" "$URL/v1/audit/verify" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["verified"], d; e=d["entries"]; print(len(e) if isinstance(e, list) else e)'; }
 
-echo "== Serving as the runtime role: admit, dispatch, kill switch, audit"
+echo "== Serving in production mode as the runtime role: admit, dispatch over TLS, kill switch, audit"
 forward
 RUN="$(python3 -c '
 import json
 run = json.load(open("examples/support-refund/requests/run.json"))
+# Production requires the model and evaluator releases to be pinned.
+art = lambda t, i: {"artifact_type": t, "artifact_id": i, "version": "1", "sha256": "sha256:" + "0" * 64}
+run["contract"]["release_refs"] += [art("model_profile", "e2e-model"), art("evaluator_suite", "e2e-evals")]
 run["task_authorization"] = {
     "issued_by": {"principal_id": "usr_771", "principal_type": "person", "trust_domain": "contextos.dev",
                   "tenant_id": "tenant_acme_prod"},
@@ -158,7 +167,8 @@ status="$(api "$KEY" -H "contextos-executor-generation: $GENERATION" -X POST "$U
 api "$OPS" -X POST "$URL/v1/revocations" \
   -d '{"kind": "capability", "target": "adp_orders.lookup", "reason": "E2E-1"}' >/dev/null
 before="$(verified)"
-echo "admitted, refunded, revoked; audit verifies ($before entries)"
+kubectl -n "$NS" logs deploy/contextosd -c contextosd | grep -q 'trusting private CAs from CONTEXTOS_CA_BUNDLE'
+echo "admitted, refunded over TLS behind a private CA, revoked; audit verifies ($before entries)"
 
 echo "== Rolling restart: state persists, no DDL needed"
 kubectl -n "$NS" rollout restart deployment/contextosd >/dev/null
