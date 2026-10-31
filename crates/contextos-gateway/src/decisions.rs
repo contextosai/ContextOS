@@ -20,7 +20,7 @@ use contextos_contract::types::{
     DecisionRationale, DecisionRecord, DecisionStatus, JsonObject, PolicyVerdict, ReplayPacket, ToolLineageEntry,
 };
 use contextos_kernel::TransitionResult;
-use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, transact};
+use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreError, transact};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -29,6 +29,9 @@ use crate::{Gateway, GatewayError, operation_ledger_key};
 
 /// Decisions recorded per run at most.
 pub const MAX_DECISIONS_PER_RUN: usize = 1024;
+/// Budget compaction archives an evidence walk follows before it calls the chain
+/// corrupt.
+const MAX_BUDGET_ARCHIVES: usize = 16_384;
 /// Tool calls one decision may cite.
 pub const MAX_DECISION_TOOL_CALLS: usize = 256;
 /// Canonical size of a decision's free-form parts (outputs, rationale, subjects).
@@ -418,12 +421,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             &admission.budget_ledger_id,
         ))
         .await?;
-        // Walk the compaction archives from the live ledger back to admission.
+        // Walk the compaction archives from the live ledger back to admission. A chain
+        // that revisits an archive or outgrows any real run is corrupt, not evidence.
         let mut archives = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         let mut next = budget
             .as_ref()
             .and_then(|b| b["opening_usage_ref"]["artifact_id"].as_str().map(str::to_owned));
         while let Some(id) = next.filter(|id| *id != admission.budget_ledger_id) {
+            if archives.len() >= MAX_BUDGET_ARCHIVES || !seen.insert(id.clone()) {
+                return Err(StoreError::Integrity.into());
+            }
             let Some(archive) = get(DocKey::new(&admission.tenant_id, DocKind::BudgetArchive, &id)).await? else {
                 break;
             };

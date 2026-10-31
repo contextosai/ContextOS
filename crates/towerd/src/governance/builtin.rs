@@ -193,12 +193,12 @@ pub fn builtin(view: &AgentView, now_hour: i64) -> Vec<Finding> {
             ));
         }
     }
-    if !a.unresolved.is_empty() {
+    if a.unresolved_effects() > 0 {
         out.push(finding(
             "unresolved_effects",
             "critical",
             view,
-            format!("{name} has {} effect(s) with unknown outcome", a.unresolved.len()),
+            format!("{name} has {} effect(s) with unknown outcome", a.unresolved_effects()),
             "The runtime cannot tell whether these actions happened. Nothing may retry them until they are reconciled."
                 .into(),
             "Reconcile each operation (provider query, or an operator assertion with evidence) on its runtime.",
