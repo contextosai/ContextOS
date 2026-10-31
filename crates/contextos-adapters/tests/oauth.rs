@@ -124,6 +124,18 @@ async fn a_short_lived_token_is_replaced_halfway_through_its_life() {
 }
 
 #[tokio::test]
+async fn an_unrepresentable_lifetime_is_capped_not_a_crash() {
+    let (url, requests) = token_server(|n| {
+        token(json!({"access_token": format!("tok_{n}"), "token_type": "Bearer", "expires_in": u64::MAX}))
+    })
+    .await;
+    let broker = broker(&url, Duration::from_secs(60));
+    broker.credential(&manifest(), &call()).await.unwrap();
+    broker.credential(&manifest(), &call()).await.unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1, "cached for the capped lifetime");
+}
+
+#[tokio::test]
 async fn without_a_bearer_token_the_call_fails_before_anything_is_sent() {
     for answer in [
         (|_| StatusCode::UNAUTHORIZED.into_response()) as fn(usize) -> Response,
