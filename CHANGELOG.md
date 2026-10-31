@@ -5,6 +5,33 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+- A capability pinned to an upstream tool (`upstream_tool_digest`) on an adapter that
+  cannot list its tools was refused forever as unverified; startup now refuses such a
+  pin outside MCP adapters. While a pinned tool is unverified, the check retries every
+  15 seconds instead of 5 minutes, and a poisoned verdict lock refuses rather than
+  serves.
+- `--check-config` warns about every pack that governs several intents and scopes a
+  restrictive rule to any of them; it missed packs whose other intents only allow.
+- Tower bounds agents per source tenant, so one tenant declaring many agent ids no
+  longer sends every other tenant's new agents to `(other agents)`.
+- `examples/ops/unresolved.py` gives partly applied effects escalation guidance instead
+  of a reconcile call that cannot decide them, treats provisional outcomes as
+  unresolved, and prints calls using its own `CONTEXTOS_URL`.
+- Filing feedback audits before it claims its index slot again (a concurrent listing
+  could drop a slot claimed long before its record existed); a full index still
+  refuses before anything is audited.
+- Migrations run in one transaction under an advisory lock, so replicas starting
+  together on an old schema migrate one at a time.
+- `scripts/check-archive.sh` reports a dev server that failed to start instead of
+  aborting, and waits longer on slow hosts; `scripts/dev-postgres.sh` keeps its socket
+  in a per-user directory.
+
+### Added
+- Informational alerts `ContextOSAgentBindingMismatches` and
+  `ContextOSPackIntentMismatches`, with runbooks, for rolling either guard out in
+  `observe` before switching to `required`.
+
 ## 0.1.0-alpha.9 - 2026-10-31
 
 Ninth alpha: deployable as documented (container under the Helm chart,

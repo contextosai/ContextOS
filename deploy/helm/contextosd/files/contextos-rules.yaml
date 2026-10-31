@@ -206,6 +206,31 @@ groups:
             replica that has not checked it since it started refuses its calls.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamcheckunavailable
 
+      - alert: ContextOSAgentBindingMismatches
+        expr: sum by (mode) (increase(contextos_agent_binding_mismatches_total[1h])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: 'Runs declared agents their credentials do not name (agent_binding {{ $labels.mode }}).'
+          description: >-
+            In the last hour, runs declared an agent their caller's credential is not issued
+            for. With observe they were admitted; with required, refused. Before switching
+            to required, wait until this stays quiet.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosagentbindingmismatches
+
+      - alert: ContextOSPackIntentMismatches
+        expr: sum by (mode) (increase(contextos_pack_intent_mismatches_total[1h])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: 'Runs declared intents their packs do not govern (pack_intents {{ $labels.mode }}).'
+          description: >-
+            In the last hour, runs declared an intent their Context Pack's rules do not
+            name, so intent-scoped rules did not apply to them. With observe they were
+            admitted; with required, refused. Before switching to required, wait until
+            this stays quiet.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextospackintentmismatches
+
   - name: contextos.service
     rules:
       - alert: ContextOSServerErrors

@@ -185,3 +185,26 @@ fn attempts_unresolved_effects_and_agents_stay_bounded() {
     let other = &fleet.agents[&format!("acme/{OVERFLOW_AGENT}")];
     assert_eq!((other.runs, other.agent_urn.as_deref()), (2, None));
 }
+
+#[test]
+fn one_tenant_past_its_agent_bound_does_not_crowd_out_another() {
+    let mut fleet = Fleet::new(10, 48);
+    fleet.max_agents = 1;
+    let admit = |fleet: &mut Fleet, seq: u64, tenant: &str, agent: &str| {
+        let mut e = entry(
+            seq,
+            "run_admitted",
+            json!({"run_id": format!("r{seq}"), "agent_id": agent, "trace_id": format!("t{seq}")}),
+        );
+        e.tenant_id = tenant.into();
+        fleet.apply("eu", &e);
+    };
+    admit(&mut fleet, 1, "noisy", "a1");
+    admit(&mut fleet, 2, "noisy", "a2");
+    admit(&mut fleet, 3, "quiet", "b1");
+    assert!(fleet.agents.contains_key(&format!("noisy/{OVERFLOW_AGENT}")));
+    assert!(
+        fleet.agents.contains_key("quiet/b1"),
+        "the other tenant keeps its own agents"
+    );
+}

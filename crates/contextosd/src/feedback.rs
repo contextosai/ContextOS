@@ -125,6 +125,14 @@ impl FeedbackBody {
     }
 }
 
+/// Refuses when the tenant's open index is full, without changing it.
+pub async fn ensure_room<S: DocumentStore>(store: &S, tenant_id: &str) -> Result<(), FeedbackError> {
+    if open_ids(store, tenant_id).await?.len() >= MAX_OPEN {
+        return Err(FeedbackError::Full);
+    }
+    Ok(())
+}
+
 /// Adds `id` to the tenant's open index (once), refusing past [`MAX_OPEN`].
 pub async fn index_open<S: DocumentStore>(store: &S, tenant_id: &str, id: &str) -> Result<(), FeedbackError> {
     change_index(store, tenant_id, |ids| {

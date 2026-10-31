@@ -271,8 +271,8 @@ run, counts it in `contextos_pack_intent_mismatches_total{mode}` and records
 `pack_intent: {"mode", "governed": false}` in `run_admitted`. A pack with no
 intent-scoped rules governs every intent alike. A pack that serves more than one intent
 should give each one its own rules: a run that declares one intent is not held to
-another's, and `--check-config` warns about packs whose restrictive rules span
-intents.
+another's, and `--check-config` warns about every pack that governs several intents
+and scopes a restrictive rule to any of them.
 
 | Route | Scope | Use |
 |---|---|---|

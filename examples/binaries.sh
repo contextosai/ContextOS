@@ -14,7 +14,9 @@ contextos_binaries() {
       [ "$profile" = release ] && other=debug
       for binary in "$@"; do [ -x "$target/$other/$binary" ] || has_other=""; done
       # Reuse a profile another example already built rather than compile a second.
-      if [ -n "$has_other" ] && [ ! -x "$target/$profile/$1" ]; then profile="$other"; fi
+      local has_own=1
+      for binary in "$@"; do [ -x "$target/$profile/$binary" ] || has_own=""; done
+      if [ -n "$has_other" ] && [ -z "$has_own" ]; then profile="$other"; fi
       CONTEXTOS_BUILD_PROFILE="$profile"
       CONTEXTOS_BIN="$target/$profile"
     fi
