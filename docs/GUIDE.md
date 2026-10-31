@@ -172,8 +172,22 @@ and response bodies against it.
 ```sh
 ctx hash-key            # paste a ≥32-character key; configure only the hash
 contextosd --check-config deploy/contextosd.example.toml
+contextosd --migrate deploy/contextosd.example.toml    # PostgreSQL schema, as its owner
 contextosd --config deploy/contextosd.example.toml
 ```
+
+To try a configuration on your machine first, `./examples/dev-server.sh` runs the
+quickstart's development configuration. Moving that example to production mode
+switches on defaults that its development files do not meet; each refusal names its
+setting:
+
+| Refusal | Why | Meet it, or opt out |
+|---|---|---|
+| `--check-config`: an effectful MCP capability needs `recovery.completion` | a finished MCP result must say which reported state settles it | add `recovery.completion` to the manifest, or `[guards] require_completion_contracts = false` |
+| `422 memory_unverified` | recalled memory must be verified against promoted state | `[providers.memory]`, or `[guards] trust_supplied_memory = true` |
+| `422 release_ref_missing` | each run pins the model and evaluators that produce its decisions | pin `model_profile` and `evaluator_suite` in the contract's `release_refs`, or `[guards] required_release_refs = []` |
+| `422 contract_rejected` (`required_control_unsupported`) | the contract requires controls the deployment does not declare | declare them in `[support] controls`, only if your providers enforce them |
+| `endpoint must use https` | production refuses plaintext providers and adapters | serve them over HTTPS |
 
 `--check-config` runs the validation startup performs and exits: the configuration,
 its packs and pinned capability manifests, the dispatch gateway, that the signing seed
@@ -1281,7 +1295,7 @@ For incidents (containment with the kill switch, evidence, recovery, postmortems
 [INCIDENT.md](INCIDENT.md).
 
 **Production checklist.** Production mode enforces on its own: no published
-development keys, HTTPS endpoints and KMS, scope separation, runs that pin
+development keys, HTTPS for providers, adapters and the KMS, scope separation, runs that pin
 `model_profile` and `evaluator_suite` in `release_refs` (`[guards]
 required_release_refs`, default in production), user claims that state a `role`
 (`[guards] require_user_role`, default in production; `user_role_missing`), and
@@ -1289,7 +1303,8 @@ delegations whose result schema is registered (`[[result_schemas]]`), and runs w
 effects are independently scored before they complete
 (`[guards] completion_requires_scores`). Opt out of
 either only explicitly (`required_release_refs = []`, `require_user_role = false`).
-Also turn on:
+It warns about, but accepts, an audit signing seed in the environment: keep the key in
+a KMS (below). Also turn on:
 
 ```toml
 [guards]
@@ -1311,9 +1326,21 @@ run_content_days = 30            # personal content does not outlive its purpose
 
 Production refuses runs without `user.role` (see the threat model's residual risks).
 
-- **Store:** PostgreSQL. Grant the runtime role `SELECT, INSERT, UPDATE` on
-  `contextos_documents` and `SELECT, INSERT` only on `contextos_audit_log` (updates and
-  deletes are also blocked by trigger).
+- **Store:** PostgreSQL (to try one locally without Docker,
+  `eval "$(scripts/dev-postgres.sh)"` starts a disposable server and exports
+  `CONTEXTOS_DATABASE_URL`). Create or upgrade the schema with a role that owns it,
+  before the first start and after each upgrade:
+
+  ```sh
+  CONTEXTOS_DATABASE_URL=postgres://contextos_owner@db/contextos contextosd --migrate contextosd.toml
+  ```
+
+  Then run the server as a runtime role with `USAGE` on the schema, `SELECT, INSERT,
+  UPDATE` on `contextos_documents`, `SELECT, INSERT` only on `contextos_audit_log`
+  (updates and deletes are also blocked by trigger) and `SELECT` on
+  `contextos_schema_version`. A server whose schema is current starts without DDL; one
+  whose schema needs migrating tries to migrate, and with a runtime role that cannot,
+  refuses to start and says to run `--migrate`.
 - **Keys:** sign the audit chain with a key held in a KMS, so the runtime never holds
   the private key:
 
@@ -1389,6 +1416,41 @@ Production refuses runs without `user.role` (see the threat model's residual ris
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).
+
+### Backup and restore
+
+Everything `contextosd` remembers is in its PostgreSQL database: documents (runs,
+operation and budget ledgers, shared-guarantee exposure, approvals, decisions) and the
+audit log. Back up:
+
+- **The database, as one consistent snapshot.** `pg_dump` takes one; continuous
+  archiving (base backups plus WAL, point-in-time recovery) loses least. Never back up
+  the two tables separately: a ledger and its audit entries must agree.
+- **The audit verifying keys,** current and retired (`[audit] retired_keys`), and the
+  signing key in your KMS, so restored history still verifies.
+- **Configuration, packs and capability manifests,** which belong in version control.
+- **The audit chain, continuously, outside the database.** Export
+  `GET /v1/audit/entries` to your SIEM or write-once storage, so you can tell what a
+  restore removed.
+
+A restore takes the runtime back to the restore point, but your providers do not go
+back. Before serving again:
+
+1. Keep agents out: revoke the tenants (section 8), or do not route traffic yet.
+2. Verify the restored chain (`GET /v1/audit/verify`, or `ctx audit-verify` on an
+   export) and compare its last entry with your external copy. Entries after the
+   restore point are gone from the database; the external copy is the record of them.
+3. Reconcile with the providers' records for the gap. Operations the restored ledgers
+   show as unknown or in flight are reconciled as usual (INCIDENT.md, *Unknown effects*). Effects
+   applied after the restore point are absent from the ledgers, so shared guarantees
+   undercount them: account for them at the provider, and lower the affected limits
+   until the period they cover has passed.
+4. Have each executor take its runs over (`attach(...).take_over()`) rather than
+   continue from memory; restored runs may be at an older state than the executor
+   saw.
+5. Restore the tenants.
+
+Rehearse this restore before you rely on it.
 
 ## 13. Govern every agent with Tower
 

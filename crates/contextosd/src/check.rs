@@ -90,6 +90,9 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     let packs = load_packs(&config)?;
     report.push(format!("{} context pack(s) valid", packs.len()));
 
+    if config.api_keys.is_empty() && config.oidc.is_empty() {
+        report.push("warning: no [[api_keys]] or [[oidc]] issuers: no caller can authenticate".into());
+    }
     let dispatch = runtime::dispatch_setup_from_config(&config)?;
     guarantees_need_dispatch(&config, dispatch.is_some())?;
     report.push(match &dispatch {
@@ -135,6 +138,14 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
             key.principal_id
         ));
     }
+    for manifest in dispatch.iter().flat_map(|d| &d.manifests) {
+        if !config.adapters.iter().any(|a| a.id == manifest.adapter_id) {
+            report.push(format!(
+                "warning: {} names adapter {}, which no [[adapters]] entry configures: its calls cannot be sent",
+                manifest.capability_id, manifest.adapter_id
+            ));
+        }
+    }
     let unpinned = dispatch
         .as_ref()
         .map(|d| crate::upstream_check::unpinned(&config, d))
@@ -156,7 +167,14 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         format!("audit signing via {} at {} (not contacted)", kms.kind, kms.url)
     } else {
         signer_from_env(&config.audit.signing_seed_env, &config.audit.key_id)?;
-        format!("audit signing seed in {}", config.audit.signing_seed_env)
+        if config.server.mode == Mode::Production {
+            format!(
+                "warning: audit signing seed in {}: in production keep the key in a KMS ([audit.kms])",
+                config.audit.signing_seed_env
+            )
+        } else {
+            format!("audit signing seed in {}", config.audit.signing_seed_env)
+        }
     });
 
     report.push(match &config.store {

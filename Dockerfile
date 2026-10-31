@@ -24,4 +24,7 @@ COPY --from=console /src/tower/dist /usr/share/contextos/tower
 COPY LICENSE LICENSE-docs NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.txt /usr/share/licenses/contextos/
 USER nonroot:nonroot
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/contextosd", "--config", "/etc/contextos/contextosd.toml"]
+# Arguments go in CMD, so `docker run IMAGE --check-config …` and Kubernetes `args`
+# replace them instead of adding a second --config.
+ENTRYPOINT ["/usr/local/bin/contextosd"]
+CMD ["--config", "/etc/contextos/contextosd.toml"]

@@ -363,7 +363,7 @@ where
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "release_ref_missing",
-            "The execution contract must pin these release artifacts in release_refs.",
+            "The execution contract must pin these release artifacts in release_refs ([guards] required_release_refs).",
         )
         .with_detail(json!({"artifact_types": unpinned})));
     }
@@ -2093,7 +2093,8 @@ where
             Ok(())
         } else {
             Err(refused(
-                json!({"reason": "no memory governance verifies recalled memory"}),
+                json!({"reason": "no memory governance verifies recalled memory",
+                    "remedy": "configure [providers.memory], or set [guards] trust_supplied_memory = true"}),
             ))
         };
     }

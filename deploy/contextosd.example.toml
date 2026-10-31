@@ -54,6 +54,14 @@ tenant_id = "tenant_acme_prod"
 principal_id = "svc_orchestrator"
 scopes = ["compile", "admit", "dispatch", "audit:read"]
 
+# On-call operators' key: the kill switch, reconciliation and escalations
+# (docs/INCIDENT.md). Keep it apart from executors' keys.
+# [[api_keys]]
+# key_sha256 = "sha256:<from ctx hash-key>"
+# tenant_id = "tenant_acme_prod"
+# principal_id = "oncall"
+# scopes = ["control", "reconcile", "audit:read"]
+
 
 # ── Governed dispatch ────────────────────────────────────────────────────────
 # Without [providers], /v1/runs and tool calls return 501. Each provider is a
