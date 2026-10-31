@@ -7,8 +7,9 @@
 //! the runtime, reachable by run id. An effect whose run has left the window is counted
 //! against its source as unattributed rather than guessed. Open attempts are kept for
 //! the newest [`MAX_ATTEMPTS`], each agent tracks at most [`MAX_UNRESOLVED`] unresolved
-//! effects by id (the rest are counted), and past [`MAX_AGENTS`] agents a tenant's new
-//! agents share one [`OVERFLOW_AGENT`].
+//! effects by id (the rest are counted), and past [`MAX_AGENTS`] agents in one source
+//! tenant that tenant's new agents share one [`OVERFLOW_AGENT`], so one tenant's agent
+//! ids cannot crowd out another's.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
@@ -205,11 +206,14 @@ pub struct Fleet {
     max_attempts: usize,
     max_unresolved: usize,
     max_agents: usize,
+    /// Agents created per `(source, tenant)`, for the per-tenant bound.
+    agents_per_tenant: HashMap<(String, String), usize>,
 }
 
 const MAX_CHANGES: usize = 2_000;
 pub const MAX_ATTEMPTS: usize = 200_000;
 pub const MAX_UNRESOLVED: usize = 1_000;
+/// Agents per source tenant.
 pub const MAX_AGENTS: usize = 50_000;
 /// The agent id that a tenant's agents past [`MAX_AGENTS`] are counted under.
 pub const OVERFLOW_AGENT: &str = "(other agents)";
@@ -269,6 +273,7 @@ impl Fleet {
             max_attempts: MAX_ATTEMPTS,
             max_unresolved: MAX_UNRESOLVED,
             max_agents: MAX_AGENTS,
+            agents_per_tenant: HashMap::new(),
         }
     }
 
@@ -660,11 +665,19 @@ impl Fleet {
         let Some(run_id) = s(&p["run_id"]) else { return };
         let mut agent_id = s(&p["agent_id"]).unwrap_or("unknown");
         let mut key = agent_key(&entry.tenant_id, agent_id, s(&p["agent_urn"]));
-        // Agent ids are the caller's to declare; a fleet past its bound counts a
-        // tenant's new ones together rather than growing.
-        if !self.agents.contains_key(&key) && self.agents.len() >= self.max_agents {
-            agent_id = OVERFLOW_AGENT;
-            key = agent_key(&entry.tenant_id, agent_id, None);
+        // Agent ids are the caller's to declare; a tenant past its bound has its new
+        // ones counted together rather than growing the fleet or crowding out others.
+        if !self.agents.contains_key(&key) {
+            let created = self
+                .agents_per_tenant
+                .entry((source.to_owned(), entry.tenant_id.clone()))
+                .or_default();
+            if *created >= self.max_agents {
+                agent_id = OVERFLOW_AGENT;
+                key = agent_key(&entry.tenant_id, agent_id, None);
+            } else {
+                *created += 1;
+            }
         }
         let at = entry.emitted_at.clone();
         let a = self.agents.entry(key.clone()).or_insert_with(|| AgentActivity {

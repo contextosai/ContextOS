@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$ROOT/target/dev-postgres"
 PORT="${CONTEXTOS_DEV_PG_PORT:-55432}"
 # Unix socket paths are limited to about 100 bytes, which a deep checkout exceeds.
-SOCKDIR="/tmp/contextos-pg-$PORT"
+SOCKDIR="/tmp/contextos-pg-$(id -u)-$PORT"
 mkdir -p "$SOCKDIR"
 if [ ! -x "$DIR/venv/bin/python" ]; then
   python3 -m venv "$DIR/venv" >&2

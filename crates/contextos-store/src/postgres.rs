@@ -15,6 +15,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_schema_version.sql"),
 ];
 
+/// Advisory lock key held while migrating (`"ctxos_mg"` as bytes).
+const MIGRATION_LOCK: i64 = 0x6374_786f_735f_6d67;
+
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
@@ -51,9 +54,18 @@ impl PostgresStore {
     /// Applies idempotent schema migrations and records the schema version. Needs a
     /// role that may create tables; see [`PostgresStore::schema_current`].
     pub async fn migrate(&self) -> Result<(), StoreError> {
+        // One transaction under an advisory lock: replicas starting together migrate
+        // one at a time, and no reader sees a half-applied schema (for example the
+        // audit log without its immutability trigger).
+        let mut tx = self.pool.begin().await.map_err(|e| backend(&e))?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(MIGRATION_LOCK)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| backend(&e))?;
         for statement in MIGRATIONS {
             sqlx::raw_sql(statement)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| backend(&e))?;
         }
@@ -62,10 +74,10 @@ impl PostgresStore {
              ON CONFLICT (singleton) DO UPDATE SET version = GREATEST(contextos_schema_version.version, $1)",
         )
         .bind(i32::try_from(MIGRATIONS.len()).unwrap_or(i32::MAX))
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| backend(&e))?;
-        Ok(())
+        tx.commit().await.map_err(|e| backend(&e))
     }
 
     /// Whether the schema is migrated at least as far as this build needs, read

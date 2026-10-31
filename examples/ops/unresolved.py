@@ -5,8 +5,9 @@ chain, with the call that reconciles each. For on-call: no run id needed.
     CONTEXTOS_URL=https://contextos.internal AUDIT_TOKEN=... python3 examples/ops/unresolved.py
     python3 examples/ops/unresolved.py --entries export.json    # an exported chain
 
-The token needs `audit:read` and selects the tenant. Standard library only. Reconcile
-by querying the provider first; never re-run an effect to find out whether it happened.
+The token needs `audit:read` and selects the tenant. Standard library only. The
+printed reconcile calls need OPS_TOKEN, a credential with `reconcile`. Reconcile by
+querying the provider first; never re-run an effect to find out whether it happened.
 """
 import json
 import os
@@ -42,7 +43,11 @@ def main():
             continue
         if kind == "operation_claim":
             claims[attempt] = payload
-        elif kind in ("effect_observation", "effect_reconciliation"):
+        elif kind == "effect_observation":
+            # A provisional observation does not settle an effect.
+            final = payload.get("finality") == "definitive"
+            latest[attempt] = payload.get("outcome") if final else "unknown"
+        elif kind == "effect_reconciliation":
             latest[attempt] = payload.get("outcome")
     # Unresolved: the latest outcome is unknown or partial, or there is none yet (in
     # flight, or orphaned by a crash).
@@ -54,10 +59,14 @@ def main():
     for claim, outcome in unresolved:
         run, operation = claim["run_id"], claim["operation_id"]
         print(f"{outcome or 'no outcome yet'}: run {run} operation {operation} ({claim.get('capability_id')})")
-        print(f"  curl -X POST \"$CONTEXTOS/v1/runs/{run}/operations/{operation}/reconcile\" "
-              f"-H \"Authorization: Bearer $OPS_TOKEN\" -H 'Content-Type: application/json' "
-              f"-d '{{\"source\": \"provider\"}}'")
-
+        if outcome == "partial":
+            # Reconciliation decides unknown outcomes only; part of this effect applied.
+            print("  partly applied: escalate to its owner, and compensate or complete it at the "
+                  "provider (docs/COMPENSATION.md); do not retry it")
+        else:
+            print(f"  curl -X POST \"$CONTEXTOS_URL/v1/runs/{run}/operations/{operation}/reconcile\" "
+                  f"-H \"Authorization: Bearer $OPS_TOKEN\" -H 'Content-Type: application/json' "
+                  f"-d '{{\"source\": \"provider\"}}'")
 
 if __name__ == "__main__":
     main()

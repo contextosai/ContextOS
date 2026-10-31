@@ -74,7 +74,11 @@ impl DriftState {
     /// The reason calls to this capability are refused, if they are.
     pub(crate) fn refusal(&self, manifest: &crate::CapabilityManifest) -> Option<&'static str> {
         manifest.upstream_tool_digest.as_ref()?;
-        match self.0.read().ok()?.get(&manifest.capability_id) {
+        // A poisoned lock is no verdict: refuse rather than serve unchecked.
+        let Ok(verdicts) = self.0.read() else {
+            return Some("upstream_tool_unverified");
+        };
+        match verdicts.get(&manifest.capability_id) {
             None => Some("upstream_tool_unverified"),
             Some(true) => Some("upstream_tool_drifted"),
             Some(false) => None,
@@ -93,6 +97,15 @@ impl DriftState {
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
+    /// Whether some pinned capability has not been checked yet, so its calls are
+    /// refused until a check succeeds.
+    #[must_use]
+    pub fn upstream_unverified(&self) -> bool {
+        self.manifests
+            .values()
+            .any(|m| self.drift.refusal(m) == Some("upstream_tool_unverified"))
+    }
+
     /// Checks every capability that pins an upstream digest against its provider's
     /// current tool definitions, one listing per adapter, and updates which are
     /// refused. Returns each checked capability's status.

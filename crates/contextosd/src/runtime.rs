@@ -305,6 +305,22 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
                 manifest.capability_id
             ));
         }
+        // Only an MCP server lists its tools, so a pin elsewhere could never be checked
+        // and would refuse every call.
+        if !config
+            .adapters
+            .iter()
+            .any(|a| a.id == manifest.adapter_id && a.kind == crate::config::AdapterKind::Mcp)
+            && (manifest.upstream_tool_digest.is_some() || manifest.upstream_description_digest.is_some())
+        {
+            return Err(format!(
+                "{}: {} pins an upstream tool, but adapter {} is not an MCP adapter, whose tools \
+                 could be listed and checked",
+                path.display(),
+                manifest.capability_id,
+                manifest.adapter_id
+            ));
+        }
         // An HTTP success status is not proof of the effect: the provider's reported
         // state is, so an effectful HTTP capability must declare how to read it.
         let http = config

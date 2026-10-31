@@ -1774,10 +1774,9 @@ where
         "summary": request.summary, "expected_outcome": request.expected_outcome, "reporter": caller.principal_id,
         "filed_at": now, "status": "open",
         "replay_obligation": {"case": run_id, "replay_case": format!("/v1/runs/{run_id}/replay-case")}});
-    // Indexed before it is audited or exists, so a full index refuses before the chain
-    // claims a filing; an id left without a record (a failed audit or create) is
-    // dropped by the next list or close that meets it.
-    crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
+    // A full index refuses before the chain records a filing (index_open below
+    // enforces the bound itself; this read only keeps a refused filing unaudited).
+    crate::feedback::ensure_room(state.store.as_ref(), &admission.tenant_id)
         .await
         .map_err(feedback_error)?;
     // Audited by digest: the summary itself stays out of the chain.
@@ -1799,6 +1798,12 @@ where
                 "The audit log is unavailable.",
             )
         })?;
+    // Indexed just before the record exists, so a concurrent list or close meets an
+    // id without a record only briefly; one left without a record (a failed create)
+    // is dropped by the next list or close that meets it.
+    crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
+        .await
+        .map_err(feedback_error)?;
     let store_down = || {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,

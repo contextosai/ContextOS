@@ -1,7 +1,8 @@
 //! Periodic upstream drift checks and the `--pin-mcp-tools` report (see
 //! [`contextos_gateway::upstream_drift`]).
 //!
-//! Every replica checks at startup and then every [`CHECK_INTERVAL`], because each
+//! Every replica checks at startup and then every [`CHECK_INTERVAL`] (every
+//! [`RETRY_INTERVAL`] while a pinned tool is still unverified), because each
 //! keeps its own verdict and refuses drifted capabilities itself. The gauge
 //! `contextos_upstream_tool{capability,status}` is 1 for each checked capability's
 //! current status. Capabilities are pinned at startup, so the label is bounded.
@@ -17,6 +18,8 @@ use contextos_store::{AppendLog, DocumentStore};
 use crate::metrics::Metrics;
 
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(300);
+/// How soon to check again while a pinned tool is unverified (its calls are refused).
+pub const RETRY_INTERVAL: Duration = Duration::from_secs(15);
 
 /// The gauge exposition for one check.
 #[must_use]
@@ -41,14 +44,17 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    let mut ticker = tokio::time::interval(CHECK_INTERVAL);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        ticker.tick().await;
         let statuses = gateway.check_upstream_tools().await;
         if !statuses.is_empty() {
             metrics.set_upstream(Some(exposition(&statuses)));
         }
+        let wait = if gateway.upstream_unverified() {
+            RETRY_INTERVAL
+        } else {
+            CHECK_INTERVAL
+        };
+        tokio::time::sleep(wait).await;
     }
 }
 

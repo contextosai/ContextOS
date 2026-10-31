@@ -284,3 +284,32 @@ tests:
               summary: 'The upstream tool behind adp_mail.send cannot be checked.'
               description: The provider's tool list has not been readable for 30 minutes, so drift of adp_mail.send would go unnoticed. The last verdict stands; a replica that has not checked it since it started refuses its calls.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamcheckunavailable
+
+  - name: observe-mode mismatches are reported per mode
+    interval: 1m
+    input_series:
+      - series: 'contextos_agent_binding_mismatches_total{mode="observe",pod="a"}'
+        values: '0+1x40'
+      - series: 'contextos_pack_intent_mismatches_total{mode="observe",pod="a"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ContextOSAgentBindingMismatches
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              mode: observe
+            exp_annotations:
+              summary: 'Runs declared agents their credentials do not name (agent_binding observe).'
+              description: In the last hour, runs declared an agent their caller's credential is not issued for. With observe they were admitted; with required, refused. Before switching to required, wait until this stays quiet.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosagentbindingmismatches
+      - eval_time: 20m
+        alertname: ContextOSPackIntentMismatches
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              mode: observe
+            exp_annotations:
+              summary: 'Runs declared intents their packs do not govern (pack_intents observe).'
+              description: In the last hour, runs declared an intent their Context Pack's rules do not name, so intent-scoped rules did not apply to them. With observe they were admitted; with required, refused. Before switching to required, wait until this stays quiet.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextospackintentmismatches

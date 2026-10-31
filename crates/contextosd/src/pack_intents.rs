@@ -14,7 +14,8 @@
 //! - `off` checks nothing.
 //!
 //! This does not stop a run declaring one governed intent to avoid the rules of
-//! another in the same pack; `--check-config` names packs where that is possible.
+//! another in the same pack; `--check-config` names every pack where that is possible
+//! (more than one governed intent, and a restrictive rule scoped to one of them).
 
 use std::collections::BTreeSet;
 
@@ -82,20 +83,24 @@ fn restrictive(rule: &PolicyRule) -> bool {
         || rule.otherwise.as_ref().is_some_and(|o| !o.allow)
 }
 
-/// A `--check-config` warning when the pack's restrictive rules are scoped to more
-/// than one intent, so a run declaring one is not held to the others' rules.
+/// A `--check-config` warning when the pack governs more than one intent and scopes
+/// a restrictive rule to any of them: a run may declare another governed intent, and
+/// it is not held to that rule.
 #[must_use]
 pub fn spread(pack_ref: &str, pack: &ContextPack) -> Option<String> {
-    let scoped: BTreeSet<&str> = rules(pack)
+    let governed = governed(pack);
+    let restricted: BTreeSet<&str> = rules(pack)
         .filter(|rule| restrictive(rule))
         .filter_map(|rule| rule.applies_to.intent.as_deref())
         .filter(|intent| !intent.is_empty())
         .collect();
-    (scoped.len() > 1).then(|| {
+    (governed.len() > 1 && !restricted.is_empty()).then(|| {
         format!(
-            "{pack_ref} scopes restrictive rules to {} intents ({}): a run declaring one is not held to the others' rules",
-            scoped.len(),
-            scoped.into_iter().collect::<Vec<_>>().join(", ")
+            "{pack_ref} governs {} intents ({}) and scopes restrictive rules to {}: a run declaring \
+             one intent is not held to another's rules",
+            governed.len(),
+            governed.into_iter().collect::<Vec<_>>().join(", "),
+            restricted.into_iter().collect::<Vec<_>>().join(", ")
         )
     })
 }
@@ -165,20 +170,25 @@ mod tests {
     }
 
     #[test]
-    fn restrictive_rules_across_intents_are_reported() {
-        let one = pack(json!([
+    fn a_restriction_that_another_governed_intent_escapes_is_reported() {
+        // A run declaring general.query is admitted and not held to R1.
+        let escapable = pack(json!([
             rule("R1", Some("support.refund"), json!({"allow": false})),
             rule("R2", Some("general.query"), json!({"allow": true})),
         ]));
-        assert_eq!(spread("p@1", &one), None);
-        let two = pack(json!([
-            rule("R1", Some("support.refund"), json!({"allow": false})),
-            rule(
-                "R2",
-                Some("general.query"),
-                json!({"allow": true, "prohibits": ["adp_payments.issue_refund"]})
-            ),
+        let warning = spread("p@1", &escapable).unwrap();
+        assert!(
+            warning.contains("governs 2 intents (general.query, support.refund)"),
+            "{warning}"
+        );
+        assert!(warning.contains("restrictive rules to support.refund"), "{warning}");
+        // One governed intent, or no restriction at all: nothing to escape.
+        let single = pack(json!([rule("R1", Some("support.refund"), json!({"allow": false}))]));
+        assert_eq!(spread("p@1", &single), None);
+        let permissive = pack(json!([
+            rule("R1", Some("support.refund"), json!({"allow": true})),
+            rule("R2", Some("general.query"), json!({"allow": true})),
         ]));
-        assert!(spread("p@1", &two).unwrap().contains("general.query, support.refund"));
+        assert_eq!(spread("p@1", &permissive), None);
     }
 }

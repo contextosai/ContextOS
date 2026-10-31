@@ -86,7 +86,8 @@ refused, and the run cannot complete until it is reconciled. Find them from the 
 chain, with the reconcile call for each:
 
 ```sh
-CONTEXTOS_URL=$CONTEXTOS AUDIT_TOKEN=$AUDIT_TOKEN python3 examples/ops/unresolved.py
+export CONTEXTOS_URL=$CONTEXTOS AUDIT_TOKEN OPS_TOKEN   # the printed calls use these
+python3 examples/ops/unresolved.py
 ```
 
 Tower lists them per agent too (the `unresolved_effects` finding). Query the provider
@@ -230,6 +231,22 @@ A replica has not been able to list the provider's tools for 30 minutes, so drif
 would go unnoticed. The last verdict stands; a replica that has not checked the tool
 since it started refuses calls with `upstream_tool_unverified`. Check the provider's
 health and that its credential allows `tools/list`.
+
+### ContextOSAgentBindingMismatches
+
+Informational. Runs declared an agent their caller's credential is not issued for. In
+`observe` mode this is the rollout signal: find the callers in the `run_admitted`
+entries (`agent_binding.bound: false`, with `admitted_by`), add the agents to their
+credentials (`agent_ids` or the issuer's `agent_claim`), and switch to `required` once
+this alert stays quiet. In `required` mode the runs were refused (`agent_not_bound`).
+
+### ContextOSPackIntentMismatches
+
+Informational. Runs declared an intent their Context Pack's rules do not name, so the
+pack's intent-scoped rules did not apply to them. In `observe` mode, find them in the
+`run_admitted` entries (`pack_intent.governed: false`, with `intent` and `pack_ref`):
+fix the callers' intents, or give the pack rules for each intent it serves, then switch
+to `required`. In `required` mode the runs were refused (`intent_not_governed`).
 
 ### ContextOSServerErrors
 

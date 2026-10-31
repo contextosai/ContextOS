@@ -62,6 +62,20 @@ async fn effectful_mcp_tools_need_a_completion_contract_in_production() {
 }
 
 #[tokio::test]
+async fn only_mcp_capabilities_may_pin_an_upstream_tool() {
+    let (mut config, _) = world_setup(&ALL_CONTROLS).await;
+    let path = config.capabilities[0].clone();
+    let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["upstream_tool_digest"] = json!(format!("sha256:{}", "a".repeat(64)));
+    std::fs::write(&path, manifest.to_string()).unwrap();
+    assert!(dispatch_setup_from_config(&config).is_ok(), "pinned on its MCP adapter");
+    // On an HTTP adapter the pin could never be checked, so every call would be refused.
+    config.adapters[0].kind = contextosd::config::AdapterKind::Http;
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("is not an MCP adapter"), "{refused}");
+}
+
+#[tokio::test]
 async fn production_requires_pins_and_a_stated_role() {
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
     // Development defaults: neither required.
