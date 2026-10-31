@@ -30,6 +30,7 @@ pub struct Metrics {
     decisions: Mutex<BTreeMap<String, u64>>,
     task_amendments: Mutex<BTreeMap<String, u64>>,
     agent_binding_mismatches: Mutex<BTreeMap<String, u64>>,
+    pack_intent_mismatches: Mutex<BTreeMap<String, u64>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
@@ -89,6 +90,12 @@ impl Metrics {
     /// binding mode (`observe` admits it, `required` refuses it).
     pub fn agent_binding_mismatch(&self, mode: &str) {
         bump(&self.agent_binding_mismatches, mode.to_owned());
+    }
+
+    /// Counts a run admitted or refused whose intent its pack's rules do not name, by
+    /// mode (`observe` admits it, `required` refuses it).
+    pub fn pack_intent_mismatch(&self, mode: &str) {
+        bump(&self.pack_intent_mismatches, mode.to_owned());
     }
 
     /// Counts a notification attempt by webhook and outcome (`delivered`, `failed`,
@@ -176,7 +183,7 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 5] = [
+        let counters: [(&str, &str, &str, &Counter); 6] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -206,6 +213,12 @@ impl Metrics {
                 "Runs whose declared agent their credential does not name, by binding mode.",
                 "mode",
                 &self.agent_binding_mismatches,
+            ),
+            (
+                "contextos_pack_intent_mismatches_total",
+                "Runs whose intent their Context Pack's rules do not name, by mode.",
+                "mode",
+                &self.pack_intent_mismatches,
             ),
         ];
         for (name, help, label, map) in counters {

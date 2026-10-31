@@ -228,6 +228,28 @@ parent's binding (`bound: "inherited"`). SPIRE's OIDC discovery provider publish
 JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
 accepted.
 
+#### Hold runs to the intents their pack governs
+
+A rule scoped to an intent (`applies_to.intent`) is evaluated only for runs that
+declare that intent, and the caller declares it. A pack whose refund rules are scoped
+to `support.refund` restricts nothing for a run that declares `general.query`, yet its
+refund tool is still surfaced. So admission checks the intent the compiler resolved
+against the intents the pack's rules name:
+
+```toml
+[guards]
+pack_intents = "required"    # or "observe", "off"
+```
+
+`required` refuses any other intent (`422 intent_not_governed`); it is the default
+with the `contextos.enterprise` profile. `observe`, the default otherwise, admits the
+run, counts it in `contextos_pack_intent_mismatches_total{mode}` and records
+`pack_intent: {"mode", "governed": false}` in `run_admitted`. A pack with no
+intent-scoped rules governs every intent alike. A pack that serves more than one intent
+should give each one its own rules: a run that declares one intent is not held to
+another's, and `--check-config` warns about packs whose restrictive rules span
+intents.
+
 | Route | Scope | Use |
 |---|---|---|
 | `POST /v1/compile` | `compile` | Compile a pinned pack |
