@@ -234,6 +234,7 @@ unit = "INR_minor"
                 c = admit("shared_pending", "support_async", PENDING)
                 pending = dispatch("shared_pending", "support_async", PENDING, c)
                 assert pending["result"]["status"] == "paused", pending
+                print("    support_async: accepted as a pending provider task, held until it resolves")
                 d = admit("shared_after_pending", "support_followup", 10_000)
                 blocked = dispatch("shared_after_pending", "support_followup", 10_000, d)
                 assert blocked["report"]["reason_codes"] == ["shared_guarantee_exceeded"], blocked

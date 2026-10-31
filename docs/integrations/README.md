@@ -46,11 +46,13 @@ checkpoint revision 1: thread run_langgraph_…
   issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_… (refunded)
 run completed
-evidence: budget used {… 'tokens': 4000, 'tool_calls': 2}, 11 signed audit entries
+evidence: budget used {… 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
-With `--approval`, the run is admitted for a refund above the pack's 3,000 threshold,
-so its calls wait for an exact approval. Each example surfaces the pause through the
+With `--approval`, the run is admitted declaring a refund of 5,000 (the run's
+`refund_amount`), above the pack's 3,000 approval threshold. The pack's high-value
+rule applies to the whole run, so its calls wait for an exact approval, whatever
+amount each call carries. Each example surfaces the pause through the
 framework's human-in-the-loop mechanism, a scripted reviewer approves the bound action
 in the development approval service, and the framework re-sends the identical call,
 which redeems the approval once:

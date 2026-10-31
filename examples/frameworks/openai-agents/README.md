@@ -16,16 +16,16 @@ and not repeated:
 ```
 admitted run_openai_agents_1792550735238 (executor generation 2)
 tool lookup_order -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
-approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
 approved; checkpoint revision 1
 tool issue_refund -> {'refund_id': 'rf_ord_881'}
-approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
 approved; checkpoint revision 2
 tool issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 agent: Refunded ord_881 in full. The repeat refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c598dcb7048aa807c818fb7b8d0 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 12 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## Approval
@@ -49,19 +49,19 @@ paused for approval: dev_approval:d4af686049c9
 reviewer approved dev_approval:d4af686049c9
 resumed: re-sending the same lookup_order call
 tool lookup_order -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
-approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
 approved; checkpoint revision 1
 paused for approval: dev_approval:aa6ac12c8b74
 reviewer approved dev_approval:aa6ac12c8b74
 resumed: re-sending the same issue_refund call
 tool issue_refund -> {'refund_id': 'rf_ord_881'}
-approval requested: issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
 approved; checkpoint revision 2
 tool issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 agent: Refunded ord_881 in full. The repeat refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6c8fcf75c1a6407f77569322f4 (refunded)
 run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, 14 signed audit entries
+evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## What is governed

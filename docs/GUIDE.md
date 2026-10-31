@@ -5,18 +5,22 @@
 The kernel is pure and deterministic, so it can run inside the agent process on the hot
 path. Every binding exposes the same operations (see `crates/contextos-embed`).
 
-Python (`bindings/python`, built with maturin):
+Python (`bindings/python`, built with maturin; see its
+[README](../bindings/python/README.md) to install):
 
 ```python
 import contextos
-compiled = contextos.compile(pack, request, run_context, {"evidence": evidence})
+compiled = contextos.compile(pack=pack, request=request, run_context=run_context,
+                             deps={"evidence": evidence})
 for gate in compiled["runtime_controls"]["evidence_gates"]:
     if not gate["commit_allowed"]:
         ...  # do not commit this decision; gather the unresolved evidence
 decision = contextos.evaluate_authorization(authorization_input)
 ```
 
-Node (`bindings/node`, N-API; async calls run on the libuv pool):
+Node (`bindings/node`, N-API; async calls run on the libuv pool). Nothing is on npm
+yet: `@contextos/kernel` names the package in `bindings/node`, which you install from
+this repository (`npm install /path/to/ContextOS/bindings/node`):
 
 ```js
 import { kernel } from "@contextos/kernel";
@@ -36,9 +40,13 @@ gateway (in-process in Rust, or `contextosd`) provides.
 
 ## 2. Govern an existing Python agent over HTTP
 
-`contextos.client` is a standard-library-only client for `contextosd`. It holds the
-executor generation for you and turns non-success results into exceptions, so agent
-code cannot mistake a pause or refusal for a result:
+`contextos.client` is a standard-library-only client for `contextosd` (put
+`bindings/python` on `PYTHONPATH`; see its [README](../bindings/python/README.md)). It
+holds the executor generation (which process currently owns the run) for you and turns
+non-success results into exceptions, so agent code cannot mistake a pause or refusal
+for a result. To try it locally, `./examples/dev-server.sh` starts a server and prints
+its URL and token; `admission_body` below is a run like
+[`run.json`](../examples/support-refund/requests/run.json):
 
 ```python
 from contextos.client import Client, ToolBlocked, ToolPaused, governed_tool

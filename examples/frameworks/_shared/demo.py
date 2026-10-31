@@ -11,7 +11,8 @@ Every example governs the same task, the quickstart's refund of order ord_881:
   ledger tool calls spend, so the agent cannot loop past its budget.
 
 Run an example with ``./examples/frameworks/run.sh <framework>``. With ``--approval``
-the run is admitted for a refund above the pack's 3,000 threshold, so the refund pauses
+the run is admitted declaring a refund of 5,000 (its ``refund_amount``), above the
+pack's 3,000 approval threshold, so the run's calls pause
 for an exact approval: the example surfaces it through the framework's human-in-the-loop
 mechanism, ``approve`` plays the reviewer, and the framework re-sends the same call.
 """

@@ -1,5 +1,6 @@
 //! `contextosd --check-config`: passes on a startable configuration and reports the
-//! first problem otherwise, without serving.
+//! first problem otherwise (every missing environment variable at once), without
+//! serving.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -45,7 +46,40 @@ fn passes_on_a_startable_configuration() {
 fn reports_a_missing_signing_seed() {
     let (ok, text) = check(&config("check-seed.toml", "127.0.0.1:0"), None);
     assert!(!ok);
-    assert!(text.contains("CONTEXTOS_AUDIT_SEED is not set"), "{text}");
+    assert!(
+        text.contains("CONTEXTOS_AUDIT_SEED (the audit signing seed: 64 hex characters)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn reports_every_missing_environment_variable_at_once() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_contextosd"));
+    command
+        .arg("--check-config")
+        .arg("deploy/contextosd.example.toml")
+        .current_dir(root());
+    for var in [
+        "CONTEXTOS_AUDIT_SEED",
+        "CONTEXTOS_DATABASE_URL",
+        "CONTEXTOS_AUTHORITY_TOKEN",
+        "CONTEXTOS_CONTROLS_TOKEN",
+        "CONTEXTOS_APPROVALS_TOKEN",
+        "CONTEXTOS_PAYMENTS_TOKEN",
+    ] {
+        command.env_remove(var);
+    }
+    let output = command.output().unwrap();
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    for expected in [
+        "CONTEXTOS_AUTHORITY_TOKEN (the authority service token)",
+        "CONTEXTOS_PAYMENTS_TOKEN (adapter adp_payments's provider token)",
+        "CONTEXTOS_AUDIT_SEED (the audit signing seed",
+        "CONTEXTOS_DATABASE_URL (the PostgreSQL URL)",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
 }
 
 #[test]

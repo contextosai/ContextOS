@@ -55,7 +55,8 @@ pub async fn audit_signer(config: &Config) -> Result<AuditSigner, String> {
 
 /// Reads a 32-byte hex seed from the named environment variable.
 pub fn signer_from_env(var: &str, key_id: &str) -> Result<AuditSigner, String> {
-    let hex_seed = std::env::var(var).map_err(|_| format!("{var} is not set"))?;
+    let hex_seed =
+        std::env::var(var).map_err(|_| format!("{var} is not set (the audit signing seed: 64 hex characters)"))?;
     let bytes = hex::decode(hex_seed.trim()).map_err(|_| format!("{var} must be hex"))?;
     let seed: [u8; 32] = bytes.try_into().map_err(|_| format!("{var} must hold 32 bytes"))?;
     Ok(AuditSigner::from_seed(key_id, seed))

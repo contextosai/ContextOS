@@ -396,7 +396,7 @@ impl Config {
             let hex = key.key_sha256.strip_prefix("sha256:").unwrap_or_default();
             if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
                 return Err(ConfigError::Invalid(format!(
-                    "api key for {} must be a lowercase sha256: hash",
+                    "api key for {} must be a lowercase sha256: hash (print one with `ctx hash-key`)",
                     key.principal_id
                 )));
             }

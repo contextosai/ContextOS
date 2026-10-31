@@ -3,7 +3,8 @@
 
 # Context Pack JSON files loaded and validated at startup.
 packs = []
-# Reviewed capability manifests pinned at startup (see deploy/capabilities/).
+# Reviewed capability manifests pinned at startup (examples/support-refund/capabilities/
+# has two). Relative paths resolve against the directory you start contextosd from.
 capabilities = []
 # Versions those replaced, kept so operations claimed under them can still be
 # reconciled and attested; never dispatched (docs/GUIDE.md, "Upgrading a capability").
@@ -45,7 +46,8 @@ profiles = ["contextos.core"]
 controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
 
 # Generate a key, give it to the caller, configure only its hash:
-#   key=$(openssl rand -hex 32); printf 'sha256:%s\n' "$(printf %s "$key" | shasum -a 256 | cut -d' ' -f1)"
+#   key=$(openssl rand -hex 32); printf '%s\n' "$key" | ctx hash-key   # prints key_sha256
+# Replace the placeholder below: no key matches it.
 [[api_keys]]
 key_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 tenant_id = "tenant_acme_prod"

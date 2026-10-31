@@ -11,10 +11,12 @@ NAME="${1:?usage: examples/frameworks/run.sh <framework>}"
 DIR="examples/frameworks/$NAME"
 [ -d "$DIR" ] || { echo "no example $DIR" >&2; exit 1; }
 if [ -f "$DIR/requirements.txt" ]; then
+  command -v uv >/dev/null || { echo "the Python examples need uv: https://docs.astral.sh/uv/" >&2; exit 1; }
   [ -x "$DIR/.venv/bin/python" ] || uv venv -q --python 3.12 "$DIR/.venv"
   uv pip install -q --python "$DIR/.venv/bin/python" -r "$DIR/requirements.txt"
   CMD=("$DIR/.venv/bin/python" "$DIR/agent.py")
 else
+  command -v node >/dev/null || { echo "the TypeScript examples need Node.js 24" >&2; exit 1; }
   [ -d "$DIR/node_modules" ] || npm install --prefix "$DIR" --silent --no-audit --no-fund
   CMD=(node --experimental-strip-types --no-warnings "$DIR/$(cd "$DIR" && ls agent.* | head -1)")
 fi

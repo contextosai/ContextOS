@@ -9,10 +9,76 @@ use std::path::Path;
 use crate::config::{Mode, StoreConfig};
 use crate::{Config, guarantees_need_dispatch, load_packs, runtime, signer_from_env};
 
+/// Every environment variable the configuration names, with what it holds.
+fn named_env(config: &Config) -> Vec<(&str, String)> {
+    let mut vars = Vec::new();
+    if let Some(providers) = &config.providers {
+        let optional = [
+            &providers.idempotency,
+            &providers.data_flow,
+            &providers.boundary,
+            &providers.memory,
+            &providers.result_screening,
+        ];
+        let named = [
+            ("authority", Some(&providers.authority)),
+            ("constraints", Some(&providers.constraints)),
+            ("approvals", Some(&providers.approvals)),
+        ]
+        .into_iter()
+        .chain(
+            ["idempotency", "data_flow", "boundary", "memory", "result_screening"]
+                .into_iter()
+                .zip(optional.into_iter().map(Option::as_ref)),
+        );
+        for (name, provider) in named {
+            if let Some(var) = provider.and_then(|p| p.token_env.as_deref()) {
+                vars.push((var, format!("the {name} service token")));
+            }
+        }
+    }
+    for adapter in &config.adapters {
+        if let Some(var) = adapter.token_env.as_deref() {
+            vars.push((var, format!("adapter {}'s provider token", adapter.id)));
+        }
+        if let Some(oauth) = &adapter.oauth {
+            vars.push((
+                oauth.client_secret_env.as_str(),
+                format!("adapter {}'s OAuth client secret", adapter.id),
+            ));
+        }
+    }
+    for hook in &config.notifications {
+        vars.push((
+            hook.secret_env.as_str(),
+            format!("webhook {}'s signing secret", hook.id),
+        ));
+    }
+    match &config.audit.kms {
+        Some(kms) => vars.push((kms.token_env.as_str(), "the KMS token".into())),
+        None => vars.push((
+            config.audit.signing_seed_env.as_str(),
+            "the audit signing seed: 64 hex characters".into(),
+        )),
+    }
+    if let StoreConfig::Postgres { url_env, .. } = &config.store {
+        vars.push((url_env.as_str(), "the PostgreSQL URL".into()));
+    }
+    vars
+}
+
 /// One line per passing check (`warning: ` for a check that passes with a caveat), or
-/// the first failure.
+/// the first failure. Missing environment variables are reported together.
 pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     let config = Config::load(path).map_err(|e| e.to_string())?;
+    let missing: Vec<String> = named_env(&config)
+        .into_iter()
+        .filter(|(var, _)| std::env::var_os(var).is_none())
+        .map(|(var, what)| format!("  {var} ({what})"))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!("environment variables not set:\n{}", missing.join("\n")));
+    }
     let mut report = vec![format!(
         "configuration parsed ({} mode)",
         match config.server.mode {
@@ -58,6 +124,16 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         if let Some(note) = crate::pack_intents::spread(pack_ref, packs[pack_ref].compiler.pack()) {
             report.push(format!("warning: {note}"));
         }
+    }
+    for key in config
+        .api_keys
+        .iter()
+        .filter(|k| k.key_sha256 == format!("sha256:{}", "0".repeat(64)))
+    {
+        report.push(format!(
+            "warning: the api key for {} is the example placeholder; no key matches it (`ctx hash-key` prints a real hash)",
+            key.principal_id
+        ));
     }
     let unpinned = dispatch
         .as_ref()

@@ -13,6 +13,17 @@ use contextosd::{Config, build_state, router};
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+const USAGE: &str = "\
+usage: contextosd <command>
+
+  --config <path>         serve with this configuration
+  --check-config <path>   validate the configuration and its environment, then exit
+  --pin-mcp-tools <path>  print upstream MCP tool digests to pin in capability manifests
+  --version               print the version
+  --help                  print this help
+
+Try it locally: ./examples/dev-server.sh. Configuration: docs/GUIDE.md section 3.";
+
 fn fail(message: impl std::fmt::Display) -> ! {
     tracing::error!(%message, "startup failed");
     eprintln!("contextosd: {message}");
@@ -25,6 +36,15 @@ async fn main() {
     if matches!(args.as_slice(), [_, flag] if flag == "--version") {
         println!("contextosd {}", env!("CARGO_PKG_VERSION"));
         return;
+    }
+    if matches!(args.as_slice(), [_, flag] if flag == "--help" || flag == "-h") {
+        println!("{USAGE}");
+        return;
+    }
+    let known = ["--config", "--check-config", "--pin-mcp-tools"];
+    if !matches!(args.as_slice(), [_, flag, _] if known.contains(&flag.as_str())) {
+        eprintln!("{USAGE}");
+        std::process::exit(2);
     }
     if let [_, flag, path] = args.as_slice()
         && flag == "--check-config"
@@ -66,7 +86,7 @@ async fn main() {
     let telemetry = contextosd::telemetry::init().unwrap_or_else(|e| fail(e));
     let path = match args.as_slice() {
         [_, flag, path] if flag == "--config" => path.clone(),
-        _ => fail("usage: contextosd --config <path> | --check-config <path> | --pin-mcp-tools <path> | --version"),
+        _ => unreachable!("arguments were checked above"),
     };
     let config = Config::load(std::path::Path::new(&path)).unwrap_or_else(|e| fail(e));
     let signer = contextosd::audit_signer(&config).await.unwrap_or_else(|e| fail(e));

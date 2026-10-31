@@ -21,7 +21,7 @@ issueRefund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted
 agent (4 steps): Refunded 120000 minor units for ord_881. A second refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c55c8fe734ca756b3f7f00f54e4 (refunded)
 run completed
-evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 10 signed audit entries
+evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, <n> signed audit entries
 ```
 
 The first install pulls about 140 MB (`@mastra/core` brings Hono, the A2A SDK, PostHog
@@ -79,7 +79,7 @@ issueRefund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted
 agent (4 steps): Refunded 120000 minor units for ord_881. A second refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c6f7cf370458f3aa2047bb58430 (refunded)
 run completed
-evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, 12 signed audit entries
+evidence: budget used {"cost_units":100,"replans":0,"tokens":4000,"tool_calls":2}, <n> signed audit entries
 ```
 
 ## With a real model
