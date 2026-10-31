@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.7 - 2026-10-31
+
+Seventh alpha: a newcomer path from clone to your own governed agent, and the fixes
+from review round 7. Two changes can need configuration; see the
+[release notes](docs/releases/v0.1.0-alpha.7.md) before upgrading.
+
 ### Changed (breaking)
 - Pack intents: a run's intent must be one its Context Pack's rules name
   (`applies_to.intent`), when they name any, so a caller cannot step around

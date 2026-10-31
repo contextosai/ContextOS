@@ -2,5 +2,5 @@ apiVersion: v2
 name: contextosd
 description: ContextOS runtime server - governed compilation, admission, tool dispatch and signed audit
 type: application
-version: 0.1.0-alpha.6
-appVersion: "0.1.0-alpha.6"
+version: 0.1.0-alpha.7
+appVersion: "0.1.0-alpha.7"
