@@ -202,7 +202,8 @@ groups:
           summary: 'The upstream tool behind {{ $labels.capability }} cannot be checked.'
           description: >-
             The provider's tool list has not been readable for 30 minutes, so drift of
-            {{ $labels.capability }} would go unnoticed. The last verdict stands.
+            {{ $labels.capability }} would go unnoticed. The last verdict stands; a
+            replica that has not checked it since it started refuses its calls.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamcheckunavailable
 
   - name: contextos.service

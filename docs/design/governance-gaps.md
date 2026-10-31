@@ -165,7 +165,7 @@ surface as `PortError`, which the gateway already treats as fail-closed. On-beha
 token exchange (RFC 8693) waits for a customer who needs the user, not the gateway, as
 the upstream subject.
 
-**D3. Upstream drift detection.** *Built* (GUIDE section 4, threat T32). Every replica checks, not only the leader, because each keeps and enforces its own verdict. An unreachable server keeps the last verdict.
+**D3. Upstream drift detection.** *Built* (GUIDE section 4, threat T32). Every replica checks, not only the leader, because each keeps and enforces its own verdict. A pinned tool the replica has not yet checked is refused (`upstream_tool_unverified`, added after review round 7); after that an unreachable server keeps the last verdict.
 - Add `upstream_tool_digest` to the manifest: SHA-256 over the canonical (RFC 8785)
   upstream definition of `name`, `inputSchema`, `outputSchema` and `annotations`. Add a
   separate `upstream_description_digest` over the description (see decision 3).
