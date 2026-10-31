@@ -13,6 +13,10 @@ minor versions may break APIs and every break is listed.
   otherwise they are admitted and counted (`contextos_pack_intent_mismatches_total`).
   `run_admitted` records `pack_intent`. Set `[guards] pack_intents` to choose.
   `--check-config` warns about packs whose restrictive rules span intents.
+- `[guards.approval_step_up] amount_at_least` is now a list of
+  `{currency, minor_units}` thresholds instead of a bare number, so a threshold meant
+  in one currency is not applied to another's minor units. An amount in a currency
+  without a threshold, or without a currency, always needs step-up.
 
 ### Fixed
 - The OAuth client-credentials broker no longer panics when a token endpoint answers
@@ -22,6 +26,25 @@ minor versions may break APIs and every break is listed.
   until the replica has checked it once, so neither the moments after startup nor a
   restart while the provider is unreachable serve an unchecked tool. A pin on an
   adapter that cannot list its tools stays unverified and is reported `unavailable`.
+- Closing feedback accepts only identifier-shaped `evidence_ref.artifact_type` and
+  `artifact_id` (letters, digits and `._:/@#+-`), so prose cannot reach the unerasable
+  audit chain; a filing is indexed before it is audited, so a full index refuses it
+  before the chain records it.
+- `GET /v1/runs/{run_id}/evidence` refuses a budget archive chain that loops or
+  exceeds 16,384 archives (`store_unavailable`, logged as an integrity failure)
+  instead of walking it forever.
+- Tower's fleet model is bounded as documented: open attempts evict oldest first
+  instead of all at once at 200,000; each agent tracks at most 1,000 unresolved effects
+  by id and counts the rest; past 50,000 agents a tenant's new agents are counted
+  together under `(other agents)`.
+- `run_admitted` for a delegated run records `named_by_credential`: whether the
+  admitting credential names the child's agent, which the parent's delegation chose.
+
+### Documentation
+- SCOPE.md: request-context values satisfy evidence gates without integrity checks,
+  and evidence freshness is the caller's label (`valid_until` is not evaluated).
+- Spec proposal 0007: what resume compares in the budget snapshot, so a parent can
+  resume after its delegated children close.
 
 ## 0.1.0-alpha.6 - 2026-10-30
 

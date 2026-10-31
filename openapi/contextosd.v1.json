@@ -3090,7 +3090,8 @@
                   ],
                   "properties": {
                     "open": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Open feedback in the tenant's index. Entries past `limit` are counted without being read, so a few left over from interrupted filings or closures may be included until a listing or closure reaches them."
                     },
                     "feedback": {
                       "type": "array",

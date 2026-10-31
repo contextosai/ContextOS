@@ -207,11 +207,14 @@ async fn approval_step_up_is_configured_and_checked_at_startup() {
     let (config, _) = world_setup(&ALL_CONTROLS).await;
     let with = |table: &str| Config::parse(&format!("{}\n{table}", config.source));
     let parsed = with(
-        "[guards.approval_step_up]\namount_at_least = 100000\namr_values = [\"mfa\", \"hwk\"]\nmax_age_seconds = 300",
+        "[guards.approval_step_up]\namount_at_least = [{currency = \"USD\", minor_units = 100000}]\n\
+         amr_values = [\"mfa\", \"hwk\"]\nmax_age_seconds = 300",
     )
     .unwrap();
     let policy = parsed.guards.approval_step_up.unwrap();
-    assert_eq!(policy.amount_at_least, Some(100_000));
-    let refused = with("[guards.approval_step_up]\namount_at_least = 100000").unwrap_err();
+    assert_eq!(policy.amount_at_least[0].minor_units, 100_000);
+    // A bare number names no currency.
+    assert!(with("[guards.approval_step_up]\namount_at_least = 100000\namr_values = [\"mfa\"]").is_err());
+    let refused = with("[guards.approval_step_up]\ncapabilities = [\"adp_payments.issue_refund\"]").unwrap_err();
     assert!(refused.to_string().contains("acr_values or amr_values"), "{refused}");
 }

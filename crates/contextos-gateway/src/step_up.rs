@@ -26,13 +26,23 @@ fn default_max_age() -> u64 {
     300
 }
 
+/// An amount at or above which approvals need step-up, in one currency.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmountThreshold {
+    /// ISO 4217 code, as the action's bound `amount.currency`.
+    pub currency: String,
+    pub minor_units: u64,
+}
+
 /// `[guards.approval_step_up]`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StepUpPolicy {
-    /// Applies to actions whose bound amount is at least this many minor units.
+    /// Applies to actions whose bound amount reaches the threshold for its currency,
+    /// and to any bound amount in a currency without one (or without a currency).
     #[serde(default)]
-    pub amount_at_least: Option<u64>,
+    pub amount_at_least: Vec<AmountThreshold>,
     /// Applies to every approval of these capabilities.
     #[serde(default)]
     pub capabilities: Vec<String>,
@@ -49,8 +59,17 @@ pub struct StepUpPolicy {
 
 impl StepUpPolicy {
     pub fn validate(&self) -> Result<(), String> {
-        if self.amount_at_least.is_none() && self.capabilities.is_empty() {
+        if self.amount_at_least.is_empty() && self.capabilities.is_empty() {
             return Err("approval_step_up needs amount_at_least or capabilities".into());
+        }
+        let mut currencies = std::collections::HashSet::new();
+        for threshold in &self.amount_at_least {
+            let code = &threshold.currency;
+            if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_uppercase()) || !currencies.insert(code) {
+                return Err(format!(
+                    "approval_step_up amount_at_least: {code:?} must be a distinct ISO 4217 currency code"
+                ));
+            }
         }
         if self.acr_values.is_empty() && self.amr_values.is_empty() {
             return Err("approval_step_up needs acr_values or amr_values".into());
@@ -64,11 +83,16 @@ impl StepUpPolicy {
     /// Whether approvals of this action need step-up.
     #[must_use]
     pub fn applies(&self, capability_id: &str, binding: &Value) -> bool {
+        let amount = &binding["amount"];
         self.capabilities.iter().any(|c| c == capability_id)
-            || self
-                .amount_at_least
-                .zip(binding["amount"]["minor_units"].as_u64())
-                .is_some_and(|(threshold, amount)| amount >= threshold)
+            || (!self.amount_at_least.is_empty()
+                && amount["minor_units"].as_u64().is_some_and(|units| {
+                    // A currency without a threshold cannot be compared: step up.
+                    self.amount_at_least
+                        .iter()
+                        .find(|t| amount["currency"] == t.currency.as_str())
+                        .is_none_or(|t| units >= t.minor_units)
+                }))
     }
 
     fn strong(&self, entry: &Value, decided_at: &str) -> bool {
@@ -115,7 +139,10 @@ mod tests {
 
     fn policy() -> StepUpPolicy {
         StepUpPolicy {
-            amount_at_least: Some(100_000),
+            amount_at_least: vec![AmountThreshold {
+                currency: "USD".into(),
+                minor_units: 100_000,
+            }],
             capabilities: Vec::new(),
             acr_values: vec!["phr".into()],
             amr_values: vec!["mfa".into(), "hwk".into()],
@@ -133,12 +160,22 @@ mod tests {
     #[test]
     fn step_up_applies_by_amount_or_capability() {
         let p = policy();
-        assert!(p.applies(
-            "adp_payments.issue_refund",
-            &json!({"amount": {"minor_units": 100_000}})
-        ));
-        assert!(!p.applies("adp_payments.issue_refund", &json!({"amount": {"minor_units": 99_999}})));
+        let amount = |currency: &str, units: u64| json!({"amount": {"currency": currency, "minor_units": units}});
+        assert!(p.applies("adp_payments.issue_refund", &amount("USD", 100_000)));
+        assert!(!p.applies("adp_payments.issue_refund", &amount("USD", 99_999)));
         assert!(!p.applies("adp_payments.issue_refund", &json!({})));
+        // No threshold for the currency, or none named: the amounts cannot be
+        // compared, so step-up applies.
+        assert!(p.applies("adp_payments.issue_refund", &amount("JPY", 5)));
+        assert!(p.applies("adp_payments.issue_refund", &json!({"amount": {"minor_units": 5}})));
+        for currency in ["usd", "US", "USD"] {
+            let mut twice = p.clone();
+            twice.amount_at_least.push(AmountThreshold {
+                currency: currency.into(),
+                minor_units: 1,
+            });
+            assert!(twice.validate().is_err(), "{currency}");
+        }
         let named = StepUpPolicy {
             capabilities: vec!["adp_iam.grant_admin".into()],
             ..policy()
@@ -155,7 +192,7 @@ mod tests {
         );
         assert!(
             StepUpPolicy {
-                amount_at_least: None,
+                amount_at_least: Vec::new(),
                 ..policy()
             }
             .validate()

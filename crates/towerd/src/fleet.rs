@@ -5,7 +5,10 @@
 //! Memory is bounded by design. Agents keep counters and hourly buckets (bounded by
 //! `hours`), runs are kept for the last `recent_runs` only, and raw evidence stays in
 //! the runtime, reachable by run id. An effect whose run has left the window is counted
-//! against its source as unattributed rather than guessed.
+//! against its source as unattributed rather than guessed. Open attempts are kept for
+//! the newest [`MAX_ATTEMPTS`], each agent tracks at most [`MAX_UNRESOLVED`] unresolved
+//! effects by id (the rest are counted), and past [`MAX_AGENTS`] agents a tenant's new
+//! agents share one [`OVERFLOW_AGENT`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
@@ -84,11 +87,34 @@ pub struct AgentActivity {
     pub checkpoints: u64,
     /// Effects whose outcome is unknown or partial and not yet reconciled.
     pub unresolved: BTreeSet<String>,
+    /// Unresolved effects past [`MAX_UNRESOLVED`], counted but not tracked by id.
+    pub unresolved_untracked: u64,
     #[serde(skip)]
     pub hours: BTreeMap<i64, Hour>,
 }
 
 impl AgentActivity {
+    /// Unresolved effects, tracked or not.
+    #[must_use]
+    pub fn unresolved_effects(&self) -> u64 {
+        self.unresolved.len() as u64 + self.unresolved_untracked
+    }
+
+    /// A reconciliation for an effect not tracked by id settles an untracked one.
+    fn resolve(&mut self, key: &str) {
+        if !self.unresolved.remove(key) {
+            self.unresolved_untracked = self.unresolved_untracked.saturating_sub(1);
+        }
+    }
+
+    fn unresolve(&mut self, key: String, max: usize) {
+        if self.unresolved.len() < max || self.unresolved.contains(&key) {
+            self.unresolved.insert(key);
+        } else {
+            self.unresolved_untracked += 1;
+        }
+    }
+
     fn hour(&mut self, at: &str) -> &mut Hour {
         self.hours.entry(hour_index(at)).or_default()
     }
@@ -169,15 +195,24 @@ pub struct Fleet {
     order: VecDeque<(String, String)>,
     traces: HashMap<(String, String), String>,
     attempts: HashMap<(String, String), Open>,
+    /// `attempts` keys, oldest first.
+    attempt_order: VecDeque<(String, String)>,
     pub changes: VecDeque<Change>,
     recent_runs: usize,
     hours: usize,
     /// Bumped on every change, so readers can cache derived views.
     pub revision: u64,
+    max_attempts: usize,
+    max_unresolved: usize,
+    max_agents: usize,
 }
 
 const MAX_CHANGES: usize = 2_000;
-const MAX_ATTEMPTS: usize = 200_000;
+pub const MAX_ATTEMPTS: usize = 200_000;
+pub const MAX_UNRESOLVED: usize = 1_000;
+pub const MAX_AGENTS: usize = 50_000;
+/// The agent id that a tenant's agents past [`MAX_AGENTS`] are counted under.
+pub const OVERFLOW_AGENT: &str = "(other agents)";
 
 fn s(v: &Value) -> Option<&str> {
     v.as_str()
@@ -226,10 +261,14 @@ impl Fleet {
             order: VecDeque::new(),
             traces: HashMap::new(),
             attempts: HashMap::new(),
+            attempt_order: VecDeque::new(),
             changes: VecDeque::new(),
             recent_runs: recent_runs.max(1),
             hours: hours.max(24),
             revision: 0,
+            max_attempts: MAX_ATTEMPTS,
+            max_unresolved: MAX_UNRESOLVED,
+            max_agents: MAX_AGENTS,
         }
     }
 
@@ -406,17 +445,22 @@ impl Fleet {
                         run.capabilities.insert(capability.clone());
                     }
                     if let Some(attempt) = s(&p["attempt_id"]) {
-                        if self.attempts.len() >= MAX_ATTEMPTS {
-                            self.attempts.clear();
+                        let key = (source.to_owned(), attempt.to_owned());
+                        let open = Open {
+                            run: r.clone(),
+                            operation: s(&p["operation_id"]).unwrap_or_default().to_owned(),
+                            capability,
+                        };
+                        if self.attempts.insert(key.clone(), open).is_none() {
+                            self.attempt_order.push_back(key);
                         }
-                        self.attempts.insert(
-                            (source.to_owned(), attempt.to_owned()),
-                            Open {
-                                run: r.clone(),
-                                operation: s(&p["operation_id"]).unwrap_or_default().to_owned(),
-                                capability,
-                            },
-                        );
+                        // The oldest attempts go first: their observations have
+                        // almost always arrived already.
+                        while self.attempts.len() > self.max_attempts {
+                            if let Some(oldest) = self.attempt_order.pop_front() {
+                                self.attempts.remove(&oldest);
+                            }
+                        }
                     }
                 }
             }
@@ -431,7 +475,7 @@ impl Fleet {
                 if let Some(k) = self.agent_of(source, &open.run.clone())
                     && let Some(a) = self.agents.get_mut(&k)
                 {
-                    a.unresolved.remove(&key);
+                    a.resolve(&key);
                 }
             }
             "revocation_refusal"
@@ -614,8 +658,14 @@ impl Fleet {
     fn admitted(&mut self, source: &str, entry: &AuditEntry) {
         let p = &entry.payload;
         let Some(run_id) = s(&p["run_id"]) else { return };
-        let agent_id = s(&p["agent_id"]).unwrap_or("unknown");
-        let key = agent_key(&entry.tenant_id, agent_id, s(&p["agent_urn"]));
+        let mut agent_id = s(&p["agent_id"]).unwrap_or("unknown");
+        let mut key = agent_key(&entry.tenant_id, agent_id, s(&p["agent_urn"]));
+        // Agent ids are the caller's to declare; a fleet past its bound counts a
+        // tenant's new ones together rather than growing.
+        if !self.agents.contains_key(&key) && self.agents.len() >= self.max_agents {
+            agent_id = OVERFLOW_AGENT;
+            key = agent_key(&entry.tenant_id, agent_id, None);
+        }
         let at = entry.emitted_at.clone();
         let a = self.agents.entry(key.clone()).or_insert_with(|| AgentActivity {
             key: key.clone(),
@@ -623,7 +673,9 @@ impl Fleet {
             first_seen: at.clone(),
             ..AgentActivity::default()
         });
-        a.agent_urn = s(&p["agent_urn"]).map(str::to_owned).or(a.agent_urn.take());
+        if agent_id != OVERFLOW_AGENT {
+            a.agent_urn = s(&p["agent_urn"]).map(str::to_owned).or(a.agent_urn.take());
+        }
         a.last_seen.clone_from(&at);
         a.runs += 1;
         a.sources.insert(source.to_owned());
@@ -726,7 +778,7 @@ impl Fleet {
                 "applied" => a.hour(&at).applied += 1,
                 "unknown" | "partial" => {
                     a.hour(&at).unknown += 1;
-                    a.unresolved.insert(key.clone());
+                    a.unresolve(key.clone(), self.max_unresolved);
                 }
                 _ => {}
             }
@@ -743,148 +795,5 @@ impl Fleet {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    pub(crate) fn entry(sequence: u64, kind: &str, payload: Value) -> AuditEntry {
-        AuditEntry {
-            entry_version: "contextos.audit_entry.v1".into(),
-            tenant_id: "acme".into(),
-            sequence,
-            prev_hash: None,
-            kind: kind.into(),
-            emitted_at: format!("2026-10-21T10:{:02}:00Z", sequence % 60),
-            payload_digest: String::new(),
-            payload,
-            record_hash: String::new(),
-            signature: contextos_audit::chain::EntrySignature {
-                alg: "ed25519".into(),
-                kid: "k".into(),
-                sig: String::new(),
-            },
-        }
-    }
-
-    #[test]
-    fn hours_count_from_the_epoch() {
-        assert_eq!(hour_index("1970-01-01T00:00:00Z"), 0);
-        assert_eq!(hour_index("1970-01-02T03:00:00.123Z"), 27);
-        assert_eq!(hour_index("2026-10-21T10:00:00Z") % 24, 10);
-        assert_eq!(hour_index("garbage"), 0);
-    }
-
-    #[test]
-    fn runs_are_attributed_to_agents_and_effects_to_capabilities() {
-        let mut fleet = Fleet::new(10, 48);
-        fleet.apply(
-            "eu",
-            &entry(
-                1,
-                "run_admitted",
-                json!({"run_id": "r1", "agent_id": "agt_support", "trace_id": "t1",
-            "pack_ref": "ctxpack.support@5.2.0", "intent": "support.refund", "profiles": ["contextos.core"],
-            "release_refs": [{"artifact_type": "model_profile", "artifact_id": "claude-opus-5-5", "version": "1"}],
-            "surfaced_capabilities": ["adp_payments.issue_refund"], "admitted_by": "svc"}),
-            ),
-        );
-        fleet.apply("eu", &entry(2, "authorization_decision", json!({"run_id": "r1", "operation_id": "op", "verdict": "allow", "approval_refs": [{"artifact_id": "apr"}]})));
-        fleet.apply("eu", &entry(3, "operation_claim", json!({"run_id": "r1", "operation_id": "op", "attempt_id": "a1", "capability_id": "adp_payments.issue_refund"})));
-        fleet.apply(
-            "eu",
-            &entry(
-                4,
-                "effect_observation",
-                json!({"run_id": "r1", "attempt_id": "a1", "outcome": "unknown", "finality": "provisional"}),
-            ),
-        );
-        let agent = &fleet.agents["acme/agt_support"];
-        assert_eq!(agent.runs, 1);
-        assert_eq!(agent.approvals_redeemed, 1);
-        assert_eq!(agent.models, BTreeSet::from(["claude-opus-5-5@1".to_owned()]));
-        assert_eq!(agent.capabilities["adp_payments.issue_refund"].unknown, 1);
-        assert_eq!(agent.unresolved.len(), 1);
-        fleet.apply(
-            "eu",
-            &entry(
-                5,
-                "effect_reconciliation",
-                json!({"attempt_id": "a1", "outcome": "not_applied"}),
-            ),
-        );
-        assert!(fleet.agents["acme/agt_support"].unresolved.is_empty());
-        assert_eq!(fleet.run("eu", "r1").unwrap().unknown, 1);
-    }
-
-    #[test]
-    fn the_run_window_is_bounded_and_late_effects_are_unattributed() {
-        let mut fleet = Fleet::new(2, 48);
-        for (i, run) in ["r1", "r2", "r3"].iter().enumerate() {
-            fleet.apply(
-                "eu",
-                &entry(
-                    i as u64 + 1,
-                    "run_admitted",
-                    json!({"run_id": run, "agent_id": "a", "trace_id": run}),
-                ),
-            );
-        }
-        assert!(fleet.run("eu", "r1").is_none());
-        assert_eq!(fleet.recent_runs(|_| true).count(), 2);
-        fleet.apply(
-            "eu",
-            &entry(
-                9,
-                "operation_claim",
-                json!({"run_id": "r1", "attempt_id": "x", "capability_id": "c"}),
-            ),
-        );
-        assert_eq!(fleet.sources["eu"].unattributed, 1);
-        assert_eq!(fleet.agents["acme/a"].runs, 3, "counters survive the window");
-    }
-
-    #[test]
-    fn decisions_belong_to_the_parent_run_of_a_shared_trace() {
-        let mut fleet = Fleet::new(10, 48);
-        for (i, run) in ["parent", "child"].iter().enumerate() {
-            fleet.apply(
-                "eu",
-                &entry(
-                    i as u64 + 1,
-                    "run_admitted",
-                    json!({"run_id": run, "agent_id": "a", "trace_id": "t"}),
-                ),
-            );
-        }
-        fleet.apply(
-            "eu",
-            &entry(3, "decision_record", json!({"trace_id": "t", "record_id": "d1"})),
-        );
-        assert_eq!(fleet.run("eu", "parent").unwrap().decisions, 1);
-        assert_eq!(fleet.run("eu", "child").unwrap().decisions, 0);
-    }
-
-    #[test]
-    fn kill_switch_state_and_changes_come_from_the_chain() {
-        let mut fleet = Fleet::new(10, 48);
-        fleet.apply(
-            "eu",
-            &entry(
-                1,
-                "revocation",
-                json!({"kind": "capability", "target": "pay.send", "reason": "INC-1", "operator": "oncall"}),
-            ),
-        );
-        assert_eq!(fleet.sources["eu"].revoked["capability:pay.send"], "INC-1");
-        fleet.apply(
-            "eu",
-            &entry(
-                2,
-                "revocation_restored",
-                json!({"kind": "capability", "target": "pay.send", "reason": "fixed"}),
-            ),
-        );
-        assert!(fleet.sources["eu"].revoked.is_empty());
-        assert_eq!(fleet.changes.len(), 2);
-        assert_eq!(fleet.changes[0].by.as_deref(), Some("oncall"));
-    }
-}
+#[path = "fleet_tests.rs"]
+mod tests;

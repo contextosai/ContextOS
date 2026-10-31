@@ -224,7 +224,9 @@ default otherwise, admits the run, counts it in
 `contextos_agent_binding_mismatches_total{mode}` and records `bound: false`: turn it on,
 watch the counter reach zero, then switch to `required`. Every `run_admitted` entry
 records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit their
-parent's binding (`bound: "inherited"`). SPIRE's OIDC discovery provider publishes the
+parent's binding (`bound: "inherited"`); their agent is the one the parent's
+delegation names, and `named_by_credential` says whether the admitting credential
+names it too. SPIRE's OIDC discovery provider publishes the
 JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
 accepted.
 
@@ -689,7 +691,9 @@ minimal, development-only implementation):
 
   ```toml
   [guards.approval_step_up]
-  amount_at_least = 100000        # minor units of the action's bound amount
+  # Minor units of the action's bound amount, per currency. An amount in a currency
+  # without a threshold always needs step-up.
+  amount_at_least = [{ currency = "USD", minor_units = 100000 }]
   # capabilities = ["adp_iam.grant_admin"]   # always, whatever the amount
   amr_values = ["mfa", "hwk"]     # or acr_values = ["phr"]
   max_age_seconds = 300

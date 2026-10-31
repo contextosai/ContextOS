@@ -1774,6 +1774,12 @@ where
         "summary": request.summary, "expected_outcome": request.expected_outcome, "reporter": caller.principal_id,
         "filed_at": now, "status": "open",
         "replay_obligation": {"case": run_id, "replay_case": format!("/v1/runs/{run_id}/replay-case")}});
+    // Indexed before it is audited or exists, so a full index refuses before the chain
+    // claims a filing; an id left without a record (a failed audit or create) is
+    // dropped by the next list or close that meets it.
+    crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
+        .await
+        .map_err(feedback_error)?;
     // Audited by digest: the summary itself stays out of the chain.
     state
         .audit
@@ -1793,11 +1799,6 @@ where
                 "The audit log is unavailable.",
             )
         })?;
-    // Indexed before the record exists so the bound holds; an id left without a record
-    // (a failed create) is dropped by the next list or close that meets it.
-    crate::feedback::index_open(state.store.as_ref(), &admission.tenant_id, &id)
-        .await
-        .map_err(feedback_error)?;
     let store_down = || {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2831,7 +2832,8 @@ where
     let caller = authorize(&state, &headers, Some("audit:read"))?;
     let gateway = dispatch_gateway(&state)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
-    let evidence = gateway.run_evidence(&admission).await.map_err(|_| {
+    let evidence = gateway.run_evidence(&admission).await.map_err(|error| {
+        tracing::error!(run_id = %admission.run_id, error = %error, "run evidence unavailable");
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "store_unavailable",

@@ -14,7 +14,10 @@
 //! - `off` checks nothing (development only; `--check-config` warns).
 //!
 //! Delegated runs are admitted by their parent's executor and inherit the parent's
-//! binding; delegation already narrows what they may do.
+//! binding; delegation already narrows what they may do. Their agent is the delegation
+//! envelope's subject, which the parent names, so `run_admitted` records whether the
+//! admitting credential names it too (`named_by_credential`) for whoever attributes
+//! runs to agents.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -109,9 +112,13 @@ pub struct Verdict {
 
 #[must_use]
 pub fn evaluate(mode: AgentBinding, caller: &Caller, agent_id: &str, delegated: bool) -> Verdict {
+    let named = caller
+        .agents
+        .as_ref()
+        .is_some_and(|agents| agents.iter().any(|a| a == agent_id));
     if delegated {
         return Verdict {
-            record: json!({"mode": mode.as_str(), "bound": "inherited"}),
+            record: json!({"mode": mode.as_str(), "bound": "inherited", "named_by_credential": named}),
             unbound: false,
             refuse: false,
         };
@@ -123,14 +130,10 @@ pub fn evaluate(mode: AgentBinding, caller: &Caller, agent_id: &str, delegated: 
             refuse: false,
         };
     }
-    let bound = caller
-        .agents
-        .as_ref()
-        .is_some_and(|agents| agents.iter().any(|a| a == agent_id));
     Verdict {
-        record: json!({"mode": mode.as_str(), "bound": bound, "source": caller.agent_source}),
-        unbound: !bound,
-        refuse: !bound && mode == AgentBinding::Required,
+        record: json!({"mode": mode.as_str(), "bound": named, "source": caller.agent_source}),
+        unbound: !named,
+        refuse: !named && mode == AgentBinding::Required,
     }
 }
 
@@ -166,5 +169,8 @@ mod tests {
         let child = evaluate(AgentBinding::Required, &unnamed, "agt_child", true);
         assert!(!child.refuse);
         assert_eq!(child.record["bound"], "inherited");
+        assert_eq!(child.record["named_by_credential"], false);
+        let named = evaluate(AgentBinding::Required, &issued, "agt_support", true);
+        assert_eq!(named.record["named_by_credential"], true);
     }
 }

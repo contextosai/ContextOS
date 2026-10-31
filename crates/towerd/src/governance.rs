@@ -221,7 +221,7 @@ pub fn facts(view: &AgentView) -> Value {
         "activity": {"runs": a.runs, "runs_by_status": a.runs_by_status, "child_runs": a.child_runs,
             "approvals_required": a.approvals_required, "approvals_redeemed": a.approvals_redeemed,
             "escalations": a.escalations, "decisions": a.decisions, "scores": a.scores, "low_scores": a.low_scores,
-            "loops": a.loops, "repeated_effects": a.repeated_effects, "unresolved_effects": a.unresolved.len(),
+            "loops": a.loops, "repeated_effects": a.repeated_effects, "unresolved_effects": a.unresolved_effects(),
             "refusals": a.refusals, "output_schema_violations": a.output_schema_violations,
             "first_seen": a.first_seen, "last_seen": a.last_seen},
     })

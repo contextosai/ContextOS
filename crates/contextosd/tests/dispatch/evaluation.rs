@@ -408,6 +408,8 @@ async fn feedback_index_heals_and_closures_stay_bounded() {
     assert_eq!(close(a.clone(), extra).await.status(), 422);
     let long = json!({"status": "invalid", "evidence_ref": {"artifact_type": "note", "artifact_id": "x".repeat(300), "sha256": digest}});
     assert_eq!(close(a.clone(), long).await.status(), 422);
+    let prose = json!({"status": "invalid", "evidence_ref": {"artifact_type": "note", "artifact_id": "call Jane on 555-0100", "sha256": digest}});
+    assert_eq!(close(a.clone(), prose).await.status(), 422);
 
     // A record closed while its index entry survived (an interrupted close) is not
     // listed as open, and a retried close clears the entry.

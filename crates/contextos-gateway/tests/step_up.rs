@@ -14,7 +14,7 @@ use support::*;
 async fn an_approval_without_a_recent_strong_sign_in_is_not_used() {
     let mut h = harness("require_approval", Behavior::Confirm).await;
     h.gateway.set_approval_step_up(Some(StepUpPolicy {
-        amount_at_least: None,
+        amount_at_least: Vec::new(),
         capabilities: vec!["adp_payments.issue_refund".into()],
         acr_values: Vec::new(),
         amr_values: vec!["mfa".into(), "hwk".into()],

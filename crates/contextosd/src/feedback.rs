@@ -52,8 +52,9 @@ pub struct CloseBody {
     pub evidence_ref: EvidenceRef,
 }
 
-/// A reference to the evidence for a closure: exactly these three fields, bounded, so
-/// nothing else reaches the (unerasable) audit chain.
+/// A reference to the evidence for a closure: exactly these three fields, bounded and
+/// identifier-shaped, so no prose (or personal data pasted as prose) reaches the
+/// unerasable audit chain.
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceRef {
@@ -65,14 +66,17 @@ pub struct EvidenceRef {
 impl CloseBody {
     pub fn check(&self) -> Result<(), FeedbackError> {
         let e = &self.evidence_ref;
-        let bounded = |s: &str| !s.trim().is_empty() && s.len() <= 256;
+        // Identifiers, paths and `id@version` references; no spaces.
+        let bounded = |s: &str| {
+            (1..=256).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:/@#+-".contains(&b))
+        };
         if !CLOSED.contains(&self.status.as_str())
             || !bounded(&e.artifact_type)
             || !bounded(&e.artifact_id)
             || !contextos_contract::canonical::is_sha256_digest(&e.sha256)
         {
             return Err(FeedbackError::Invalid(
-                "status must be fixed, still_failing, invalid or superseded, with an evidence_ref {artifact_type, artifact_id (1..256 bytes), sha256}",
+                "status must be fixed, still_failing, invalid or superseded, with an evidence_ref {artifact_type, artifact_id (identifiers of 1..256 bytes: letters, digits and ._:/@#+-), sha256}",
             ));
         }
         Ok(())
