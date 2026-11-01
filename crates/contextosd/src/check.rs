@@ -127,6 +127,10 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         }
         mode => format!("pack intents: {}", mode.as_str()),
     });
+    report.push(format!(
+        "evidence: {}",
+        crate::evidence_admission::mode(&config).as_str()
+    ));
     let mut refs: Vec<_> = packs.keys().collect();
     refs.sort();
     for pack_ref in refs {

@@ -53,6 +53,7 @@ pub fn effective(config: &Config) -> Value {
     let guards = &mut value["guards"];
     guards["required_release_refs"] = json!(config.required_release_refs());
     guards["require_user_role"] = json!(config.require_user_role());
+    guards["evidence"] = json!(crate::evidence_admission::mode(config));
     guards["completion_requires_scores"] = config.completion_score_floors().map_or(
         json!(false),
         |f| json!({"policy_floor": f.policy_floor, "safety_floor": f.safety_floor}),

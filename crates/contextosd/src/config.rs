@@ -358,6 +358,7 @@ impl Config {
         let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
+        crate::evidence_admission::check(&config).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
