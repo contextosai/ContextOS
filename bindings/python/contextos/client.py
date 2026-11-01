@@ -45,6 +45,9 @@ import uuid
 import warnings
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
+from .errors import (_HTTP_ERRORS, _OUTCOMES, BudgetExhausted, ContextOSHTTPError, IncompatibleServer, ToolBlocked,
+                     ToolFailed, ToolOutcome, ToolPaused, ToolRejected, VersionMismatchWarning, _pause_kind)
+
 GENERATION_HEADER = "ContextOS-Executor-Generation"
 # On a model request, these tell a metering LLM gateway which reservation to settle
 # with the usage it measures (see examples/metering-proxy).
@@ -55,37 +58,6 @@ RESERVATION_HEADER = "ContextOS-Usage-Reservation"
 API_VERSION = "v1"
 # This client's release (scripts/package_clients.py checks it against Cargo.toml).
 CLIENT_VERSION = "0.1.0-alpha.11"
-
-
-class ContextOSHTTPError(Exception):
-    """The server refused the request (4xx/5xx other than a governed tool result)."""
-
-    def __init__(self, status: int, code: str, message: str, detail: Any = None):
-        super().__init__(f"{status} {code}: {message}")
-        self.status = status
-        self.code = code
-        self.detail = detail
-
-
-class BudgetExhausted(ContextOSHTTPError):
-    """The run's budget cannot fit a model-call or replan reservation (``reasons``
-    says which limit). Stop the loop: retrying the same reservation cannot succeed."""
-
-    @property
-    def reasons(self) -> List[str]:
-        return self.detail if isinstance(self.detail, list) else []
-
-
-_HTTP_ERRORS = {"budget_exhausted": BudgetExhausted}
-
-
-class IncompatibleServer(Exception):
-    """The server speaks a different HTTP API generation than this client."""
-
-
-class VersionMismatchWarning(UserWarning):
-    """The server is a different ContextOS release than this client. Releases before
-    1.0 may change the API, so use the same release on both sides."""
 
 
 def _check_versions(deployment: Any, client_version: str) -> dict:
@@ -101,59 +73,6 @@ def _check_versions(deployment: Any, client_version: str) -> dict:
         warnings.warn(f"contextosd is release {runtime}; this client is {client_version}. "
                       "Use the same release on both sides", VersionMismatchWarning, stacklevel=4)
     return {"api_version": api, "runtime_version": runtime, "client_version": client_version}
-
-
-class ToolOutcome(Exception):
-    """A governed tool call that did not simply succeed."""
-
-    def __init__(self, result: dict, report: dict):
-        self.result = result
-        self.report = report
-        self.status = result.get("status")
-        self.reason_codes: List[str] = report.get("reason_codes", [])
-        self.obligations: List[str] = report.get("obligations", [])
-        self.operation_id: Optional[str] = report.get("operation_id")
-        super().__init__(f"{self.status}: {', '.join(self.reason_codes) or result.get('error') or ''}")
-
-
-class ToolPaused(ToolOutcome):
-    """Approval pending, input required, or an unknown outcome awaiting reconciliation."""
-
-    @property
-    def kind(self) -> str:
-        """What the pause waits on: ``approval`` (redeem by re-sending the same call once
-        approved), ``input`` (answer with ``provide_input``), ``unknown_outcome`` (the
-        effect may have happened: reconcile), ``duplicate`` (this operation was already
-        requested and is not repeated) or ``other``."""
-        return _pause_kind(self.obligations, self.reason_codes)
-
-    @property
-    def input_requests(self) -> Optional[dict]:
-        return (self.result.get("output") or {}).get("result", {}).get("inputRequests")
-
-
-class ToolBlocked(ToolOutcome):
-    """Authority, policy, constraints or budget refused the call."""
-
-
-class ToolRejected(ToolOutcome):
-    """The call was malformed, not surfaced to this run, or reused an operation key."""
-
-
-class ToolFailed(ToolOutcome):
-    """The provider definitively did not apply the effect."""
-
-
-def _pause_kind(obligations: List[str], reason_codes: List[str]) -> str:
-    if "await_approval" in obligations:
-        return "approval"
-    if "provide_requested_input" in obligations:
-        return "input"
-    if "reconcile_effect_before_retry" in obligations:
-        return "unknown_outcome"
-    if "retry_unsafe" in reason_codes or "reconcile_existing_operation" in obligations:
-        return "duplicate"
-    return "other"
 
 
 def task_scope(root_run_id: str, purpose_id: str, capability_id: str, *, resources: List[str] = (),
@@ -190,9 +109,6 @@ def task_authorization(issued_by: dict, scopes: List[dict], *, out_of_scope: str
     if limits:
         task["limits"] = limits
     return task
-
-
-_OUTCOMES = {"paused": ToolPaused, "blocked": ToolBlocked, "rejected": ToolRejected, "failed": ToolFailed}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -23,7 +23,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PY_SOURCES = ["__init__.py", "client.py", "aio.py"]
+PY_SOURCES = ["__init__.py", "client.py", "errors.py", "aio.py"]
 NODE_SOURCES = ["client.mjs", "client.d.ts"]
 LEGAL = ["LICENSE", "NOTICE"]
 REPOSITORY = "https://github.com/contextosai/ContextOS"
