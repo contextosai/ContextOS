@@ -7,18 +7,26 @@ Two modules, one package:
 - `contextos` itself is the kernel, in-process, through a compiled extension
   (`contextos._native`). You need it only to embed the kernel without a server.
 
-Nothing is published to PyPI yet (alpha). Install from this repository.
+## Install
+
+```sh
+pip install --pre contextos
+```
+
+Published from 0.1.0-alpha.12. Linux (x86_64 and aarch64, glibc 2.28 or newer) and
+macOS on Apple silicon get a wheel with the compiled kernel. Every other platform gets
+a pure-Python wheel with the HTTP client only; kernel calls there raise
+`native_unavailable`. Use the client release that matches your `contextosd`.
 
 ## The HTTP client (most agents)
 
-Put the package on your path, from a checkout or a release archive:
+From a checkout instead of the package index, put the package on your path or copy
+`bindings/python/contextos/` into your project:
 
 ```sh
 export PYTHONPATH=/path/to/ContextOS/bindings/python
 python3 -c "from contextos.client import Client; print('ok')"
 ```
-
-or copy `bindings/python/contextos/` into your project. Python 3.9 or newer.
 
 Try it against a local server: `./examples/dev-server.sh` prints `CONTEXTOS_URL` and
 `CONTEXTOS_TOKEN`, and `examples/support-refund/requests/run.json` is a run you can
@@ -26,7 +34,8 @@ admit. `examples/frameworks/` shows the client inside eleven agent frameworks.
 
 ## The embedded kernel
 
-Build the extension with [maturin](https://www.maturin.rs/) (needs the Rust toolchain):
+The platform wheels above include it. To build the extension yourself, use
+[maturin](https://www.maturin.rs/) (needs the Rust toolchain):
 
 ```sh
 python3 -m pip install maturin

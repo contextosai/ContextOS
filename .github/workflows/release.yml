@@ -96,6 +96,98 @@ jobs:
           path: contextos-*.tar.gz*
           if-no-files-found: error
 
+  # The Python package with the in-process kernel, one abi3 wheel per platform. Linux
+  # wheels are manylinux_2_28, the same glibc baseline as the archives.
+  wheels:
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, manylinux: "2_28" }
+          - { os: macos-latest, target: aarch64-apple-darwin, manylinux: "auto" }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
+      - uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.16.0
+          rust-toolchain: 1.99.1
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          working-directory: bindings/python
+          args: --release --locked --out dist
+      # The wheel, not the checkout, must provide `contextos`: run the kernel tests
+      # from an isolated interpreter in a fresh virtual environment.
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-index bindings/python/dist/*.whl
+          "$RUNNER_TEMP/venv/bin/python" -I bindings/python/tests/test_contextos.py
+          "$RUNNER_TEMP/venv/bin/python" -I -c 'import contextos, os; assert contextos.__version__ == os.environ["GITHUB_REF_NAME"][1:]'
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: bindings/python/dist/*.whl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.target }}
+          path: bindings/python/dist/*.whl
+          if-no-files-found: error
+
+  # The HTTP clients: a pure-Python wheel (pip's fallback on every other platform) and
+  # the `contextos-client` npm package.
+  clients:
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.12.0
+      - run: npm install --global npm@11.8.0 --ignore-scripts --no-audit --no-fund
+      - name: Build
+        run: |
+          python scripts/package_clients.py python dist
+          python scripts/package_clients.py node "$RUNNER_TEMP/npm"
+          npm pack "$RUNNER_TEMP/npm/contextos-client" --pack-destination dist
+      - name: Smoke-test the packages
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-index dist/*-py3-none-any.whl
+          "$RUNNER_TEMP/venv/bin/python" -I -c 'import contextos, contextos.client, contextos.aio; assert contextos._native is None'
+          app="$RUNNER_TEMP/app"
+          mkdir "$app" && cd "$app"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/contextos-client-$version.tgz" typescript@5.6.3
+          node -e 'import("contextos-client").then(m => { if (typeof m.Client !== "function") process.exit(1) })'
+          printf 'import { Client, governedTool } from "contextos-client";\nconst c: Client = new Client("http://x", { token: "t" });\nvoid c; void governedTool;\n' > check.mts
+          npx tsc --noEmit --strict --module nodenext --moduleResolution nodenext --lib es2022,dom check.mts
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tgz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: clients
+          path: dist/*
+          if-no-files-found: error
+
   sbom:
     needs: validate
     runs-on: ubuntu-24.04
@@ -166,7 +258,7 @@ jobs:
           push-to-registry: true
 
   publish:
-    needs: [binaries, sbom, image]
+    needs: [binaries, wheels, clients, sbom, image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -176,6 +268,17 @@ jobs:
         with:
           pattern: binaries-*
           merge-multiple: true
+      # Packages ride on the draft; publish-packages.yml sends them to PyPI and npm
+      # only when a maintainer publishes the release.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: packages
+      - uses: actions/download-artifact@v8
+        with:
+          name: clients
+          path: packages
       - uses: actions/download-artifact@v8
         with:
           name: sbom
@@ -195,6 +298,9 @@ jobs:
           fi
           mapfile -t sboms < <(find sbom -name '*.cdx.json' -type f)
           test "${#sboms[@]}" -gt 0
+          # Three platform wheels, the pure-Python wheel and the npm tarball.
+          mapfile -t packages < <(find packages -type f \( -name '*.whl' -o -name 'contextos-client-*.tgz' \))
+          test "${#packages[@]}" -eq 5
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "ContextOS ${GITHUB_REF_NAME#v}" --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
-            "${release_flags[@]}" contextos-*.tar.gz* "${sboms[@]}"
+            "${release_flags[@]}" contextos-*.tar.gz* "${sboms[@]}" "${packages[@]}"

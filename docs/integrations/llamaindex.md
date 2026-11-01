@@ -16,8 +16,8 @@ This guide uses `llama-index-core` 0.14 and the Python client in
 pip install "llama-index-core==0.14.25" "llama-index-llms-openai==0.8.3"
 ```
 
-The ContextOS client is standard library only: put `bindings/python` on `PYTHONPATH` or
-vendor it. LlamaIndex tools and LLM calls are async, so use `contextos.aio`:
+The ContextOS client is standard library only: `pip install --pre contextos`, or put
+`bindings/python` on `PYTHONPATH`. LlamaIndex tools and LLM calls are async, so use `contextos.aio`:
 `AsyncClient` and `AsyncRun` have the client's methods as coroutines (each request runs
 in a worker thread), which keeps the event loop free (the example does).
 

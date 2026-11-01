@@ -1,6 +1,6 @@
 // ContextOS kernel for Node.js, in-process.
 //
-//   import { kernel } from "@contextos/kernel";
+//   import { kernel } from "./bindings/node/index.mjs";
 //   const compiled = await kernel.call("compile", { pack, request, run_context });
 import { createRequire } from "node:module";
 

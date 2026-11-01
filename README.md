@@ -74,7 +74,7 @@ minutes; later examples reuse that build.
 
 ```sh
 ./examples/dev-server.sh          # prints CONTEXTOS_URL and CONTEXTOS_TOKEN; Ctrl-C stops it
-export PYTHONPATH=$PWD/bindings/python
+pip install --pre contextos       # the HTTP client (from 0.1.0-alpha.12; or PYTHONPATH=$PWD/bindings/python)
 ```
 
 That serves the quickstart's support pack with synthetic providers on loopback. Admit

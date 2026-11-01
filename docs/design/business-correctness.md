@@ -243,8 +243,9 @@ the config schema first in one small PR.
 
 Decided 2026-11-01 by the maintainer, as proposed.
 
-1. **Package names.** PyPI `contextos`; npm `@contextosai/client`. Both are claimed by
-   the project account before A1 merges.
+1. **Package names.** PyPI `contextos`; npm `contextos-client` (unscoped: the `@contextosai`
+   and `@contextos` scopes and the name `contextos` belong to unrelated publishers).
+   Both must be claimed by the project before the first publish.
 2. **Strict evidence under the enterprise profile.** Required. This is a breaking
    change, listed in CHANGELOG Unreleased, as agent binding and pack intents were.
 3. **Over-limit after import.** The import is accepted and recorded; the resource

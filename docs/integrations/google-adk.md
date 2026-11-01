@@ -18,7 +18,7 @@ This page was written against `google-adk==2.12.0` (Python 3.11 or later).
 
 ```sh
 pip install google-adk==2.12.0            # add the [mcp] extra for McpToolset
-export PYTHONPATH=/path/to/ContextOS/bindings/python
+pip install --pre contextos               # the ContextOS client, from 0.1.0-alpha.12
 ```
 
 `contextos.client` uses only the standard library. ADK is asyncio, so use

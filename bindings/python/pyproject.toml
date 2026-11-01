@@ -5,11 +5,21 @@ build-backend = "maturin"
 [project]
 name = "contextos"
 description = "ContextOS kernel: governed context, authorization and durable effects for AI agents"
+readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
+license-files = ["LICENSE", "NOTICE"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+]
 dynamic = ["version"]
+
+[project.urls]
+Source = "https://github.com/contextosai/ContextOS"
 
 [tool.maturin]
 manifest-path = "../../crates/contextos-py/Cargo.toml"
 module-name = "contextos._native"
 python-source = "."
+exclude = ["**/__pycache__/**", "**/*.pyc"]

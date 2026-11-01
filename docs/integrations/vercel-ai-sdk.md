@@ -18,7 +18,7 @@ npm install ai@7.0.150 @ai-sdk/openai@4.0.101 zod@4.6.7   # or any AI SDK provid
 npm install @ai-sdk/mcp@2.0.80                           # only for the MCP route (section 8)
 ```
 
-The ContextOS client (`bindings/node/client.mjs`, published as `@contextos/kernel/client`)
+The ContextOS client (`npm install contextos-client`, from 0.1.0-alpha.12)
 has no dependencies and runs anywhere `fetch` does, including edge and serverless
 runtimes.
 
@@ -27,7 +27,7 @@ runtimes.
 Admit one run per agent task, before building the agent:
 
 ```ts
-import { Client, governedTool } from "@contextos/kernel/client";
+import { Client, governedTool } from "contextos-client";
 
 const client = new Client("https://contextos.internal", { token: process.env.CONTEXTOS_TOKEN! });
 const run = await client.admit(admissionBody);   // holds the executor generation
@@ -126,7 +126,7 @@ Non-success results throw a `ToolOutcome` subclass. Catch them in `execute` and 
 text the model reads, so a refusal never looks like a result:
 
 ```ts
-import { ToolOutcome, ToolPaused } from "@contextos/kernel/client";
+import { ToolOutcome, ToolPaused } from "contextos-client";
 
 const WAITS = ["approval", "input", "unknown_outcome"];   // pauses someone else resolves
 const paused: ToolPaused[] = [];

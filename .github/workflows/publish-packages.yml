@@ -1,0 +1,91 @@
+name: publish-packages
+# Sends the client packages attached to a GitHub release to PyPI and npm. It runs when
+# a maintainer publishes the draft that release.yml creates, so publishing the release
+# is the one decision that makes a version public. Both registries use trusted
+# publishing (OIDC): there are no registry tokens in this repository.
+#
+# Run it by hand with the tag to retry after a failure; versions already on a
+# registry are skipped.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.1.0-alpha.12
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: publish-packages-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  pypi:
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/contextos/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - name: Download and verify the wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --dir dist
+          version="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import package_clients as p; print(p.pep440(p.workspace_version()))')"
+          test "v$(python3 scripts/package_clients.py version)" = "$TAG"
+          ls dist
+          # Three platform wheels and the pure-Python fallback, all of this version.
+          test "$(find dist -name "contextos-$version-*.whl" | wc -l)" -eq 4
+          test "$(find dist -name '*.whl' | wc -l)" -eq 4
+          for wheel in dist/*.whl; do
+            gh attestation verify "$wheel" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  npm:
+    runs-on: ubuntu-24.04
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/contextos-client
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.12.0
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global npm@11.8.0 --ignore-scripts --no-audit --no-fund
+      - name: Download and verify the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          test "$(python3 scripts/package_clients.py version)" = "$version"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "contextos-client-$version.tgz"
+          gh attestation verify "contextos-client-$version.tgz" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+      - name: Publish
+        run: |
+          version="${TAG#v}"
+          if npm view "contextos-client@$version" version >/dev/null 2>&1; then
+            echo "contextos-client@$version is already on npm"
+            exit 0
+          fi
+          # Every release is an alpha for now, so each one is `latest`: without it,
+          # `npm install contextos-client` would find no version to install.
+          npm publish "./contextos-client-$version.tgz" --access public --tag latest
