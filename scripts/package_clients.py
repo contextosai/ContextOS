@@ -23,7 +23,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PY_SOURCES = ["__init__.py", "client.py", "aio.py"]
+PY_SOURCES = ["__init__.py", "client.py", "errors.py", "aio.py"]
 NODE_SOURCES = ["client.mjs", "client.d.ts"]
 LEGAL = ["LICENSE", "NOTICE"]
 REPOSITORY = "https://github.com/contextosai/ContextOS"
@@ -52,10 +52,21 @@ def pep440(version):
 
 
 def check_facade_version(version, root=ROOT):
-    """The facade's fallback `__version__` is what a client-only install reports."""
+    """The facade's fallback `__version__` is what a client-only install reports, and
+    `CLIENT_VERSION` is what the client compares with the server's release."""
     init = (root / "bindings/python/contextos/__init__.py").read_text()
     if f'"__version__", "{version}")' not in init:
         raise SystemExit(f"bindings/python/contextos/__init__.py does not report {version}")
+    client = (root / "bindings/python/contextos/client.py").read_text()
+    if f'CLIENT_VERSION = "{version}"' not in client:
+        raise SystemExit(f"bindings/python/contextos/client.py CLIENT_VERSION is not {version}")
+
+
+def check_node_client_version(version, root=ROOT):
+    """`CLIENT_VERSION` is what the Node client compares with the server's release."""
+    client = (root / "bindings/node/client.mjs").read_text()
+    if f'export const CLIENT_VERSION = "{version}";' not in client:
+        raise SystemExit(f"bindings/node/client.mjs CLIENT_VERSION is not {version}")
 
 
 def _record_hash(data):
@@ -131,6 +142,7 @@ def node_manifest(version):
 
 def build_node(out_dir, root=ROOT):
     version = workspace_version(root)
+    check_node_client_version(version, root)
     out_dir = pathlib.Path(out_dir) / "contextos-client"
     if out_dir.exists():
         shutil.rmtree(out_dir)

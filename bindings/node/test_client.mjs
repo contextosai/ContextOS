@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BudgetExhausted, Client, ContextOSHTTPError, ToolBlocked, ToolPaused, ToolRejected, governedTool, taskAuthorization,
-  taskScope,
+  taskScope, CLIENT_VERSION, IncompatibleServer, checkVersions,
 } from "./client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -62,9 +62,22 @@ for (let i = 0; i < 100; i++) {
 }
 
 try {
+  // Another API generation refuses; another or an unreported release warns.
+  const warned = [];
+  const onWarning = (w) => { if (w.name === "VersionMismatchWarning") warned.push(w.message); };
+  process.on("warning", onWarning);
+  assert.equal(checkVersions({ api_version: "v1", runtime_version: CLIENT_VERSION }).runtimeVersion, CLIENT_VERSION);
+  assert.throws(() => checkVersions({ api_version: "v2" }), IncompatibleServer);
+  checkVersions({ api_version: "v1", runtime_version: "0.0.1" });
+  checkVersions({ mode: "production" });
+
   const client = new Client(base, { token: KEY });
   assert.equal(JSON.stringify(client).includes(KEY), false, "the token is never serialized");
   const run = await client.admit(JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8")));
+  assert.equal((await client.checkServer()).runtimeVersion, CLIENT_VERSION);
+  await new Promise((ok) => setImmediate(ok)); // warnings are emitted on the next tick
+  process.off("warning", onWarning);
+  assert.equal(warned.length, 2, `only the two mismatches warn (the server is this release): ${warned}`);
   assert.equal(run.executorGeneration, 2);
 
   const call = JSON.parse(readFileSync(join(example, "requests/tool_call.json"), "utf8"));

@@ -42,88 +42,37 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import warnings
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+
+from .errors import (_HTTP_ERRORS, _OUTCOMES, BudgetExhausted, ContextOSHTTPError, IncompatibleServer, ToolBlocked,
+                     ToolFailed, ToolOutcome, ToolPaused, ToolRejected, VersionMismatchWarning, _pause_kind)
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
 # On a model request, these tell a metering LLM gateway which reservation to settle
 # with the usage it measures (see examples/metering-proxy).
 RUN_HEADER = "ContextOS-Run-Id"
 RESERVATION_HEADER = "ContextOS-Usage-Reservation"
+# The HTTP API generation this client speaks; a server reports its own in
+# ``GET /v1/deployment``.
+API_VERSION = "v1"
+# This client's release (scripts/package_clients.py checks it against Cargo.toml).
+CLIENT_VERSION = "0.1.0-alpha.11"
 
 
-class ContextOSHTTPError(Exception):
-    """The server refused the request (4xx/5xx other than a governed tool result)."""
-
-    def __init__(self, status: int, code: str, message: str, detail: Any = None):
-        super().__init__(f"{status} {code}: {message}")
-        self.status = status
-        self.code = code
-        self.detail = detail
-
-
-class BudgetExhausted(ContextOSHTTPError):
-    """The run's budget cannot fit a model-call or replan reservation (``reasons``
-    says which limit). Stop the loop: retrying the same reservation cannot succeed."""
-
-    @property
-    def reasons(self) -> List[str]:
-        return self.detail if isinstance(self.detail, list) else []
-
-
-_HTTP_ERRORS = {"budget_exhausted": BudgetExhausted}
-
-
-class ToolOutcome(Exception):
-    """A governed tool call that did not simply succeed."""
-
-    def __init__(self, result: dict, report: dict):
-        self.result = result
-        self.report = report
-        self.status = result.get("status")
-        self.reason_codes: List[str] = report.get("reason_codes", [])
-        self.obligations: List[str] = report.get("obligations", [])
-        self.operation_id: Optional[str] = report.get("operation_id")
-        super().__init__(f"{self.status}: {', '.join(self.reason_codes) or result.get('error') or ''}")
-
-
-class ToolPaused(ToolOutcome):
-    """Approval pending, input required, or an unknown outcome awaiting reconciliation."""
-
-    @property
-    def kind(self) -> str:
-        """What the pause waits on: ``approval`` (redeem by re-sending the same call once
-        approved), ``input`` (answer with ``provide_input``), ``unknown_outcome`` (the
-        effect may have happened: reconcile), ``duplicate`` (this operation was already
-        requested and is not repeated) or ``other``."""
-        return _pause_kind(self.obligations, self.reason_codes)
-
-    @property
-    def input_requests(self) -> Optional[dict]:
-        return (self.result.get("output") or {}).get("result", {}).get("inputRequests")
-
-
-class ToolBlocked(ToolOutcome):
-    """Authority, policy, constraints or budget refused the call."""
-
-
-class ToolRejected(ToolOutcome):
-    """The call was malformed, not surfaced to this run, or reused an operation key."""
-
-
-class ToolFailed(ToolOutcome):
-    """The provider definitively did not apply the effect."""
-
-
-def _pause_kind(obligations: List[str], reason_codes: List[str]) -> str:
-    if "await_approval" in obligations:
-        return "approval"
-    if "provide_requested_input" in obligations:
-        return "input"
-    if "reconcile_effect_before_retry" in obligations:
-        return "unknown_outcome"
-    if "retry_unsafe" in reason_codes or "reconcile_existing_operation" in obligations:
-        return "duplicate"
-    return "other"
+def _check_versions(deployment: Any, client_version: str) -> dict:
+    """Raises on a different API generation; warns on a different or unreported release."""
+    deployment = deployment if isinstance(deployment, dict) else {}
+    api, runtime = deployment.get("api_version"), deployment.get("runtime_version")
+    if api is not None and api != API_VERSION:
+        raise IncompatibleServer(f"contextosd speaks API {api}; this client speaks {API_VERSION}")
+    if runtime is None:
+        warnings.warn(f"contextosd does not report its release (older than this client, {client_version}); "
+                      "use the same release on both sides", VersionMismatchWarning, stacklevel=4)
+    elif runtime != client_version:
+        warnings.warn(f"contextosd is release {runtime}; this client is {client_version}. "
+                      "Use the same release on both sides", VersionMismatchWarning, stacklevel=4)
+    return {"api_version": api, "runtime_version": runtime, "client_version": client_version}
 
 
 def task_scope(root_run_id: str, purpose_id: str, capability_id: str, *, resources: List[str] = (),
@@ -162,9 +111,6 @@ def task_authorization(issued_by: dict, scopes: List[dict], *, out_of_scope: str
     return task
 
 
-_OUTCOMES = {"paused": ToolPaused, "blocked": ToolBlocked, "rejected": ToolRejected, "failed": ToolFailed}
-
-
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Refuses redirects: urllib would resend the bearer token to wherever one points."""
 
@@ -181,10 +127,14 @@ class Client:
 
     The token is sent only to ``base_url``: redirects are not followed (a ``3xx`` raises
     ``ContextOSHTTPError``), and plain ``http`` is refused except to a loopback address
-    unless ``allow_http=True`` (for example inside a private network you trust)."""
+    unless ``allow_http=True`` (for example inside a private network you trust).
+
+    Before its first admission the client reads ``GET /v1/deployment`` once: a server
+    with another API generation raises ``IncompatibleServer``, another release warns
+    with ``VersionMismatchWarning``. ``check_server=False`` skips it."""
 
     def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3, *,
-                 allow_http: bool = False):
+                 allow_http: bool = False, check_server: bool = True):
         parsed = urllib.parse.urlsplit(base_url)
         if parsed.scheme not in ("https", "http") or not parsed.hostname:
             raise ValueError("base_url must be an http(s) URL")
@@ -195,6 +145,7 @@ class Client:
         self._token = token
         self.timeout = timeout
         self.max_retries = max_retries
+        self._server_checked = not check_server
 
     def __repr__(self) -> str:  # never print the token
         return f"Client({self.base_url!r})"
@@ -235,8 +186,17 @@ class Client:
                 raise ContextOSHTTPError(error.code, "refused", json.dumps(decoded), decoded) from None
         raise AssertionError("unreachable")
 
+    def check_server(self) -> dict:
+        """Compares the server's API generation and release with this client's (see the
+        class docstring) and returns the three versions."""
+        versions = _check_versions(self.request("GET", "/v1/deployment"), CLIENT_VERSION)
+        self._server_checked = True
+        return versions
+
     def admit(self, body: dict, principal_chain: Optional[List[dict]] = None) -> "Run":
         """Admits a run (``POST /v1/runs``) and returns a handle that owns it."""
+        if not self._server_checked:
+            self.check_server()
         admitted = self.request("POST", "/v1/runs", body)
         context = body.get("run_context", {})
         agent = (context.get("agent") or {}).get("agent_id")

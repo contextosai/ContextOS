@@ -6683,6 +6683,8 @@
       "Deployment": {
         "type": "object",
         "required": [
+          "runtime_version",
+          "api_version",
           "mode",
           "caller",
           "packs",
@@ -6698,6 +6700,14 @@
           "retention"
         ],
         "properties": {
+          "runtime_version": {
+            "type": "string",
+            "description": "The contextosd release, for example 0.1.0-alpha.12. The HTTP clients warn when it differs from their own release."
+          },
+          "api_version": {
+            "const": "v1",
+            "description": "The HTTP API generation. A client refuses a server with a different one."
+          },
           "mode": {
             "enum": [
               "production",
