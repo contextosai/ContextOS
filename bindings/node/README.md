@@ -33,7 +33,10 @@ Try it against a local server from a checkout: `./examples/dev-server.sh` prints
 show the client inside Mastra, the Vercel AI SDK and the OpenAI Agents SDK.
 
 The client's version matches the `contextosd` release it was published with. Use the
-same release on both sides while ContextOS is in alpha.
+same release on both sides while ContextOS is in alpha: before its first admission the
+client emits a `VersionMismatchWarning` when the server is another release, and throws
+`IncompatibleServer` for a server with another API generation. `checkServer: false`
+skips the check.
 
 ## The embedded kernel
 

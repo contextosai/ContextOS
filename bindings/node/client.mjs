@@ -16,6 +16,36 @@ export const GENERATION_HEADER = "ContextOS-Executor-Generation";
 // the usage it measures (see examples/metering-proxy).
 export const RUN_HEADER = "ContextOS-Run-Id";
 export const RESERVATION_HEADER = "ContextOS-Usage-Reservation";
+// This client's release (scripts/package_clients.py checks it against Cargo.toml) and
+// the HTTP API generation it speaks; a server reports both in GET /v1/deployment.
+export const CLIENT_VERSION = "0.1.0-alpha.11";
+export const API_VERSION = "v1";
+
+/** The server speaks a different HTTP API generation than this client. */
+export class IncompatibleServer extends Error {}
+
+function warnVersion(message) {
+  if (typeof globalThis.process?.emitWarning === "function") {
+    globalThis.process.emitWarning(message, "VersionMismatchWarning");
+  } else {
+    console.warn(`VersionMismatchWarning: ${message}`);
+  }
+}
+
+// Throws on a different API generation; warns on a different or unreported release.
+export function checkVersions(deployment, clientVersion = CLIENT_VERSION) {
+  const api = deployment?.api_version ?? null;
+  const runtime = deployment?.runtime_version ?? null;
+  if (api !== null && api !== API_VERSION) {
+    throw new IncompatibleServer(`contextosd speaks API ${api}; this client speaks ${API_VERSION}`);
+  }
+  if (runtime === null) {
+    warnVersion(`contextosd does not report its release (older than this client, ${clientVersion}); use the same release on both sides`);
+  } else if (runtime !== clientVersion) {
+    warnVersion(`contextosd is release ${runtime}; this client is ${clientVersion}. Use the same release on both sides`);
+  }
+  return { apiVersion: api, runtimeVersion: runtime, clientVersion };
+}
 
 export class ContextOSHTTPError extends Error {
   constructor(status, code, message, detail) {
@@ -79,16 +109,28 @@ const segment = (value) => {
   return encodeURIComponent(value);
 };
 
+// Before its first admission the client reads GET /v1/deployment once: a server with
+// another API generation throws IncompatibleServer, another release warns
+// (VersionMismatchWarning). `checkServer: false` skips it.
 export class Client {
   #token;
+  #serverChecked;
 
-  constructor(baseUrl, { token, timeoutMs = 30_000, maxRetries = 3, fetch: fetchImpl = globalThis.fetch } = {}) {
+  constructor(baseUrl, { token, timeoutMs = 30_000, maxRetries = 3, fetch: fetchImpl = globalThis.fetch, checkServer = true } = {}) {
     if (!token) throw new TypeError("a token is required");
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.#token = token;
     this.timeoutMs = timeoutMs;
     this.maxRetries = maxRetries;
     this.fetch = fetchImpl;
+    this.#serverChecked = checkServer ? null : Promise.resolve();
+  }
+
+  /** Compares the server's API generation and release with this client's. */
+  async checkServer() {
+    const versions = checkVersions(await this.request("GET", "/v1/deployment"));
+    this.#serverChecked = Promise.resolve();
+    return versions;
   }
 
   toJSON() {
@@ -129,6 +171,14 @@ export class Client {
 
   /** Admits a run (POST /v1/runs) and returns a handle that owns it. */
   async admit(body, { principalChain } = {}) {
+    if (this.#serverChecked === null) {
+      // Concurrent first admissions share one check; a failed check is retried next time.
+      this.#serverChecked = this.checkServer().catch((error) => {
+        this.#serverChecked = null;
+        throw error;
+      });
+    }
+    await this.#serverChecked;
     const admitted = await this.request("POST", "/v1/runs", { body });
     const context = body.run_context ?? {};
     const agent = context.agent?.agent_id;

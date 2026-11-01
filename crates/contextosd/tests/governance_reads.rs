@@ -109,6 +109,8 @@ async fn deployment_names_the_caller_and_what_is_enforced_without_secrets() {
     assert_eq!(body["caller"]["principal_id"], "svc_oncall");
     assert_eq!(body["caller"]["scopes"], serde_json::json!(["control"]));
     assert_eq!(body["mode"], "production");
+    assert_eq!(body["runtime_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["api_version"], "v1");
     assert_eq!(body["packs"], serde_json::json!(["ctxpack.support@5.2.0"]));
     assert_eq!(
         body["adapters"],

@@ -68,7 +68,9 @@ email reporting route in `SECURITY.md` works independently of the GitHub form.
 
 ## Cutting an alpha
 
-Keep the workspace, Tower package, Python fallback and Helm chart versions aligned.
+Keep the workspace, Tower package, Python fallback, both clients' `CLIENT_VERSION`
+(`bindings/python/contextos/client.py`, `bindings/node/client.mjs`) and Helm chart versions aligned; `scripts/package_clients.py`
+refuses to build when the two client versions differ from `Cargo.toml`.
 Add notes under `docs/releases/<tag>.md` and record the version in `CHANGELOG.md`.
 The first release is `v0.1.0-alpha.1`; it is a prerelease, with evolving APIs and
 storage formats. From 0.1.0-alpha.12 the client packages go to PyPI and npm (below);

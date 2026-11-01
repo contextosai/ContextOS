@@ -16,7 +16,9 @@ pip install --pre contextos
 Published from 0.1.0-alpha.12. Linux (x86_64 and aarch64, glibc 2.28 or newer) and
 macOS on Apple silicon get a wheel with the compiled kernel. Every other platform gets
 a pure-Python wheel with the HTTP client only; kernel calls there raise
-`native_unavailable`. Use the client release that matches your `contextosd`.
+`native_unavailable`. Use the client release that matches your `contextosd`: before its
+first admission the client warns (`VersionMismatchWarning`) when the server is another
+release, and refuses (`IncompatibleServer`) a server with another API generation.
 
 ## The HTTP client (most agents)
 

@@ -21,6 +21,17 @@ export interface DispatchReport {
 }
 
 export declare const RUN_HEADER: string;
+export declare const CLIENT_VERSION: string;
+export declare const API_VERSION: "v1";
+
+export interface ServerVersions {
+  apiVersion: string | null;
+  runtimeVersion: string | null;
+  clientVersion: string;
+}
+/** The server speaks a different HTTP API generation than this client. */
+export declare class IncompatibleServer extends Error {}
+export declare function checkVersions(deployment: unknown, clientVersion?: string): ServerVersions;
 export declare const RESERVATION_HEADER: string;
 
 export declare class ContextOSHTTPError extends Error {
@@ -114,7 +125,9 @@ export interface CallOptions {
 }
 
 export declare class Client {
-  constructor(baseUrl: string, options: { token: string; timeoutMs?: number; maxRetries?: number; fetch?: typeof fetch });
+  constructor(baseUrl: string, options: { token: string; timeoutMs?: number; maxRetries?: number; fetch?: typeof fetch; checkServer?: boolean });
+  /** Reads GET /v1/deployment: throws IncompatibleServer on another API generation, warns on another release. Runs once before the first admit. */
+  checkServer(): Promise<ServerVersions>;
   readonly baseUrl: string;
   request<T = any>(method: string, path: string, options?: { body?: unknown; generation?: number; query?: Record<string, string | number> }): Promise<T>;
   admit(body: Record<string, any>, options?: { principalChain?: { kind: string; id: string }[] }): Promise<Run>;
