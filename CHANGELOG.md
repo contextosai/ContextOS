@@ -5,6 +5,20 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Installable clients. Each release attaches a `contextos` wheel per platform (Linux
+  x86_64 and aarch64 on glibc 2.28+, macOS arm64, with the in-process kernel), a
+  pure-Python `contextos` wheel with the HTTP client for every other platform, and the
+  `contextos-client` npm package. Publishing a release sends them to PyPI and npm
+  through trusted publishing (`.github/workflows/publish-packages.yml`), with build
+  provenance verified before upload. `scripts/package_clients.py` builds the client
+  packages from the source tree.
+
+### Changed
+- The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;
+  `@contextos/kernel` was never published and its scope belongs to someone else.
+  Import the HTTP client as `contextos-client`.
+
 ## 0.1.0-alpha.11 - 2026-10-31
 
 Eleventh alpha: services behind a private CA, a chart that migrates its own schema,

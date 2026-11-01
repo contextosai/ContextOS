@@ -1,4 +1,4 @@
-//! `@contextos/kernel` native module.
+//! Node.js native module for the in-process kernel (`bindings/node/index.mjs`).
 //!
 //! `callSync(operation, inputJson)` runs on the calling thread; `call(...)` runs on the
 //! libuv thread pool and returns a Promise so the event loop never blocks on a large

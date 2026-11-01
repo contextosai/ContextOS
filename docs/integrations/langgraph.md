@@ -18,8 +18,8 @@ pip install "langgraph==1.2.16" "langchain==1.4.6" "langchain-anthropic==1.7.6"
 pip install "langgraph-checkpoint-postgres"     # a durable checkpointer, for failover (section 6)
 ```
 
-`contextos.client` is standard-library only; vendor `bindings/python/contextos` or
-install it from your internal index.
+`contextos.client` is standard-library only: `pip install --pre contextos` (published
+from 0.1.0-alpha.12), or vendor `bindings/python/contextos`.
 
 ## 2. Admit a run
 

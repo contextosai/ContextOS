@@ -19,14 +19,14 @@ npm install @mastra/mcp@2.4.1        # only for the MCP route (section 8)
 
 `@mastra/core` is large (about 140 MB installed) and includes the model router, so
 `model: "openai/gpt-6.1-sol"` needs no provider package. The ContextOS client
-(`bindings/node/client.mjs`, published as `@contextos/kernel/client`) has no dependencies.
+(`npm install contextos-client`, from 0.1.0-alpha.12) has no dependencies.
 
 ## 2. Admit a run
 
 Admit one run per agent task, before calling the agent:
 
 ```ts
-import { Client, governedTool } from "@contextos/kernel/client";
+import { Client, governedTool } from "contextos-client";
 
 const client = new Client("https://contextos.internal", { token: process.env.CONTEXTOS_TOKEN! });
 const run = await client.admit(admissionBody);   // holds the executor generation
@@ -115,7 +115,7 @@ Non-success results throw a `ToolOutcome` subclass. Return text the model reads 
 refusals, and suspend the tool for pauses that wait on a person:
 
 ```ts
-import { ToolOutcome, ToolPaused } from "@contextos/kernel/client";
+import { ToolOutcome, ToolPaused } from "contextos-client";
 
 function refusal(error) {
   const reasons = error.reasonCodes.join(", ") || error.status;

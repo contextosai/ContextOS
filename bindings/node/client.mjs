@@ -1,7 +1,7 @@
 // HTTP client for contextosd: govern an agent's tool calls from Node.js or any
 // runtime with fetch. No dependencies and no native addon.
 //
-//   import { Client, ToolPaused, ToolBlocked, governedTool } from "@contextos/kernel/client";
+//   import { Client, ToolPaused, ToolBlocked, governedTool } from "contextos-client";
 //   const client = new Client("https://contextos.internal", { token: process.env.CONTEXTOS_TOKEN });
 //   const run = await client.admit(admissionBody);       // holds the executor generation
 //   const output = await run.callTool("adp_payments.issue_refund", args,

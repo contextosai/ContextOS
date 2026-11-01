@@ -20,9 +20,9 @@ pip install "openai-agents==0.24.0"
 npm install @openai/agents@0.21.0 zod@4.6.7
 ```
 
-`contextos.client` is standard-library only; vendor `bindings/python/contextos` or
-install it from your internal index. The Node client is `bindings/node/client.mjs`
-(`@contextos/kernel/client`).
+`contextos.client` is standard-library only: `pip install --pre contextos` (published
+from 0.1.0-alpha.12), or vendor `bindings/python/contextos`. The Node client is
+`npm install contextos-client`.
 
 ## 2. Admit a run
 

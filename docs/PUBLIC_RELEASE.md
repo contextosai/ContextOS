@@ -71,14 +71,16 @@ email reporting route in `SECURITY.md` works independently of the GitHub form.
 Keep the workspace, Tower package, Python fallback and Helm chart versions aligned.
 Add notes under `docs/releases/<tag>.md` and record the version in `CHANGELOG.md`.
 The first release is `v0.1.0-alpha.1`; it is a prerelease, with evolving APIs and
-storage formats. Package registries remain unpublished.
+storage formats. From 0.1.0-alpha.12 the client packages go to PyPI and npm (below);
+crates.io stays unpublished.
 
 Merge the preparation PR, obtain green CI for the exact commit to be tagged, and
 create an annotated `v<workspace version>` tag at that commit. Pushing the tag runs
 `.github/workflows/release.yml`. It validates the version and notes, builds and tests
 the three platform archives, emits all-target/all-feature Rust source inventories,
-attests the archives, signs the container and creates a draft with the checked-in
-notes. Alpha tags are marked as prereleases and are not marked Latest.
+attests the archives, signs the container, builds and smoke-tests the client
+packages (three `contextos` platform wheels, the pure-Python `contextos` wheel and the
+`contextos-client` npm tarball) and creates a draft with the checked-in notes. Alpha tags are marked as prereleases and are not marked Latest.
 
 Before publishing, download the draft's assets and independently verify checksums,
 the expected workflow/tag in provenance, archive contents and the runnable examples.
@@ -94,3 +96,30 @@ commit, image digest and verification results with the release. Do not move publ
 tags or replace their assets; ship a new alpha for corrections. A failed candidate
 can remain unpublished with its failure explained, rather than being presented as a
 working release.
+
+## Package registries
+
+Publishing the draft release runs `.github/workflows/publish-packages.yml`. It
+downloads the wheels and the npm tarball from the release, verifies their build
+provenance against `release.yml`, and uploads them through trusted publishing: no
+registry token lives in the repository. Versions already on a registry are skipped,
+so a failed run can be repeated from the Actions tab (`workflow_dispatch` with the
+tag). Do not upload packages by hand once trusted publishing is set up.
+
+One-time setup, by an owner of the registry accounts:
+
+1. GitHub: create the environments `pypi` and `npm` under Settings / Environments,
+   each limited to tags `v*`. Add required reviewers if a second approval is wanted.
+2. PyPI: under the project account, add a pending trusted publisher for project
+   `contextos`: owner `contextosai`, repository `ContextOS`, workflow
+   `publish-packages.yml`, environment `pypi`. The first run creates the project.
+3. npm: trusted publishing can only be configured on a package that exists. Publish
+   the first version once by hand from the release's tarball, with two-factor
+   authentication: `npm publish contextos-client-<version>.tgz --access public`.
+   Then, in the package's settings, add the trusted publisher (GitHub Actions,
+   `contextosai/ContextOS`, workflow `publish-packages.yml`, environment `npm`),
+   and set publishing access to require two-factor authentication and disallow
+   tokens.
+
+The release notes template line "This release does not publish packages to PyPI, npm
+or crates.io" changes to name the two packages and their version.

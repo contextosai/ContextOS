@@ -155,6 +155,22 @@ jobs:
         run: |
           node bindings/node/test_client.mjs
           npx -y -p typescript@5.6.3 tsc --noEmit --strict --lib es2022,dom bindings/node/client.d.ts
+      # The packages release.yml publishes, installed as a user would (see its
+      # `clients` job): the pure-Python wheel and the npm package with its types.
+      - name: Client packages
+        run: |
+          python scripts/package_clients.py python "$RUNNER_TEMP/dist"
+          python scripts/package_clients.py node "$RUNNER_TEMP/npm"
+          npm pack "$RUNNER_TEMP/npm/contextos-client" --pack-destination "$RUNNER_TEMP/dist"
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-index "$RUNNER_TEMP"/dist/*-py3-none-any.whl
+          "$RUNNER_TEMP/venv/bin/python" -I -c 'import contextos, contextos.client, contextos.aio; assert contextos._native is None'
+          mkdir "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/dist/contextos-client-*.tgz typescript@5.6.3
+          node -e 'import("contextos-client").then(m => { if (typeof m.Client !== "function") process.exit(1) })'
+          printf 'import { Client, governedTool } from "contextos-client";\nconst c: Client = new Client("http://x", { token: "t" });\nvoid c; void governedTool;\n' > check.mts
+          npx tsc --noEmit --strict --module nodenext --moduleResolution nodenext --lib es2022,dom check.mts
   frameworks:
     # Each framework example on its own agent loop with a scripted model, plain and
     # with an approval that a scripted reviewer grants.

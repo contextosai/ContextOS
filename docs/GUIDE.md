@@ -18,12 +18,11 @@ for gate in compiled["runtime_controls"]["evidence_gates"]:
 decision = contextos.evaluate_authorization(authorization_input)
 ```
 
-Node (`bindings/node`, N-API; async calls run on the libuv pool). Nothing is on npm
-yet: `@contextos/kernel` names the package in `bindings/node`, which you install from
-this repository (`npm install /path/to/ContextOS/bindings/node`):
+Node (`bindings/node`, N-API; async calls run on the libuv pool). The kernel addon is
+not published; build it from this repository (see `bindings/node/README.md`):
 
 ```js
-import { kernel } from "@contextos/kernel";
+import { kernel } from "./bindings/node/index.mjs";
 const compiled = await kernel.call("compile", { pack, request, run_context });
 ```
 
@@ -84,7 +83,7 @@ never blocks on the network.
 The same client exists for Node.js and other `fetch` runtimes, with TypeScript types:
 
 ```ts
-import { Client, ToolPaused, ToolBlocked, governedTool } from "@contextos/kernel/client";
+import { Client, ToolPaused, ToolBlocked, governedTool } from "contextos-client";
 
 const client = new Client("https://contextos.internal", { token: process.env.CONTEXTOS_TOKEN! });
 const run = await client.admit(admissionBody);

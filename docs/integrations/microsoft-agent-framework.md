@@ -21,7 +21,8 @@ pip install "agent-framework-core==1.22.0" "agent-framework-openai==1.17.0"
 ```
 
 `agent-framework` installs every connector; the two packages above are enough here.
-Put `bindings/python` on `PYTHONPATH` or vendor it. The framework is asyncio, so use
+Install the ContextOS client with `pip install --pre contextos`, or put `bindings/python`
+on `PYTHONPATH`. The framework is asyncio, so use
 `contextos.aio`: `AsyncClient` and `AsyncRun` have the client's methods as coroutines
 (each request runs in a worker thread), so middleware never blocks the event loop.
 
