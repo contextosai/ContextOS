@@ -56,16 +56,20 @@ release already builds. The package version is the release tag. `/v1/deployment`
 `runtime_version` and `contract_version` (no version route exists today); the client
 refuses a server whose contract version differs, with a message naming both.
 
-**A2. One-tool walkthrough.** `ctx init-tool` reads one MCP server's `tools/list` or
-one OpenAPI operation and writes a draft capability manifest with every effectful
-field left `REVIEW:` so `--check-config` refuses it until a person fills it in. The
+**A2. One-tool walkthrough.** `ctx init-tool` reads one MCP server's saved
+`tools/list` and writes a draft capability manifest with every authority decision
+left `REVIEW:`, so `ctx manifest` and contextosd refuse it until a person fills it in.
+OpenAPI is not supported: the HTTP adapter only sends `POST {endpoint}/{protocol_tool}`
+with a JSON body, so a manifest drafted from an arbitrary OpenAPI operation would not
+be callable through it. The
 README's "Govern your own agent" path becomes: install, `ctx init-tool`, review,
 run `examples/dev-server.sh`, trigger a refusal, read the refusal's
 `next_safe_step`, export the evidence.
 
 **Tests.** Release workflow installs the published wheel and npm package in a clean
 job and runs `examples/agent-loop` against a released `contextosd` binary.
-`ctx init-tool` golden tests on two MCP servers and one OpenAPI file.
+`ctx init-tool` tests: the draft pins the tool, marks every decision and fails to
+load; the same draft with decisions filled in validates.
 
 **Not doing.** crates.io (the Rust crates are not a supported embedding API yet).
 Generating manifests that activate without review.

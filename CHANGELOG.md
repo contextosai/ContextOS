@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `ctx init-tool --mcp tools.json --tool <name> --adapter <id>` drafts a capability
+  manifest from an MCP server's saved `tools/list`: schemas and upstream pins copied,
+  every authority decision left as a `"REVIEW: …"` string with the allowed values, tool
+  annotations quoted only as untrusted hints. `ctx manifest` and contextosd refuse a
+  manifest while any `REVIEW:` string remains (`ctx manifest` reports their pointers
+  under `unreviewed`).
 - Installable clients. Each release attaches a `contextos` wheel per platform (Linux
   x86_64 and aarch64 on glibc 2.28+, macOS arm64, with the in-process kernel), a
   pure-Python `contextos` wheel with the HTTP client for every other platform, and the

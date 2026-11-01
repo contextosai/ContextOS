@@ -88,7 +88,8 @@ pub use findings::{
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{
-    CapabilityManifest, Compensation, CompletionCheck, ManifestError, RecoveryStrategy, is_path_segment,
+    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy, is_path_segment,
+    unreviewed,
 };
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;

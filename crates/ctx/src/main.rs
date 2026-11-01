@@ -6,7 +6,12 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+mod args;
+mod init_tool;
+
+use args::{Cli, Command};
+
+use clap::Parser;
 use contextos_contract::ingress::parse_strict;
 use contextos_contract::schema::{SchemaDoc, SchemaTarget, validate};
 use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
@@ -16,138 +21,6 @@ use contextos_kernel::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-
-#[derive(Parser)]
-#[command(name = "ctx", version, about = "ContextOS offline tooling")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Validate a JSON file against a published schema (e.g. `context-pack`, `execution-contract --def ActionBinding`).
-    Validate {
-        schema: String,
-        file: PathBuf,
-        #[arg(long)]
-        def: Option<String>,
-    },
-    /// Compile a Context Pack for a request and run context.
-    Compile {
-        #[arg(long)]
-        pack: PathBuf,
-        #[arg(long)]
-        request: PathBuf,
-        #[arg(long)]
-        run_context: PathBuf,
-        /// JSON object with optional `evidence`, `evidence_conflicts`, `promoted_memory` arrays.
-        #[arg(long)]
-        deps: Option<PathBuf>,
-    },
-    /// Print the RFC 8785 digest of an ActionBinding.
-    Digest { binding: PathBuf },
-    /// Negotiate an execution contract against the standard profile registry.
-    Negotiate {
-        #[arg(long)]
-        contract: PathBuf,
-        #[arg(long)]
-        support: PathBuf,
-        #[arg(long)]
-        features: PathBuf,
-    },
-    /// Review a capability manifest before pinning it.
-    Manifest { file: PathBuf },
-    /// Print the standard profile registry.
-    Profiles,
-    /// Hash an API key for the server configuration (reads the key from stdin).
-    HashKey,
-    /// Verify an exported audit chain offline against published keys: every entry's
-    /// payload digest, record hash and signature, and the chain's linkage from genesis.
-    AuditVerify {
-        /// The entries in order: a JSON array, or `{"entries": [...]}` pages concatenated
-        /// into one array.
-        #[arg(long)]
-        entries: PathBuf,
-        /// `{"keys": [{"kid", "alg", "public_key"}]}` as served by `GET /v1/audit/keys`.
-        #[arg(long)]
-        keys: PathBuf,
-        /// The last entry of an export verified earlier: the entries must continue it
-        /// exactly (next sequence, linked hash), so only new entries need checking.
-        #[arg(long)]
-        continues: Option<PathBuf>,
-    },
-    /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
-    /// into `ctx scorecard-gate` input, one case per run.
-    Scorecards {
-        /// Evidence bundle files.
-        #[arg(required = true)]
-        evidence: Vec<PathBuf>,
-        /// JSON object mapping run ids to case names (replays of one case under
-        /// different run ids pair up); runs without an entry use their run id.
-        #[arg(long)]
-        case_map: Option<PathBuf>,
-    },
-    /// Trajectory gate: compare what agents did on the same cases under a baseline and
-    /// a candidate (evidence bundles of replayed or shadowed runs): capabilities used,
-    /// decision outcomes, effects applied and tool calls. Fails on new capabilities,
-    /// changed outcomes, more effects, tool calls beyond a ratio of the baseline's, or a
-    /// case the candidate did not run, unless acknowledged per case.
-    TrajectoryGate {
-        /// Baseline evidence bundle files.
-        #[arg(long, required = true, num_args = 1..)]
-        baseline: Vec<PathBuf>,
-        /// Candidate evidence bundle files.
-        #[arg(long, required = true, num_args = 1..)]
-        candidate: Vec<PathBuf>,
-        /// JSON object mapping run ids to case names.
-        #[arg(long)]
-        case_map: Option<PathBuf>,
-        /// Tool calls a candidate case may make, as a multiple of the baseline's most.
-        #[arg(long, default_value_t = 1.5)]
-        max_tool_call_ratio: f64,
-        /// `{"capabilities": {case: [ids]}, "outcomes": [cases], "effects": [cases], "tool_calls": [cases], "unpaired": [cases]}`.
-        #[arg(long)]
-        acknowledge: Option<PathBuf>,
-        /// Audit exports (`GET /v1/audit/entries`, verified with `ctx audit-verify`): when
-        /// given, the capabilities a run called and the effects it applied come from the
-        /// runtime's signed record instead of what its decisions reported.
-        #[arg(long, num_args = 1..)]
-        audit: Vec<PathBuf>,
-    },
-    /// Scorecard release gate: compare candidate scorecards with the baseline's on
-    /// paired replay cases; fails on floors, policy/safety regressions, utility,
-    /// latency or cost beyond limits, and missing cases or measurements.
-    ScorecardGate {
-        /// JSON array of `{case, scorecards: [{policy, utility, safety, latency?, cost?}]}`.
-        #[arg(long)]
-        baseline: PathBuf,
-        #[arg(long)]
-        candidate: PathBuf,
-        /// `{policy_floor, safety_floor, max_utility_drop, max_latency_ratio?, max_cost_ratio?, min_cases}`.
-        #[arg(long)]
-        thresholds: PathBuf,
-    },
-    /// Release gate: compare a candidate Context Pack with the baseline on replay
-    /// cases; fails on unacknowledged widenings of capabilities, policy or evidence
-    /// gates, and on cases the candidate cannot compile.
-    Gate {
-        #[arg(long)]
-        baseline: PathBuf,
-        #[arg(long)]
-        candidate: PathBuf,
-        /// JSON array of `{name, request, run_context, deps}` (see `GET /v1/runs/{id}/replay-case`).
-        #[arg(long)]
-        cases: PathBuf,
-        /// Operator acknowledgements: `{capabilities, policy_loosening, evidence_gates}`.
-        #[arg(long)]
-        acknowledge: Option<PathBuf>,
-        /// Open feedback (`GET /v1/feedback`): the gate fails unless every open
-        /// record's replay obligation is among the cases.
-        #[arg(long)]
-        feedback: Option<PathBuf>,
-    },
-}
 
 enum Failure {
     Usage(String),
@@ -244,7 +117,12 @@ fn run(command: Command) -> Result<Value, Failure> {
             }
         }
         Command::Manifest { file } => {
-            let manifest: contextos_gateway::CapabilityManifest = typed(read(&file)?, "manifest")?;
+            let document = read(&file)?;
+            let unreviewed = contextos_gateway::unreviewed(&document);
+            if !unreviewed.is_empty() {
+                return Err(Failure::Rejected(json!({"valid": false, "unreviewed": unreviewed})));
+            }
+            let manifest: contextos_gateway::CapabilityManifest = typed(document, "manifest")?;
             manifest
                 .validate()
                 .map_err(|e| Failure::Rejected(json!({"error": e.to_string()})))?;
@@ -518,6 +396,12 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Err(Failure::Rejected(value))
             }
         }
+        Command::InitTool {
+            mcp,
+            tool,
+            adapter,
+            capability,
+        } => init_tool::draft(&read(&mcp)?, &tool, &adapter, capability.as_deref()).map_err(Failure::Usage),
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
         Command::HashKey => {
             let mut key = String::new();

@@ -83,9 +83,11 @@ functions with `governed_tool`, and register them with your framework: the
 [integration guides](docs/integrations/README.md) cover LangGraph, the OpenAI Agents
 SDK, Google ADK, the Claude Agent SDK, CrewAI and six more, each with a runnable
 example. To serve your own tools, write a Context Pack and capability manifests
-([GUIDE section 3](docs/GUIDE.md#3-run-contextosd)); the [glossary](docs/GLOSSARY.md)
-explains the terms. The Python client is not on PyPI yet: see
-[bindings/python](bindings/python/README.md).
+([GUIDE section 3](docs/GUIDE.md#3-run-contextosd)); `ctx init-tool` drafts a manifest
+from an MCP server's tool list for you to review; the [glossary](docs/GLOSSARY.md)
+explains the terms. The clients are `pip install --pre contextos` and
+`npm install contextos-client` from 0.1.0-alpha.12: see
+[bindings/python](bindings/python/README.md) and [bindings/node](bindings/node/README.md).
 
 ## Why not a database transaction?
 
