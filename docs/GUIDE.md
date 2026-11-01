@@ -772,7 +772,23 @@ minimal, development-only implementation):
     never content.
 
 Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); protocol
-discovery is never permission. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
+discovery is never permission.
+
+To start a manifest for an MCP tool, save the server's tool list and draft one:
+
+```sh
+npx @modelcontextprotocol/inspector --cli https://tools.internal/mcp --method tools/list > tools.json
+ctx init-tool --mcp tools.json --tool issue_refund --adapter adp_payments > issue_refund.json
+```
+
+The draft copies the tool's input and output schemas and its upstream pins
+(`upstream_tool_digest`, `upstream_description_digest`). Everything that grants or
+bounds authority is a `"REVIEW: …"` string listing the allowed values: purpose, desired
+effect, each risk dimension, approval mode, resource, destination and amount pointers,
+recovery strategy, artifact refs, and the description agents will read (the server's
+own text is quoted for you, since agents should not read it unreviewed). The tool's
+annotations appear only as untrusted hints. `ctx manifest` and contextosd refuse the
+file while any `REVIEW:` string remains, and `ctx manifest` lists where. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
 HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
 
 Under `idempotent_retry`, the provider key (`Idempotency-Key`, MCP

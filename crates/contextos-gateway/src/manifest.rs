@@ -357,3 +357,75 @@ impl CapabilityManifest {
         &self.capability_id[self.adapter_id.len() + 1..]
     }
 }
+
+/// Marks a field of a drafted manifest (`ctx init-tool`) that a person must decide.
+pub const REVIEW_MARKER: &str = "REVIEW:";
+
+/// JSON pointers of every string in a manifest document that still starts with
+/// [`REVIEW_MARKER`]. Loaders refuse a manifest while any remain, so a draft cannot
+/// be pinned before review even where its placeholder would otherwise parse (a
+/// description, a pointer).
+#[must_use]
+pub fn unreviewed(document: &Value) -> Vec<String> {
+    fn walk(value: &Value, pointer: &mut String, found: &mut Vec<String>) {
+        match value {
+            Value::String(s) if s.trim_start().starts_with(REVIEW_MARKER) => found.push(pointer.clone()),
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    let len = pointer.len();
+                    pointer.push('/');
+                    pointer.push_str(&index.to_string());
+                    walk(item, pointer, found);
+                    pointer.truncate(len);
+                }
+            }
+            Value::Object(fields) => {
+                for (key, item) in fields {
+                    let len = pointer.len();
+                    pointer.push('/');
+                    pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
+                    walk(item, pointer, found);
+                    pointer.truncate(len);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    walk(document, &mut String::new(), &mut found);
+    found
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::unreviewed;
+    use serde_json::json;
+
+    #[test]
+    fn finds_every_marked_string_by_pointer() {
+        let draft = json!({
+            "purpose_id": "REVIEW: a purpose",
+            "description": "  REVIEW: upstream says hi",
+            "resource_pointers": ["/order_id", "REVIEW: more?"],
+            "action_risk": {"effect": "REVIEW: none|external_state", "authority": "service"},
+            "a/b": "REVIEW: escaped",
+            "note": "not a REVIEW: marker",
+        });
+        let mut found = unreviewed(&draft);
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "/action_risk/effect",
+                "/a~1b",
+                "/description",
+                "/purpose_id",
+                "/resource_pointers/1"
+            ]
+        );
+        assert_eq!(
+            unreviewed(&json!({"purpose_id": "support.refund"})),
+            Vec::<String>::new()
+        );
+    }
+}

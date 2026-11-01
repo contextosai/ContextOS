@@ -43,6 +43,22 @@ async fn startup_can_require_schemas_on_effectful_tools() {
 }
 
 #[tokio::test]
+async fn a_drafted_manifest_is_refused_until_every_review_field_is_decided() {
+    let (config, _) = world_setup(&ALL_CONTROLS).await;
+    let path = &config.capabilities[0];
+    let reviewed = std::fs::read_to_string(path).unwrap();
+    let mut manifest: Value = serde_json::from_str(&reviewed).unwrap();
+    // A placeholder that would otherwise parse: a description agents would read.
+    manifest["description"] = json!("REVIEW: write what agents should read");
+    std::fs::write(path, manifest.to_string()).unwrap();
+    let refused = dispatch_setup_from_config(&config).err().unwrap();
+    assert!(refused.contains("still marked \"REVIEW:\" (/description)"), "{refused}");
+
+    std::fs::write(path, reviewed).unwrap();
+    assert!(dispatch_setup_from_config(&config).is_ok());
+}
+
+#[tokio::test]
 async fn effectful_mcp_tools_need_a_completion_contract_in_production() {
     let (mut config, _) = world_setup(&ALL_CONTROLS).await;
     assert!(!config.require_completion_contracts(), "off in development");

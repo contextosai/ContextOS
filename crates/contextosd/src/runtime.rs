@@ -410,6 +410,15 @@ fn read_manifest(path: &std::path::Path) -> Result<CapabilityManifest, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let value = contextos_contract::ingress::parse_strict(text.as_bytes(), 1 << 20)
         .map_err(|e| format!("{}: {e}", path.display()))?;
+    let unreviewed = contextos_gateway::unreviewed(&value);
+    if !unreviewed.is_empty() {
+        return Err(format!(
+            "{}: a drafted manifest with fields still marked \"{}\" ({}); decide each one, then check it with `ctx manifest`",
+            path.display(),
+            contextos_gateway::REVIEW_MARKER,
+            unreviewed.join(", ")
+        ));
+    }
     let manifest: CapabilityManifest = serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
     manifest.validate().map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(manifest)

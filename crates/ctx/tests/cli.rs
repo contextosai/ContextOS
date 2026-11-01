@@ -599,3 +599,34 @@ fn trajectory_gate_compares_what_agents_did() {
     ]);
     assert_eq!(code, 1);
 }
+
+#[test]
+fn init_tool_drafts_a_manifest_that_cannot_be_pinned_unreviewed() {
+    let listed = write(
+        "tools.json",
+        &json!({"tools": [{"name": "issue_refund", "description": "Refund an order.",
+            "inputSchema": {"type": "object", "properties": {"order_id": {"type": "string"}}}}]}),
+    );
+    let (code, draft) = ctx(&[
+        "init-tool",
+        "--mcp",
+        &listed,
+        "--tool",
+        "issue_refund",
+        "--adapter",
+        "adp_payments",
+    ]);
+    assert_eq!(code, 0);
+    assert_eq!(draft["capability_id"], "adp_payments.issue_refund");
+    assert!(draft["upstream_tool_digest"].as_str().unwrap().starts_with("sha256:"));
+
+    let (code, report) = ctx(&["manifest", &write("draft.json", &draft)]);
+    assert_eq!(code, 1);
+    assert_eq!(report["valid"], false);
+    assert!(report["unreviewed"].as_array().unwrap().contains(&json!("/purpose_id")));
+
+    assert_eq!(
+        ctx(&["init-tool", "--mcp", &listed, "--tool", "missing", "--adapter", "adp"]).0,
+        2
+    );
+}
