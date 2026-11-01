@@ -109,8 +109,31 @@ def transport() -> None:
     print("ok: client transport")
 
 
+def versions() -> None:
+    """Another API generation refuses; another or an unreported release warns."""
+    import warnings
+    from contextos.client import CLIENT_VERSION as __version__, IncompatibleServer, VersionMismatchWarning, _check_versions
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        same = _check_versions({"api_version": "v1", "runtime_version": __version__}, __version__)
+        assert same["runtime_version"] == __version__, same
+    try:
+        _check_versions({"api_version": "v2", "runtime_version": __version__}, __version__)
+        raise AssertionError("another API generation was accepted")
+    except IncompatibleServer:
+        pass
+    for deployment in ({"api_version": "v1", "runtime_version": "0.0.1"}, {"mode": "production"}):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _check_versions(deployment, __version__)
+        assert [w.category for w in caught] == [VersionMismatchWarning], caught
+    print("ok: client versions")
+
+
 def main() -> None:
     transport()
+    versions()
     if not BINARY.exists():
         print(f"skipped: {BINARY} not built")
         return
@@ -118,7 +141,11 @@ def main() -> None:
     try:
         client = Client(base, token=KEY)
         admission = json.loads((EXAMPLE / "requests/run.json").read_text())
-        run = client.admit(admission)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # the server is this client's release
+            run = client.admit(admission)
+        assert client.check_server()["runtime_version"] == client.check_server()["client_version"]
         assert run.executor_generation == 2, run
 
         call = json.loads((EXAMPLE / "requests/tool_call.json").read_text())

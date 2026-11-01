@@ -87,6 +87,9 @@ pub fn support_declaration(config: &Config) -> Value {
 /// What this deployment enforces, for operators (`GET /v1/deployment`): mode, support,
 /// resolved guards, which fact services and adapters are wired, and how audit is
 /// signed. Names only: no endpoint, credential or environment variable is included.
+/// The HTTP API generation, the `/v1` prefix every route carries.
+pub const API_VERSION: &str = "v1";
+
 pub fn deployment_summary(config: &Config) -> Value {
     let providers = config.providers.as_ref().map(|p| {
         json!({
@@ -114,6 +117,10 @@ pub fn deployment_summary(config: &Config) -> Value {
         .completion_score_floors()
         .map(|f| json!({"policy_floor": f.policy_floor, "safety_floor": f.safety_floor}));
     json!({
+        // Clients compare these with their own release (see the HTTP clients'
+        // compatibility check): `api_version` changes only with a new URL prefix.
+        "runtime_version": env!("CARGO_PKG_VERSION"),
+        "api_version": API_VERSION,
         "mode": match config.server.mode {
             config::Mode::Production => "production",
             config::Mode::Development => "development",

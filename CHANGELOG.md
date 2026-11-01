@@ -13,6 +13,11 @@ minor versions may break APIs and every break is listed.
   through trusted publishing (`.github/workflows/publish-packages.yml`), with build
   provenance verified before upload. `scripts/package_clients.py` builds the client
   packages from the source tree.
+- `GET /v1/deployment` reports `runtime_version` and `api_version`. Before its first
+  admission each HTTP client reads them once: a server with another API generation
+  raises `IncompatibleServer`, and another or an unreported release warns with
+  `VersionMismatchWarning`, since releases before 1.0 may change the API. Pass
+  `check_server=False` (Python) or `checkServer: false` (Node) to skip it.
 
 ### Changed
 - The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;

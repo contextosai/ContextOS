@@ -29,6 +29,9 @@ class VersionTest(unittest.TestCase):
     def test_facade_reports_the_workspace_version(self):
         pc.check_facade_version(pc.workspace_version())
 
+    def test_node_client_reports_the_workspace_version(self):
+        pc.check_node_client_version(pc.workspace_version())
+
 
 class PythonWheelTest(unittest.TestCase):
     def setUp(self):

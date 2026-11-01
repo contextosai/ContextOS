@@ -42,6 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import warnings
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
@@ -49,6 +50,11 @@ GENERATION_HEADER = "ContextOS-Executor-Generation"
 # with the usage it measures (see examples/metering-proxy).
 RUN_HEADER = "ContextOS-Run-Id"
 RESERVATION_HEADER = "ContextOS-Usage-Reservation"
+# The HTTP API generation this client speaks; a server reports its own in
+# ``GET /v1/deployment``.
+API_VERSION = "v1"
+# This client's release (scripts/package_clients.py checks it against Cargo.toml).
+CLIENT_VERSION = "0.1.0-alpha.11"
 
 
 class ContextOSHTTPError(Exception):
@@ -71,6 +77,30 @@ class BudgetExhausted(ContextOSHTTPError):
 
 
 _HTTP_ERRORS = {"budget_exhausted": BudgetExhausted}
+
+
+class IncompatibleServer(Exception):
+    """The server speaks a different HTTP API generation than this client."""
+
+
+class VersionMismatchWarning(UserWarning):
+    """The server is a different ContextOS release than this client. Releases before
+    1.0 may change the API, so use the same release on both sides."""
+
+
+def _check_versions(deployment: Any, client_version: str) -> dict:
+    """Raises on a different API generation; warns on a different or unreported release."""
+    deployment = deployment if isinstance(deployment, dict) else {}
+    api, runtime = deployment.get("api_version"), deployment.get("runtime_version")
+    if api is not None and api != API_VERSION:
+        raise IncompatibleServer(f"contextosd speaks API {api}; this client speaks {API_VERSION}")
+    if runtime is None:
+        warnings.warn(f"contextosd does not report its release (older than this client, {client_version}); "
+                      "use the same release on both sides", VersionMismatchWarning, stacklevel=4)
+    elif runtime != client_version:
+        warnings.warn(f"contextosd is release {runtime}; this client is {client_version}. "
+                      "Use the same release on both sides", VersionMismatchWarning, stacklevel=4)
+    return {"api_version": api, "runtime_version": runtime, "client_version": client_version}
 
 
 class ToolOutcome(Exception):
@@ -181,10 +211,14 @@ class Client:
 
     The token is sent only to ``base_url``: redirects are not followed (a ``3xx`` raises
     ``ContextOSHTTPError``), and plain ``http`` is refused except to a loopback address
-    unless ``allow_http=True`` (for example inside a private network you trust)."""
+    unless ``allow_http=True`` (for example inside a private network you trust).
+
+    Before its first admission the client reads ``GET /v1/deployment`` once: a server
+    with another API generation raises ``IncompatibleServer``, another release warns
+    with ``VersionMismatchWarning``. ``check_server=False`` skips it."""
 
     def __init__(self, base_url: str, token: str, timeout: float = 30.0, max_retries: int = 3, *,
-                 allow_http: bool = False):
+                 allow_http: bool = False, check_server: bool = True):
         parsed = urllib.parse.urlsplit(base_url)
         if parsed.scheme not in ("https", "http") or not parsed.hostname:
             raise ValueError("base_url must be an http(s) URL")
@@ -195,6 +229,7 @@ class Client:
         self._token = token
         self.timeout = timeout
         self.max_retries = max_retries
+        self._server_checked = not check_server
 
     def __repr__(self) -> str:  # never print the token
         return f"Client({self.base_url!r})"
@@ -235,8 +270,17 @@ class Client:
                 raise ContextOSHTTPError(error.code, "refused", json.dumps(decoded), decoded) from None
         raise AssertionError("unreachable")
 
+    def check_server(self) -> dict:
+        """Compares the server's API generation and release with this client's (see the
+        class docstring) and returns the three versions."""
+        versions = _check_versions(self.request("GET", "/v1/deployment"), CLIENT_VERSION)
+        self._server_checked = True
+        return versions
+
     def admit(self, body: dict, principal_chain: Optional[List[dict]] = None) -> "Run":
         """Admits a run (``POST /v1/runs``) and returns a handle that owns it."""
+        if not self._server_checked:
+            self.check_server()
         admitted = self.request("POST", "/v1/runs", body)
         context = body.get("run_context", {})
         agent = (context.get("agent") or {}).get("agent_id")
