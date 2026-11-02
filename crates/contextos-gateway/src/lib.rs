@@ -33,6 +33,7 @@ mod exposure_import;
 mod findings;
 mod findings_api;
 pub mod hold_census;
+pub mod hold_owners;
 mod input;
 mod lifecycle;
 mod loop_guard;

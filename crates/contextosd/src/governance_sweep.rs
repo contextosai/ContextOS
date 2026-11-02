@@ -53,6 +53,8 @@ struct Known {
     marks: (bool, bool, bool),
     diagnosis: HoldDiagnosis,
     logged: bool,
+    /// Reported to its guarantee's owner (see `contextos_gateway::hold_owners`).
+    owner_reported: bool,
     pass: u64,
 }
 
@@ -130,13 +132,17 @@ impl Census {
                     };
                     if fresh {
                         let diagnosis = gateway.diagnose_hold(&tenant, hold).await?;
-                        let logged = self.known.get(&key).is_some_and(|k| k.logged);
+                        let (logged, owner_reported) = self
+                            .known
+                            .get(&key)
+                            .map_or((false, false), |k| (k.logged, k.owner_reported));
                         self.known.insert(
                             key.clone(),
                             Known {
                                 marks: hold.marks(),
                                 diagnosis,
                                 logged,
+                                owner_reported,
                                 pass: self.pass,
                             },
                         );
@@ -153,6 +159,22 @@ impl Census {
                         continue;
                     };
                     let age = elapsed_millis(&started, &now).unwrap_or(0) / 1000;
+                    // Tell the guarantee's business owner once, past its threshold.
+                    if !known.owner_reported
+                        && let Some((_, after)) = gateway.hold_owner(&ledger.guarantee_id)
+                        && age >= after
+                    {
+                        gateway
+                            .report_aged_hold(
+                                &tenant,
+                                &ledger.guarantee_id,
+                                &ledger.resource_digest,
+                                &hold.reservation_id,
+                                age,
+                            )
+                            .await?;
+                        known.owner_reported = true;
+                    }
                     if age >= HOLD_AGE_LOG_SECONDS && !known.logged {
                         known.logged = true;
                         tracing::warn!(

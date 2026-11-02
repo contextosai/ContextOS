@@ -18,6 +18,7 @@ mod exposure;
 mod exposure_import;
 mod findings;
 mod harness;
+mod hold_owners;
 mod load;
 mod memory;
 mod notifications;

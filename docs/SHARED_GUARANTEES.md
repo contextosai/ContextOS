@@ -230,6 +230,40 @@ grants no reconciliation, and no state is resolved by waiting. The views contain
 tool arguments. Run and operation identifiers and provider references are visible
 to `audit:read` holders, as they are in the audit log.
 
+### Tell the business owner
+
+On-call learns about aging holds from `ContextOSHeldEffectsAging`. A held refund is
+often the refund lead's to resolve, though, so a guarantee may name its owner's
+notification webhook:
+
+```toml
+[[guarantees]]
+id = "refunds-per-order"
+# ...
+owner_route = "refund-leads"        # a [[notifications]] webhook id
+owner_after_seconds = 1800          # the default
+
+[[notifications]]
+id = "refund-leads"
+url = "https://hooks.internal.example/refund-leads"
+secret_env = "CONTEXTOS_REFUND_LEADS_SECRET"
+```
+
+When the leader's governance sweep finds a hold whose attempt started more than
+`owner_after_seconds` ago, it appends one `shared_hold_aged` audit entry with what
+the owner needs to act: the resource digest, unit and limit, run, operation and
+attempt, `amount`, `state`, `attempt_started_at`, age, `last_observation` and
+`next_safe_step` (with its reconcile route). The notification dispatcher delivers it
+from the audit chain as an `io.contextos.hold.aged` CloudEvent to that webhook only;
+other webhooks still receive escalations, not holds.
+
+Each hold is reported once, also across restarts and leader changes (a marker is
+written after the entry, so a crash between the two may report it twice: drop
+duplicates by `reservation_id`). A hold that settles before it ages is never
+reported. The owner routing is not part of the pinned definition, so changing it is
+not a definition change. As everywhere else, the age only routes the hold: waiting
+resolves nothing.
+
 Use the existing endpoint with the `reconcile` scope and the run's **current**
 executor generation, including after the run fails or is cancelled:
 

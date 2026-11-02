@@ -138,6 +138,8 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # url = "https://hooks.internal.example/contextos"
 # secret_env = "CONTEXTOS_NOTIFY_SECRET"
 # link_template = "https://tower.example/escalations/{escalation_id}"
+# A [[guarantees]] entry's owner_route names one of these webhooks: it also receives the
+# guarantee's holds older than owner_after_seconds (default 1800) as io.contextos.hold.aged.
 
 # [guards]
 # identical_tool_calls = 5     # loop guard: refuse the next identical call in a run

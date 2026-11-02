@@ -3446,6 +3446,16 @@
                               "provider"
                             ],
                             "description": "Absent means exact."
+                          },
+                          "owner_route": {
+                            "type": "string",
+                            "description": "The notification webhook told about this guarantee's aged holds."
+                          },
+                          "owner_after_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 604800,
+                            "description": "Hold age before the owner is told (default 1800)."
                           }
                         }
                       }
