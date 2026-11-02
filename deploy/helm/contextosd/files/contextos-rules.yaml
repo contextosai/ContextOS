@@ -231,6 +231,19 @@ groups:
             this stays quiet.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextospackintentmismatches
 
+      - alert: ContextOSResourceOverLimit
+        expr: sum by (guarantee) (increase(contextos_shared_guarantee_over_limit_imports_total[24h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Imported exposure took a resource under {{ $labels.guarantee }} past its limit.'
+          description: >-
+            Exposure created outside ContextOS was imported and left a resource under
+            {{ $labels.guarantee }} over its limit. The resource refuses every new effect
+            until its limit is raised by a reviewed definition change. Confirm the
+            imported rows and decide with the guarantee's owner.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosresourceoverlimit
+
   - name: contextos.service
     rules:
       - alert: ContextOSServerErrors

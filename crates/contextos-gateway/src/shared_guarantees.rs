@@ -102,7 +102,7 @@ impl SharedGuarantee {
         Ok(())
     }
 
-    fn definition(&self) -> Value {
+    pub(crate) fn definition(&self) -> Value {
         let mut rule = self.clone();
         rule.capability_ids.sort();
         json!(rule)
@@ -134,7 +134,7 @@ impl Link {
     }
 }
 
-fn hash(value: &Value) -> Result<String, GatewayError> {
+pub(crate) fn hash(value: &Value) -> Result<String, GatewayError> {
     sha256_canonical(value).map_err(|_| GatewayError::Guarantee("shared_guarantee_invalid".into()))
 }
 
@@ -155,7 +155,7 @@ fn link_key(admission: &RunAdmission, operation: &str) -> Result<DocKey, Gateway
 }
 
 /// Create-or-compare is idempotent and race-safe. Never replace a pinned binding.
-async fn pin<S: DocumentStore>(store: &S, key: &DocKey, body: &Value) -> Result<bool, StoreError> {
+pub(crate) async fn pin<S: DocumentStore>(store: &S, key: &DocKey, body: &Value) -> Result<bool, StoreError> {
     match store.create(key, body).await {
         Ok(_) => Ok(true),
         Err(e) if e.is_conflict() => Ok(store.get(key).await?.is_some_and(|d| d.body == *body)),

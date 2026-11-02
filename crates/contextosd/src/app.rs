@@ -3206,6 +3206,10 @@ where
             get(crate::exposure::resources_with_holds::<S, L>),
         )
         .route(
+            "/v1/guarantees/{id}/imports",
+            post(crate::exposure_import::import_exposure::<S, L>),
+        )
+        .route(
             "/v1/guarantees/{id}/resources/{resource_digest}/holds",
             get(crate::exposure::exposure_holds::<S, L>),
         )

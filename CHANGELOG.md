@@ -32,6 +32,15 @@ minor versions may break APIs and every break is listed.
   (`shared_guarantee_identity_unavailable`). The reservation's audit entry records the
   canonicalizer, the digest of the identifier the call named and the provider's
   evidence. Existing (`exact`) definitions keep their digest.
+- `POST /v1/guarantees/{id}/imports` (new scope `exposure:import`) imports exposure
+  created outside ContextOS, before onboarding or later, into a shared guarantee's
+  ledgers: up to 1,000 rows per request, each committed, never releasable, idempotent
+  per `import_id` and audited (`shared_guarantee_imported`). An import may take a
+  resource past its limit; it then reports `over_limit`, refuses new effects and raises
+  the new `ContextOSResourceOverLimit` alert
+  (`contextos_shared_guarantee_over_limit_imports_total`). Resource views add
+  `imported`, `import_count` and `over_limit`. `examples/ops/import_exposure.py` uploads
+  a CSV.
 
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a

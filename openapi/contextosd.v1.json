@@ -3585,6 +3585,20 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
+                              },
+                              "imported": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Committed exposure imported from outside the runtime (`POST /v1/guarantees/{id}/imports`); part of `committed`."
+                              },
+                              "import_count": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Imported rows (at most 1,024 per resource)."
+                              },
+                              "over_limit": {
+                                "type": "boolean",
+                                "description": "Imports took `committed + held` past `limit`; every new reservation is refused."
                               }
                             }
                           },
@@ -3719,6 +3733,20 @@
                       "type": "integer",
                       "minimum": 0,
                       "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
+                    },
+                    "imported": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Committed exposure imported from outside the runtime (`POST /v1/guarantees/{id}/imports`); part of `committed`."
+                    },
+                    "import_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Imported rows (at most 1,024 per resource)."
+                    },
+                    "over_limit": {
+                      "type": "boolean",
+                      "description": "Imports took `committed + held` past `limit`; every new reservation is refused."
                     }
                   }
                 }
@@ -3943,6 +3971,20 @@
                       "type": "integer",
                       "minimum": 0,
                       "description": "Settled receipts archived after their retention; their committed amount stays in `committed`."
+                    },
+                    "imported": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Committed exposure imported from outside the runtime (`POST /v1/guarantees/{id}/imports`); part of `committed`."
+                    },
+                    "import_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Imported rows (at most 1,024 per resource)."
+                    },
+                    "over_limit": {
+                      "type": "boolean",
+                      "description": "Imports took `committed + held` past `limit`; every new reservation is refused."
                     }
                   }
                 }
@@ -5301,6 +5343,159 @@
           }
         },
         "security": []
+      }
+    },
+    "/v1/guarantees/{id}/imports": {
+      "post": {
+        "operationId": "importExposure",
+        "summary": "Import exposure created outside the runtime",
+        "description": "One-way: each row adds committed exposure to its resource's ledger, idempotent per `import_id` (re-sending a row answers `duplicate`). A row may take a resource past its limit; it is kept, the resource refuses new effects, and `over_limit` is true. Every imported row is audited (`shared_guarantee_imported`) before the ledger changes. Nothing here releases or replenishes capacity.",
+        "x-contextos-scope": "exposure:import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rows"
+                ],
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "import_id",
+                        "resource",
+                        "amount",
+                        "source",
+                        "as_of",
+                        "evidence_ref"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "import_id": {
+                          "type": "string",
+                          "description": "Idempotency key: 1–256 of ASCII letters, digits, `_.:-`."
+                        },
+                        "resource": {
+                          "type": "string",
+                          "description": "The canonical resource id (case-folded here under `ascii_casefold`; already canonical under `provider`)."
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "source": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "as_of": {
+                          "type": "string",
+                          "description": "Contract timestamp of the source reading."
+                        },
+                        "evidence_ref": {
+                          "type": "string",
+                          "maxLength": 512
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per row, in order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "guarantee_id",
+                    "results"
+                  ],
+                  "properties": {
+                    "guarantee_id": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "index",
+                          "status"
+                        ],
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "import_id": {},
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "imported",
+                              "duplicate",
+                              "refused"
+                            ]
+                          },
+                          "resource_digest": {
+                            "type": "string"
+                          },
+                          "over_limit": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "description": "For `refused`: `shared_guarantee_import_invalid`, `shared_guarantee_import_mismatch` (the import_id was used for another row), `shared_guarantee_import_saturated` or `shared_guarantee_definition_mismatch`."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },

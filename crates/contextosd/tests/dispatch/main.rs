@@ -15,6 +15,7 @@ mod evaluation;
 mod evidence;
 mod executors;
 mod exposure;
+mod exposure_import;
 mod findings;
 mod harness;
 mod load;

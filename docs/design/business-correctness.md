@@ -153,6 +153,12 @@ accepting up to 1,000 rows per call, each row keyed by canonical resource. `ctx
 guarantees import --file prior.csv` pages through a file and resumes from the last
 accepted `import_id`. Every row is a signed audit entry.
 
+**Status.** C2 is implemented with two differences. Imports live in the ledger apart
+from receipts (at most 1,024 per resource) rather than as archived receipts: archiving
+would forget the `import_id` and let a re-sent row count twice. The CSV loader is
+`examples/ops/import_exposure.py` (ctx is offline); idempotency makes re-running it the
+resume. The over-limit alert fires on `contextos_shared_guarantee_over_limit_imports_total`.
+
 **C3. Adjustments after onboarding.** The same transition handles exposure created
 outside ContextOS later (a refund issued from the legacy back office). It can only
 consume capacity. Nothing in ContextOS ever replenishes a resource from an outside

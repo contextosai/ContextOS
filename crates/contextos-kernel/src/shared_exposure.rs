@@ -9,6 +9,12 @@
 //! caller's retention has passed since, folding its committed amount into
 //! `archived_committed`. Held receipts are never archived, so [`MAX_EXPOSURE_RECEIPTS`]
 //! bounds the receipts live at once, not a resource's lifetime.
+//!
+//! Exposure created outside the runtime (before onboarding, or later by another
+//! system) arrives as a one-way import ([`import_exposure`]): committed, never
+//! releasable, idempotent per `import_id`, and kept in the ledger apart from receipts
+//! so compaction never forgets it. An import may push a resource past its limit; the
+//! resource then refuses every new reservation and reports `over_limit`.
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -21,6 +27,8 @@ use crate::TransitionResult;
 
 pub const MAX_EXPOSURE_RECEIPTS: usize = 1024;
 pub const MAX_EXACT_EXPOSURE: u64 = 9_007_199_254_740_991;
+/// Imports one resource's ledger keeps; beyond it a new import is refused.
+pub const MAX_EXPOSURE_IMPORTS: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +47,24 @@ pub struct ExposureClaim {
     pub action_digest: String,
     pub attempt_id: String,
     pub amount: u64,
+}
+
+/// One row of exposure created outside the runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExposureImport {
+    pub import_id: String,
+    pub amount: u64,
+    /// Digest of the full imported row, so a reused `import_id` with other content is
+    /// refused rather than ignored.
+    pub row_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportRecord {
+    amount: u64,
+    row_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +101,17 @@ struct Ledger {
     archived_committed: u64,
     #[serde(default)]
     archived_receipts: u64,
+    /// Committed exposure imported from outside the runtime, by `import_id`. Part of
+    /// `committed`; never archived or released.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    imports: BTreeMap<String, ImportRecord>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    imported: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 fn identifier(s: &str) -> bool {
@@ -111,8 +148,15 @@ fn checked(state: &Value, binding: &ExposureBinding) -> Result<Ledger, &'static 
     if &ledger.binding != binding {
         return Err("shared_guarantee_definition_mismatch");
     }
-    if ledger.receipts.len() > MAX_EXPOSURE_RECEIPTS {
+    if ledger.receipts.len() > MAX_EXPOSURE_RECEIPTS || ledger.imports.len() > MAX_EXPOSURE_IMPORTS {
         return Err("shared_guarantee_invalid");
+    }
+    let mut imported = 0_u64;
+    for (id, record) in &ledger.imports {
+        if !identifier(id) || !exposure_digest(&record.row_digest) || record.amount == 0 {
+            return Err("shared_guarantee_invalid");
+        }
+        imported = imported.checked_add(record.amount).ok_or("shared_guarantee_invalid")?;
     }
     let (mut committed, mut held) = (0_u64, 0_u64);
     for (id, receipt) in &ledger.receipts {
@@ -135,9 +179,17 @@ fn checked(state: &Value, binding: &ExposureBinding) -> Result<Ledger, &'static 
             .checked_add(receipt.claim.amount)
             .ok_or("shared_guarantee_invalid")?;
     }
-    if committed.checked_add(ledger.archived_committed) != Some(ledger.committed)
+    // Reservations keep committed + held within the limit; only imports may exceed it.
+    if imported != ledger.imported
+        || committed
+            .checked_add(ledger.archived_committed)
+            .and_then(|n| n.checked_add(imported))
+            != Some(ledger.committed)
         || held != ledger.held
-        || committed.checked_add(held).is_none_or(|n| n > binding.limit)
+        || ledger
+            .committed
+            .checked_add(held)
+            .is_none_or(|n| n > binding.limit.saturating_add(imported) || n > MAX_EXACT_EXPOSURE)
     {
         return Err("shared_guarantee_invalid");
     }
@@ -152,6 +204,8 @@ pub fn empty_exposure(binding: &ExposureBinding) -> Value {
         receipts: BTreeMap::new(),
         archived_committed: 0,
         archived_receipts: 0,
+        imports: BTreeMap::new(),
+        imported: 0,
     })
 }
 
@@ -159,10 +213,12 @@ pub fn empty_exposure(binding: &ExposureBinding) -> Value {
 pub fn exposure_summary(state: &Value) -> Option<Value> {
     let binding: ExposureBinding = serde_json::from_value(state.get("binding")?.clone()).ok()?;
     let ledger = checked(state, &binding).ok()?;
+    let used = ledger.committed + ledger.held;
     Some(
         serde_json::json!({"guarantee_id":binding.guarantee_id,"definition_digest":binding.definition_digest,
         "resource_digest":binding.resource_digest,"unit":binding.unit,"limit":binding.limit,
-        "committed":ledger.committed,"held":ledger.held,"available":binding.limit-ledger.committed-ledger.held,
+        "committed":ledger.committed,"held":ledger.held,"available":binding.limit.saturating_sub(used),
+        "imported":ledger.imported,"import_count":ledger.imports.len(),"over_limit":used > binding.limit,
         "receipt_count":ledger.receipts.len(),"archived_receipts":ledger.archived_receipts}),
     )
 }
@@ -312,6 +368,49 @@ pub fn transition_exposure_dispatch(
         "abort" => {}
         _ => return TransitionResult::rejected(state.clone(), "shared_guarantee_invalid"),
     }
+    TransitionResult::accepted(serde_json::json!(ledger), vec![])
+}
+
+/// Adds committed exposure created outside the runtime. Idempotent per `import_id`
+/// (the same row again is accepted unchanged; other content under it is refused), it
+/// only ever adds committed exposure, never touches receipts, and is accepted even
+/// when it takes the resource past its limit: the resource then refuses new
+/// reservations, so exposure that already happened is never hidden.
+pub fn import_exposure(state: &Value, binding: &ExposureBinding, import: &ExposureImport) -> TransitionResult {
+    let mut ledger = match checked(state, binding) {
+        Ok(v)
+            if identifier(&import.import_id)
+                && exposure_digest(&import.row_digest)
+                && import.amount > 0
+                && import.amount <= MAX_EXACT_EXPOSURE =>
+        {
+            v
+        }
+        Ok(_) => return TransitionResult::rejected(state.clone(), "shared_guarantee_import_invalid"),
+        Err(r) => return TransitionResult::rejected(state.clone(), r),
+    };
+    let record = ImportRecord {
+        amount: import.amount,
+        row_digest: import.row_digest.clone(),
+    };
+    match ledger.imports.get(&import.import_id) {
+        Some(existing) if *existing == record => return TransitionResult::accepted(state.clone(), vec![]),
+        Some(_) => return TransitionResult::rejected(state.clone(), "shared_guarantee_import_mismatch"),
+        None if ledger.imports.len() >= MAX_EXPOSURE_IMPORTS => {
+            return TransitionResult::rejected(state.clone(), "shared_guarantee_import_saturated");
+        }
+        None => {}
+    }
+    let Some(committed) = ledger
+        .committed
+        .checked_add(import.amount)
+        .filter(|c| c.checked_add(ledger.held).is_some_and(|n| n <= MAX_EXACT_EXPOSURE))
+    else {
+        return TransitionResult::rejected(state.clone(), "shared_guarantee_import_invalid");
+    };
+    ledger.committed = committed;
+    ledger.imported += import.amount;
+    ledger.imports.insert(import.import_id.clone(), record);
     TransitionResult::accepted(serde_json::json!(ledger), vec![])
 }
 

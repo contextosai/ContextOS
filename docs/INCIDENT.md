@@ -248,6 +248,19 @@ pack's intent-scoped rules did not apply to them. In `observe` mode, find them i
 fix the callers' intents, or give the pack rules for each intent it serves, then switch
 to `required`. In `required` mode the runs were refused (`intent_not_governed`).
 
+### ContextOSResourceOverLimit
+
+Warning. An exposure import (`POST /v1/guarantees/{id}/imports`) left a resource over
+its guarantee's limit, so the resource refuses every new effect
+(`shared_guarantee_exceeded`). Nothing was lost or hidden: the exposure happened
+outside ContextOS. Find the rows in the `shared_guarantee_imported` audit entries
+(`guarantee_id`, `binding.resource_digest`, `source`, `evidence_ref`, `imported_by`) and
+the resource with `GET /v1/guarantees/{id}/resources/{resource_digest}`
+(`over_limit: true`). Confirm the rows with the source system. If the spending was
+legitimate, the guarantee's owner decides whether to raise the limit, which is a
+reviewed definition change; ContextOS never replenishes a resource from an outside
+reading. A wrong row cannot be removed by another import: treat it as an incident.
+
 ### ContextOSServerErrors
 
 More than 1% of requests are failing. The runtime fails closed, so agents get errors,

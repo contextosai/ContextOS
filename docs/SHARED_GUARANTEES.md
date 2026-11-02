@@ -34,8 +34,8 @@ unit = "INR_minor"
 
 Every distinct canonical order identifier receives a lifetime ceiling of INR 1,000.
 This is a policy ceiling, not an automatic reading of captured payment or previously
-refunded money. Start with resources whose prior exposure is accounted for. Existing
-business APIs should retain their own invariant checks.
+refunded money: import what was already spent (see *Prior and outside exposure*).
+Existing business APIs should retain their own invariant checks.
 
 The runtime extracts both fields from the same arguments bound to the authorized
 action and sent to the provider. Pointers use RFC 6901; missing values, invalid
@@ -86,6 +86,41 @@ Deploy every replica participating in the boundary with the same guarantee
 definitions, tenant identities and protected store. A separate store is a separate
 enforcement domain. Memory storage shares capacity only within the same process;
 use PostgreSQL for durable multi-process operation.
+
+### Prior and outside exposure
+
+A ledger starts empty, but the resource may not be: an order refunded before
+onboarding, or refunded later from the legacy back office, has exposure ContextOS
+never saw. Import it, one way:
+
+```text
+POST /v1/guarantees/{id}/imports          (scope exposure:import)
+{"rows": [{"import_id": "backoffice:rf_1029", "resource": "ord_881", "amount": 30000,
+           "source": "legacy_backoffice", "as_of": "2026-10-01T00:00:00Z",
+           "evidence_ref": "backoffice:refund:rf_1029"}]}
+```
+
+- Each row adds committed exposure to its canonical resource's ledger. `resource` is
+  the canonical id (case-folded under `ascii_casefold`; under `provider` it must
+  already be the provider's canonical id).
+- Rows are idempotent per `import_id`: sending the same row again answers `duplicate`,
+  and another row under a used `import_id` is refused
+  (`shared_guarantee_import_mismatch`). A resource keeps at most 1,024 imports.
+- Up to 1,000 rows per request, answered one by one: `imported`, `duplicate` or
+  `refused` with a reason. `examples/ops/import_exposure.py` uploads a CSV in pages;
+  run it again to resume.
+- Every imported row is audited (`shared_guarantee_imported`, with `source`, `as_of`,
+  `evidence_ref` and who imported it) before the ledger changes.
+- An import is accepted even when it takes a resource past its limit: the spending
+  already happened, and refusing the row would hide it. The resource then reports
+  `over_limit: true`, refuses every new reservation (`shared_guarantee_exceeded`) and
+  raises `ContextOSResourceOverLimit`.
+
+Nothing ever releases imported exposure or replenishes a resource from an outside
+reading. ContextOS does not try to stay in sync with a source-of-record balance:
+reading a balance and reserving against it is the distributed transaction
+`WHY_NOT_A_TRANSACTION.md` declines. Raising capacity stays a reviewed definition
+change.
 
 ## Conservation and execution
 
