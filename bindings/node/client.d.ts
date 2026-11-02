@@ -199,6 +199,8 @@ export declare class Run {
   callTool(capabilityId: string, args: Record<string, Json>, options?: CallOptions): Promise<Record<string, Json>>;
   provideInput(paused: ToolPaused, envelope: Record<string, Json>, responses: Record<string, Json>): Promise<Record<string, Json>>;
   reconcile(operationId: string, options?: { outcome?: "confirmed" | "not_applied" | "partial"; evidenceRef?: Record<string, string> }): Promise<any>;
+  /** Relays an outcome witness's signed reading (compact JWS); needs `outcome:report`. */
+  reportOutcome(operationId: string, attestation: string): Promise<{ run_id: string; operation_id: string; state: "witnessed"; postcondition: string; late: boolean; observation: Record<string, Json> }>;
   compensations(): Promise<{ run_id: string; effects: CompensableEffect[] }>;
   compensate(operationId: string, options?: { toolCallId?: string }): Promise<Record<string, Json>>;
   compensateAll(): Promise<{ run_id: string; status: "compensated" | "stopped"; steps: { operation_id: string; result: any; report: any }[]; stopped_at: { operation_id: string; reason: string } | null }>;

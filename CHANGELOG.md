@@ -61,6 +61,11 @@ minor versions may break APIs and every break is listed.
   for the action's resource and amount, observed after the effect. Past the deadline
   the governance sweep opens one escalation (`outcome_missed`). Audited as
   `outcome_pending` and `outcome_witnessed`.
+- A decision citing an effect whose outcome is not yet witnessed cannot be recorded as
+  `DECIDED` or `CLOSED` (409 `outcome_pending`); once witnessed, its tool lineage cites
+  the reading (`artifact_refs`) and the run's evidence bundle lists its `outcomes`.
+  `ctx attest` signs claims as a development issuer or witness; the clients gain
+  `report_outcome` / `reportOutcome`. `examples/outcome-witness` is the refund pilot.
 
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a

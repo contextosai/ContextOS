@@ -101,6 +101,8 @@ pub enum DecisionRefusal {
     TooLarge,
     #[error("model profile {0} is not pinned for this run")]
     ModelNotPinned(String),
+    #[error("tool call {0} applied an effect whose outcome witness has not reported")]
+    OutcomePending(String),
     #[error(transparent)]
     Gateway(#[from] GatewayError),
 }
@@ -206,10 +208,23 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             let capability_id = self
                 .manifest_for_ref(&op["intent"]["capability_ref"])
                 .map(|m| m.capability_id.clone());
-            transcript.push(
-                json!({"tool_call_id": call.tool_call_id, "operation_id": call.operation_id,
-                "action_digest": op["intent"]["action_digest"], "outcome": op["outcome"]}),
-            );
+            // An effect with an outcome contract is cited with its witness's reading; a
+            // decision that commits to it waits for that reading.
+            let witnessed = match self.outcome(admission, &call.operation_id).await? {
+                Some(record) if record["state"] == "witnessed" => record["observation"]["attestation_digest"]
+                    .as_str()
+                    .map(|d| format!("outcome:{d}")),
+                Some(_) if matches!(report.status, DecisionStatus::Decided | DecisionStatus::Closed) => {
+                    return Err(DecisionRefusal::OutcomePending(call.tool_call_id.clone()));
+                }
+                _ => None,
+            };
+            let mut entry = json!({"tool_call_id": call.tool_call_id, "operation_id": call.operation_id,
+                "action_digest": op["intent"]["action_digest"], "outcome": op["outcome"]});
+            if let Some(cited) = &witnessed {
+                entry["witnessed"] = json!(cited);
+            }
+            transcript.push(entry);
             lineage.push(ToolLineageEntry {
                 tool_call_id: call.tool_call_id.clone(),
                 tool_result_id: None,
@@ -217,7 +232,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 approval_mode_effective: None,
                 policy_decision_id: None,
                 idempotency_key: Some(op["intent"]["idempotency_key"].as_str().map(str::to_owned)),
-                artifact_refs: None,
+                artifact_refs: witnessed.map(|cited| vec![cited]),
                 mutation_refs: (op["outcome"] == "confirmed" || op["outcome"] == "partial")
                     .then(|| vec![call.operation_id.clone()]),
                 reversal_token: None,
@@ -465,6 +480,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "budget_ledger": budget,
             "budget_archives": archives,
             "decisions": decisions,
+            "outcomes": self.run_outcomes(admission).await?,
         }))
     }
 }

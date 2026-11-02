@@ -225,6 +225,13 @@ class Client:
             {"source": "operator", "outcome": outcome, "evidence_ref": evidence_ref}
         return self.request("POST", f"/v1/runs/{_quote(run_id)}/operations/{_quote(operation_id)}/reconcile", body)
 
+    def report_outcome(self, run_id: str, operation_id: str, attestation: str) -> dict:
+        """Relays an outcome witness's signed reading (a compact JWS) for an applied effect
+        whose capability declares an outcome contract. Needs the ``outcome:report`` scope;
+        the signature, not the caller, is what the runtime trusts."""
+        return self.request("POST", f"/v1/runs/{_quote(run_id)}/operations/{_quote(operation_id)}/outcome",
+                            {"attestation": attestation})
+
     def score(self, run_id: str, record_id: str, evaluator_ref: str, *, policy: float, utility: float,
               safety: float) -> dict:
         """Scores a recorded decision as an independent evaluator (a client whose token
