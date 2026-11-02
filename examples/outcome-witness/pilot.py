@@ -76,8 +76,8 @@ def attest(tmp, claims):
     return json.loads(signed.stdout)
 
 
-def posted(order, amount):
-    return {"iss": LEDGER, "sub": order, "satisfies": ["refund_posted"], "observed_at": at(),
+def posted(order, amount, receipt):
+    return {"iss": LEDGER, "sub": order, "receipt": receipt, "satisfies": ["refund_posted"], "observed_at": at(),
             "valid_until": at(600), "amount": {"minor_units": amount, "currency": "INR"}}
 
 
@@ -101,7 +101,10 @@ def main():
         with tempfile.TemporaryDirectory(prefix="contextos-outcome-") as tmp:
             tmp = Path(tmp)
             manifest = json.loads((EXAMPLE / "capabilities/issue_refund.json").read_text())
-            manifest["outcome"] = {"witness": LEDGER, "postcondition": "refund_posted", "within_seconds": 900}
+            # The ledger must name the refund the payment API reported (binds the effect).
+            manifest["outcome"] = {"witness": LEDGER, "postcondition": "refund_posted", "within_seconds": 900,
+                                   "binds": "effect"}
+            manifest["recovery"]["reference_pointer"] = "/refund_id"
             (tmp / "issue_refund.json").write_text(json.dumps(manifest))
             jwks = attest(tmp, {"iss": LEDGER})["jwks"]
 
@@ -153,10 +156,11 @@ scopes = ["outcome:report"]
                 client = Client(base, token=KEY)
                 run = client.admit(json.loads((EXAMPLE / "requests/run.json").read_text()))
                 call = json.loads((EXAMPLE / "requests/tool_call.json").read_text())
-                run.call_tool(call["capability_id"], call["args"], approval_mode="destructive",
-                              idempotency_key=call["idempotency_key"], evidence_refs=call["evidence_refs"],
-                              tool_call_id="tc_refund")
-                print("Payment API confirmed the refund of INR 1200 for ord_881.")
+                result = run.call_tool(call["capability_id"], call["args"], approval_mode="destructive",
+                                       idempotency_key=call["idempotency_key"], evidence_refs=call["evidence_refs"],
+                                       tool_call_id="tc_refund")
+                refund_id = result["refund_id"]
+                print(f"Payment API confirmed refund {refund_id} of INR 1200 for ord_881.")
                 cited = [{"tool_call_id": "tc_refund", "operation_id": call["idempotency_key"]}]
                 decide = lambda: run.record_decision("support.refund.execute", "DECIDED",  # noqa: E731
                                                      outcome="refund_issued", tool_calls=cited)
@@ -167,14 +171,19 @@ scopes = ["outcome:report"]
                 time.sleep(0.2)  # the reading is taken after the refund
                 ledger = Client(base, token=LEDGER_KEY)
                 operation = call["idempotency_key"]
-                wrong = attest(tmp, posted("ord_881", 90_000))["attestation"]
+                wrong = attest(tmp, posted("ord_881", 90_000, refund_id))["attestation"]
                 code = refused(lambda: ledger.report_outcome(run.run_id, operation, wrong))
                 assert code == "outcome_amount_mismatch", code
                 print("Ledger reading of INR 900 refused: outcome_amount_mismatch.")
-                reading = attest(tmp, posted("ord_881", 120_000))["attestation"]
+                # Another refund of the same order and amount is not this one.
+                other = attest(tmp, posted("ord_881", 120_000, "rf_other"))["attestation"]
+                code = refused(lambda: ledger.report_outcome(run.run_id, operation, other))
+                assert code == "outcome_receipt_mismatch", code
+                print("Ledger reading of another INR 1200 refund refused: outcome_receipt_mismatch.")
+                reading = attest(tmp, posted("ord_881", 120_000, refund_id))["attestation"]
                 closed = ledger.report_outcome(run.run_id, operation, reading)
                 assert closed["state"] == "witnessed" and closed["late"] is False, closed
-                print("Ledger reading of INR 1200 for ord_881 accepted: refund_posted witnessed.")
+                print(f"Ledger reading of refund {refund_id} accepted: refund_posted witnessed.")
 
                 decision = decide()
                 refs = decision["record"]["tool_lineage"][0]["artifact_refs"]

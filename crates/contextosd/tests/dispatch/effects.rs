@@ -48,7 +48,13 @@ async fn admitted_run_dispatches_governed_effects() {
         .await
         .unwrap();
     assert_eq!(out["result"]["status"], "completed", "{out}");
-    assert_eq!(out["result"]["output"]["refund_id"], "rf_77");
+    assert!(
+        out["result"]["output"]["refund_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("rf_"),
+        "{out}"
+    );
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
 
     let audit: Value = http

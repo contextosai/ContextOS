@@ -157,13 +157,17 @@ pub fn admit(mode: EvidenceMode, pack: &ContextPack, request: &Value) -> Result<
 }
 
 /// The run's `deps` as the compiler and the replay case see them: under `strict`,
-/// with every evidence entry's labels set by its issuer's attestation.
+/// with every evidence entry's labels set by its issuer's attestation, and its
+/// `satisfies` narrowed to the requirements whose subject is the run's (`run` is the
+/// request and run context; see [`crate::evidence_subjects`]).
 #[must_use]
 pub fn relabel<'a>(
     mode: EvidenceMode,
     issuers: &crate::evidence_issuers::Issuers,
+    subjects: &[crate::evidence_subjects::EvidenceSubject],
     tenant: &str,
     now: &str,
+    (request, run_context): (&Value, &Value),
     deps: &'a Value,
 ) -> std::borrow::Cow<'a, Value> {
     if mode != EvidenceMode::Strict || !deps["evidence"].is_array() {
@@ -172,6 +176,7 @@ pub fn relabel<'a>(
     let mut deps = deps.clone();
     if let Some(evidence) = deps["evidence"].as_array_mut() {
         issuers.relabel(tenant, now, evidence);
+        crate::evidence_subjects::bind(subjects, request, run_context, evidence);
     }
     std::borrow::Cow::Owned(deps)
 }

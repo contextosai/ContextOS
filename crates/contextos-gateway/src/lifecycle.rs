@@ -145,6 +145,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     ) -> Result<(), GatewayError> {
         if matches!(outcome, "confirmed" | "partial") {
             self.note_applied_effect(admission, operation_id).await?;
+        } else if matches!(outcome, "not_applied" | "not_dispatched") {
+            // Never applied: its outcome contract retires.
+            self.sync_outcome(admission, operation_id).await?;
         }
         let unresolved = matches!(outcome, "unknown" | "partial");
         self.edit_run_state(admission, |state| {
@@ -164,8 +167,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         operation_id: &str,
     ) -> Result<(), GatewayError> {
-        // An applied effect's outcome contract starts its deadline now.
-        self.start_outcome(admission, operation_id).await?;
+        // An applied effect's outcome contract starts its deadline from the ledger's
+        // first observation of the effect.
+        self.sync_outcome(admission, operation_id).await?;
         if self.completion_floor.is_none() {
             return Ok(());
         }

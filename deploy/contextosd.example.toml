@@ -120,6 +120,14 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # algorithm = "EdDSA"
 # jwks = '''{"keys": [{"kty": "OKP", "crv": "Ed25519", "kid": "k1", "x": "..."}]}'''
 
+# What each gated requirement's evidence must be about: an attestation whose sub is not
+# the run's subject does not satisfy it.
+# [[evidence_subjects]]
+# requirement = "identity_verified"
+# from = "/request/input/context/customer_id"
+# prefix = "customer:"
+# canonicalizer = "ascii_casefold"
+
 # Overload protection (defaults shown).
 # [limits]
 # max_in_flight = 4096

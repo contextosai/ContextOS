@@ -296,3 +296,25 @@ Decided 2026-11-01 by the maintainer, as proposed.
    would hide real past spending.
 4. **Outcome deadline default.** `escalate`. `hold` only when the guarantee owner opts
    in, since it ties up capacity.
+
+## 7. Review round 2 (2026-11-02)
+
+An external review of `98e441b` found the plan substantially implemented and named
+three P1 findings and one verification gap, all confirmed in the code. Order of work:
+
+| Finding | Fix | Status |
+|---|---|---|
+| F2: one witness attestation could close several equal effects on one resource | Contracts state `binds`: `"effect"` needs the reading to name the provider's reference for the effect (`receipt` = the ledger's `external_ref`, from `recovery.reference_pointer`) and closes one effect per attestation; `"state"` keeps the resource-state semantics | branch `fix/outcome-binding` |
+| F3: the sweep re-read the first 1,000 index entries every pass; `awaiting_effect` records never retired | Persistent sweep cursor (every open outcome examined within `ceil(open / 1000)` passes); a definitive `not_applied` or `not_dispatched` retires the record (`not_applicable`) and frees its index entries; unresolved effects keep theirs | same PR |
+| Crash recovery: activation was a separate write timed by the clock of whoever ran it | Outcome state is derived from the operation ledger on every read (dispatch, reconciliation, completion gate, sweep), with `effect_at` the ledger's first observation of the effect. A crash-at-every-write matrix over dispatch and reconciliation, with and without a retry and a restart 30 minutes later, runs on the in-memory store and on PostgreSQL (a schema per case, in CI) | same PR |
+| F1: an evidence attestation's `sub` was recorded, not compared with what the decision concerns | `[[evidence_subjects]]`: per requirement, the subject read from the run's request or run context (a JSON Pointer, prefix, `exact` or `ascii_casefold`); a missing or different `sub` drops that requirement from the entry before compiling, so the compiler's parity holds and the replay case keeps the result. That the agent then acts on that subject is the task authorization's `resource_ids`/`destination_ids`; `provider` canonicalization at admission is not done | same PR |
+
+The crash matrix showed that completion was already refused across the gap the review
+pointed at (`settle_recorded` settles the budget before `note_effect`): the operation
+stays in `outstanding_effects` until `note_effect`, which activates the outcome first.
+What the matrix did catch was the deadline: a recovery activated the outcome at
+recovery time, not effect time. Both are now asserted per case.
+
+Not done here: registry publication and a clean-machine install (the maintainer's
+registry setup, `docs/PUBLIC_RELEASE.md`), and the design-partner workflow, which the
+review ranks after these fixes.

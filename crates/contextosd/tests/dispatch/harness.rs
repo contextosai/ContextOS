@@ -219,8 +219,13 @@ pub(crate) async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>)
                 return axum::Json(json!({"jsonrpc": "2.0", "id": r["id"], "result": {
                     "resultType": "task", "task": {"taskId": "task_e2e_1", "status": "working"}}}));
             }
+            // Each refund gets its own provider reference, from the operation's key.
+            let key = r["params"]["_meta"]["io.contextos/idempotencyKey"]
+                .as_str()
+                .unwrap_or_default();
+            let refund_id = format!("rf_{}", &contextos_contract::canonical::sha256_text(key)[7..19]);
             axum::Json(
-                json!({"jsonrpc": "2.0", "id": r["id"], "result": {"structuredContent": {"refund_id": "rf_77"}}}),
+                json!({"jsonrpc": "2.0", "id": r["id"], "result": {"structuredContent": {"refund_id": refund_id}}}),
             )
         }
     })))

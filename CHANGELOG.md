@@ -5,6 +5,32 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Changed (breaking)
+- Outcome contracts must state `binds`: `"effect"` (the witness's reading names the
+  provider's reference for the effect as `receipt`, taken from the finished result at
+  the new `recovery.reference_pointer`, which `"effect"` requires; one reading closes
+  one effect, `outcome_attestation_reused`; `outcome_receipt_mismatch`,
+  `outcome_receipt_missing`) or `"state"` (the previous semantics: a reading of the
+  resource's state). A manifest with `outcome` and no `binds` no longer loads.
+
+### Added (evidence)
+- `[[evidence_subjects]]`: under strict evidence, each gated requirement can be bound
+  to the subject it concerns (a JSON Pointer into the request or run context, with a
+  `prefix` and an `exact` or `ascii_casefold` canonicalizer). An attestation whose `sub`
+  is missing or is another subject no longer satisfies it (`verification.subjects`:
+  `evidence_subject_mismatch`, `evidence_subject_missing`). `--check-config` warns for
+  gated requirements without a binding.
+
+### Fixed
+- Outcome state is derived from the operation ledger, so a crash between recording an
+  effect and its outcome loses neither the obligation nor its deadline, which runs from
+  the ledger's first observation of the effect (previously from whenever recovery
+  activated it). `complete` refuses while an outcome's effect is unresolved.
+- An effect definitively not applied, or never dispatched, retires its outcome
+  (`not_applicable`) and frees its run and tenant index entries.
+- The governance sweep resumes its pass over open outcomes where the last pass stopped,
+  so outcomes not yet due can no longer starve an overdue one past the first 1,000.
+
 ### Added
 - Keycloak as identity provider ([docs/integrations/keycloak.md](docs/integrations/keycloak.md),
   `examples/keycloak`, run in CI against Keycloak 26.8). `[[oidc]]` claims are paths

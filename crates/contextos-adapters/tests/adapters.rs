@@ -688,6 +688,15 @@ async fn http_success_bodies_are_read_under_a_declared_contract() {
         assert_eq!((response.outcome, response.definitive), expected, "{body}");
         assert_eq!(response.external_ref.as_deref(), external_ref, "{body}");
     }
+    // The manifest may say where the provider's reference for the effect is.
+    let (url, _) =
+        server(|_| json_response(json!({"id": "job_9", "refund": {"id": "rf_9"}, "job": {"state": "succeeded"}})))
+            .await;
+    let adapter = HttpAdapter::new(&url, policy(), Arc::new(NoCredentials)).unwrap();
+    let mut pointed = with_completion(manifest("external_state"));
+    pointed.recovery.reference_pointer = Some("/refund/id".into());
+    let response = adapter.invoke(&pointed, &call()).await;
+    assert_eq!(response.external_ref.as_deref(), Some("rf_9"));
     // Without the contract an effectful call is never sent; a read-only one has no
     // effect to confirm, and its success status stands.
     let (url, seen) = server(|_| json_response(json!({"id": "rf_8"}))).await;

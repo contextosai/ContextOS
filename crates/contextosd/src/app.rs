@@ -143,6 +143,8 @@ pub struct AppState<S, L> {
     pub evidence: crate::evidence_admission::EvidenceMode,
     /// Issuers whose attestations set evidence labels under strict evidence.
     pub evidence_issuers: Arc<crate::evidence_issuers::Issuers>,
+    /// What each gated requirement's evidence must be about.
+    pub evidence_subjects: Arc<Vec<crate::evidence_subjects::EvidenceSubject>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -473,8 +475,10 @@ where
     let deps_input = crate::evidence_admission::relabel(
         state.evidence,
         &state.evidence_issuers,
+        &state.evidence_subjects,
         &caller.tenant_id,
         &gateway.now(),
+        (&input["request"], &input["run_context"]),
         &input["deps"],
     );
     let list = |key: &str| deps_input[key].as_array().cloned().unwrap_or_default();

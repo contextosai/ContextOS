@@ -56,10 +56,11 @@ fn at(offset_seconds: i64) -> String {
     format_unix_micros(now + offset_seconds * 1_000_000)
 }
 
-/// What the ledger saw: refund of `amount` on `order`, observed `observed` seconds from now.
-fn posted(order: &str, amount: u64, observed: i64, until: i64) -> Value {
+/// What the ledger saw: refund `receipt` of `amount` on `order`, observed `observed`
+/// seconds from now.
+fn posted(order: &str, amount: u64, receipt: &str, observed: i64, until: i64) -> Value {
     json!({"iss": LEDGER, "sub": order, "satisfies": ["refund_posted"], "observed_at": at(observed),
-        "valid_until": at(until), "amount": {"minor_units": amount, "currency": "INR"}})
+        "valid_until": at(until), "amount": {"minor_units": amount, "currency": "INR"}, "receipt": receipt})
 }
 
 /// A world whose refund capability declares an outcome witnessed by the ledger.
@@ -67,8 +68,9 @@ async fn outcome_world(witness: &Witness, within_seconds: u64) -> World {
     world_with(&ALL_CONTROLS, 1, |c| {
         let path = c.capabilities[0].clone();
         let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        manifest["outcome"] =
-            json!({"witness": LEDGER, "postcondition": "refund_posted", "within_seconds": within_seconds});
+        manifest["outcome"] = json!({"witness": LEDGER, "postcondition": "refund_posted",
+            "within_seconds": within_seconds, "binds": "effect"});
+        manifest["recovery"]["reference_pointer"] = json!("/refund_id");
         std::fs::write(&path, manifest.to_string()).unwrap();
         c.evidence_issuers.push(witness.issuer(LEDGER));
         c.api_keys.push(ApiKey {
@@ -82,8 +84,9 @@ async fn outcome_world(witness: &Witness, within_seconds: u64) -> World {
     .await
 }
 
-/// Admits `run_id` and refunds 120,000 on ord_881; returns the executor client.
-async fn refund(w: &World, run_id: &str) -> reqwest::Client {
+/// Admits `run_id` and refunds 120,000 on ord_881; returns the executor client and the
+/// provider's refund id.
+async fn refund(w: &World, run_id: &str) -> (reqwest::Client, String) {
     let admitted: Value = reqwest::Client::new()
         .post(format!("{}/v1/runs", w.base))
         .bearer_auth("acme-key")
@@ -106,7 +109,7 @@ async fn refund(w: &World, run_id: &str) -> reqwest::Client {
         .await
         .unwrap();
     assert_eq!(out["result"]["status"], "completed", "{out}");
-    http
+    (http, out["result"]["output"]["refund_id"].as_str().unwrap().to_owned())
 }
 
 async fn report(w: &World, run_id: &str, token: &str) -> (u16, Value) {
@@ -171,7 +174,8 @@ fn code(body: &Value) -> &str {
 async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
     let ledger = Witness::new();
     let w = outcome_world(&ledger, 900).await;
-    let http = refund(&w, "run_witnessed").await;
+    let (http, rf) = refund(&w, "run_witnessed").await;
+    let rf = rf.as_str();
 
     let refused = complete(&w, &http, "run_witnessed").await;
     assert!(refused.to_string().contains("outcome_pending"), "{refused}");
@@ -184,24 +188,31 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
     assert_eq!(code(&decided.1), "outcome_pending");
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    // Another order, another amount, an expired reading, an earlier reading, a service
-    // that is not the witness: each is refused.
+    // Another order, another amount, another refund, no refund named, an expired
+    // reading, an earlier reading, a service that is not the witness: each is refused.
+    let mut unnamed = posted("ord_881", 120_000, rf, 0, 600);
+    unnamed.as_object_mut().unwrap().remove("receipt");
     let cases = [
         (
-            ledger.sign(&posted("ord_999", 120_000, 0, 600)),
+            ledger.sign(&posted("ord_999", 120_000, rf, 0, 600)),
             "outcome_resource_mismatch",
         ),
         (
-            ledger.sign(&posted("ord_881", 90_000, 0, 600)),
+            ledger.sign(&posted("ord_881", 90_000, rf, 0, 600)),
             "outcome_amount_mismatch",
         ),
-        (ledger.sign(&posted("ord_881", 120_000, -600, -60)), "expired"),
         (
-            ledger.sign(&posted("ord_881", 120_000, -300, 600)),
+            ledger.sign(&posted("ord_881", 120_000, "rf_other", 0, 600)),
+            "outcome_receipt_mismatch",
+        ),
+        (ledger.sign(&unnamed), "outcome_receipt_mismatch"),
+        (ledger.sign(&posted("ord_881", 120_000, rf, -600, -60)), "expired"),
+        (
+            ledger.sign(&posted("ord_881", 120_000, rf, -300, 600)),
             "outcome_before_effect",
         ),
         (
-            Witness::new().sign(&posted("ord_881", 120_000, 0, 600)),
+            Witness::new().sign(&posted("ord_881", 120_000, rf, 0, 600)),
             "signature_invalid",
         ),
     ];
@@ -209,7 +220,7 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
         let (status, body) = report(&w, "run_witnessed", token).await;
         assert_eq!((status, code(&body)), (422, *expected), "{body}");
     }
-    let mut stranger = posted("ord_881", 120_000, 0, 600);
+    let mut stranger = posted("ord_881", 120_000, rf, 0, 600);
     stranger["iss"] = json!("https://stranger.example.test");
     let (status, body) = report(&w, "run_witnessed", &ledger.sign(&stranger)).await;
     assert_eq!((status, code(&body)), (422, "issuer_unknown"), "{body}");
@@ -221,7 +232,7 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
     );
 
     // The ledger's own reading closes it, once.
-    let token = ledger.sign(&posted("ord_881", 120_000, 0, 600));
+    let token = ledger.sign(&posted("ord_881", 120_000, rf, 0, 600));
     let (status, body) = report(&w, "run_witnessed", &token).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["state"], "witnessed");
@@ -263,7 +274,7 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
 async fn a_missed_outcome_escalates_once_and_a_late_witness_still_closes_it() {
     let ledger = Witness::new();
     let w = outcome_world(&ledger, 1).await;
-    let http = refund(&w, "run_late").await;
+    let (http, rf) = refund(&w, "run_late").await;
     let gateway = w.state.gateway.clone().unwrap();
     let config = SweepConfig::default();
     let mut census = Census::new(vec![TENANT.into()], gateway.shared_guarantee_ids());
@@ -287,7 +298,7 @@ async fn a_missed_outcome_escalates_once_and_a_late_witness_still_closes_it() {
             .contains("outcome_pending")
     );
 
-    let (status, body) = report(&w, "run_late", &ledger.sign(&posted("ord_881", 120_000, 0, 600))).await;
+    let (status, body) = report(&w, "run_late", &ledger.sign(&posted("ord_881", 120_000, &rf, 0, 600))).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["late"], true);
     assert_eq!(complete(&w, &http, "run_late").await["status"], "completed");
@@ -304,7 +315,7 @@ async fn an_operation_without_a_contract_has_no_outcome_to_report() {
             w.base
         ))
         .bearer_auth("acme-key")
-        .json(&json!({"attestation": ledger.sign(&posted("ord_881", 120_000, 0, 600))}))
+        .json(&json!({"attestation": ledger.sign(&posted("ord_881", 120_000, "rf_x", 0, 600))}))
         .send()
         .await
         .unwrap();
@@ -314,9 +325,10 @@ async fn an_operation_without_a_contract_has_no_outcome_to_report() {
 
 #[tokio::test]
 async fn a_witness_must_be_an_issuer_that_may_attest_the_postcondition() {
-    let contract: contextos_gateway::manifest::OutcomeContract =
-        serde_json::from_value(json!({"witness": LEDGER, "postcondition": "refund_posted", "within_seconds": 900}))
-            .unwrap();
+    let contract: contextos_gateway::manifest::OutcomeContract = serde_json::from_value(
+        json!({"witness": LEDGER, "postcondition": "refund_posted", "within_seconds": 900, "binds": "effect"}),
+    )
+    .unwrap();
     let contracts = [("adp_payments.issue_refund".to_owned(), contract)];
     let unlisted = contextosd::outcome_witness::check(&contracts, &[]).unwrap_err();
     assert!(unlisted.contains("is not an [[evidence_issuers]] issuer"), "{unlisted}");

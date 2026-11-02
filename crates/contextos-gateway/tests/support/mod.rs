@@ -2,6 +2,8 @@
 //! an admitted run, shared by the integration suites.
 #![allow(dead_code)]
 
+pub mod outcome;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -437,6 +439,20 @@ pub async fn harness_ports(
     let mut gateway = Gateway::new(store.clone(), audit.clone(), ports);
     gateway.register_adapter("adp_payments", adapter.clone());
     gateway.pin_capability(manifest()).unwrap();
+    let admission = admit_test_run(store.as_ref(), tool_calls, cost_cents).await;
+    Harness {
+        gateway,
+        admission,
+        store,
+        audit,
+        adapter,
+        approvals,
+        authority,
+    }
+}
+
+/// Admits the harness's run (`run_1` of [`TENANT`]) on `store`.
+pub async fn admit_test_run<S: DocumentStore>(store: &S, tool_calls: u64, cost_cents: f64) -> RunAdmission {
     let registry = &*STANDARD_PROFILE_REGISTRY;
     let contract = json!({"envelope_version": "contextos.execution_contract.v1", "contract_id": "contract_1",
         "run_id": "run_1", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "tenant_id": TENANT,
@@ -446,8 +462,8 @@ pub async fn harness_ports(
         "supported_profiles": registry.profiles.iter().map(|p| &p.profile).collect::<Vec<_>>(),
         "supported_controls": registry.controls.iter().map(|c| &c.control).collect::<Vec<_>>()});
     let (compiled, compiler, request, run_context) = compiled();
-    let admission = admit_run(
-        store.as_ref(),
+    admit_run(
+        store,
         AdmissionRequest {
             contract: &contract,
             support: &support,
@@ -475,16 +491,7 @@ pub async fn harness_ports(
         },
     )
     .await
-    .unwrap();
-    Harness {
-        gateway,
-        admission,
-        store,
-        audit,
-        adapter,
-        approvals,
-        authority,
-    }
+    .unwrap()
 }
 
 pub fn call(id: &str, idempotency_key: Option<&str>) -> Value {

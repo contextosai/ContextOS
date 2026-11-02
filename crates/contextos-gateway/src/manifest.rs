@@ -66,6 +66,12 @@ pub struct Recovery {
     /// capability every other 4xx leaves the outcome unknown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub not_applied_statuses: Vec<u16>,
+    /// JSON Pointer to the provider's own reference for the applied effect (its
+    /// transaction or receipt id, a string) in a finished result: MCP
+    /// `structuredContent`, or the HTTP response body (unset: `/id`). Recorded with the
+    /// attempt as `external_ref`; an outcome contract that binds the effect needs it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_pointer: Option<String>,
 }
 
 /// Statuses a manifest may declare as not applied, at most.
@@ -231,15 +237,29 @@ pub enum OnMissed {
     Escalate,
 }
 
+/// What a witness's observation establishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeBinds {
+    /// This particular effect completed: the observation names the provider's
+    /// reference for it (`receipt`), and one observation closes one effect.
+    Effect,
+    /// The action's resource is in the postcondition's state: one observation of that
+    /// state may close every effect on the resource it was taken after.
+    State,
+}
+
 /// A capability's outcome contract: after its effect is applied, the run cannot
 /// complete until `witness` (an `[[evidence_issuers]]` issuer) attests
-/// `postcondition` for the action's resource, within `within_seconds`.
+/// `postcondition` for the action's resource, within `within_seconds`. `binds` says
+/// whether that establishes the effect itself or only the resource's state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutcomeContract {
     pub witness: String,
     pub postcondition: String,
     pub within_seconds: u64,
+    pub binds: OutcomeBinds,
     #[serde(default)]
     pub on_missed: OnMissed,
 }
@@ -362,6 +382,17 @@ impl CapabilityManifest {
                 .validate()
                 .map_err(|reason| ManifestError::Completion(id.clone(), reason))?;
         }
+        if self
+            .recovery
+            .reference_pointer
+            .as_ref()
+            .is_some_and(|p| !p.starts_with('/'))
+        {
+            return Err(ManifestError::Completion(
+                id.clone(),
+                "reference_pointer must be a JSON Pointer",
+            ));
+        }
         let statuses = &self.recovery.not_applied_statuses;
         if statuses.len() > MAX_NOT_APPLIED_STATUSES
             || statuses.iter().any(|s| !(400..500).contains(s))
@@ -405,6 +436,12 @@ impl CapabilityManifest {
             outcome
                 .validate()
                 .map_err(|reason| ManifestError::Outcome(id.clone(), reason))?;
+            if outcome.binds == OutcomeBinds::Effect && self.recovery.reference_pointer.is_none() {
+                return Err(ManifestError::Outcome(
+                    id.clone(),
+                    "binds = effect needs recovery.reference_pointer: the provider's reference the witness must name",
+                ));
+            }
         }
         Ok(())
     }

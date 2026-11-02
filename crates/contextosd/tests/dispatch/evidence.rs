@@ -78,6 +78,7 @@ mod issuers {
     use contextos_contract::validation::format_unix_micros;
     use contextosd::evidence_admission::EvidenceMode;
     use contextosd::evidence_issuers::EvidenceIssuerConfig;
+    use contextosd::evidence_subjects::{Canonicalizer, EvidenceSubject};
     use jsonwebtoken::{Algorithm, EncodingKey, Header};
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use serde_json::{Value, json};
@@ -192,5 +193,116 @@ mod issuers {
         assert_eq!(replayed["freshness"], "current");
         assert_eq!(replayed["verification"]["issuer"], ISS);
         assert!(replayed["verification"]["evaluated_at"].is_string());
+    }
+
+    /// The issuer's signer and a world trusting it, with `subjects` bound.
+    async fn attested_world(subjects: Vec<EvidenceSubject>) -> (World, Vec<u8>) {
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new()).unwrap();
+        let public = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
+            .unwrap()
+            .public_key()
+            .as_ref()
+            .to_vec();
+        let jwks =
+            json!({"keys": [{"kty": "OKP", "crv": "Ed25519", "kid": "k1", "x": URL_SAFE_NO_PAD.encode(&public)}]});
+        let w = world_with(&ALL_CONTROLS, 1, |c| {
+            c.guards.evidence = Some(EvidenceMode::Strict);
+            c.evidence_issuers.push(EvidenceIssuerConfig {
+                issuer: ISS.into(),
+                tenants: vec![TENANT.into()],
+                satisfies: vec!["identity_verified".into()],
+                max_validity_seconds: 3600,
+                algorithm: "EdDSA".into(),
+                jwks: jwks.to_string(),
+            });
+            c.evidence_subjects = subjects;
+        })
+        .await;
+        (w, pkcs8.as_ref().to_vec())
+    }
+
+    /// A genuine, current identity check of `sub`, for a refund to `customer`.
+    fn checked(run_id: &str, pkcs8: &[u8], sub: &str, customer: Option<&str>) -> Value {
+        let mut header = Header::new(Algorithm::EdDSA);
+        header.kid = Some("k1".into());
+        let claims = json!({"iss": ISS, "sub": sub, "satisfies": ["identity_verified"],
+            "content_hash": sha256_text(CONTENT), "observed_at": at(-60), "valid_until": at(600)});
+        let entry = json!({"evidence_ref": "kyc:check", "source_id": "kyc", "content": CONTENT,
+            "satisfies": ["identity_verified"],
+            "attestation": jsonwebtoken::encode(&header, &claims, &EncodingKey::from_ed_der(pkcs8)).unwrap()});
+        let mut body = body(run_id, entry);
+        if let Some(customer) = customer {
+            body["request"]["input"]["context"]["customer_id"] = json!(customer);
+        }
+        body["run_context"]["run_id"] = json!(run_id);
+        body["contract"]["run_id"] = json!(run_id);
+        body
+    }
+
+    async fn gate_for(w: &World, body: &Value) -> Value {
+        let admitted = admit(w, body).await;
+        assert_eq!(admitted.status(), 201);
+        identity_gate(&admitted.json().await.unwrap())
+    }
+
+    fn satisfied(gate: &Value) -> bool {
+        gate["satisfied"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("identity_verified"))
+    }
+
+    #[tokio::test]
+    async fn an_attestation_satisfies_a_gate_only_for_the_subject_the_run_concerns() {
+        let binding = |canonicalizer| EvidenceSubject {
+            requirement: "identity_verified".into(),
+            from: "/request/input/context/customer_id".into(),
+            prefix: "customer:".into(),
+            canonicalizer,
+        };
+        let (w, key) = attested_world(vec![binding(Canonicalizer::Exact)]).await;
+        assert!(satisfied(
+            &gate_for(&w, &checked("run_b_checked", &key, "customer:cus_B", Some("cus_B"))).await
+        ));
+        // A genuine, current check of customer A does not satisfy a refund to B.
+        let gate = gate_for(&w, &checked("run_a_for_b", &key, "customer:cus_A", Some("cus_B"))).await;
+        assert!(!satisfied(&gate), "{gate}");
+        // Nor does any check when the run does not say which customer it concerns.
+        assert!(!satisfied(
+            &gate_for(&w, &checked("run_unnamed", &key, "customer:cus_B", None)).await
+        ));
+        // Exact comparison: another spelling is another subject.
+        assert!(!satisfied(
+            &gate_for(&w, &checked("run_spelled", &key, "customer:CUS_B", Some("cus_B"))).await
+        ));
+        // The replay case records why.
+        let case: Value = reqwest::Client::new()
+            .get(format!("{}/v1/runs/run_a_for_b/replay-case", w.base))
+            .bearer_auth("acme-key")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let entry = case["deps"]["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["evidence_ref"] == "kyc:check")
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry["verification"]["subjects"]["identity_verified"],
+            "evidence_subject_mismatch"
+        );
+
+        let (w, key) = attested_world(vec![binding(Canonicalizer::AsciiCasefold)]).await;
+        assert!(satisfied(
+            &gate_for(&w, &checked("run_alias", &key, "customer:CUS_B", Some("cus_b"))).await
+        ));
+        assert!(!satisfied(
+            &gate_for(&w, &checked("run_alias_a", &key, "CUSTOMER:cus_a", Some("cus_B"))).await
+        ));
     }
 }
