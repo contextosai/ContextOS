@@ -3438,6 +3438,14 @@
                           },
                           "unit": {
                             "type": "string"
+                          },
+                          "resource_canonicalizer": {
+                            "type": "string",
+                            "enum": [
+                              "ascii_casefold",
+                              "provider"
+                            ],
+                            "description": "Absent means exact."
                           }
                         }
                       }

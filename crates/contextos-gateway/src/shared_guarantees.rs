@@ -59,6 +59,10 @@ pub struct SharedGuarantee {
     pub amount_pointer: String,
     pub limit: u64,
     pub unit: String,
+    /// How the extracted identifier is made canonical (see
+    /// [`crate::resource_identity`]); omitted from the definition when `exact`.
+    #[serde(default, skip_serializing_if = "crate::ResourceCanonicalizer::is_exact")]
+    pub resource_canonicalizer: crate::ResourceCanonicalizer,
 }
 
 pub(crate) fn identifier(s: &str) -> bool {
@@ -172,6 +176,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             if !ids.insert(&rule.id) {
                 return Err(GatewayError::Guarantee("duplicate shared guarantee id".into()));
             }
+            if rule.resource_canonicalizer == crate::ResourceCanonicalizer::Provider && !self.has_resource_identity() {
+                return Err(GatewayError::Guarantee(
+                    "a provider resource canonicalizer needs a resource identity provider".into(),
+                ));
+            }
             for cap in &rule.capability_ids {
                 let Some(manifest) = self.manifests.get(cap) else {
                     return Err(GatewayError::Guarantee(
@@ -264,6 +273,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         else {
             return Ok(Err("shared_guarantee_amount_invalid"));
         };
+        // The ledger is the canonical resource's; an unmapped identifier reserves nothing.
+        let canonical = match self.canonical_resource(admission, rule, resource).await {
+            Ok(canonical) => canonical,
+            Err(reason) => return Ok(Err(reason)),
+        };
+        let identity = canonical.audit(rule, &hash(&json!(resource))?);
         let reservation_id = hash(&json!([admission.run_id, operation]))?;
         let link = Link {
             run_id: admission.run_id.clone(),
@@ -274,7 +289,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             binding: ExposureBinding {
                 guarantee_id: rule.id.clone(),
                 definition_digest,
-                resource_digest: hash(&json!(resource))?,
+                resource_digest: hash(&json!(canonical.id))?,
                 limit: rule.limit,
                 unit: rule.unit.clone(),
             },
@@ -312,15 +327,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(Err(reason));
         }
         // No provider call is permitted until the reservation is durably audited.
+        let mut payload = json!({"run_id":admission.run_id,"operation_id":operation,"attempt_id":attempt,
+            "action_digest":digest,"binding":link.binding,"amount":amount});
+        if let Some(identity) = identity {
+            payload["resource_identity"] = identity;
+        }
         let entry = self
             .audit
-            .append(
-                &admission.tenant_id,
-                "shared_guarantee_reserved",
-                json!({"run_id":admission.run_id,"operation_id":operation,"attempt_id":attempt,
-                "action_digest":digest,"binding":link.binding,"amount":amount}),
-                &self.now(),
-            )
+            .append(&admission.tenant_id, "shared_guarantee_reserved", payload, &self.now())
             .await?;
         Ok(Ok(vec![entry.sequence]))
     }

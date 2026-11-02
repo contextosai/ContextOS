@@ -40,6 +40,7 @@ mod memory;
 mod ownership;
 pub mod ports;
 mod reconcile;
+pub mod resource_identity;
 pub mod result_screening;
 mod retired;
 mod revocations;
@@ -98,6 +99,7 @@ pub use ports::{
     ConstraintProvider, EffectOutcome, IdSource, PolicyProvider, PortError,
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
+pub use resource_identity::{ResourceCanonicalizer, ResourceIdentityProvider};
 pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::{EXPOSURE_RECEIPT_RETENTION_SECONDS, SharedGuarantee};
@@ -247,6 +249,8 @@ pub struct Gateway<S, L> {
     drift: upstream_drift::DriftState,
     /// Judges confirmed effects' output before the agent sees it (see [`result_screening`]).
     result_screening: Option<Arc<dyn result_screening::ResultScreeningProvider>>,
+    /// Maps resource identifiers to canonical ids (see [`resource_identity`]).
+    resource_identity: Option<Arc<dyn resource_identity::ResourceIdentityProvider>>,
     /// Approvals that count only after the approver's step-up (see [`step_up`]).
     approval_step_up: Option<step_up::StepUpPolicy>,
 }
@@ -458,6 +462,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             shared_guarantees: Vec::new(),
             drift: upstream_drift::DriftState::default(),
             result_screening: None,
+            resource_identity: None,
             approval_step_up: None,
         }
     }

@@ -219,6 +219,28 @@ impl contextos_gateway::result_screening::ResultScreeningProvider for RemoteResu
     }
 }
 
+/// Resource identity service: answers `{"canonical_id", "evidence_ref"}` for an
+/// identifier a guarded call named (see [`contextos_gateway::resource_identity`]).
+#[derive(Debug, Clone)]
+pub struct RemoteResourceIdentity(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl contextos_gateway::ResourceIdentityProvider for RemoteResourceIdentity {
+    async fn canonical(
+        &self,
+        admission: &RunAdmission,
+        guarantee_id: &str,
+        resource: &str,
+    ) -> Result<Value, PortError> {
+        self.0
+            .call(
+                "resource_identity",
+                &json!({"run": run_summary(admission), "guarantee_id": guarantee_id, "resource": resource}),
+            )
+            .await
+    }
+}
+
 /// Execution-boundary controller: returns `{"requirement", "observation"}` for a run.
 #[derive(Debug, Clone)]
 pub struct RemoteBoundary(pub Arc<RemoteFacts>);

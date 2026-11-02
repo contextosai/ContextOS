@@ -131,6 +131,14 @@ unavailable withholds the call (`shared_guarantee_identity_unavailable`). Changi
 canonicalizer changes the definition digest, so the existing definition pin refuses
 mixed replicas.
 
+**Status.** C1 is implemented with `exact`, `ascii_casefold` and `provider`. The
+provider's answer is `{canonical_id, evidence_ref}` over the same trusted transport as
+the other fact services, not a separately signed observation; the reservation audit
+entry records the canonicalizer, the extracted identifier's digest and the evidence
+ref. Comparing an evidence attestation's `sub` with the action's canonical resource
+(B3's `evidence_subject_mismatch`) still needs the evidence a decision relied on to be
+tied to the call, and is not done yet.
+
 **C2. Prior exposure import.** A new kernel transition
 `import_exposure(state, binding, import)` in `shared_exposure.rs` adds a committed,
 non-releasable receipt with `{import_id, amount, source, as_of, evidence_ref}`. It is
