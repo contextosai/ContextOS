@@ -148,6 +148,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # require_user_role = true      # the production default: runs must state user.role
 # require_tool_schemas = true   # capabilities need input and output schemas
 # agent_binding = "required"  # declared agents must be ones the credential names (default: required with contextos.enterprise, observe otherwise)
+# user_binding = "required"   # a run's user must be the user its delegated token acts for (default: observe; needs [oidc.delegation])
 # evidence = "strict"           # gated facts arrive as issuer-attested evidence entries (required with contextos.enterprise)
 # require_completion_contracts = true  # the production default: effectful MCP tools declare recovery.completion
 # completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }   # the production default; false opts out

@@ -43,5 +43,9 @@ step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || f
 if [ -n "${CONTEXTOS_DRILL_DATABASE_URL:-}" ]; then
     step postgres-drill; check_example examples/postgres-drill/run.sh "No violations:" || fail "postgres drill"
 fi
+if [ -n "${CONTEXTOS_KEYCLOAK_E2E:-}" ]; then
+    # Starts Keycloak in Docker (or uses KEYCLOAK_URL); CI runs it on every change.
+    step keycloak; check_example examples/keycloak/run.sh "keycloak delegation bound" || fail "keycloak example"
+fi
 step archive;    check_example scripts/check-archive.sh "Offline audit verification:" || fail "release archive"
 echo "ALL CHECKS PASSED"

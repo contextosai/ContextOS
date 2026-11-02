@@ -28,3 +28,4 @@ mod ownership;
 mod pack_intents;
 mod startup;
 mod task_authorization;
+mod user_binding;

@@ -53,6 +53,11 @@ pub struct GuardsConfig {
     /// `required` with the `contextos.enterprise` profile, `observe` otherwise.
     #[serde(default)]
     pub agent_binding: Option<crate::agent_binding::AgentBinding>,
+    /// Whether a run's declared user must be the user its caller's delegated token
+    /// acts for (`required`, `observe`, `off`; see [`crate::user_binding`]). Unset:
+    /// `observe`.
+    #[serde(default)]
+    pub user_binding: Option<crate::user_binding::UserBinding>,
     /// Whether a run's intent must be one its Context Pack's rules name (`required`,
     /// `observe`, `off`; see [`crate::pack_intents`]). Unset: `required` with the
     /// `contextos.enterprise` profile, `observe` otherwise.
@@ -128,6 +133,7 @@ impl Default for GuardsConfig {
             require_task_authorization: false,
             require_completion_contracts: None,
             agent_binding: None,
+            user_binding: None,
             pack_intents: None,
             evidence: None,
             approval_step_up: None,

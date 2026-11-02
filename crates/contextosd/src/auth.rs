@@ -26,6 +26,18 @@ pub struct Caller {
     pub agents: Option<Vec<String>>,
     /// Where `agents` came from: `api_key`, or `oidc:<issuer>#<claim>`.
     pub agent_source: Option<String>,
+    /// The user a delegated credential acts for (see [`crate::user_binding`]).
+    pub user: Option<VerifiedUser>,
+}
+
+/// The user an identity provider says a delegated credential acts for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedUser {
+    pub user_id: String,
+    /// The user's roles, when the issuer is configured to read them.
+    pub roles: Option<Vec<String>>,
+    /// `oidc:<issuer>#<actor claim>`.
+    pub source: String,
 }
 
 impl Caller {
@@ -59,6 +71,7 @@ impl Authenticator {
                         scopes: k.scopes.clone(),
                         agents: k.agent_ids.clone(),
                         agent_source: k.agent_ids.as_ref().map(|_| "api_key".to_owned()),
+                        user: None,
                     },
                 ))
             })

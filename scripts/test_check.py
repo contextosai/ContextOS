@@ -50,7 +50,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += f"exit {agent_exit if name == 'agent-loop' else tower_exit}\n"
                 (example / "run.sh").write_text(text)
             # The drill runs only when a database is configured; never inherit one.
-            env = {k: v for k, v in os.environ.items() if k != "CONTEXTOS_DRILL_DATABASE_URL"}
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("CONTEXTOS_DRILL_DATABASE_URL", "CONTEXTOS_KEYCLOAK_E2E")}
             if drill_url:
                 env["CONTEXTOS_DRILL_DATABASE_URL"] = drill_url
             return subprocess.run(

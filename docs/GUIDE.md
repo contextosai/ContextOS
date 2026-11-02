@@ -210,6 +210,13 @@ scope_claim = "scope"                        # default; string or array
 algorithms = ["RS256", "ES256"]              # default; HS* and none are refused
 ```
 
+Without `jwks_url`, the key set's URL is discovered from the issuer's OpenID Provider
+Metadata (`<issuer>/.well-known/openid-configuration`, whose `issuer` must match).
+Claims are named by path: a key the token holds (including namespaced names such as
+`https://example.com/tenant`), else a dot path (`realm_access.roles`), or a JSON
+Pointer (`/resource_access/api.v2/roles`). `tenant_claim` may hold a string, a list or
+an object keyed by name (Keycloak's `organization`); after `[oidc.tenant_map]` (claim
+value to tenant id) it must name exactly one of `tenants`.
 Keys are fetched in the background (every `refresh_seconds`, and soon after an unknown
 `kid`, at most once per 30 s); `/readyz` reports not ready until every issuer's keys
 have loaded. Tokens need `kid`, `iss`, `aud`, `sub` and `exp`. Scopes recognized:
@@ -250,6 +257,41 @@ delegation names, and `named_by_credential` says whether the admitting credentia
 names it too. SPIRE's OIDC discovery provider publishes the
 JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
 accepted.
+
+#### Bind runs to the user the agent acts for
+
+A run's `run_context.user` (who the agent acts for, and in which role) is also named by
+the caller, and pack rules are keyed by `user.role`. An identity provider that issues
+delegated tokens (RFC 8693) can vouch for it: Keycloak's token exchange delegation
+gives the agent a token whose `sub` is the user and whose `act` names the agent
+([Keycloak guide](integrations/keycloak.md)).
+
+```toml
+[[oidc]]
+# …
+agent_claim = "azp"
+[oidc.delegation]
+actor_claim = "act"                         # default
+actor_agent_claim = "client_id"             # the agent: act.client_id, mapped through [oidc.agents]
+user_roles_claim = "realm_access.roles"     # optional: the roles the user holds
+
+[guards]
+user_binding = "required"    # or "observe" (default), "off"
+```
+
+A token carrying the actor claim authenticates the actor (`act.sub`, the caller and
+`admitted_by`) acting for the user (`sub`); a token without it is an ordinary token and
+names no user; an actor claim without a `sub`, or naming the subject itself, rejects
+the token. At admission, `required` refuses (`403 user_not_bound`, detail `no_user`,
+`other_user` or `role_not_held`) a run whose credential names no user, whose
+`user.user_id` is not that user, or whose `user.role` the user does not hold (when
+`user_roles_claim` is set). Startup then refuses an issuer without `[oidc.delegation]`
+and an API key with `admit`. `observe` admits, counts
+`contextos_user_binding_mismatches_total{reason}` and records `bound: false`. Every
+`run_admitted` records `user_binding` (`mode`, `bound`, `reason`, `source`), never the
+user id. Delegated runs inherit their parent's binding. No profile turns `required`
+on: agents that act for no user are legitimate, so turn it on for deployments whose
+agents always act for a signed-in user.
 
 #### Hold runs to the intents their pack governs
 

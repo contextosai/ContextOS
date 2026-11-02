@@ -135,6 +135,8 @@ pub struct AppState<S, L> {
     pub trust_supplied_memory: bool,
     /// Whether a run's declared agent must be one its caller's credential names.
     pub agent_binding: crate::agent_binding::AgentBinding,
+    /// Whether a run's declared user must be the user its caller acts for.
+    pub user_binding: crate::user_binding::UserBinding,
     /// Whether a run's intent must be one its Context Pack governs.
     pub pack_intents: crate::pack_intents::PackIntents,
     /// What may satisfy a decision's evidence gate.
@@ -511,6 +513,13 @@ where
             "The run's agent is not one the caller's credential is issued for.",
         ));
     }
+    let user_binding = crate::user_binding::admit(
+        state.user_binding,
+        &state.metrics,
+        &caller,
+        &run_context.user,
+        parent.is_some(),
+    )?;
     // Intent-scoped rules restrict only runs that declare their intent.
     let intent = crate::pack_intents::evaluate(
         state.pack_intents,
@@ -720,7 +729,7 @@ where
                 "release_refs": admission.release_refs, "surfaced_capabilities": surfaced,
                 "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
                 "compiled_context_hash": admission.compiled_context_hash,
-                "agent_binding": binding.record, "pack_intent": intent.record,
+                "agent_binding": binding.record, "user_binding": user_binding, "pack_intent": intent.record,
                 "task_authorization_refs": admission.task_authorizations.iter()
                     .map(|t| t.bundle_ref(&admission.run_id)).collect::<Vec<_>>()}),
             &admission.admitted_at,
