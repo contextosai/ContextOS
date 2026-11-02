@@ -298,6 +298,15 @@ jobs:
             --set-json 'extraEnv=[{"name":"CONTEXTOS_CA_BUNDLE","value":"/etc/contextos/ca/ca.pem"}]' \
             | tee rendered.yaml | ./kubeconform -strict -summary -skip ServiceMonitor
           grep -q 'CONTEXTOS_CA_BUNDLE' rendered.yaml && grep -q 'mountPath: /etc/contextos/ca' rendered.yaml
+          # Agent egress: the agents' pods reach contextosd, DNS and allowTo only, and
+          # contextosd admits them; an empty selector (every pod, contextosd too) is refused.
+          ! helm template t deploy/helm/contextosd | grep -q 'agent-egress'
+          helm template t deploy/helm/contextosd --set agentEgress.enabled=true --set agentEgress.namespace=agents \
+            --set-json 'agentEgress.podSelector={"matchLabels":{"app.kubernetes.io/component":"agent"}}' \
+            --set-json 'agentEgress.allowTo=[{"to":[{"ipBlock":{"cidr":"10.20.0.0/16"}}],"ports":[{"port":443}]}]' \
+            | tee agents.yaml | ./kubeconform -strict -summary -skip ServiceMonitor
+          yq ea -o=json '[.]' agents.yaml | python3 deploy/helm/check_agent_egress.py
+          ! helm template t deploy/helm/contextosd --set agentEgress.enabled=true 2>/dev/null
       - name: Check and unit-test the alerting rules
         run: |
           curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \

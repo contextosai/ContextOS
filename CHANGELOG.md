@@ -47,6 +47,12 @@ minor versions may break APIs and every break is listed.
   diagnosed state, last observation and next safe step, and the dispatcher delivers it
   to that webhook only, as `io.contextos.hold.aged`. Owner routing is left out of the
   pinned definition.
+- The Helm chart's `agentEgress` confines agent workloads: their pods may reach
+  contextosd, DNS and `allowTo` (a model gateway), nothing else, and contextosd's
+  NetworkPolicy admits them. With provider credentials only in contextosd's Secret,
+  contextosd is then the only path to the systems agents act on
+  (`docs/integrations/egress.md`). The kind e2e checks an agent pod cannot reach a
+  provider.
 
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a

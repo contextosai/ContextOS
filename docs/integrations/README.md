@@ -19,7 +19,9 @@ handful of seams the framework already has to the run the agent was admitted und
 | Mastra | TypeScript | [mastra.md](mastra.md) | [mastra](../../examples/frameworks/mastra) |
 
 Any other framework that accepts plain functions as tools, or speaks MCP, integrates the
-same way.
+same way. Whatever the framework, deploy the agent so `contextosd` is its only path to
+the systems it acts on: no provider credentials, and no network route to them
+([egress.md](egress.md)).
 
 ## Run the examples
 

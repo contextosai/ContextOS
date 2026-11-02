@@ -95,6 +95,20 @@ Sidecars go in `extraContainers` (with `extraVolumes`): they share the pod's net
 so contextosd reaches them on loopback, for example a database proxy or a secrets
 agent.
 
+**Confine the agents.** `agentEgress` makes contextosd the only path from your agents
+to the systems they act on: their pods may reach contextosd, DNS and `allowTo` (your
+model gateway), and contextosd's policy admits them. See
+[docs/integrations/egress.md](../../../docs/integrations/egress.md):
+
+```yaml
+agentEgress:
+  enabled: true
+  namespace: agents
+  podSelector: { matchLabels: { app.kubernetes.io/component: agent } }
+  allowTo:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: llm-gateway } } }]
+```
+
 Put `contextosd.toml` in `config`; reference packs and capability manifests at
 `/etc/contextos/packs/<name>` and `/etc/contextos/capabilities/<name>` after listing
 them under `packs` / `capabilities`. Secrets come only from `secretName`. Pin the image

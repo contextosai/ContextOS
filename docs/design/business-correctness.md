@@ -200,6 +200,12 @@ contextosd the only workload holding provider credentials and allowed to reach
 provider hosts (extending `networkpolicy.yaml` with an egress allow-list). This is
 how coverage is established: by construction, not by a dashboard.
 
+**Status.** D2 is implemented as the chart's `agentEgress` values: a NetworkPolicy in
+the agents' namespace allowing DNS, contextosd and `allowTo` (the model gateway), and a
+matching ingress peer on contextosd's policy. An empty selector is refused at render.
+The recipe is `docs/integrations/egress.md`. The kind e2e shows an agent pod reaching
+contextosd but not a stand-in provider, which an unselected pod still reaches.
+
 **Tests.** Sweep emits one notification per aged hold, none after it settles; Helm
 template test for the egress policy; kind e2e confirms an agent pod cannot reach a
 provider directly.
