@@ -91,6 +91,7 @@ pub fn verify(
         observed_at: observed_at.to_owned(),
         valid_until: valid_until.to_owned(),
         amount: claims.get("amount").filter(|a| !a.is_null()).cloned(),
+        receipt: claims["receipt"].as_str().filter(|r| !r.is_empty()).map(str::to_owned),
         attestation_digest: sha256_text(token),
     })
 }

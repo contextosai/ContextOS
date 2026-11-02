@@ -266,6 +266,10 @@ pub struct Config {
     /// Services trusted to vouch for gated evidence (see [`crate::evidence_issuers`]).
     #[serde(default)]
     pub evidence_issuers: Vec<crate::evidence_issuers::EvidenceIssuerConfig>,
+    /// What each gated requirement's evidence must be about (see
+    /// [`crate::evidence_subjects`]).
+    #[serde(default)]
+    pub evidence_subjects: Vec<crate::evidence_subjects::EvidenceSubject>,
     /// Overload protection (see [`crate::limits`]).
     #[serde(default)]
     pub limits: crate::limits::LimitsConfig,
@@ -368,6 +372,7 @@ impl Config {
         crate::user_binding::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_admission::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_issuers::Issuers::new(&config.evidence_issuers).map_err(ConfigError::Invalid)?;
+        crate::evidence_subjects::check(&config.evidence_subjects).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;

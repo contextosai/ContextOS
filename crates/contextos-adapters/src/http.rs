@@ -144,7 +144,18 @@ impl Adapter for HttpAdapter {
                         external_ref,
                         ..AdapterResponse::unknown()
                     },
-                    200..=299 => success(manifest, output, external_ref),
+                    200..=299 => {
+                        // A finished effect's reference, where the manifest says it is.
+                        let reference = match manifest.recovery.reference_pointer.as_deref() {
+                            Some(pointer) => Value::Object(output.clone())
+                                .pointer(pointer)
+                                .and_then(Value::as_str)
+                                .filter(|r| !r.is_empty() && r.len() <= 512)
+                                .map(str::to_owned),
+                            None => external_ref,
+                        };
+                        success(manifest, output, reference)
+                    }
                     s if rejected_before_execution(manifest, s) => AdapterResponse {
                         outcome: EffectOutcome::NotApplied,
                         definitive: true,

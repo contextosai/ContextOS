@@ -417,11 +417,39 @@ times and a `verification` record (`evaluated_at`, `issuer`, `subject`,
 `content_mismatch`). The replay case stores the relabelled entries, so a replay a day
 later reaches the same decision without consulting the clock.
 
+An authentic attestation is not necessarily about this run: a current identity check
+for customer A says nothing about a refund to customer B. Bind each requirement to the
+subject it concerns, read from the run's own request or run context:
+
+```toml
+[[evidence_subjects]]
+requirement = "identity_verified"
+from = "/request/input/context/customer_id"   # JSON Pointer into {request, run_context}
+prefix = "customer:"                           # attestations name "customer:<id>"
+canonicalizer = "ascii_casefold"               # or "exact" (default)
+
+[[evidence_subjects]]
+requirement = "order_eligible"
+from = "/request/input/context/order_id"
+prefix = "order:"
+```
+
+An entry whose attestation `sub` is missing, or differs from the run's value (after
+the prefix and canonicalizer), no longer satisfies that requirement; so does any entry
+when the run has no value at `from`. Other requirements the entry satisfies are
+unaffected. `verification.subjects` records each check (`bound`,
+`evidence_subject_mismatch`, `evidence_subject_missing`). With `from =
+"/run_context/user/user_id"` and user binding (`[guards] user_binding = "required"`),
+the subject is the user the identity provider says the run acts for. The request's
+values are the caller's statement of what the run is about; that the agent then acts
+on the same customer or order is what a task authorization's `resource_ids` and
+`destination_ids` enforce.
+
 `--check-config` warns when strict evidence has no issuers (no entry can satisfy a
-gate) and names every pack rule that reads a gated name from `request.context`, since
-strict evidence refuses that context and the rule can never match. The attestation's
-`sub` is recorded but not yet compared with the resource the action names; that waits
-for canonical resource identity (`docs/design/business-correctness.md`, C1).
+gate), names every gated requirement without an `[[evidence_subjects]]` binding (any
+authentic, current attestation satisfies it, whatever it is about), and names every
+pack rule that reads a gated name from `request.context`, since strict evidence
+refuses that context and the rule can never match.
 
 `GET /v1/runs/{run_id}/evidence` returns the run's admission, lifecycle state, budget
 ledger with its compaction archives, and its decisions with replay packets.
@@ -786,27 +814,49 @@ second source, a witness, before the run counts the effect as done:
 
 ```json
 "outcome": {"witness": "https://ledger.internal.example", "postcondition": "refund_posted",
-            "within_seconds": 900, "on_missed": "escalate"}
+            "within_seconds": 900, "binds": "effect", "on_missed": "escalate"},
+"recovery": {"reference_pointer": "/refund_id", …}
 ```
 
+- **What a reading establishes (`binds`, required).** `"effect"`: this particular
+  effect completed. The reading must name, as `receipt`, the provider's own reference
+  for the effect, which the runtime takes from the finished result at
+  `recovery.reference_pointer` (MCP `structuredContent`, or the HTTP body; required
+  with `"effect"`), and one reading closes one effect
+  (`outcome_attestation_reused`). Two equal refunds of one order need two readings.
+  `"state"`: the resource is in the postcondition's state; one reading taken after
+  several effects on the resource may close each of them. Use `"effect"` for money
+  movement.
 - **The witness** is an `[[evidence_issuers]]` issuer whose `satisfies` lists the
   postcondition; contextosd refuses to start otherwise.
 - **After the effect is applied** (confirmed or partial, at dispatch or by
   reconciliation), the outcome is pending (audited `outcome_pending`) and
   `complete` refuses with `outcome_pending`. Before dispatch the contract is recorded
   for the action; a call that cannot be recorded is refused (`outcome_index_full`).
+  The operation ledger is the source of truth: the deadline runs from the ledger's
+  first observation of the effect, so a process that crashes before recording the
+  outcome loses neither it nor its clock; while the ledger has not resolved the effect,
+  `complete` still refuses; an effect the provider definitively did not apply (or that
+  was never dispatched) retires its outcome (`not_applicable`) and frees its place in
+  the run's and tenant's limits (1,024 and 10,000 open outcomes).
 - **The witness, or a service relaying its signed reading** (the scope is
   `outcome:report`; the signature is what is trusted), posts `{"attestation": "<JWS>"}`
   to `POST /v1/runs/{run_id}/operations/{operation_id}/outcome`. The payload is
-  `{iss, sub, satisfies, observed_at, valid_until, amount?}`. It is accepted when the
-  witness signed it, serves the tenant and signed the postcondition, it is current,
-  `sub` is the action's resource (the shared guarantee's canonical resource when the
-  capability has one), `amount` (`{minor_units, currency}`) is the action's amount
-  when it has one, and it was observed after the effect applied. Accepted, it is
-  audited (`outcome_witnessed`, the token by digest) and the run may complete.
+  `{iss, sub, satisfies, observed_at, valid_until, amount?, receipt?}`. It is accepted
+  when the witness signed it, serves the tenant and signed the postcondition, it is
+  current, `sub` is the action's resource (the shared guarantee's canonical resource
+  when the capability has one), `amount` (`{minor_units, currency}`) is the action's
+  amount when it has one, it was observed after the effect applied and, for
+  `"effect"`, `receipt` is the effect's reference (`outcome_receipt_mismatch`;
+  `outcome_receipt_missing` when the provider reported none, which leaves the outcome
+  to its escalation). Accepted, it is audited (`outcome_witnessed`, the token by
+  digest) and the run may complete.
 - **Past `within_seconds`**, the governance sweep opens one escalation for the
   operation (`reason_codes: ["outcome_missed"]`), which notifications deliver like any
   other. The outcome stays pending: a late reading still closes it (`late: true`).
+  Each pass reads up to 1,000 open outcomes from where the last one stopped, so an
+  overdue outcome is reached within `ceil(open / 1000)` passes however many others
+  are not yet due.
 - **Decisions and evidence.** A `DECIDED` or `CLOSED` decision citing such an effect is
   refused with 409 `outcome_pending` until it is witnessed; then its tool lineage entry
   cites the reading (`artifact_refs: ["outcome:<attestation digest>"]`) and the replay

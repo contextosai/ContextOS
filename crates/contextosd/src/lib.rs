@@ -11,6 +11,7 @@ pub mod config;
 pub mod configs;
 pub mod evidence_admission;
 pub mod evidence_issuers;
+pub mod evidence_subjects;
 pub mod exposure;
 pub mod exposure_import;
 pub mod feedback;
@@ -295,6 +296,7 @@ where
         pack_intents: pack_intents::mode(config),
         evidence: evidence_admission::mode(config),
         evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),
+        evidence_subjects: Arc::new(config.evidence_subjects.clone()),
         public_url: config.server.public_url.clone(),
     }))
 }

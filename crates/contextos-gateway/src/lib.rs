@@ -39,6 +39,7 @@ mod lifecycle;
 mod loop_guard;
 pub mod manifest;
 mod memory;
+mod outcome_sweep;
 pub mod outcomes;
 mod ownership;
 pub mod ports;
@@ -2042,6 +2043,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.note_effect(admission, &operation_id, "partial").await?;
         } else if response.outcome == EffectOutcome::Confirmed && response.definitive {
             self.note_applied_effect(admission, &operation_id).await?;
+        } else if not_applied {
+            // Never applied: its outcome contract retires and frees its index entries.
+            self.sync_outcome(admission, &operation_id).await?;
         } else if !(response.definitive && response.outcome != EffectOutcome::Unknown) {
             self.note_effect(admission, &operation_id, "unknown").await?;
         }

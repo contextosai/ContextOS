@@ -334,12 +334,20 @@ fn tool_result(projection: ResultProjection, manifest: &CapabilityManifest, resu
             .and_then(Value::as_str)
             .and_then(|state| check.outcome(state)),
     };
+    // The provider's own reference for the effect, where the manifest says it is.
+    let external_ref = manifest
+        .recovery
+        .reference_pointer
+        .as_deref()
+        .and_then(|pointer| result.get("structuredContent")?.pointer(pointer)?.as_str())
+        .filter(|r| !r.is_empty() && r.len() <= 512)
+        .map(str::to_owned);
     match outcome {
         Some(outcome) => AdapterResponse {
             outcome,
             definitive: true,
             output,
-            external_ref: None,
+            external_ref,
             cost_units: None,
         },
         None => AdapterResponse {

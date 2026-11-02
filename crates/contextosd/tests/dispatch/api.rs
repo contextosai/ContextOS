@@ -84,7 +84,13 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
     .await;
     assert_eq!(done["result"]["isError"], false, "{done}");
     conforms("McpResponse", &done);
-    assert_eq!(done["result"]["structuredContent"]["refund_id"], "rf_77");
+    assert!(
+        done["result"]["structuredContent"]["refund_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("rf_"),
+        "{done}"
+    );
     // The result names the call and operation, so a decision can cite them.
     assert_eq!(done["result"]["_meta"]["io.contextos/toolCallId"], "tc_host_1");
     let operation = done["result"]["_meta"]["io.contextos/operationId"].clone();

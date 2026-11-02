@@ -145,7 +145,16 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         let mut refs: Vec<_> = packs.keys().collect();
         refs.sort();
         for pack_ref in refs {
-            for rule in crate::evidence_admission::rules_reading_gated_context(packs[pack_ref].compiler.pack()) {
+            let pack = packs[pack_ref].compiler.pack();
+            for name in crate::evidence_admission::gated(pack) {
+                if !config.evidence_subjects.iter().any(|s| s.requirement == name) {
+                    report.push(format!(
+                        "warning: {pack_ref} requirement {name} has no [[evidence_subjects]] binding: any authentic, \
+                         current attestation satisfies it, whatever it is about"
+                    ));
+                }
+            }
+            for rule in crate::evidence_admission::rules_reading_gated_context(pack) {
                 report.push(format!(
                     "warning: {pack_ref} rule {rule} reads a gated name from request.context, which strict evidence refuses: \
                      the rule never matches"

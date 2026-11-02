@@ -29,6 +29,7 @@ mimalloc.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 contextos-policy.workspace = true
 proptest.workspace = true
+sqlx.workspace = true
 
 [[bench]]
 name = "dispatch"
