@@ -148,6 +148,7 @@ mod tests {
             scopes: vec!["admit".into()],
             agents: agents.map(|a| a.into_iter().map(str::to_owned).collect()),
             agent_source: Some("api_key".into()),
+            user: None,
         }
     }
 

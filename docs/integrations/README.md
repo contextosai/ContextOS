@@ -22,6 +22,10 @@ Any other framework that accepts plain functions as tools, or speaks MCP, integr
 same way. Whatever the framework, deploy the agent so `contextosd` is its only path to
 the systems it acts on: no provider credentials, and no network route to them
 ([egress.md](egress.md)).
+([egress.md](egress.md)).
+
+Identity providers: [keycloak.md](keycloak.md) configures Keycloak as the issuer of
+agent and delegated user tokens, and binds each run to the user its agent acts for.
 
 ## Run the examples
 

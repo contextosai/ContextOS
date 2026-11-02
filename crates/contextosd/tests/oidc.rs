@@ -271,3 +271,190 @@ async fn an_agent_claim_names_the_agents_a_token_is_issued_for() {
     assert_eq!(caller(&mapped).unwrap().agents, Some(Vec::new()));
     assert_eq!(caller(&claims()).unwrap().agents, Some(Vec::new()), "no azp claim");
 }
+
+/// Serves a Keycloak-shaped realm: OpenID Provider Metadata naming `metadata_issuer`
+/// and the realm's certs. Returns the realm's issuer URL.
+async fn realm(issuer: &Issuer, metadata_issuer: Option<&str>) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let realm = format!("http://{}/realms/acme", listener.local_addr().unwrap());
+    let metadata = json!({"issuer": metadata_issuer.unwrap_or(&realm),
+        "jwks_uri": format!("{realm}/protocol/openid-connect/certs")});
+    let jwks = issuer.jwks();
+    let app = axum::Router::new()
+        .route(
+            "/realms/acme/.well-known/openid-configuration",
+            axum::routing::get(move || {
+                let metadata = metadata.clone();
+                async move { axum::Json(metadata) }
+            }),
+        )
+        .route(
+            "/realms/acme/protocol/openid-connect/certs",
+            axum::routing::get(move || {
+                let jwks = jwks.clone();
+                async move { axum::Json(jwks) }
+            }),
+        );
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    realm
+}
+
+fn discovering(realm: &str, extra: &str) -> Arc<contextosd::oidc::OidcIssuer> {
+    let config: contextosd::oidc::OidcConfig = toml::from_str(&format!(
+        "issuer = \"{realm}\"\naudience = \"contextosd\"\ntenants = [\"tenant_acme_prod\"]\nalgorithms = [\"EdDSA\"]\n{extra}"
+    ))
+    .unwrap();
+    Arc::new(contextosd::oidc::OidcIssuer::new(config, true).unwrap())
+}
+
+#[tokio::test]
+async fn keys_are_discovered_from_the_issuers_metadata() {
+    let issuer = Issuer::new();
+    let realm_url = realm(&issuer, None).await;
+    let found = discovering(&realm_url, "");
+    found.refresh_once().await.unwrap();
+    assert!(found.ready());
+    let mut token = claims();
+    token["iss"] = json!(realm_url);
+    let caller = contextosd::oidc::authenticate_jwt(&[found], &issuer.sign("k1", &token)).unwrap();
+    assert_eq!(caller.principal_id, "svc_orchestrator");
+
+    // Metadata naming another issuer is not trusted.
+    let impostor = realm(&issuer, Some("https://login.example.test")).await;
+    let refused = discovering(&impostor, "");
+    assert!(refused.refresh_once().await.unwrap_err().contains("different issuer"));
+    assert!(!refused.ready());
+}
+
+#[tokio::test]
+async fn organizations_map_to_exactly_one_tenant() {
+    let issuer = Issuer::new();
+    let (_, state) = start_with(
+        &issuer,
+        "tenant_claim = \"organization\"\n[oidc.tenant_map]\nacme = \"tenant_acme_prod\"",
+    )
+    .await;
+    let tenant = |organization: Value| {
+        let mut token = claims();
+        token["organization"] = organization;
+        state
+            .auth
+            .authenticate(Some(&format!("Bearer {}", issuer.sign("k1", &token))))
+            .map(|c| c.tenant_id)
+    };
+    for shape in [
+        json!("acme"),
+        json!(["acme"]),
+        json!({"acme": {"id": "7d1c"}}),
+        json!(["acme", "globex"]),
+    ] {
+        assert_eq!(tenant(shape.clone()).as_deref(), Some("tenant_acme_prod"), "{shape}");
+    }
+    assert_eq!(
+        tenant(json!("tenant_acme_prod")),
+        None,
+        "only mapped values name tenants"
+    );
+    assert_eq!(tenant(json!(["globex"])), None);
+    assert_eq!(tenant(json!([])), None);
+}
+
+#[tokio::test]
+async fn delegated_tokens_name_the_actor_as_caller_and_the_subject_as_user() {
+    let issuer = Issuer::new();
+    let (_, state) = start_with(
+        &issuer,
+        "agent_claim = \"azp\"\n[oidc.delegation]\nactor_agent_claim = \"client_id\"\nuser_roles_claim = \"realm_access.roles\"",
+    )
+    .await;
+    let caller = |token: &Value| {
+        state
+            .auth
+            .authenticate(Some(&format!("Bearer {}", issuer.sign("k1", token))))
+    };
+    let mut delegated = claims();
+    delegated["sub"] = json!("u-alice");
+    delegated["azp"] = json!("login-app");
+    delegated["act"] = json!({"sub": "sa-support", "client_id": "support-agent"});
+    delegated["realm_access"] = json!({"roles": ["support_agent"]});
+    let found = caller(&delegated).unwrap();
+    assert_eq!(found.principal_id, "sa-support");
+    assert_eq!(
+        found.agents,
+        Some(vec!["support-agent".to_owned()]),
+        "from act, not azp"
+    );
+    let user = found.user.unwrap();
+    assert_eq!(user.user_id, "u-alice");
+    assert_eq!(user.roles, Some(vec!["support_agent".to_owned()]));
+
+    // An ordinary token names no user, and its agent comes from agent_claim.
+    let mut service = claims();
+    service["azp"] = json!("support-agent");
+    let found = caller(&service).unwrap();
+    assert_eq!((found.principal_id.as_str(), found.user), ("svc_orchestrator", None));
+    assert_eq!(found.agents, Some(vec!["support-agent".to_owned()]));
+
+    // A malformed actor is refused, never read as an ordinary token.
+    for act in [
+        json!("sa-support"),
+        json!({"client_id": "x"}),
+        json!({"sub": ""}),
+        json!({"sub": "u-alice"}),
+    ] {
+        delegated["act"] = act.clone();
+        assert!(caller(&delegated).is_none(), "{act}");
+    }
+}
+
+#[tokio::test]
+async fn without_delegation_an_actor_claim_changes_nothing() {
+    let issuer = Issuer::new();
+    let (_, state) = start_with(&issuer, "").await;
+    let mut token = claims();
+    token["act"] = json!({"sub": "sa-support"});
+    let found = state
+        .auth
+        .authenticate(Some(&format!("Bearer {}", issuer.sign("k1", &token))))
+        .unwrap();
+    assert_eq!((found.principal_id.as_str(), found.user), ("svc_orchestrator", None));
+}
+
+#[test]
+fn configuration_refuses_bad_paths_and_tenant_maps() {
+    let parse = |extra: &str| {
+        toml::from_str::<contextosd::oidc::OidcConfig>(&format!(
+            "issuer = \"https://kc.example/realms/acme\"\naudience = \"a\"\ntenants = [\"t\"]\n{extra}"
+        ))
+        .unwrap()
+        .check(false)
+    };
+    assert!(parse("").is_ok(), "discovery from an https issuer");
+    assert!(parse("tenant_claim = \"organization\"\n[tenant_map]\nacme = \"t\"").is_ok());
+    assert!(
+        parse("[tenant_map]\nacme = \"other\"")
+            .unwrap_err()
+            .contains("not in tenants")
+    );
+    assert!(
+        parse("tenant_claim = \"a..b\"")
+            .unwrap_err()
+            .contains("invalid claim path")
+    );
+    assert!(
+        parse("[delegation]\nactor_agent_claim = \"client_id\"")
+            .unwrap_err()
+            .contains("needs agent_claim")
+    );
+    assert!(parse("[delegation]\nactor_claim = \"\"").is_err());
+    assert!(
+        toml::from_str::<contextosd::oidc::OidcConfig>(
+            "issuer = \"http://kc.example/realms/acme\"\naudience = \"a\"\ntenants = [\"t\"]"
+        )
+        .unwrap()
+        .check(false)
+        .unwrap_err()
+        .contains("https"),
+        "discovery needs an https issuer outside development"
+    );
+}

@@ -30,6 +30,7 @@ pub struct Metrics {
     decisions: Mutex<BTreeMap<String, u64>>,
     task_amendments: Mutex<BTreeMap<String, u64>>,
     agent_binding_mismatches: Mutex<BTreeMap<String, u64>>,
+    user_binding_mismatches: Mutex<BTreeMap<String, u64>>,
     pack_intent_mismatches: Mutex<BTreeMap<String, u64>>,
     over_limit_imports: Mutex<BTreeMap<String, u64>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
@@ -91,6 +92,12 @@ impl Metrics {
     /// binding mode (`observe` admits it, `required` refuses it).
     pub fn agent_binding_mismatch(&self, mode: &str) {
         bump(&self.agent_binding_mismatches, mode.to_owned());
+    }
+
+    /// Counts a run admitted or refused whose user its credential does not act for, by
+    /// reason (`no_user`, `other_user`, `role_not_held`).
+    pub fn user_binding_mismatch(&self, reason: &str) {
+        bump(&self.user_binding_mismatches, reason.to_owned());
     }
 
     /// Counts a run admitted or refused whose intent its pack's rules do not name, by
@@ -189,7 +196,7 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 7] = [
+        let counters: [(&str, &str, &str, &Counter); 8] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -219,6 +226,12 @@ impl Metrics {
                 "Runs whose declared agent their credential does not name, by binding mode.",
                 "mode",
                 &self.agent_binding_mismatches,
+            ),
+            (
+                "contextos_user_binding_mismatches_total",
+                "Runs whose declared user their credential does not act for, by reason.",
+                "reason",
+                &self.user_binding_mismatches,
             ),
             (
                 "contextos_pack_intent_mismatches_total",

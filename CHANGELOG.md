@@ -6,6 +6,17 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Keycloak as identity provider ([docs/integrations/keycloak.md](docs/integrations/keycloak.md),
+  `examples/keycloak`, run in CI against Keycloak 26.8). `[[oidc]]` claims are paths
+  (`realm_access.roles`, `act.client_id`, JSON Pointers); `jwks_url` may be omitted to
+  discover keys from the issuer's OpenID metadata; `tenant_claim` may be a list or map
+  (Keycloak `organization`) and must name exactly one configured tenant, optionally
+  through `[oidc.tenant_map]`. `[oidc.delegation]` accepts RFC 8693 delegated tokens:
+  the caller is the actor (`act.sub`), the agent may come from `act.client_id`, and the
+  token's `sub` is the user it acts for. `[guards] user_binding` (`observe` by default,
+  `required`, `off`) checks a run's `user.user_id`, and `user.role` against
+  `user_roles_claim`, refusing with `403 user_not_bound`; `run_admitted` records
+  `user_binding` and `contextos_user_binding_mismatches_total{reason}` counts misses.
 - `ctx init-tool --mcp tools.json --tool <name> --adapter <id>` drafts a capability
   manifest from an MCP server's saved `tools/list`: schemas and upstream pins copied,
   every authority decision left as a `"REVIEW: …"` string with the allowed values, tool

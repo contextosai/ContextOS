@@ -25,6 +25,7 @@ pub mod membership;
 pub mod metrics;
 pub mod notifications;
 pub mod oidc;
+pub mod oidc_claims;
 pub mod outcome_witness;
 pub mod pack_intents;
 pub mod protected_resource;
@@ -35,6 +36,7 @@ pub mod runtime;
 pub mod task_amendment;
 pub mod telemetry;
 pub mod upstream_check;
+pub mod user_binding;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -289,6 +291,7 @@ where
         require_task_authorization: config.guards.require_task_authorization,
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
         agent_binding: agent_binding::mode(config),
+        user_binding: user_binding::mode(config),
         pack_intents: pack_intents::mode(config),
         evidence: evidence_admission::mode(config),
         evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),

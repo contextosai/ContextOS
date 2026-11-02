@@ -365,6 +365,7 @@ impl Config {
         let mut config: Config = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
+        crate::user_binding::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_admission::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_issuers::Issuers::new(&config.evidence_issuers).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
