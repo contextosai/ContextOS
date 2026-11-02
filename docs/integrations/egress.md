@@ -67,7 +67,8 @@ not a provider, and one without it should reach the provider:
 ```sh
 probe() {   # probe NAME LABELS
   kubectl -n agents run "$1" --restart=Never --image=python:3.12-slim --labels="$2" --command -- \
-    python3 -c 'import sys, urllib.request
+    python3 -c 'import sys, time, urllib.request
+time.sleep(15)
 for url in sys.argv[1:]:
     try: urllib.request.urlopen(url, timeout=5); print(url, "reached")
     except urllib.error.HTTPError: print(url, "reached")
@@ -80,8 +81,11 @@ probe agent-check app.kubernetes.io/component=agent   # contextosd reached, paym
 probe control-check app=control                       # payments reached
 ```
 
-If the control cannot reach the provider either, the check proves nothing: pick a
-target the cluster can reach. If the agent reaches the provider, the CNI is not
+Enforcement is not instant: a policy takes effect seconds after it is created, and a
+new pod's first packets can precede it on some CNIs (kindnet among them), which is why
+the probe waits before connecting. The window is one more reason agents hold no
+provider credentials. If the control cannot reach the provider either, the check
+proves nothing: pick a target the cluster can reach. If the agent reaches the provider, the CNI is not
 enforcing the policy. CI runs this check on a kind cluster in `deploy/kind/e2e.sh`.
 
 ## What this does not cover

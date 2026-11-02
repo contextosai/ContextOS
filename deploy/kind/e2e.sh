@@ -226,7 +226,8 @@ sleep 5
 probe() {
   kubectl -n "$AGENTS" delete pod "$1" --ignore-not-found >/dev/null
   kubectl -n "$AGENTS" run "$1" --restart=Never --image=python:3.12-slim --labels="$2" --command -- python3 -c '
-import sys, urllib.error, urllib.request
+import sys, time, urllib.error, urllib.request
+time.sleep(15)  # until the CNI has seen this pod: its first packets may precede enforcement
 for name, url in (("contextosd", sys.argv[1]), ("provider", sys.argv[2])):
     try:
         urllib.request.urlopen(url, timeout=5)
