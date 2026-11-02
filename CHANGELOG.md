@@ -33,6 +33,15 @@ minor versions may break APIs and every break is listed.
   profile that put gated facts in the request context must move them to
   `deps.evidence` before upgrading. `GET /v1/deployment`, `--check-config` and the
   effective configuration report the mode.
+- Under strict evidence the caller's `integrity` and `freshness` labels are replaced.
+  `[[evidence_issuers]]` names the services trusted to vouch for gated facts (tenants,
+  the names each may satisfy, maximum validity, algorithm and JWK Set). Each evidence
+  entry carries an `attestation` JWS; contextosd verifies it and sets the labels from
+  the signature, content hash and server clock, keeping the signed times and a
+  `verification` record on the entry and in the replay case. An entry without a valid
+  attestation is `untrusted` and cannot satisfy a gate. `--check-config` warns about
+  strict evidence without issuers and about rules that read a gated name from
+  `request.context`.
 
 ### Changed
 - The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;

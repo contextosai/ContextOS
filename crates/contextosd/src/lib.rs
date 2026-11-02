@@ -10,6 +10,7 @@ pub mod compensation;
 pub mod config;
 pub mod configs;
 pub mod evidence_admission;
+pub mod evidence_issuers;
 pub mod exposure;
 pub mod feedback;
 pub mod findings;
@@ -146,6 +147,7 @@ pub fn deployment_summary(config: &Config) -> Value {
             "completion_requires_scores": floors,
             "require_task_authorization": config.guards.require_task_authorization,
             "evidence": evidence_admission::mode(config).as_str(),
+            "evidence_issuers": config.evidence_issuers.iter().map(|i| &i.issuer).collect::<Vec<_>>(),
         },
         "audit": {
             "key_id": config.audit.key_id,
@@ -284,6 +286,7 @@ where
         agent_binding: agent_binding::mode(config),
         pack_intents: pack_intents::mode(config),
         evidence: evidence_admission::mode(config),
+        evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),
         public_url: config.server.public_url.clone(),
     }))
 }

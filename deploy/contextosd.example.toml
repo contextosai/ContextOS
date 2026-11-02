@@ -107,6 +107,15 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # tenants = ["tenant_acme_prod"]
 # agent_claim = "sub"         # the claim naming the agent the token is issued for
 
+# Services that vouch for gated evidence under [guards] evidence = "strict".
+# [[evidence_issuers]]
+# issuer = "https://kyc.example.com"
+# tenants = ["tenant_acme_prod"]
+# satisfies = ["identity_verified"]
+# max_validity_seconds = 86400
+# algorithm = "EdDSA"
+# jwks = '''{"keys": [{"kty": "OKP", "crv": "Ed25519", "kid": "k1", "x": "..."}]}'''
+
 # Overload protection (defaults shown).
 # [limits]
 # max_in_flight = 4096
@@ -133,7 +142,7 @@ token_env = "CONTEXTOS_PAYMENTS_TOKEN"
 # require_user_role = true      # the production default: runs must state user.role
 # require_tool_schemas = true   # capabilities need input and output schemas
 # agent_binding = "required"  # declared agents must be ones the credential names (default: required with contextos.enterprise, observe otherwise)
-# evidence = "strict"           # gated facts arrive as evidence entries, not request context (required with contextos.enterprise)
+# evidence = "strict"           # gated facts arrive as issuer-attested evidence entries (required with contextos.enterprise)
 # require_completion_contracts = true  # the production default: effectful MCP tools declare recovery.completion
 # completion_requires_scores = { policy_floor = 1.0, safety_floor = 0.9 }   # the production default; false opts out
 # trust_supplied_memory = false  # without [providers.memory], admit caller-supplied memory?

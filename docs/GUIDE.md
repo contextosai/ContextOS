@@ -345,9 +345,39 @@ evidence = "strict"    # or "caller"
 (`422 evidence_in_request_context`, with the names under `detail.requirements`). Supply
 those facts as evidence entries instead. The `contextos.enterprise` profile requires
 `strict`, and it is the default there; `caller`, the default otherwise, keeps the
-compiler's behaviour. The entries' `integrity` and `freshness` labels are still the
-caller's: verifying them against configured issuers is planned
-(`docs/design/business-correctness.md`, B2).
+compiler's behaviour, including the caller's labels on evidence entries.
+
+Under `strict` those labels are not the caller's either. Each entry carries an
+`attestation`: a compact JWS from a configured issuer whose payload is
+`{iss, sub, satisfies, content_hash, observed_at, valid_until, source_version}`, with
+`content_hash` the `sha256:` hash of the entry's `content`.
+
+```toml
+[[evidence_issuers]]
+issuer = "https://kyc.example.com"         # exact iss
+tenants = ["tenant_acme_prod"]
+satisfies = ["identity_verified"]          # the gated names it may vouch for
+max_validity_seconds = 86400               # the longest valid_until - observed_at it may claim
+algorithm = "EdDSA"                        # asymmetric only
+jwks = '''{"keys": [{"kty": "OKP", "crv": "Ed25519", "kid": "k1", "x": "…"}]}'''
+```
+
+Before compiling, contextosd verifies each entry and sets the labels the compiler
+reads. `integrity` is `verified` only when the signature is the issuer's, the issuer
+serves the run's tenant, every name the entry `satisfies` is signed and one the issuer
+may satisfy, and the content matches its hash. `freshness` is `current` only for a
+verified entry with `observed_at <= now < valid_until` within the issuer's maximum
+validity, `stale` after `valid_until`, `unknown` otherwise. The entry keeps the signed
+times and a `verification` record (`evaluated_at`, `issuer`, `subject`,
+`source_version`, the labels and `reasons` such as `expired`, `signature_invalid` or
+`content_mismatch`). The replay case stores the relabelled entries, so a replay a day
+later reaches the same decision without consulting the clock.
+
+`--check-config` warns when strict evidence has no issuers (no entry can satisfy a
+gate) and names every pack rule that reads a gated name from `request.context`, since
+strict evidence refuses that context and the rule can never match. The attestation's
+`sub` is recorded but not yet compared with the resource the action names; that waits
+for canonical resource identity (`docs/design/business-correctness.md`, C1).
 
 `GET /v1/runs/{run_id}/evidence` returns the run's admission, lifecycle state, budget
 ledger with its compaction archives, and its decisions with replay packets.
