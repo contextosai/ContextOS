@@ -169,7 +169,9 @@ status="$(api "$KEY" -H "contextos-executor-generation: $GENERATION" -X POST "$U
 api "$OPS" -X POST "$URL/v1/revocations" \
   -d '{"kind": "capability", "target": "adp_orders.lookup", "reason": "E2E-1"}' >/dev/null
 before="$(verified)"
-kubectl -n "$NS" logs deploy/contextosd -c contextosd | grep -q 'trusting private CAs from CONTEXTOS_CA_BUNDLE'
+# Captured first: `grep -q` exits at the match and, under pipefail, a producer still
+# writing would fail the script with SIGPIPE.
+grep -q 'trusting private CAs from CONTEXTOS_CA_BUNDLE' <<<"$(kubectl -n "$NS" logs deploy/contextosd -c contextosd)"
 echo "admitted, refunded over TLS behind a private CA, revoked; audit verifies ($before entries)"
 
 echo "== Rolling restart: state persists, no DDL needed"
@@ -177,7 +179,7 @@ kubectl -n "$NS" rollout restart deployment/contextosd >/dev/null
 kubectl -n "$NS" rollout status deployment/contextosd --timeout=180s
 forward
 api "$KEY" "$URL/v1/runs/run_demo_1" >/dev/null
-api "$OPS" "$URL/v1/revocations" | grep -q 'E2E-1'
+grep -q 'E2E-1' <<<"$(api "$OPS" "$URL/v1/revocations")"
 # The same operation again is not sent twice, by any replica.
 again="$(api "$KEY" -H "contextos-executor-generation: $GENERATION" -X POST "$URL/v1/runs/run_demo_1/tool-calls" \
   --data @examples/support-refund/requests/tool_call.json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["result"]["status"], r["report"]["reason_codes"])')"
@@ -189,7 +191,7 @@ echo "== helm upgrade re-runs the migration hook"
 helm upgrade contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" "${files[@]}" \
   --set logLevel=debug --wait --timeout 5m
 forward
-api "$OPS" "$URL/v1/revocations" | grep -q 'E2E-1'
+grep -q 'E2E-1' <<<"$(api "$OPS" "$URL/v1/revocations")"
 verified >/dev/null
 
 echo "== Agent egress: an agent reaches contextosd, not the systems it acts on"
