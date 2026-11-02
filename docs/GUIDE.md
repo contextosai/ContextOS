@@ -1226,6 +1226,9 @@ link_template = "https://tower.example/escalations/{escalation_id}"
 - **What a notification is.** It tells a person a decision is waiting and grants
   nothing. Approve where approvers sign in, never from the message.
 - **Relays.** `examples/notify/` relays events to Slack and PagerDuty.
+- **Aged holds.** A shared guarantee's `owner_route` webhook also receives
+  `io.contextos.hold.aged` for each of its holds older than `owner_after_seconds`
+  (see `SHARED_GUARANTEES.md`, "Tell the business owner"); no other webhook does.
 
 ### Require scores before a run completes
 

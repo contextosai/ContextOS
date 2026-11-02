@@ -63,6 +63,14 @@ pub struct SharedGuarantee {
     /// [`crate::resource_identity`]); omitted from the definition when `exact`.
     #[serde(default, skip_serializing_if = "crate::ResourceCanonicalizer::is_exact")]
     pub resource_canonicalizer: crate::ResourceCanonicalizer,
+    /// The notification webhook that tells this guarantee's business owner about a
+    /// hold older than `owner_after_seconds` (see [`crate::hold_owners`]). Routing
+    /// only: not part of the pinned definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_route: Option<String>,
+    /// How old a hold is before its owner is told (default 1,800 seconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_after_seconds: Option<u64>,
 }
 
 pub(crate) fn identifier(s: &str) -> bool {
@@ -96,15 +104,23 @@ impl SharedGuarantee {
             || self.resource_pointer == self.amount_pointer
             || self.limit == 0
             || self.limit > MAX_EXACT_EXPOSURE
+            || self.owner_route.as_deref().is_some_and(|r| !identifier(r))
+            || self
+                .owner_after_seconds
+                .is_some_and(|s| !(1..=7 * 86_400).contains(&s) || self.owner_route.is_none())
         {
             return Err("invalid shared guarantee definition".into());
         }
         Ok(())
     }
 
+    /// The semantic definition pinned per tenant: who is told about holds is left
+    /// out, so rerouting owners is not a definition change.
     pub(crate) fn definition(&self) -> Value {
         let mut rule = self.clone();
         rule.capability_ids.sort();
+        rule.owner_route = None;
+        rule.owner_after_seconds = None;
         json!(rule)
     }
 }

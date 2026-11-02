@@ -190,6 +190,11 @@ with the resource, amount, diagnosed state, `next_safe_step`, and the evidence t
 reconcile route needs. Delivery reuses the audit-chain cursor, so it is exactly what
 was audited.
 
+**Status.** D1 is implemented as `owner_route` plus `owner_after_seconds` on the
+guarantee, kept out of the pinned definition. The sweep appends `shared_hold_aged` and
+the dispatcher delivers it to that webhook only. Building it fixed the census, which
+reported a ledger's store key as its `resource_digest`.
+
 **D2. Deployment recipe.** `docs/integrations/egress.md` and Helm values that make
 contextosd the only workload holding provider credentials and allowed to reach
 provider hosts (extending `networkpolicy.yaml` with an egress allow-list). This is

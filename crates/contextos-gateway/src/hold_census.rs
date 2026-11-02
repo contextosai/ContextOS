@@ -112,7 +112,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             else {
                 continue;
             };
-            let Some(guarantee_id) = doc.body["binding"]["guarantee_id"].as_str() else {
+            let binding = &doc.body["binding"];
+            let (Some(guarantee_id), Some(resource_digest)) =
+                (binding["guarantee_id"].as_str(), binding["resource_digest"].as_str())
+            else {
                 page.unreadable += 1;
                 continue;
             };
@@ -134,7 +137,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .collect();
             page.ledgers.push(LedgerHolds {
                 guarantee_id: guarantee_id.to_owned(),
-                resource_digest: id.clone(),
+                // The digest the inspection routes take, not the ledger's store key.
+                resource_digest: resource_digest.to_owned(),
                 live_receipts: receipts.len(),
                 holds,
             });

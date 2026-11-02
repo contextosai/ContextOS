@@ -1,4 +1,7 @@
 //! Escalation notifications: signed webhooks that tell people a decision is waiting.
+//! Every webhook receives escalations; a shared guarantee's `owner_route` webhook also
+//! receives its aged holds (`shared_hold_aged`, see `contextos_gateway::hold_owners`),
+//! and no other webhook does.
 //!
 //! The audit chain is the outbox. `escalation_opened` and `escalation_resolved` are
 //! appended exactly when the transition commits, in order, and never change, so the
@@ -80,6 +83,16 @@ pub fn check(config: &Config) -> Result<(), String> {
             return Err(format!("notification webhook {}: secret_env is required", hook.id));
         }
     }
+    for guarantee in &config.guarantees {
+        if let Some(route) = &guarantee.owner_route
+            && !ids.contains(route)
+        {
+            return Err(format!(
+                "guarantee {}: owner_route {route} is not a [[notifications]] webhook id",
+                guarantee.id
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -132,6 +145,54 @@ pub fn signature(key: &ring::hmac::Key, timestamp: u64, body: &[u8]) -> String {
         "t={timestamp},v1={}",
         hex::encode(ring::hmac::sign(key, &message).as_ref())
     )
+}
+
+/// The CloudEvent for an aged hold: identifiers, amounts, the diagnosed state and the
+/// next safe step, never tool arguments.
+fn hold_event(entry: &Value) -> Option<Value> {
+    let tenant = entry["tenant_id"].as_str()?;
+    let payload = &entry["payload"];
+    let reservation_id = payload["reservation_id"].as_str()?;
+    let mut data = json!({"tenant_id": tenant, "audit_sequence": entry["sequence"]});
+    for field in [
+        "guarantee_id",
+        "resource_digest",
+        "unit",
+        "limit",
+        "reservation_id",
+        "run_id",
+        "operation_id",
+        "amount",
+        "state",
+        "attempt_started_at",
+        "age_seconds",
+        "last_observation",
+        "next_safe_step",
+    ] {
+        data[field] = payload[field].clone();
+    }
+    Some(json!({
+        "specversion": "1.0",
+        "id": format!("{tenant}:{}", entry["sequence"]),
+        "source": "contextosd",
+        "type": "io.contextos.hold.aged",
+        "subject": reservation_id,
+        "time": entry["emitted_at"],
+        "datacontenttype": "application/json",
+        "data": data,
+    }))
+}
+
+/// The CloudEvent `webhook` receives for an audit entry, or `None` if it is not one
+/// it is told about.
+#[must_use]
+pub fn event_for(entry: &Value, webhook: &WebhookConfig) -> Option<Value> {
+    if entry["kind"] == contextos_gateway::hold_owners::HOLD_AGED {
+        return contextos_gateway::hold_owners::routed_to(entry, &webhook.id)
+            .then(|| hold_event(entry))
+            .flatten();
+    }
+    event(entry, webhook.link_template.as_deref())
 }
 
 /// The CloudEvent for an audit entry, or `None` if it is not a notified kind.
@@ -279,7 +340,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Dispatcher<S, L> {
         let rows = log.range(tenant, next, PAGE).await.map_err(|e| e.to_string())?;
         let mut saved = next;
         for row in rows {
-            if let Some(event) = event(&row.body, hook.config.link_template.as_deref()) {
+            if let Some(event) = event_for(&row.body, &hook.config) {
                 if self.post(hook, &event).await {
                     self.metrics.notification(&hook.config.id, "delivered");
                 } else {

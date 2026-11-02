@@ -41,6 +41,12 @@ minor versions may break APIs and every break is listed.
   (`contextos_shared_guarantee_over_limit_imports_total`). Resource views add
   `imported`, `import_count` and `over_limit`. `examples/ops/import_exposure.py` uploads
   a CSV.
+- Shared guarantees take `owner_route` (a `[[notifications]]` webhook id) and
+  `owner_after_seconds` (default 1,800). The governance sweep reports each hold older
+  than that once, as a `shared_hold_aged` audit entry with the resource, amount,
+  diagnosed state, last observation and next safe step, and the dispatcher delivers it
+  to that webhook only, as `io.contextos.hold.aged`. Owner routing is left out of the
+  pinned definition.
 
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a
@@ -64,6 +70,10 @@ minor versions may break APIs and every break is listed.
 - The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;
   `@contextos/kernel` was never published and its scope belongs to someone else.
   Import the HTTP client as `contextos-client`.
+
+### Fixed
+- The governance sweep logged an aging hold with its ledger's store key as
+  `resource_digest`; it now logs the resource digest the inspection routes take.
 
 ## 0.1.0-alpha.11 - 2026-10-31
 
