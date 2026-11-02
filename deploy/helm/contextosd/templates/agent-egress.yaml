@@ -1,0 +1,32 @@
+{{- /*
+Confines agent workloads: their pods may reach contextosd, DNS and the hosts in
+agentEgress.allowTo (a model gateway), and nothing else. contextosd is then the only
+workload able to reach the systems agents act on, holding the only credentials for
+them (docs/integrations/egress.md).
+*/ -}}
+{{- if .Values.agentEgress.enabled }}
+{{- $selector := .Values.agentEgress.podSelector | default dict }}
+{{- if not (or $selector.matchLabels $selector.matchExpressions) }}
+{{- fail "agentEgress.podSelector must select the agent pods: an empty selector would confine every pod in the namespace, contextosd included" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "contextosd.fullname" . }}-agent-egress
+  namespace: {{ .Values.agentEgress.namespace | default .Release.Namespace }}
+  labels: {{- include "contextosd.labels" . | nindent 4 }}
+spec:
+  podSelector: {{- toYaml $selector | nindent 4 }}
+  policyTypes: ["Egress"]
+  egress:
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - ports: [{ port: 8080, protocol: TCP }]
+      to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} }
+          podSelector:
+            matchLabels: {{- include "contextosd.selectorLabels" . | nindent 14 }}
+    {{- with .Values.agentEgress.allowTo }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

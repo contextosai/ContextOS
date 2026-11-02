@@ -7,7 +7,9 @@
 # - the server starts in production mode as the runtime role (no DDL), with its own
 #   keys, and reaches its providers over HTTPS behind a private CA it trusts through
 #   CONTEXTOS_CA_BUNDLE: it admits a run, dispatches a refund, signs and verifies audit;
-# - the data survives a rolling restart, and `helm upgrade` re-runs the hook.
+# - the data survives a rolling restart, and `helm upgrade` re-runs the hook;
+# - with agentEgress, an agent pod reaches contextosd but not a provider, which still
+#   answers pods the policy does not select.
 #
 # Needs kubectl, helm, curl and python3, and the image already loaded into the
 # cluster as $IMAGE (default contextosd:e2e). Run from the repo root.
@@ -188,5 +190,60 @@ helm upgrade contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" "
   --set logLevel=debug --wait --timeout 5m
 forward
 api "$OPS" "$URL/v1/revocations" | grep -q 'E2E-1'
+verified >/dev/null
+
+echo "== Agent egress: an agent reaches contextosd, not the systems it acts on"
+AGENTS="$NS-agents"
+kubectl create namespace "$AGENTS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# A stand-in for a provider an agent could otherwise call directly.
+kubectl -n "$NS" apply -f - >/dev/null <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: provider }
+spec:
+  selector: { matchLabels: { app: provider } }
+  template:
+    metadata: { labels: { app: provider } }
+    spec:
+      containers:
+        - { name: provider, image: python:3.12-slim, command: ["python3", "-m", "http.server", "8000"], ports: [{ containerPort: 8000 }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: provider }
+spec:
+  selector: { app: provider }
+  ports: [{ port: 8000 }]
+YAML
+kubectl -n "$NS" rollout status deployment/provider --timeout=180s
+helm upgrade contextosd deploy/helm/contextosd -n "$NS" -f "$WORK/values.yaml" "${files[@]}" \
+  --set agentEgress.enabled=true --set agentEgress.namespace="$AGENTS" \
+  --set-json 'agentEgress.podSelector={"matchLabels":{"app.kubernetes.io/component":"agent"}}' --wait --timeout 5m
+sleep 5
+# probe NAME LABELS: a pod in the agents' namespace tries contextosd and the provider.
+probe() {
+  kubectl -n "$AGENTS" delete pod "$1" --ignore-not-found >/dev/null
+  kubectl -n "$AGENTS" run "$1" --restart=Never --image=python:3.12-slim --labels="$2" --command -- python3 -c '
+import sys, urllib.error, urllib.request
+for name, url in (("contextosd", sys.argv[1]), ("provider", sys.argv[2])):
+    try:
+        urllib.request.urlopen(url, timeout=5)
+        print(name, "reached")
+    except urllib.error.HTTPError:
+        print(name, "reached")
+    except Exception:
+        print(name, "unreachable")
+' "http://contextosd.$NS.svc:8080/readyz" "http://provider.$NS.svc:8000/" >/dev/null
+  kubectl -n "$AGENTS" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$1" --timeout=120s >/dev/null
+  kubectl -n "$AGENTS" logs "$1" | tr '\n' ' '
+}
+agent="$(probe agent app.kubernetes.io/component=agent)"
+other="$(probe other app=other)"
+echo "agent: $agent; unconfined pod: $other"
+[ "$agent" = "contextosd reached provider unreachable " ] || { echo "the agent's egress is not confined" >&2; exit 1; }
+# The control: the provider answers a pod the policy does not select, so the agent's
+# refusal is the policy, not the network; and contextosd admits only the agents.
+[ "$other" = "contextosd unreachable provider reached " ] || { echo "the control pod: $other" >&2; exit 1; }
+forward
 verified >/dev/null
 echo "kubernetes e2e passed"

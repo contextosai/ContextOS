@@ -16,6 +16,11 @@ spec:
         {{- else }}
         - podSelector: {}
         {{- end }}
+        {{- if .Values.agentEgress.enabled }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.agentEgress.namespace | default .Release.Namespace }} }
+          podSelector: {{- toYaml .Values.agentEgress.podSelector | nindent 12 }}
+        {{- end }}
   {{- if .Values.networkPolicy.egressTo }}
   egress:
     - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]

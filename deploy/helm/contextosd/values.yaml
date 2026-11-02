@@ -97,6 +97,15 @@ networkPolicy:
   ingressFrom: []    # NetworkPolicyPeer list; empty allows same-namespace pods only
   egressTo: []       # NetworkPolicyEgressRule list, added to DNS egress; empty leaves egress unrestricted
 
+# Confine agent workloads so contextosd is the only path to the systems they act on
+# (docs/integrations/egress.md). The agents' pods may reach contextosd, DNS and
+# `allowTo` (your model gateway), nothing else; contextosd's own policy admits them.
+agentEgress:
+  enabled: false
+  namespace: ""      # the agents' namespace; defaults to the release's
+  podSelector: {}    # required: selects the agent pods, never empty
+  allowTo: []        # NetworkPolicyEgressRule list, for example the model gateway
+
 serviceMonitor:
   enabled: false
   interval: 30s
