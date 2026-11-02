@@ -10,7 +10,8 @@
 //! - `outstanding_effects`: operations whose outcome is unknown or partial (added when
 //!   dispatch observes one, removed or updated when reconciliation resolves it).
 //!
-//! **Complete** requires no unresolved effect, no open child and nothing in flight.
+//! **Complete** requires no unresolved effect, no open child, nothing in flight and
+//! no applied effect still waiting for its outcome witness (`outcome_pending`).
 //! **Cancel** first requests cancellation (fencing the executor), cancels and closes
 //! every child, and acknowledges once dispatch has stopped: the run's budget ledger
 //! holds an open reservation for every effect between reservation and settlement, so
@@ -163,6 +164,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         operation_id: &str,
     ) -> Result<(), GatewayError> {
+        // An applied effect's outcome contract starts its deadline now.
+        self.start_outcome(admission, operation_id).await?;
         if self.completion_floor.is_none() {
             return Ok(());
         }
@@ -284,6 +287,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     ) -> Result<LifecycleOutcome, GatewayError> {
         if self.effects_in_flight(admission).await? {
             return self.refusal(admission, "effects_in_flight").await;
+        }
+        // An applied effect with an outcome contract is done when its witness says so.
+        if self.outcome_unwitnessed(admission).await? {
+            return self.refusal(admission, "outcome_pending").await;
         }
         // Online validation: what the run did is judged before it is finished.
         if let Some(reason) = self.unjudged(admission).await? {

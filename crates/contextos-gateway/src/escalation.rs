@@ -46,10 +46,21 @@ fn record_key(tenant_id: &str, id: &str) -> DocKey {
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Opens the escalation for a blocked call, once per operation; returns its id.
     pub(crate) async fn open_escalation(&self, admission: &RunAdmission, facts: Value) -> Result<String, GatewayError> {
-        let operation_id = facts["operation_id"].as_str().unwrap_or_default();
+        let operation_id = facts["operation_id"].as_str().unwrap_or_default().to_owned();
+        self.open_escalation_for(admission, &operation_id, facts).await
+    }
+
+    /// Opens an escalation identified by `basis` within the run (an operation id, or a
+    /// prefixed one for a hand-off other than the operation's policy escalation).
+    pub(crate) async fn open_escalation_for(
+        &self,
+        admission: &RunAdmission,
+        basis: &str,
+        facts: Value,
+    ) -> Result<String, GatewayError> {
         let id = format!(
             "esc_{}",
-            &sha256_text(&format!("{}\u{0}{operation_id}", admission.run_id))[7..31]
+            &sha256_text(&format!("{}\u{0}{basis}", admission.run_id))[7..31]
         );
         let key = record_key(&admission.tenant_id, &id);
         let now = self.now();
@@ -197,7 +208,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         self.drop_from(index_key(tenant_id), id).await
     }
 
-    async fn drop_from(&self, key: DocKey, id: &str) -> Result<(), GatewayError> {
+    pub(crate) async fn drop_from(&self, key: DocKey, id: &str) -> Result<(), GatewayError> {
         for _ in 0..8 {
             let Some(current) = self.store.get(&key).await? else {
                 return Ok(());

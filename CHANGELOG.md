@@ -53,6 +53,14 @@ minor versions may break APIs and every break is listed.
   contextosd is then the only path to the systems agents act on
   (`docs/integrations/egress.md`). The kind e2e checks an agent pod cannot reach a
   provider.
+- Outcome contracts. A capability manifest may declare `outcome: {witness,
+  postcondition, within_seconds, on_missed}`. Once its effect is applied, the run
+  cannot complete (`outcome_pending`) until the witness, an `[[evidence_issuers]]`
+  issuer, attests the postcondition through `POST
+  /v1/runs/{run_id}/operations/{operation_id}/outcome` (new scope `outcome:report`)
+  for the action's resource and amount, observed after the effect. Past the deadline
+  the governance sweep opens one escalation (`outcome_missed`). Audited as
+  `outcome_pending` and `outcome_witnessed`.
 
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a

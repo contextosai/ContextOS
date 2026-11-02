@@ -23,7 +23,7 @@ use serde_json::Value;
 use crate::auth::Caller;
 
 /// Scopes a token may grant; anything else in the scope claim is ignored.
-pub const KNOWN_SCOPES: [&str; 12] = [
+pub const KNOWN_SCOPES: [&str; 13] = [
     "compile",
     "admit",
     "dispatch",
@@ -36,6 +36,7 @@ pub const KNOWN_SCOPES: [&str; 12] = [
     "authorize",
     "attest",
     "exposure:import",
+    "outcome:report",
 ];
 
 const MAX_JWKS_BYTES: usize = 1024 * 1024;

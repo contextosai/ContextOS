@@ -232,6 +232,13 @@ with workstream B's issuer check, binds it to the action's canonical resource, a
 closes the outcome. Past `within`, the governance sweep escalates (`escalate`) or
 also keeps the shared-guarantee hold open (`hold`).
 
+**Status.** E1 is implemented, with two departures. Outcome state lives in the gateway
+(an `Outcome` record per operation and action, indexed per run and tenant), not in
+`outstanding_effects`, which the kernel validates and reconciliation owns; `complete`
+refuses with `outcome_pending`. The deadline is `within_seconds` rather than an ISO
+duration, like `owner_after_seconds`. `on_missed = "hold"`, E2 and the refund pilot
+follow.
+
 **E2.** The DecisionRecord for a decision whose operations have outcome contracts
 cites the witness observation. The evidence bundle includes it.
 

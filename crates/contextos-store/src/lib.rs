@@ -84,6 +84,9 @@ pub enum DocKind {
     Compensation,
     /// A root team's shared findings, their invalidations and peer notices.
     Findings,
+    /// A confirmed effect's outcome contract: what its witness must observe, by when,
+    /// and each run's and tenant's index of them.
+    Outcome,
 }
 
 impl DocKind {
@@ -121,6 +124,7 @@ impl DocKind {
             DocKind::DispatchGate => "dispatch_gate",
             DocKind::Compensation => "compensation",
             DocKind::Findings => "findings",
+            DocKind::Outcome => "outcome",
         }
     }
 }

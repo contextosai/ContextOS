@@ -23,6 +23,7 @@ mod load;
 mod memory;
 mod notifications;
 mod operations;
+mod outcomes;
 mod ownership;
 mod pack_intents;
 mod startup;
