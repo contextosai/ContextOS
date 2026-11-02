@@ -12,6 +12,7 @@ pub mod configs;
 pub mod evidence_admission;
 pub mod evidence_issuers;
 pub mod exposure;
+pub mod exposure_import;
 pub mod feedback;
 pub mod findings;
 pub mod governance_sweep;

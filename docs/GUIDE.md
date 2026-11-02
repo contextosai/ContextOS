@@ -285,6 +285,7 @@ and scopes a restrictive rule to any of them.
 | `POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence` | `attest` | Release a started effect with no fact, on evidence it did not apply |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | Undo an applied effect with its declared compensation |
 | `POST /v1/runs/{run_id}/compensate` | `dispatch` | Compensate the run's effects newest first (saga) |
+| `POST /v1/guarantees/{id}/imports` | `exposure:import` | Import exposure created outside ContextOS into a shared guarantee (one way) |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
 | `GET /metrics`, `/healthz`, `/readyz` | – | Operations |
 

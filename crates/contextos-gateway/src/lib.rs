@@ -29,6 +29,7 @@ mod decisions;
 mod delegation;
 mod erasure;
 mod escalation;
+mod exposure_import;
 mod findings;
 mod findings_api;
 pub mod hold_census;
@@ -82,6 +83,7 @@ pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, Reco
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
 pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
+pub use exposure_import::ImportRow;
 pub use findings::{
     BasisInput, FindingInput, FindingKind, MAX_FINDINGS, MAX_FINDINGS_BYTES, MAX_NOTICES, MAX_STATEMENT_BYTES,
     NOTICES_PER_RESULT,

@@ -313,3 +313,23 @@ tests:
               summary: 'Runs declared intents their packs do not govern (pack_intents observe).'
               description: In the last hour, runs declared an intent their Context Pack's rules do not name, so intent-scoped rules did not apply to them. With observe they were admitted; with required, refused. Before switching to required, wait until this stays quiet.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextospackintentmismatches
+
+  - name: an import past the limit raises an over-limit alert per guarantee
+    interval: 1m
+    input_series:
+      - series: 'contextos_shared_guarantee_over_limit_imports_total{guarantee="refunds",pod="a"}'
+        values: '0x5 1x30'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ContextOSResourceOverLimit
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ContextOSResourceOverLimit
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              guarantee: refunds
+            exp_annotations:
+              summary: 'Imported exposure took a resource under refunds past its limit.'
+              description: Exposure created outside ContextOS was imported and left a resource under refunds over its limit. The resource refuses every new effect until its limit is raised by a reviewed definition change. Confirm the imported rows and decide with the guarantee's owner.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosresourceoverlimit

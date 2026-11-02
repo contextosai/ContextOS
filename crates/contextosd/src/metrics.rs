@@ -31,6 +31,7 @@ pub struct Metrics {
     task_amendments: Mutex<BTreeMap<String, u64>>,
     agent_binding_mismatches: Mutex<BTreeMap<String, u64>>,
     pack_intent_mismatches: Mutex<BTreeMap<String, u64>>,
+    over_limit_imports: Mutex<BTreeMap<String, u64>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
@@ -96,6 +97,11 @@ impl Metrics {
     /// mode (`observe` admits it, `required` refuses it).
     pub fn pack_intent_mismatch(&self, mode: &str) {
         bump(&self.pack_intent_mismatches, mode.to_owned());
+    }
+
+    /// Counts an imported row that left its resource over the guarantee's limit.
+    pub fn over_limit_import(&self, guarantee: &str) {
+        bump(&self.over_limit_imports, guarantee.to_owned());
     }
 
     /// Counts a notification attempt by webhook and outcome (`delivered`, `failed`,
@@ -183,7 +189,7 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 6] = [
+        let counters: [(&str, &str, &str, &Counter); 7] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -219,6 +225,12 @@ impl Metrics {
                 "Runs whose intent their Context Pack's rules do not name, by mode.",
                 "mode",
                 &self.pack_intent_mismatches,
+            ),
+            (
+                "contextos_shared_guarantee_over_limit_imports_total",
+                "Imported rows that left a resource over its guarantee's limit, by guarantee.",
+                "guarantee",
+                &self.over_limit_imports,
             ),
         ];
         for (name, help, label, map) in counters {
