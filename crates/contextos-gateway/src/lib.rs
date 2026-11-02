@@ -39,6 +39,7 @@ mod lifecycle;
 mod loop_guard;
 pub mod manifest;
 mod memory;
+pub mod outcomes;
 mod ownership;
 pub mod ports;
 mod reconcile;
@@ -199,6 +200,8 @@ pub enum GatewayError {
     Audit(#[from] contextos_audit::AuditError),
     #[error(transparent)]
     Manifest(#[from] ManifestError),
+    #[error("outcome contract: {0}")]
+    Outcome(String),
 }
 
 /// Governance facts for a dispatch, alongside the tool result.
@@ -1396,9 +1399,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(p.stop("blocked", reason_codes, "Budget could not be reserved."));
         }
         // What compensating this effect will need is recorded before it can be sent.
+        // So is the outcome its witness must attest (see [`outcomes`]).
         let recorded = if compensates.is_none() {
-            self.record_compensation(admission, manifest, &operation_id, &action_digest, &arguments)
+            match self
+                .record_compensation(admission, manifest, &operation_id, &action_digest, &arguments)
                 .await
+            {
+                Ok(Ok(())) => {
+                    self.register_outcome(admission, manifest, &operation_id, &action_digest, &binding)
+                        .await
+                }
+                other => other,
+            }
         } else {
             Ok(Ok(()))
         };
@@ -1416,7 +1428,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(p.stop(
                 "rejected",
                 vec![reason.into()],
-                "The effect could not be made compensable as its capability declares.",
+                "The effect could not be recorded as its capability declares (compensation or outcome).",
             ));
         }
         // Compact from the state just written instead of reading it back; otherwise the

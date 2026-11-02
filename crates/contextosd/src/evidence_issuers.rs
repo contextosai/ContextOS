@@ -151,6 +151,21 @@ impl Issuers {
         }
     }
 
+    /// The configured issuer named by `iss` with the token's verified claims, or why
+    /// not (`issuer_unknown`, `attestation_invalid`, `signature_invalid`).
+    pub fn decode(&self, token: &str) -> Result<(&EvidenceIssuerConfig, Value), &'static str> {
+        let iss = unverified_issuer(token).ok_or("attestation_invalid")?;
+        let issuer = self.0.iter().find(|i| i.config.issuer == iss).ok_or("issuer_unknown")?;
+        let claims = issuer.decode(token).ok_or("signature_invalid")?;
+        Ok((&issuer.config, claims))
+    }
+
+    /// The configuration of the issuer named `iss`, if configured.
+    #[must_use]
+    pub fn config(&self, iss: &str) -> Option<&EvidenceIssuerConfig> {
+        self.0.iter().find(|i| i.config.issuer == iss).map(|i| &i.config)
+    }
+
     fn verify(&self, tenant: &str, now: &str, entry: &Value) -> Verdict {
         let mut verdict = Verdict {
             freshness: "unknown",
@@ -252,7 +267,7 @@ impl Verdict {
     }
 }
 
-fn freshness(
+pub(crate) fn freshness(
     now: &str,
     observed: &str,
     until: &str,

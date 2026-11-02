@@ -887,6 +887,111 @@
         "x-contextos-scope": "reconcile"
       }
     },
+    "/v1/runs/{run_id}/operations/{operation_id}/outcome": {
+      "post": {
+        "operationId": "reportOutcome",
+        "summary": "Report a witness's observation that an applied effect reached its postcondition",
+        "description": "For a capability with an `outcome` contract. The attestation is a compact JWS from the contract's witness (an `[[evidence_issuers]]` issuer) with `{iss, sub, satisfies, observed_at, valid_until, amount?}`. It must be signed by the witness, serve the run's tenant, sign and be allowed the postcondition, be current, name the action's resource as `sub` (the guarantee's canonical resource when the capability has a shared guarantee), state the action's amount when it has one, and be observed after the effect was applied. Accepted, it is audited (`outcome_witnessed`, the token by digest) and the run may complete; repeating it answers the closed outcome. Refusals are 422 with the reason as the error code (`outcome_witness_mismatch`, `outcome_resource_mismatch`, `outcome_amount_mismatch`, `outcome_before_effect`, `requirement_not_attested`, `issuer_unknown`, `signature_invalid`, `expired`, ...); 404 `outcome_not_required` when the operation has no contract; 409 `outcome_effect_not_applied` before the effect is applied.",
+        "x-contextos-scope": "outcome:report",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "attestation"
+                ],
+                "properties": {
+                  "attestation": {
+                    "type": "string",
+                    "maxLength": 16384,
+                    "description": "Compact JWS from the capability's outcome witness."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The closed outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "run_id",
+                    "operation_id",
+                    "state",
+                    "postcondition",
+                    "late",
+                    "observation"
+                  ],
+                  "properties": {
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "operation_id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "witnessed"
+                    },
+                    "postcondition": {
+                      "type": "string"
+                    },
+                    "late": {
+                      "type": "boolean",
+                      "description": "Witnessed after its deadline had passed (and been escalated)."
+                    },
+                    "observation": {
+                      "type": "object",
+                      "description": "`issuer`, `subject_digest`, `observed_at`, `valid_until`, `attestation_digest`."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/runs/{run_id}/operations/{operation_id}/attest-absence": {
       "post": {
         "operationId": "attestAbsence",

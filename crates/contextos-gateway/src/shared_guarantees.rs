@@ -251,6 +251,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         Ok(self.store.get(&link_key(admission, operation)?).await?.is_some())
     }
 
+    /// The canonical resource digest a guarded operation reserved against, if any.
+    pub(crate) async fn linked_resource_digest(
+        &self,
+        admission: &RunAdmission,
+        operation: &str,
+    ) -> Result<Option<String>, GatewayError> {
+        let Some(doc) = self.store.get(&link_key(admission, operation)?).await? else {
+            return Ok(None);
+        };
+        let link: Link =
+            serde_json::from_value(doc.body).map_err(|_| GatewayError::Guarantee("shared_guarantee_invalid".into()))?;
+        Ok(Some(link.binding.resource_digest))
+    }
+
     pub(crate) async fn reserve_shared_exposure(
         &self,
         admission: &RunAdmission,

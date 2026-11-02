@@ -25,6 +25,7 @@ pub mod membership;
 pub mod metrics;
 pub mod notifications;
 pub mod oidc;
+pub mod outcome_witness;
 pub mod pack_intents;
 pub mod protected_resource;
 pub mod reconcile;
@@ -214,6 +215,9 @@ where
         )),
         None => None,
     };
+    if let Some(gateway) = &gateway {
+        outcome_witness::check(&gateway.outcome_contracts(), &config.evidence_issuers)?;
+    }
     let development = config.server.mode == config::Mode::Development;
     let issuers = config
         .oidc

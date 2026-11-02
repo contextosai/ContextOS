@@ -216,6 +216,50 @@ pub struct CapabilityManifest {
     /// refused, since agents see the manifest's own description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_description_digest: Option<String>,
+    /// What must be observed, by whom and by when, before an applied effect counts as
+    /// done (see [`crate::outcomes`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<OutcomeContract>,
+}
+
+/// What happens when an outcome's witness has not reported by its deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnMissed {
+    /// Open an escalation for a human (once).
+    #[default]
+    Escalate,
+}
+
+/// A capability's outcome contract: after its effect is applied, the run cannot
+/// complete until `witness` (an `[[evidence_issuers]]` issuer) attests
+/// `postcondition` for the action's resource, within `within_seconds`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutcomeContract {
+    pub witness: String,
+    pub postcondition: String,
+    pub within_seconds: u64,
+    #[serde(default)]
+    pub on_missed: OnMissed,
+}
+
+/// The longest an outcome may wait for its witness.
+pub const MAX_OUTCOME_WITHIN_SECONDS: u64 = 30 * 86_400;
+
+impl OutcomeContract {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.witness.is_empty() || self.witness.len() > 512 || self.witness.chars().any(char::is_control) {
+            return Err("witness must name an evidence issuer");
+        }
+        if !contextos_contract::validation::is_contract_identifier(&self.postcondition) {
+            return Err("postcondition must be an identifier");
+        }
+        if !(1..=MAX_OUTCOME_WITHIN_SECONDS).contains(&self.within_seconds) {
+            return Err("within_seconds must be between 1 and 2592000");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -242,6 +286,8 @@ pub enum ManifestError {
     NotAppliedStatuses(String),
     #[error("capability {0} repeats the capability_ref of a pinned or retired version")]
     DuplicateCapabilityRef(String),
+    #[error("capability {0} outcome contract is invalid: {1}")]
+    Outcome(String, &'static str),
 }
 
 impl CompletionCheck {
@@ -348,6 +394,17 @@ impl CapabilityManifest {
             compensation
                 .validate(id)
                 .map_err(|reason| ManifestError::Compensation(id.clone(), reason))?;
+        }
+        if let Some(outcome) = &self.outcome {
+            if self.action_risk.effect == contextos_contract::types::ActionEffect::None {
+                return Err(ManifestError::Outcome(
+                    id.clone(),
+                    "only an effectful capability can declare one",
+                ));
+            }
+            outcome
+                .validate()
+                .map_err(|reason| ManifestError::Outcome(id.clone(), reason))?;
         }
         Ok(())
     }

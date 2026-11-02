@@ -285,6 +285,7 @@ and scopes a restrictive rule to any of them.
 | `POST /v1/runs/{run_id}/operations/{operation_id}/attest-absence` | `attest` | Release a started effect with no fact, on evidence it did not apply |
 | `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | Undo an applied effect with its declared compensation |
 | `POST /v1/runs/{run_id}/compensate` | `dispatch` | Compensate the run's effects newest first (saga) |
+| `POST /v1/runs/{run_id}/operations/{operation_id}/outcome` | `outcome:report` | A witness's signed observation that an applied effect reached its postcondition |
 | `POST /v1/guarantees/{id}/imports` | `exposure:import` | Import exposure created outside ContextOS into a shared guarantee (one way) |
 | `GET /v1/audit/verify` | `audit:read` | Verify the tenant's signed audit chain |
 | `GET /metrics`, `/healthz`, `/readyz` | – | Operations |
@@ -734,6 +735,36 @@ their manifests declare: `run.compensate(operation_id)` for one effect, or
 doubt. Each compensation is a new governed operation with its own authority, policy,
 approval and budget, and runs at most once per effect. See
 [COMPENSATION.md](COMPENSATION.md).
+
+### Outcome contracts
+
+A provider confirming a refund call says it accepted the call, not that the refund
+posted to the right order for the right amount. A capability can require that from a
+second source, a witness, before the run counts the effect as done:
+
+```json
+"outcome": {"witness": "https://ledger.internal.example", "postcondition": "refund_posted",
+            "within_seconds": 900, "on_missed": "escalate"}
+```
+
+- **The witness** is an `[[evidence_issuers]]` issuer whose `satisfies` lists the
+  postcondition; contextosd refuses to start otherwise.
+- **After the effect is applied** (confirmed or partial, at dispatch or by
+  reconciliation), the outcome is pending (audited `outcome_pending`) and
+  `complete` refuses with `outcome_pending`. Before dispatch the contract is recorded
+  for the action; a call that cannot be recorded is refused (`outcome_index_full`).
+- **The witness, or a service relaying its signed reading** (the scope is
+  `outcome:report`; the signature is what is trusted), posts `{"attestation": "<JWS>"}`
+  to `POST /v1/runs/{run_id}/operations/{operation_id}/outcome`. The payload is
+  `{iss, sub, satisfies, observed_at, valid_until, amount?}`. It is accepted when the
+  witness signed it, serves the tenant and signed the postcondition, it is current,
+  `sub` is the action's resource (the shared guarantee's canonical resource when the
+  capability has one), `amount` (`{minor_units, currency}`) is the action's amount
+  when it has one, and it was observed after the effect applied. Accepted, it is
+  audited (`outcome_witnessed`, the token by digest) and the run may complete.
+- **Past `within_seconds`**, the governance sweep opens one escalation for the
+  operation (`reason_codes: ["outcome_missed"]`), which notifications deliver like any
+  other. The outcome stays pending: a late reading still closes it (`late: true`).
 
 ## 4. Integrate your services
 

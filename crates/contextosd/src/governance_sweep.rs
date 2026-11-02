@@ -29,6 +29,9 @@ use crate::metrics::Metrics;
 /// A hold this old is logged once for the SIEM.
 pub const HOLD_AGE_LOG_SECONDS: u64 = 900;
 
+/// Open outcomes read per tenant and pass, oldest first.
+pub const MISSED_OUTCOMES_PER_PASS: usize = 1000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct SweepConfig {
     pub interval: Duration,
@@ -204,6 +207,11 @@ impl Census {
         }
         let mut escalations = 0;
         for tenant in &self.tenants {
+            // Outcomes past their deadline are handed to a human once (see
+            // `contextos_gateway::outcomes`), before they are counted.
+            gateway
+                .escalate_missed_outcomes(tenant, MISSED_OUTCOMES_PER_PASS)
+                .await?;
             escalations += gateway.open_escalation_count(tenant).await?;
         }
         let text = self.render(&gateway.now(), escalations, unix_seconds());

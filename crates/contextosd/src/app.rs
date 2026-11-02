@@ -57,6 +57,7 @@
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
+//! | `POST /v1/runs/{run_id}/operations/{operation_id}/outcome` | `outcome:report` | a witness's signed observation that an applied effect reached its postcondition |
 //! | `GET /v1/runs/{run_id}/compensations` | `dispatch` | the run's compensable effects and where each stands |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/compensate` | `dispatch` | compensate one applied effect with its declared capability, governed as a new operation |
 //! | `POST /v1/runs/{run_id}/compensate` | `dispatch` | compensate the run's applied effects newest first, stopping at any in doubt |
@@ -3303,6 +3304,10 @@ where
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/reconcile",
             post(crate::reconcile::reconcile::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/operations/{operation_id}/outcome",
+            post(crate::outcome_witness::report_outcome::<S, L>),
         )
         .route(
             "/v1/runs/{run_id}/operations/{operation_id}/attest-absence",
