@@ -59,6 +59,8 @@ pub struct DispatchSetup {
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// `[providers.result_screening]`.
     pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
+    /// `[providers.resource_identity]`.
+    pub resource_identity: Option<Arc<dyn contextos_gateway::ResourceIdentityProvider>>,
 }
 
 impl std::fmt::Debug for DispatchSetup {
@@ -98,6 +100,9 @@ where
     gateway.set_model_call_floor(setup.model_call_floor);
     gateway.set_completion_floor(setup.completion_floor);
     gateway.require_result_schemas(setup.require_result_schemas);
+    if let Some(identity) = setup.resource_identity {
+        gateway.set_resource_identity(identity);
+    }
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
     if let Some(screening) = setup.result_screening {
@@ -401,6 +406,10 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         approval_step_up: config.guards.approval_step_up.clone(),
         result_screening: match &providers.result_screening {
             Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
+            None => None,
+        },
+        resource_identity: match &providers.resource_identity {
+            Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResourceIdentity(remote(p)?))),
             None => None,
         },
     }))

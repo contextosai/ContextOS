@@ -41,10 +41,41 @@ The runtime extracts both fields from the same arguments bound to the authorized
 action and sent to the provider. Pointers use RFC 6901; missing values, invalid
 resource identifiers and zero, fractional, negative or unsafe amounts withhold the
 call. Amount and limit are positive integers at most 9,007,199,254,740,991.
-Resource strings contain 1–256 ASCII letters, digits or `_.:-`; they are
-case-sensitive. Upstream aliases, case folding and identifier canonicalization must
-be resolved by your integration. Unit is trusted configuration metadata; the
-runtime performs no currency conversion.
+Resource strings contain 1–256 ASCII letters, digits or `_.:-`. Unit is trusted
+configuration metadata; the runtime performs no currency conversion.
+
+### Resource identity
+
+By default the ledger is keyed by the identifier exactly as extracted, so `ord_881`
+and `ORD-881` are two resources, each with the full limit. Name how identifiers are
+made canonical first:
+
+```toml
+[[guarantees]]
+id = "refunds-per-order"
+# ...
+resource_canonicalizer = "provider"   # or "ascii_casefold"; omitted means "exact"
+
+[providers.resource_identity]         # required by "provider"
+url = "https://orders.internal.example/contextos/identity"
+token_env = "CONTEXTOS_IDENTITY_TOKEN"
+```
+
+- `ascii_casefold` lowercases ASCII letters: `ORD_881` and `ord_881` are one resource.
+- `provider` asks your resource identity service at reservation time. It receives
+  `{"run", "guarantee_id", "resource"}` and answers
+  `{"canonical_id", "evidence_ref"}`, where `canonical_id` follows the resource rules
+  above and `evidence_ref` names the record behind the mapping. An unavailable service
+  or a malformed answer withholds the call (`shared_guarantee_identity_unavailable`);
+  the gateway never guesses a ledger. Startup refuses a `provider` guarantee without
+  `[providers.resource_identity]`.
+
+The ledger, `binding.resource_digest` and the inspection routes use the canonical id.
+The `shared_guarantee_reserved` audit entry adds `resource_identity`: the
+canonicalizer, `extracted_digest` (the digest of the identifier the call named) and
+the provider's `evidence_ref`. The canonicalizer is part of the pinned definition
+(left out when `exact`, so existing definitions keep their digest): switching it on an
+existing guarantee is a definition change and fails closed like any other.
 
 A guarantee can cover several effectful capabilities with the same resource/amount
 shape and unit. Each capability belongs to at most one guarantee; unknown or
@@ -111,8 +142,8 @@ GET /v1/guarantees/{id}/holds?after=<cursor>&scan=<n>
 GET /v1/guarantees/{id}/resources/{resource_digest}/holds
 ```
 
-The resource digest is SHA-256 of the RFC 8785 canonical JSON string, including its
-JSON quotes. For an accepted ASCII identifier, for example:
+The resource digest is SHA-256 of the RFC 8785 canonical JSON string of the
+canonical id (see *Resource identity*), including its JSON quotes. For an accepted ASCII identifier, for example:
 
 ```sh
 python3 - <<'PY'

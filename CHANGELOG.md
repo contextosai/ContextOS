@@ -25,6 +25,14 @@ minor versions may break APIs and every break is listed.
   `VersionMismatchWarning`, since releases before 1.0 may change the API. Pass
   `check_server=False` (Python) or `checkServer: false` (Node) to skip it.
 
+- Shared guarantees take `resource_canonicalizer`: `exact` (the default),
+  `ascii_casefold`, or `provider`, which asks a new `[providers.resource_identity]`
+  service for the canonical id at reservation time, so aliases of one order share one
+  ledger and one limit. An unavailable service withholds the call
+  (`shared_guarantee_identity_unavailable`). The reservation's audit entry records the
+  canonicalizer, the digest of the identifier the call named and the provider's
+  evidence. Existing (`exact`) definitions keep their digest.
+
 ### Changed (breaking)
 - `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a
   `required_evidence` item of its pack (`422 evidence_in_request_context`): gated facts

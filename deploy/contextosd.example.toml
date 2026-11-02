@@ -87,6 +87,10 @@ token_env = "CONTEXTOS_APPROVALS_TOKEN"
 # url = "https://screening.internal.example/contextos/facts"
 # token_env = "CONTEXTOS_SCREENING_TOKEN"
 
+# [providers.resource_identity] # optional: maps identifiers to canonical ids for guarantees with resource_canonicalizer = "provider"
+# url = "https://orders.internal.example/contextos/identity"
+# token_env = "CONTEXTOS_IDENTITY_TOKEN"
+
 [[adapters]]
 id = "adp_payments"
 kind = "mcp"                   # stateless MCP 2026-07-28 over Streamable HTTP

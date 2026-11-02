@@ -181,6 +181,10 @@ pub struct ProvidersConfig {
     /// agent sees it.
     #[serde(default)]
     pub result_screening: Option<RemoteProvider>,
+    /// Resource identity service; maps identifiers to canonical ids for guarantees with
+    /// `resource_canonicalizer = "provider"`.
+    #[serde(default)]
+    pub resource_identity: Option<RemoteProvider>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
