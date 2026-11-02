@@ -11,9 +11,9 @@
 //!   Required with the `contextos.enterprise` profile, and its default there.
 //! - `caller` admits it, as the compiler always has. The default otherwise.
 //!
-//! The caller's `integrity` and `freshness` labels on evidence entries are still
-//! taken as given; verifying them against configured issuers comes next
-//! (docs/design/business-correctness.md, B2 and B3).
+//! Under `strict` the caller's `integrity` and `freshness` labels on evidence entries
+//! are also replaced: [`crate::evidence_issuers`] sets them from each entry's
+//! issuer-signed attestation and the server clock.
 
 use std::collections::BTreeSet;
 
@@ -94,6 +94,51 @@ pub fn in_request_context<'a>(pack: &'a ContextPack, request: &Value) -> Vec<&'a
         .collect()
 }
 
+/// Rules that read a gated name from the request context (`request.context.<name>`),
+/// as `rule_id: name`. Strict evidence refuses such a context, so these rules never
+/// match; `--check-config` names them.
+#[must_use]
+pub fn rules_reading_gated_context(pack: &ContextPack) -> Vec<String> {
+    fn vars<'v>(value: &'v Value, out: &mut Vec<&'v str>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::String(path)) = map.get("var") {
+                    out.push(path);
+                }
+                map.values().for_each(|v| vars(v, out));
+            }
+            Value::Array(items) => items.iter().for_each(|v| vars(v, out)),
+            _ => {}
+        }
+    }
+    let gated = gated(pack);
+    let mut found = Vec::new();
+    for rule in pack
+        .policy_layer
+        .policy_bundles
+        .iter()
+        .flat_map(|b| &b.policy_dsl.rules)
+    {
+        let value = serde_json::to_value(rule).unwrap_or(Value::Null);
+        let mut paths = Vec::new();
+        vars(&value, &mut paths);
+        for path in paths {
+            let Some(rest) = path.strip_prefix("request.context.") else {
+                continue;
+            };
+            for name in &gated {
+                let entry = format!("{}: {name}", rule.rule_id);
+                if (rest == *name || rest.strip_prefix(*name).is_some_and(|r| r.starts_with('.')))
+                    && !found.contains(&entry)
+                {
+                    found.push(entry);
+                }
+            }
+        }
+    }
+    found
+}
+
 /// Admission: under `strict`, refuse a request whose context names a gated item.
 pub fn admit(mode: EvidenceMode, pack: &ContextPack, request: &Value) -> Result<(), ApiError> {
     if mode != EvidenceMode::Strict {
@@ -109,6 +154,26 @@ pub fn admit(mode: EvidenceMode, pack: &ContextPack, request: &Value) -> Result<
         "The request context names evidence a decision requires; supply it as an evidence entry.",
     )
     .with_detail(json!({"requirements": named})))
+}
+
+/// The run's `deps` as the compiler and the replay case see them: under `strict`,
+/// with every evidence entry's labels set by its issuer's attestation.
+#[must_use]
+pub fn relabel<'a>(
+    mode: EvidenceMode,
+    issuers: &crate::evidence_issuers::Issuers,
+    tenant: &str,
+    now: &str,
+    deps: &'a Value,
+) -> std::borrow::Cow<'a, Value> {
+    if mode != EvidenceMode::Strict || !deps["evidence"].is_array() {
+        return std::borrow::Cow::Borrowed(deps);
+    }
+    let mut deps = deps.clone();
+    if let Some(evidence) = deps["evidence"].as_array_mut() {
+        issuers.relabel(tenant, now, evidence);
+    }
+    std::borrow::Cow::Owned(deps)
 }
 
 #[cfg(test)]
@@ -133,6 +198,14 @@ mod tests {
         let plain = json!({"input": {"context": {"refund_amount": 4200}}});
         assert!(admit(EvidenceMode::Strict, &pack, &plain).is_ok());
         assert!(admit(EvidenceMode::Strict, &pack, &json!({"input": {}})).is_ok());
+    }
+
+    #[test]
+    fn rules_conditioned_on_a_gated_context_value_are_named() {
+        assert_eq!(
+            rules_reading_gated_context(&pack()),
+            ["R_REFUND_REQUIRES_IDV: identity_verified"]
+        );
     }
 
     #[test]

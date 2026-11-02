@@ -107,6 +107,11 @@ labels, it stays pure and parity holds. The evaluation time and each verificatio
 result are recorded in the replay case, so replay reproduces the decision without
 the clock.
 
+**Status.** B1 is PR #124. B2 and B3 follow with these differences: issuer keys are an
+inline JWK Set per issuer (no JWKS URL fetching yet), issuers are scoped to tenants,
+and the `sub` comparison waits for C1, so `evidence_subject_mismatch` is not yet
+raised; `sub` is recorded in each entry's `verification`.
+
 **Tests.** Expired, future-dated, wrong-issuer, wrong-subject, tampered-content and
 over-long-validity entries each fail the gate while labelled `"current"` and
 `"verified"` by the caller. Replay of a strict run gives the same decision a day later.

@@ -259,6 +259,9 @@ pub struct Config {
     /// OIDC issuers whose JWTs authenticate callers.
     #[serde(default)]
     pub oidc: Vec<crate::oidc::OidcConfig>,
+    /// Services trusted to vouch for gated evidence (see [`crate::evidence_issuers`]).
+    #[serde(default)]
+    pub evidence_issuers: Vec<crate::evidence_issuers::EvidenceIssuerConfig>,
     /// Overload protection (see [`crate::limits`]).
     #[serde(default)]
     pub limits: crate::limits::LimitsConfig,
@@ -359,6 +362,7 @@ impl Config {
         config.check()?;
         crate::agent_binding::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_admission::check(&config).map_err(ConfigError::Invalid)?;
+        crate::evidence_issuers::Issuers::new(&config.evidence_issuers).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;

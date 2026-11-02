@@ -131,6 +131,27 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         "evidence: {}",
         crate::evidence_admission::mode(&config).as_str()
     ));
+    if crate::evidence_admission::mode(&config) == crate::evidence_admission::EvidenceMode::Strict {
+        report.push(if config.evidence_issuers.is_empty() {
+            "warning: strict evidence with no [[evidence_issuers]]: no evidence entry can satisfy a decision's gate"
+                .into()
+        } else {
+            let issuers: Vec<&str> = config.evidence_issuers.iter().map(|i| i.issuer.as_str()).collect();
+            format!("evidence issuers: {}", issuers.join(", "))
+        });
+    }
+    if crate::evidence_admission::mode(&config) == crate::evidence_admission::EvidenceMode::Strict {
+        let mut refs: Vec<_> = packs.keys().collect();
+        refs.sort();
+        for pack_ref in refs {
+            for rule in crate::evidence_admission::rules_reading_gated_context(packs[pack_ref].compiler.pack()) {
+                report.push(format!(
+                    "warning: {pack_ref} rule {rule} reads a gated name from request.context, which strict evidence refuses: \
+                     the rule never matches"
+                ));
+            }
+        }
+    }
     let mut refs: Vec<_> = packs.keys().collect();
     refs.sort();
     for pack_ref in refs {
