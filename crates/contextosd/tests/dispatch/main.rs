@@ -12,6 +12,7 @@ mod discovery;
 mod effects;
 mod erasure;
 mod evaluation;
+mod evidence;
 mod executors;
 mod exposure;
 mod findings;

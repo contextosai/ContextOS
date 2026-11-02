@@ -9,6 +9,7 @@ pub mod check;
 pub mod compensation;
 pub mod config;
 pub mod configs;
+pub mod evidence_admission;
 pub mod exposure;
 pub mod feedback;
 pub mod findings;
@@ -144,6 +145,7 @@ pub fn deployment_summary(config: &Config) -> Value {
             "require_tool_schemas": config.guards.require_tool_schemas,
             "completion_requires_scores": floors,
             "require_task_authorization": config.guards.require_task_authorization,
+            "evidence": evidence_admission::mode(config).as_str(),
         },
         "audit": {
             "key_id": config.audit.key_id,
@@ -281,6 +283,7 @@ where
         trust_supplied_memory: development || config.guards.trust_supplied_memory,
         agent_binding: agent_binding::mode(config),
         pack_intents: pack_intents::mode(config),
+        evidence: evidence_admission::mode(config),
         public_url: config.server.public_url.clone(),
     }))
 }

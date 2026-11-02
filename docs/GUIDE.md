@@ -333,6 +333,22 @@ is met by a truthy key in the request's `context` or by an evidence entry labell
 a service you trust (not the agent), or treat the gate as a check on the agent's
 reasoning rather than a proof.
 
+Strict evidence closes the first of those paths:
+
+```toml
+[guards]
+evidence = "strict"    # or "caller"
+```
+
+`strict` refuses a run whose `request.input.context` has a key naming any
+`required_evidence` item of a DecisionSpec in its pack, whatever the value
+(`422 evidence_in_request_context`, with the names under `detail.requirements`). Supply
+those facts as evidence entries instead. The `contextos.enterprise` profile requires
+`strict`, and it is the default there; `caller`, the default otherwise, keeps the
+compiler's behaviour. The entries' `integrity` and `freshness` labels are still the
+caller's: verifying them against configured issuers is planned
+(`docs/design/business-correctness.md`, B2).
+
 `GET /v1/runs/{run_id}/evidence` returns the run's admission, lifecycle state, budget
 ledger with its compaction archives, and its decisions with replay packets.
 `GET /v1/audit/entries?from=&limit=` pages the tenant's signed chain out for SIEM

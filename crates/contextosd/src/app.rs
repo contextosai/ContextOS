@@ -136,6 +136,8 @@ pub struct AppState<S, L> {
     pub agent_binding: crate::agent_binding::AgentBinding,
     /// Whether a run's intent must be one its Context Pack governs.
     pub pack_intents: crate::pack_intents::PackIntents,
+    /// What may satisfy a decision's evidence gate.
+    pub evidence: crate::evidence_admission::EvidenceMode,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -445,6 +447,8 @@ where
                 "No such Context Pack for this tenant.",
             )
         })?;
+    // Under strict evidence, gated facts arrive as evidence entries, not request context.
+    crate::evidence_admission::admit(state.evidence, pack.compiler.pack(), &input["request"])?;
     let request: InvokeRequest = serde_json::from_value(input["request"].clone()).map_err(|_| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,

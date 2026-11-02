@@ -25,6 +25,15 @@ minor versions may break APIs and every break is listed.
   `VersionMismatchWarning`, since releases before 1.0 may change the API. Pass
   `check_server=False` (Python) or `checkServer: false` (Node) to skip it.
 
+### Changed (breaking)
+- `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a
+  `required_evidence` item of its pack (`422 evidence_in_request_context`): gated facts
+  must arrive as evidence entries. It is the default with the `contextos.enterprise`
+  profile, which now refuses to start with `evidence = "caller"`. Deployments on that
+  profile that put gated facts in the request context must move them to
+  `deps.evidence` before upgrading. `GET /v1/deployment`, `--check-config` and the
+  effective configuration report the mode.
+
 ### Changed
 - The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;
   `@contextos/kernel` was never published and its scope belongs to someone else.

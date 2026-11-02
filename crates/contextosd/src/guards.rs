@@ -58,6 +58,11 @@ pub struct GuardsConfig {
     /// `contextos.enterprise` profile, `observe` otherwise.
     #[serde(default)]
     pub pack_intents: Option<crate::pack_intents::PackIntents>,
+    /// What may satisfy a decision's evidence gate (`strict`, `caller`; see
+    /// [`crate::evidence_admission`]). Unset: `strict` with the `contextos.enterprise`
+    /// profile, which requires it, `caller` otherwise.
+    #[serde(default)]
+    pub evidence: Option<crate::evidence_admission::EvidenceMode>,
     /// Approvals above an amount, or of named capabilities, count only after the
     /// approver's recent strong sign-in (see [`contextos_gateway::step_up`]).
     #[serde(default)]
@@ -124,6 +129,7 @@ impl Default for GuardsConfig {
             require_completion_contracts: None,
             agent_binding: None,
             pack_intents: None,
+            evidence: None,
             approval_step_up: None,
         }
     }
