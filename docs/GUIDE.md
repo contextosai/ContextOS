@@ -765,6 +765,17 @@ second source, a witness, before the run counts the effect as done:
 - **Past `within_seconds`**, the governance sweep opens one escalation for the
   operation (`reason_codes: ["outcome_missed"]`), which notifications deliver like any
   other. The outcome stays pending: a late reading still closes it (`late: true`).
+- **Decisions and evidence.** A `DECIDED` or `CLOSED` decision citing such an effect is
+  refused with 409 `outcome_pending` until it is witnessed; then its tool lineage entry
+  cites the reading (`artifact_refs: ["outcome:<attestation digest>"]`) and the replay
+  transcript binds it. The run's evidence bundle lists its `outcomes`.
+- **Signing readings while you build a witness:** `ctx attest --claims claims.json
+  --seed-env SEED` prints the compact EdDSA JWS and the JWK Set to configure. The
+  clients relay a reading with `Client.report_outcome(run_id, operation_id, token)`
+  (Python) or `run.reportOutcome(operationId, token)` (Node).
+
+[examples/outcome-witness](../examples/outcome-witness/README.md) runs the refund
+this way: the provider confirms, the run waits, the ledger's reading closes it.
 
 ## 4. Integrate your services
 

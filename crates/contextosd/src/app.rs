@@ -1216,6 +1216,12 @@ where
                 "A reported tool call is not a governed effect of this run.",
             )
             .with_detail(json!({"tool_call_id": id})),
+            DecisionRefusal::OutcomePending(id) => ApiError::new(
+                StatusCode::CONFLICT,
+                "outcome_pending",
+                "A cited effect's outcome witness has not reported; record the decision once it has.",
+            )
+            .with_detail(json!({"tool_call_id": id})),
             DecisionRefusal::ModelNotPinned(_) => ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "model_not_pinned",

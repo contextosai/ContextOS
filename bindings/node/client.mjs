@@ -325,6 +325,14 @@ export class Run {
     return this.#post(`/operations/${segment(operationId)}/reconcile`, body);
   }
 
+  /**
+   * Relays an outcome witness's signed reading (a compact JWS) for an applied effect whose
+   * capability declares an outcome contract. The token needs the `outcome:report` scope.
+   */
+  reportOutcome(operationId, attestation) {
+    return this.client.request("POST", this.#path(`/operations/${segment(operationId)}/outcome`), { body: { attestation } });
+  }
+
   /** The run's compensable effects and where each stands (`state`). */
   compensations() {
     return this.client.request("GET", this.#path("/compensations"));

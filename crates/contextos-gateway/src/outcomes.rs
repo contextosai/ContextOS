@@ -213,6 +213,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         Ok(false)
     }
 
+    /// The run's outcome records, for its evidence bundle.
+    pub(crate) async fn run_outcomes(&self, admission: &RunAdmission) -> Result<Vec<Value>, GatewayError> {
+        let mut outcomes = Vec::new();
+        for id in ids(self.store.get(&run_index(admission)).await?) {
+            let key = DocKey::new(&admission.tenant_id, DocKind::Outcome, &id);
+            if let Some(doc) = self.store.get(&key).await? {
+                outcomes.push(doc.body);
+            }
+        }
+        Ok(outcomes)
+    }
+
     /// Binds a verified witness observation to the operation's effect and closes its
     /// outcome. `Ok(Err)` is the refusal reason; `Ok(Ok)` is the closed record (also for
     /// an outcome already witnessed).

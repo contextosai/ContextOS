@@ -1147,7 +1147,8 @@
             ]
           }
         ],
-        "x-contextos-scope": "dispatch"
+        "x-contextos-scope": "dispatch",
+        "description": "A `DECIDED` or `CLOSED` decision citing an applied effect whose outcome contract is not yet witnessed is refused with 409 `outcome_pending`; a witnessed effect's lineage entry cites the reading in `artifact_refs`."
       }
     },
     "/v1/runs/{run_id}/memory": {
@@ -6179,6 +6180,13 @@
                   }
                 }
               }
+            }
+          },
+          "outcomes": {
+            "type": "array",
+            "description": "The run's outcome contract records (capabilities declaring `outcome`): `state` (`awaiting_effect`, `pending`, `missed`, `witnessed`), `due_at`, and the accepted `observation` once witnessed.",
+            "items": {
+              "type": "object"
             }
           }
         }

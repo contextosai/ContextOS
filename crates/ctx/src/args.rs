@@ -67,6 +67,19 @@ pub enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Sign claims as an evidence issuer or outcome witness (for building and testing
+    /// one): prints `{attestation, jwks}`, the compact EdDSA JWS and the JWK Set to
+    /// configure in `[[evidence_issuers]]`.
+    Attest {
+        /// The claims, a JSON object with `iss`.
+        #[arg(long)]
+        claims: PathBuf,
+        /// Environment variable holding the 32-byte signing seed, hex encoded.
+        #[arg(long)]
+        seed_env: String,
+        #[arg(long, default_value = "k1")]
+        kid: String,
+    },
     /// Verify an exported audit chain offline against published keys: every entry's
     /// payload digest, record hash and signature, and the chain's linkage from genesis.
     AuditVerify {

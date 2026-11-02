@@ -148,6 +148,21 @@ async fn audited(w: &World, kind: &str) -> Vec<Value> {
         .collect()
 }
 
+async fn decide(w: &World, http: &reqwest::Client, run_id: &str) -> (u16, Value) {
+    let response = http
+        .post(format!("{}/v1/runs/{run_id}/decisions", w.base))
+        .bearer_auth("acme-key")
+        .json(
+            &json!({"decision_key": "support.refund.execute", "decision_version": "1", "status": "DECIDED",
+            "outcome": "refund_issued", "rationale": {"strategy": "policy_and_evidence"},
+            "tool_calls": [{"tool_call_id": "tc_1", "operation_id": format!("refund:{run_id}")}]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    (response.status().as_u16(), response.json().await.unwrap())
+}
+
 fn code(body: &Value) -> &str {
     body["error"]["code"].as_str().unwrap_or_default()
 }
@@ -163,6 +178,10 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
     let pending = audited(&w, "outcome_pending").await;
     assert_eq!(pending.len(), 1, "{pending:?}");
     assert_eq!(pending[0]["postcondition"], "refund_posted");
+    // Nor can a decision commit to the refund.
+    let decided = decide(&w, &http, "run_witnessed").await;
+    assert_eq!(decided.0, 409, "{}", decided.1);
+    assert_eq!(code(&decided.1), "outcome_pending");
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
     // Another order, another amount, an expired reading, an earlier reading, a service
@@ -215,6 +234,26 @@ async fn a_confirmed_refund_completes_only_once_the_ledger_witnesses_it() {
         !witnessed[0].to_string().contains(&token),
         "the token is recorded by digest"
     );
+
+    // The decision cites the reading; the evidence bundle carries the outcome.
+    let (status, recorded) = decide(&w, &http, "run_witnessed").await;
+    assert_eq!(status, 201, "{recorded}");
+    let digest = witnessed[0]["observation"]["attestation_digest"].as_str().unwrap();
+    assert_eq!(
+        recorded["record"]["tool_lineage"][0]["artifact_refs"],
+        json!([format!("outcome:{digest}")])
+    );
+    let evidence: Value = http
+        .get(format!("{}/v1/runs/run_witnessed/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(evidence["outcomes"][0]["state"], "witnessed", "{evidence}");
+    conforms("EvidenceBundle", &evidence);
 
     let done = complete(&w, &http, "run_witnessed").await;
     assert_eq!(done["status"], "completed", "{done}");

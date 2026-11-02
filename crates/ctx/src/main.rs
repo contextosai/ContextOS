@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod args;
+mod attest;
 mod init_tool;
 
 use args::{Cli, Command};
@@ -403,6 +404,10 @@ fn run(command: Command) -> Result<Value, Failure> {
             capability,
         } => init_tool::draft(&read(&mcp)?, &tool, &adapter, capability.as_deref()).map_err(Failure::Usage),
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
+        Command::Attest { claims, seed_env, kid } => {
+            let seed = std::env::var(&seed_env).map_err(|_| Failure::Usage(format!("{seed_env} is not set")))?;
+            attest::attest(&read(&claims)?, &seed, &kid).map_err(Failure::Usage)
+        }
         Command::HashKey => {
             let mut key = String::new();
             std::io::stdin()

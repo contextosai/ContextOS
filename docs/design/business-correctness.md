@@ -236,8 +236,10 @@ also keeps the shared-guarantee hold open (`hold`).
 (an `Outcome` record per operation and action, indexed per run and tenant), not in
 `outstanding_effects`, which the kernel validates and reconciliation owns; `complete`
 refuses with `outcome_pending`. The deadline is `within_seconds` rather than an ISO
-duration, like `owner_after_seconds`. `on_missed = "hold"`, E2 and the refund pilot
-follow.
+duration, like `owner_after_seconds`. E2 and the refund pilot followed: a decision committing to an
+unwitnessed effect is refused (`outcome_pending`), a witnessed one cites the reading in
+its tool lineage, the evidence bundle lists outcomes, and `examples/outcome-witness`
+runs the pilot in the gate. `on_missed = "hold"` remains.
 
 **E2.** The DecisionRecord for a decision whose operations have outcome contracts
 cites the witness observation. The evidence bundle includes it.
