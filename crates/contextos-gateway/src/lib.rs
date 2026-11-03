@@ -39,6 +39,7 @@ mod lifecycle;
 mod loop_guard;
 pub mod manifest;
 mod memory;
+pub mod outcome_fence;
 mod outcome_sweep;
 pub mod outcomes;
 mod ownership;
@@ -1401,14 +1402,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         // What compensating this effect will need is recorded before it can be sent.
         // So is the outcome its witness must attest (see [`outcomes`]).
-        let recorded = if compensates.is_none() {
+        let owes_outcome = compensates.is_none();
+        let recorded = if owes_outcome {
             match self
                 .record_compensation(admission, manifest, &operation_id, &action_digest, &arguments)
                 .await
             {
                 Ok(Ok(())) => {
-                    self.register_outcome(admission, manifest, &operation_id, &action_digest, &binding)
-                        .await
+                    self.register_outcome(
+                        admission,
+                        manifest,
+                        &operation_id,
+                        &action_digest,
+                        &attempt_id,
+                        &binding,
+                    )
+                    .await
                 }
                 other => other,
             }
@@ -1573,6 +1582,32 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         p.report.audit_sequences.push(claim_entry.sequence);
 
+        // The outcome record is armed for this attempt before anything can be sent; one
+        // abandoned or taken over meanwhile is never sent (see [`outcome_fence`]).
+        if owes_outcome
+            && !self
+                .arm_outcome(admission, manifest, &operation_id, &action_digest, &attempt_id)
+                .await?
+        {
+            self.withhold_dispatch(
+                admission,
+                &operations_key,
+                &operation_id,
+                &attempt_id,
+                &action_digest,
+                &now,
+                "outcome_not_armed",
+            )
+            .await?;
+            self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                .await?;
+            p.report.obligations.push("reconcile_existing_operation".into());
+            return Ok(p.stop(
+                "rejected",
+                vec!["outcome_not_armed".into()],
+                "The effect's outcome record was abandoned or taken over before it was sent; send it again.",
+            ));
+        }
         // Ownership is re-checked after the claim commits and before dispatch: this is
         // the linearization point against a concurrent takeover. If the run changed
         // hands, the attempt is recorded as definitively not dispatched and its budget

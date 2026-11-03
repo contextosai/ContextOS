@@ -6,7 +6,8 @@
 //! `ceil(open / limit)` passes, however many outcomes ahead of it are not yet due or
 //! still wait for their effect: none can starve an overdue one. Each entry is brought
 //! up to the operation ledger first, so an effect that was applied (or definitively
-//! not) before a crash is found here too.
+//! not) before a crash is found here too, and one registered for an attempt that was
+//! never armed is abandoned after its grace (see [`crate::outcome_fence`]).
 
 use contextos_contract::validation::compare_contract_times;
 use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore};
@@ -83,10 +84,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let mut record = doc.body.clone();
         let mut revision = doc.revision;
         if record["state"] == "awaiting_effect" {
-            let Some(admission) = &admission else {
-                return Ok(false);
+            let synced = match &admission {
+                Some(admission) => self.sync_outcome(admission, &operation_id).await?,
+                None => None,
             };
-            match self.sync_outcome(admission, &operation_id).await? {
+            match synced {
                 Some(synced) if synced["state"] == "pending" => {
                     let Some(current) = self.store.get(&key).await? else {
                         return Ok(false);
@@ -94,8 +96,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     record = current.body;
                     revision = current.revision;
                 }
-                // Still waiting for its effect, or retired.
-                _ => return Ok(false),
+                // Retired.
+                Some(synced) if synced["state"] != "awaiting_effect" => return Ok(false),
+                // Still waiting for its effect; a dispatcher that never armed it
+                // releases it after its grace.
+                _ => {
+                    self.abandon_stale_outcome(&key).await?;
+                    return Ok(false);
+                }
             }
         }
         if record["state"] != "pending" {

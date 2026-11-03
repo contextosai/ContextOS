@@ -196,59 +196,47 @@ async fn an_applied_effect_stays_owed_on_postgresql_whichever_write_a_crash_inte
     .await;
 }
 
-/// A migrated PostgreSQL store in a schema of its own.
-async fn fresh_schema(url: &str, n: u64) -> contextos_store::postgres::PostgresStore {
-    use std::str::FromStr;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let schema = format!("outcome_crash_{nanos}_{n}");
-    let admin = sqlx::PgPool::connect(url).await.unwrap();
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
-        .execute(&admin)
-        .await
-        .unwrap();
-    admin.close().await;
-    let options = sqlx::postgres::PgConnectOptions::from_str(url)
-        .unwrap()
-        .options([("search_path", schema.as_str())]);
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .connect_with(options)
-        .await
-        .unwrap();
-    let store = contextos_store::postgres::PostgresStore::from_pool(pool);
-    store.migrate().await.unwrap();
-    store
-}
-
-#[tokio::test]
-async fn a_witness_crash_closes_the_outcome_once_on_retry() {
-    let store = Arc::new(MemoryStore::new());
+/// Witnesses a fresh store's pending outcome in a process that crashes at write
+/// `crash_at`, then again from a restarted one: it closes once. Returns the writes the
+/// crashing process attempted.
+async fn witness_case<S: DocumentStore + 'static>(store: Arc<S>, crash_at: usize, after_commit: bool) -> usize {
+    let case = format!("witness crash_at={crash_at} after_commit={after_commit}");
     let admission = admitted(&store).await;
     let audit = audit();
     let adapter = provider(EffectOutcome::Confirmed, None);
     let g = process(store.clone(), &audit, adapter.clone(), 10_000, NOW);
     g.dispatch(&admission, &refund_call("run_1", "op_w")).await.unwrap();
-    for crash_at in 0..4 {
-        for after_commit in [false, true] {
-            let crashing = Arc::new(CrashStore::new(store.clone(), crash_at, after_commit));
-            let p = process(crashing, &audit, adapter.clone(), 30_000, NOW);
-            let _ = p.witness_outcome(&admission, "op_w", &seen("rf_op_w", "cc")).await;
-        }
-    }
-    let closed = g
+    let pending = g.outcome(&admission, "op_w").await.unwrap().unwrap();
+    assert_eq!(pending["state"], "pending", "{case}: each case starts pending");
+    let crashing = Arc::new(CrashStore::new(store.clone(), crash_at, after_commit));
+    let p = process(crashing.clone(), &audit, adapter.clone(), 30_000, NOW);
+    let _ = p.witness_outcome(&admission, "op_w", &seen("rf_op_w", "cc")).await;
+    let restarted = process(store.clone(), &audit, adapter, 40_000, NOW);
+    let closed = restarted
         .witness_outcome(&admission, "op_w", &seen("rf_op_w", "cc"))
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(closed["state"], "witnessed");
+    assert_eq!(closed.map(|c| c["state"].clone()), Ok(json!("witnessed")), "{case}");
     assert!(
-        !g.complete_run(&admission, 2)
+        !restarted
+            .complete_run(&admission, 2)
             .await
             .unwrap()
             .reason_codes
-            .contains(&"outcome_pending".to_owned())
+            .contains(&"outcome_pending".to_owned()),
+        "{case}"
     );
+    crashing.writes.load(Ordering::SeqCst)
+}
+
+#[tokio::test]
+async fn a_witness_crash_at_any_write_closes_the_outcome_once_on_retry() {
+    let writes = witness_case(Arc::new(MemoryStore::new()), usize::MAX, false).await;
+    assert!(writes >= 3, "claim, record and index: {writes}");
+    for crash_at in 0..writes {
+        for after_commit in [false, true] {
+            let reached = witness_case(Arc::new(MemoryStore::new()), crash_at, after_commit).await;
+            assert!(reached > crash_at, "the crash at write {crash_at} was reached");
+        }
+    }
 }

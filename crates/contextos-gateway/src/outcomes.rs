@@ -6,18 +6,21 @@
 //! `[[evidence_issuers]]` issuer independent of the provider, must attest a named
 //! postcondition for the action's resource within a deadline.
 //!
-//! - **Before dispatch** the contract is recorded for the operation and action
+//! - **Before dispatch** the contract is recorded for the operation, action and attempt
 //!   (`awaiting_effect`), with the action's resource digests and amount, and indexed
 //!   for the run and the tenant. A full index refuses the call (`outcome_index_full`):
-//!   an effect is never sent that could not be held to its contract.
+//!   an effect is never sent that could not be held to its contract. The record is
+//!   armed for its attempt after the claim and before the send, which fences it against
+//!   retirement and abandonment (see [`crate::outcome_fence`]).
 //! - **The operation ledger decides what became of the effect**, not a separate write:
 //!   whenever the record is read while `awaiting_effect` (after dispatch, by
 //!   reconciliation, by the completion gate, by the sweep), it is brought up to the
 //!   ledger. Applied (confirmed or partial) makes it `pending`, with `effect_at` the
 //!   ledger's first observation of the effect and `due_at` counted from it, audited as
 //!   `outcome_pending`; a crash between the ledger write and this one loses neither the
-//!   obligation nor its deadline. Definitively not applied (or never dispatched) retires
-//!   it (`not_applicable`) and frees its index entries. Unresolved keeps it waiting.
+//!   obligation nor its deadline. The armed attempt definitively not applied (or never
+//!   dispatched) retires it (`not_applicable`) and frees its index entries; another
+//!   attempt's negative result does not. Unresolved keeps it waiting.
 //! - **The run cannot complete** while any outcome is `pending` or `missed`, or
 //!   `awaiting_effect` with an effect the ledger has not resolved (`outcome_pending`).
 //! - **The witness's observation** (verified by contextosd: signature, issuer, tenant,
@@ -40,7 +43,8 @@ use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, Versioned};
 use serde_json::{Value, json};
 
 use crate::admission::RunAdmission;
-use crate::manifest::{CapabilityManifest, OutcomeBinds};
+use crate::manifest::OutcomeBinds;
+use crate::outcome_fence::{attempt_not_applied, owed_by};
 use crate::{Gateway, GatewayError, operation_ledger_key};
 
 /// Outcome contracts one run may hold.
@@ -110,7 +114,7 @@ fn ledger_effect(op: &Value) -> LedgerEffect {
     }
 }
 
-fn record_key(tenant: &str, run_id: &str, operation_id: &str, action_digest: &str) -> DocKey {
+pub(crate) fn record_key(tenant: &str, run_id: &str, operation_id: &str, action_digest: &str) -> DocKey {
     let digest = sha256_text(&format!("{run_id}\u{0}{operation_id}\u{0}{action_digest}"));
     DocKey::new(tenant, DocKind::Outcome, format!("rec_{}", &digest[7..39]))
 }
@@ -130,7 +134,7 @@ fn attestation_key(tenant: &str, attestation_digest: &str) -> DocKey {
     DocKey::new(tenant, DocKind::Outcome, format!("att_{}", &digest[7..39]))
 }
 
-fn run_index(admission: &RunAdmission) -> DocKey {
+pub(crate) fn run_index(admission: &RunAdmission) -> DocKey {
     DocKey::new(
         &admission.tenant_id,
         DocKind::Outcome,
@@ -142,7 +146,7 @@ pub(crate) fn tenant_index(tenant: &str) -> DocKey {
     DocKey::new(tenant, DocKind::Outcome, "open")
 }
 
-fn digest(value: &Value) -> Result<String, GatewayError> {
+pub(crate) fn digest(value: &Value) -> Result<String, GatewayError> {
     sha256_canonical(value).map_err(|_| GatewayError::Outcome("outcome digest".into()))
 }
 
@@ -156,62 +160,6 @@ pub(crate) fn ids(index: Option<Versioned>) -> Vec<String> {
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
-    /// Records the capability's outcome contract for this operation and action before
-    /// it is dispatched. `Ok(Err)` refuses the call.
-    pub(crate) async fn register_outcome(
-        &self,
-        admission: &RunAdmission,
-        manifest: &CapabilityManifest,
-        operation_id: &str,
-        action_digest: &str,
-        binding: &Value,
-    ) -> Result<Result<(), &'static str>, GatewayError> {
-        let Some(contract) = &manifest.outcome else {
-            return Ok(Ok(()));
-        };
-        let key = record_key(&admission.tenant_id, &admission.run_id, operation_id, action_digest);
-        let existing = self.store.get(&key).await?;
-        if existing
-            .as_ref()
-            .is_some_and(|doc| doc.body["state"] != "not_applicable")
-        {
-            return Ok(Ok(()));
-        }
-        if !self
-            .note_in_index(run_index(admission), &key.id, MAX_RUN_OUTCOMES)
-            .await?
-            || !self
-                .note_in_index(tenant_index(&admission.tenant_id), &key.id, MAX_TENANT_OUTCOMES)
-                .await?
-        {
-            return Ok(Err("outcome_index_full"));
-        }
-        let resource_digests = binding["resource_ids"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(digest)
-            .collect::<Result<Vec<_>, _>>()?;
-        let record = json!({
-            "run_id": admission.run_id, "operation_id": operation_id, "action_digest": action_digest,
-            "capability_id": manifest.capability_id, "witness": contract.witness,
-            "postcondition": contract.postcondition, "within_seconds": contract.within_seconds,
-            "binds": contract.binds, "on_missed": contract.on_missed, "resource_digests": resource_digests,
-            "amount": binding.get("amount").cloned().unwrap_or(Value::Null),
-            "state": "awaiting_effect", "registered_at": self.now(),
-        });
-        let written = match existing {
-            // A retired record of an operation sent again: it is owed once more.
-            Some(retired) => self.store.compare_and_swap(&key, retired.revision, &record).await,
-            None => self.store.create(&key, &record).await,
-        };
-        match written {
-            Ok(_) => Ok(Ok(())),
-            Err(e) if e.is_conflict() => Ok(Ok(())),
-            Err(e) => Err(e.into()),
-        }
-    }
-
     /// The outcome record of the action the run's ledger holds for `operation_id`,
     /// with that operation as the ledger has it.
     async fn outcome_doc(
@@ -270,6 +218,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     record["receipt_digest"] = json!(receipt.as_deref().map(sha256_text));
                 }
                 LedgerEffect::NotApplied => {
+                    // Only the attempt the record is owed by, armed, can retire it.
+                    let (attempt, armed) = owed_by(&record, &op);
+                    if !armed || !attempt.is_some_and(|a| attempt_not_applied(&op, &a)) {
+                        return Ok(Some(doc.body));
+                    }
                     record["state"] = json!("not_applicable");
                     record["retired_at"] = json!(self.now());
                 }
@@ -305,11 +258,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         for id in ids(self.store.get(&run_index(admission)).await?) {
             let key = DocKey::new(&admission.tenant_id, DocKind::Outcome, &id);
             let Some(doc) = self.store.get(&key).await? else {
+                // Left by an older version (records are written before their entries).
+                self.drop_from(run_index(admission), &id).await?;
                 continue;
             };
             let record = if doc.body["state"] == "awaiting_effect" {
                 let operation_id = doc.body["operation_id"].as_str().unwrap_or_default().to_owned();
-                match self.sync_outcome(admission, &operation_id).await? {
+                let synced = self.sync_outcome(admission, &operation_id).await?;
+                if synced.as_ref().is_none_or(|r| r["state"] == "awaiting_effect")
+                    && self.abandon_stale_outcome(&key).await?
+                {
+                    continue;
+                }
+                match synced {
                     Some(record) => record,
                     // No operation in the ledger: nothing was ever sent.
                     None => continue,
