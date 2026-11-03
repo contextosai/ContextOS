@@ -5,43 +5,30 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.12 - 2026-11-03
+
+Twelfth alpha: installable clients on PyPI and npm, strict signed evidence bound to
+its subject, canonical resource identity, imported prior exposure, owner routing for
+aged holds, witnessed outcome contracts and Keycloak delegation. See the
+[release notes](docs/releases/v0.1.0-alpha.12.md) before upgrading.
+
 ### Changed (breaking)
-- Outcome contracts must state `binds`: `"effect"` (the witness's reading names the
-  provider's reference for the effect as `receipt`, taken from the finished result at
-  the new `recovery.reference_pointer`, which `"effect"` requires; one reading closes
-  one effect, `outcome_attestation_reused`; `outcome_receipt_mismatch`,
-  `outcome_receipt_missing`) or `"state"` (the previous semantics: a reading of the
-  resource's state). A manifest with `outcome` and no `binds` no longer loads.
-
-### Added (evidence)
-- `[[evidence_subjects]]`: under strict evidence, each gated requirement can be bound
-  to the subject it concerns (a JSON Pointer into the request or run context, with a
-  `prefix` and an `exact` or `ascii_casefold` canonicalizer). An attestation whose `sub`
-  is missing or is another subject no longer satisfies it (`verification.subjects`:
-  `evidence_subject_mismatch`, `evidence_subject_missing`). `--check-config` warns for
-  gated requirements without a binding.
-
-### Fixed
-- Outcome state is derived from the operation ledger, so a crash between recording an
-  effect and its outcome loses neither the obligation nor its deadline, which runs from
-  the ledger's first observation of the effect (previously from whenever recovery
-  activated it). `complete` refuses while an outcome's effect is unresolved.
-- An effect definitively not applied, or never dispatched, retires its outcome
-  (`not_applicable`) and frees its run and tenant index entries.
-- The governance sweep resumes its pass over open outcomes where the last pass stopped,
-  so outcomes not yet due can no longer starve an overdue one past the first 1,000.
-- Outcome records are fenced to the attempt that may apply their effect. A record is
-  registered for the attempt about to be claimed and armed by a compare-and-swap after
-  the claim and before the send; only the armed attempt's own definitive negative
-  result retires it. Previously a retry's outcome could be retired by the earlier
-  attempt's `not_applied` (read by the sweep while the retry was being claimed), leaving
-  the retry's applied effect untracked.
-- An outcome whose dispatcher stopped before arming it is abandoned after 300 seconds
-  (`outcome_abandoned`, audited) and frees its index entries. A dispatcher that resumes
-  afterwards refuses the call (`outcome_not_armed`), records its attempt as not
-  dispatched and sends nothing. Records are written before their index entries, and
-  enter the tenant's index before the run's, so no entry is left that the sweep cannot
-  reclaim.
+- `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a
+  `required_evidence` item of its pack (`422 evidence_in_request_context`): gated facts
+  must arrive as evidence entries. It is the default with the `contextos.enterprise`
+  profile, which now refuses to start with `evidence = "caller"`. Deployments on that
+  profile that put gated facts in the request context must move them to
+  `deps.evidence` before upgrading. `GET /v1/deployment`, `--check-config` and the
+  effective configuration report the mode.
+- Under strict evidence the caller's `integrity` and `freshness` labels are replaced.
+  `[[evidence_issuers]]` names the services trusted to vouch for gated facts (tenants,
+  the names each may satisfy, maximum validity, algorithm and JWK Set). Each evidence
+  entry carries an `attestation` JWS; contextosd verifies it and sets the labels from
+  the signature, content hash and server clock, keeping the signed times and a
+  `verification` record on the entry and in the replay case. An entry without a valid
+  attestation is `untrusted` and cannot satisfy a gate. `--check-config` warns about
+  strict evidence without issuers and about rules that read a gated name from
+  `request.context`.
 
 ### Added
 - Keycloak as identity provider ([docs/integrations/keycloak.md](docs/integrations/keycloak.md),
@@ -110,29 +97,24 @@ minor versions may break APIs and every break is listed.
   for the action's resource and amount, observed after the effect. Past the deadline
   the governance sweep opens one escalation (`outcome_missed`). Audited as
   `outcome_pending` and `outcome_witnessed`.
+- Each outcome contract states `binds`: `"effect"` (the witness's reading names the
+  provider's reference for the effect as `receipt`, taken from the finished result at
+  `recovery.reference_pointer`, which `"effect"` requires; one reading closes one
+  effect, `outcome_attestation_reused`; `outcome_receipt_mismatch`,
+  `outcome_receipt_missing`) or `"state"` (a reading of the resource's state).
 - A decision citing an effect whose outcome is not yet witnessed cannot be recorded as
   `DECIDED` or `CLOSED` (409 `outcome_pending`); once witnessed, its tool lineage cites
   the reading (`artifact_refs`) and the run's evidence bundle lists its `outcomes`.
   `ctx attest` signs claims as a development issuer or witness; the clients gain
   `report_outcome` / `reportOutcome`. `examples/outcome-witness` is the refund pilot.
 
-### Changed (breaking)
-- `[guards] evidence = "strict"` refuses a run whose `request.input.context` names a
-  `required_evidence` item of its pack (`422 evidence_in_request_context`): gated facts
-  must arrive as evidence entries. It is the default with the `contextos.enterprise`
-  profile, which now refuses to start with `evidence = "caller"`. Deployments on that
-  profile that put gated facts in the request context must move them to
-  `deps.evidence` before upgrading. `GET /v1/deployment`, `--check-config` and the
-  effective configuration report the mode.
-- Under strict evidence the caller's `integrity` and `freshness` labels are replaced.
-  `[[evidence_issuers]]` names the services trusted to vouch for gated facts (tenants,
-  the names each may satisfy, maximum validity, algorithm and JWK Set). Each evidence
-  entry carries an `attestation` JWS; contextosd verifies it and sets the labels from
-  the signature, content hash and server clock, keeping the signed times and a
-  `verification` record on the entry and in the replay case. An entry without a valid
-  attestation is `untrusted` and cannot satisfy a gate. `--check-config` warns about
-  strict evidence without issuers and about rules that read a gated name from
-  `request.context`.
+### Added (evidence)
+- `[[evidence_subjects]]`: under strict evidence, each gated requirement can be bound
+  to the subject it concerns (a JSON Pointer into the request or run context, with a
+  `prefix` and an `exact` or `ascii_casefold` canonicalizer). An attestation whose `sub`
+  is missing or is another subject no longer satisfies it (`verification.subjects`:
+  `evidence_subject_mismatch`, `evidence_subject_missing`). `--check-config` warns for
+  gated requirements without a binding.
 
 ### Changed
 - The unpublished Node kernel package in `bindings/node` is named `contextos-kernel`;
@@ -140,6 +122,26 @@ minor versions may break APIs and every break is listed.
   Import the HTTP client as `contextos-client`.
 
 ### Fixed
+- Outcome state is derived from the operation ledger, so a crash between recording an
+  effect and its outcome loses neither the obligation nor its deadline, which runs from
+  the ledger's first observation of the effect (previously from whenever recovery
+  activated it). `complete` refuses while an outcome's effect is unresolved.
+- An effect definitively not applied, or never dispatched, retires its outcome
+  (`not_applicable`) and frees its run and tenant index entries.
+- The governance sweep resumes its pass over open outcomes where the last pass stopped,
+  so outcomes not yet due can no longer starve an overdue one past the first 1,000.
+- Outcome records are fenced to the attempt that may apply their effect. A record is
+  registered for the attempt about to be claimed and armed by a compare-and-swap after
+  the claim and before the send; only the armed attempt's own definitive negative
+  result retires it. Previously a retry's outcome could be retired by the earlier
+  attempt's `not_applied` (read by the sweep while the retry was being claimed), leaving
+  the retry's applied effect untracked.
+- An outcome whose dispatcher stopped before arming it is abandoned after 300 seconds
+  (`outcome_abandoned`, audited) and frees its index entries. A dispatcher that resumes
+  afterwards refuses the call (`outcome_not_armed`), records its attempt as not
+  dispatched and sends nothing. Records are written before their index entries, and
+  enter the tenant's index before the run's, so no entry is left that the sweep cannot
+  reclaim.
 - The governance sweep logged an aging hold with its ledger's store key as
   `resource_digest`; it now logs the resource digest the inspection routes take.
 
