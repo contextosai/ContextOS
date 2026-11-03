@@ -30,6 +30,18 @@ minor versions may break APIs and every break is listed.
   (`not_applicable`) and frees its run and tenant index entries.
 - The governance sweep resumes its pass over open outcomes where the last pass stopped,
   so outcomes not yet due can no longer starve an overdue one past the first 1,000.
+- Outcome records are fenced to the attempt that may apply their effect. A record is
+  registered for the attempt about to be claimed and armed by a compare-and-swap after
+  the claim and before the send; only the armed attempt's own definitive negative
+  result retires it. Previously a retry's outcome could be retired by the earlier
+  attempt's `not_applied` (read by the sweep while the retry was being claimed), leaving
+  the retry's applied effect untracked.
+- An outcome whose dispatcher stopped before arming it is abandoned after 300 seconds
+  (`outcome_abandoned`, audited) and frees its index entries. A dispatcher that resumes
+  afterwards refuses the call (`outcome_not_armed`), records its attempt as not
+  dispatched and sends nothing. Records are written before their index entries, and
+  enter the tenant's index before the run's, so no entry is left that the sweep cannot
+  reclaim.
 
 ### Added
 - Keycloak as identity provider ([docs/integrations/keycloak.md](docs/integrations/keycloak.md),

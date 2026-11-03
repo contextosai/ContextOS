@@ -318,3 +318,24 @@ recovery time, not effect time. Both are now asserted per case.
 Not done here: registry publication and a clean-machine install (the maintainer's
 registry setup, `docs/PUBLIC_RELEASE.md`), and the design-partner workflow, which the
 review ranks after these fixes.
+
+## 8. Review round 3 (2026-11-03)
+
+A review of `83f85d6` accepted F1, F2 and the deadline fix and named two P1 lifecycle
+gaps around F3, both confirmed in the code:
+
+| Finding | Fix |
+|---|---|
+| R1: retirement could race a retry. A retry re-registered the outcome before its claim; the sweep, reading the earlier attempt's definitive `not_applied`, retired it again; the retry then applied and its outcome stayed `not_applicable`. Worse than reported: after the retry's claim the derived outcome is still `not_applied` (the retry has no facts yet), so the window ran until the retry's first observation | The record names the attempt it is owed by and is armed by a compare-and-swap after the claim and before the send (`outcome_fence.rs`). Only the armed attempt's own definitive negative observation retires it. A retry first brings the record up to the ledger, then takes it over (a retired or unarmed record) for its attempt |
+| R2: a record registered before a crash (before the claim) stayed `awaiting_effect` and held index capacity; an index entry could be left without its record | Unarmed past 300 seconds, the record is abandoned (`outcome_abandoned`) by the sweep or the completion check, which frees both index entries. The compare-and-swap on the record is the fence, not the age: a dispatcher that resumes cannot arm, records `not_dispatched` for its attempt and sends nothing. Records are written before their index entries, the tenant's before the run's, so a record in any index is where the sweep reads; entries without a record (older versions) are dropped |
+| Witness crash test reused one outcome across cases | Each case starts from a fresh store with a pending outcome, and asserts the crash point was reached |
+
+`tests/outcome_fencing.rs` pauses a dispatcher deterministically (before its claim,
+and between claim and arming) while a sweeper runs, and crashes a dispatch at every
+write before a sweep past the grace; on the in-memory store and PostgreSQL. Mutations
+checked: the round-2 retirement rule fails the retry case; a dispatcher that ignores a
+failed arm fails the abandonment case (it sends); indexing the run before the tenant
+fails the crash case (a record only the run index holds).
+
+Unchanged: the witness must read the provider transaction itself; ContextOS checks the
+receipt it signs.

@@ -838,7 +838,13 @@ second source, a witness, before the run counts the effect as done:
   outcome loses neither it nor its clock; while the ledger has not resolved the effect,
   `complete` still refuses; an effect the provider definitively did not apply (or that
   was never dispatched) retires its outcome (`not_applicable`) and frees its place in
-  the run's and tenant's limits (1,024 and 10,000 open outcomes).
+  the run's and tenant's limits (1,024 and 10,000 open outcomes). The outcome is owed
+  by one attempt at a time: a retry takes it over before it is claimed and arms it
+  before anything is sent, so the earlier attempt's negative result never retires the
+  retry's outcome. A dispatch that stops between recording the outcome and arming it
+  (a crash, a stalled process) has its outcome abandoned after 300 seconds
+  (`outcome_abandoned`), which frees its place; if that dispatch resumes, it refuses
+  the call with `outcome_not_armed` and sends nothing, and the call can be sent again.
 - **The witness, or a service relaying its signed reading** (the scope is
   `outcome:report`; the signature is what is trusted), posts `{"attestation": "<JWS>"}`
   to `POST /v1/runs/{run_id}/operations/{operation_id}/outcome`. The payload is

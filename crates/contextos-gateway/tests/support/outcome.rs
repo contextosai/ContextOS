@@ -5,6 +5,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
+use tokio::sync::Notify;
+
 use async_trait::async_trait;
 use contextos_gateway::outcomes::WitnessObservation;
 use contextos_gateway::*;
@@ -56,6 +58,13 @@ impl Adapter for Provider {
             external_ref: Some(format!("rf_{operation}")),
             cost_units: Some(40),
         })
+    }
+}
+
+impl Provider {
+    /// How many effects were sent to it.
+    pub fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -240,4 +249,119 @@ impl<S: DocumentStore> DocumentStore for CrashStore<S> {
     ) -> Result<Vec<contextos_store::ScanCursor>, StoreError> {
         self.inner.expiring(k, t, a, l).await
     }
+}
+
+/// A store whose process stops before the first write `pause_at` matches, until
+/// released: a dispatcher paused between two of its steps.
+pub struct PauseStore<S> {
+    inner: Arc<S>,
+    pause_at: fn(&DocKey, &Value) -> bool,
+    taken: AtomicBool,
+    pub paused: Notify,
+    pub resume: Notify,
+}
+
+impl<S: DocumentStore> PauseStore<S> {
+    pub fn new(inner: Arc<S>, pause_at: fn(&DocKey, &Value) -> bool) -> Self {
+        Self {
+            inner,
+            pause_at,
+            taken: AtomicBool::new(false),
+            paused: Notify::new(),
+            resume: Notify::new(),
+        }
+    }
+
+    async fn gate(&self, k: &DocKey, b: &Value) {
+        if (self.pause_at)(k, b) && !self.taken.swap(true, Ordering::SeqCst) {
+            self.paused.notify_one();
+            self.resume.notified().await;
+        }
+    }
+}
+
+impl<S: DocumentStore> DocumentStore for PauseStore<S> {
+    async fn get(&self, k: &DocKey) -> Result<Option<Versioned>, StoreError> {
+        self.inner.get(k).await
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<Versioned, StoreError> {
+        self.gate(k, b).await;
+        self.inner.create(k, b).await
+    }
+    async fn compare_and_swap(&self, k: &DocKey, r: u64, b: &Value) -> Result<Versioned, StoreError> {
+        self.gate(k, b).await;
+        self.inner.compare_and_swap(k, r, b).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, StoreError> {
+        self.gate(k, &b).await;
+        self.inner.compare_and_swap_encoded(k, r, b, e).await
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&contextos_store::ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<contextos_store::ScanCursor>, StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+/// Before the operation claim: the dispatcher has registered its outcome.
+pub fn before_claim(k: &DocKey, _: &Value) -> bool {
+    k.kind == DocKind::OperationLedger
+}
+
+/// After the operation claim, before the outcome is armed.
+pub fn before_arming(k: &DocKey, b: &Value) -> bool {
+    k.kind == DocKind::Outcome && b["armed"] == true
+}
+
+/// The open-outcome index of the tenant and of `run_1`.
+pub async fn indexed<S: DocumentStore>(store: &S) -> (Vec<Value>, Vec<Value>) {
+    let mut lists = Vec::new();
+    for id in ["open", "run:run_1"] {
+        lists.push(
+            store
+                .get(&DocKey::new(TENANT, DocKind::Outcome, id))
+                .await
+                .unwrap()
+                .map_or_else(Vec::new, |d| d.body["keys"].as_array().cloned().unwrap_or_default()),
+        );
+    }
+    let run = lists.pop().unwrap();
+    (lists.pop().unwrap(), run)
+}
+
+/// A migrated PostgreSQL store in a schema of its own.
+pub async fn fresh_schema(url: &str, n: u64) -> contextos_store::postgres::PostgresStore {
+    use std::str::FromStr;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let schema = format!("outcome_crash_{nanos}_{n}");
+    let admin = sqlx::PgPool::connect(url).await.unwrap();
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+    let options = sqlx::postgres::PgConnectOptions::from_str(url)
+        .unwrap()
+        .options([("search_path", schema.as_str())]);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let store = contextos_store::postgres::PostgresStore::from_pool(pool);
+    store.migrate().await.unwrap();
+    store
 }
