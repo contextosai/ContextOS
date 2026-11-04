@@ -73,8 +73,8 @@ Keep the workspace, Tower package, Python fallback, both clients' `CLIENT_VERSIO
 refuses to build when the two client versions differ from `Cargo.toml`.
 Add notes under `docs/releases/<tag>.md` and record the version in `CHANGELOG.md`.
 The first release is `v0.1.0-alpha.1`; it is a prerelease, with evolving APIs and
-storage formats. From 0.1.0-alpha.12 the client packages go to PyPI and npm (below);
-crates.io stays unpublished.
+storage formats. The client packages go to npm from 0.1.0-alpha.12 and to PyPI from
+0.1.0-alpha.13 (below); crates.io stays unpublished.
 
 Merge the preparation PR, obtain green CI for the exact commit to be tagged, and
 create an annotated `v<workspace version>` tag at that commit. Pushing the tag runs
@@ -113,8 +113,9 @@ One-time setup, by an owner of the registry accounts:
 1. GitHub: create the environments `pypi` and `npm` under Settings / Environments,
    each limited to tags `v*`. Add required reviewers if a second approval is wanted.
 2. PyPI: under the project account, add a pending trusted publisher for project
-   `contextos`: owner `contextosai`, repository `ContextOS`, workflow
-   `publish-packages.yml`, environment `pypi`. The first run creates the project.
+   `contextos-client` (PyPI refuses `contextos` as too similar to `context-os`):
+   owner `contextosai`, repository `ContextOS`, workflow `publish-packages.yml`,
+   environment `pypi`. The first run creates the project.
 3. npm: trusted publishing can only be configured on a package that exists. Publish
    the first version once by hand from the release's tarball, with two-factor
    authentication: `npm publish contextos-client-<version>.tgz --access public`.

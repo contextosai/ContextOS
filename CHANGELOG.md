@@ -5,9 +5,20 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.13 - 2026-11-04
+
+Thirteenth alpha: the Python client on PyPI, as `contextos-client`. See the
+[release notes](docs/releases/v0.1.0-alpha.13.md).
+
+### Changed
+- The Python package is published on PyPI as `contextos-client`, the npm package's
+  name: PyPI refuses `contextos` as too similar to an existing project, so 0.1.0-alpha.12
+  was not published there. Install with `pip install --pre contextos-client`; the
+  module is still `import contextos`. Wheels are named `contextos_client-*.whl`.
+
 ## 0.1.0-alpha.12 - 2026-11-03
 
-Twelfth alpha: installable clients on PyPI and npm, strict signed evidence bound to
+Twelfth alpha: installable clients (npm; PyPI from alpha.13), strict signed evidence bound to
 its subject, canonical resource identity, imported prior exposure, owner routing for
 aged holds, witnessed outcome contracts and Keycloak delegation. See the
 [release notes](docs/releases/v0.1.0-alpha.12.md) before upgrading.

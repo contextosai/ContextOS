@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds the two installable HTTP clients from the source tree, standard library only.
 
-    python3 scripts/package_clients.py python <out-dir>   # contextos-<v>-py3-none-any.whl
+    python3 scripts/package_clients.py python <out-dir>   # contextos_client-<v>-py3-none-any.whl
     python3 scripts/package_clients.py node <out-dir>     # a directory for `npm pack`
     python3 scripts/package_clients.py version            # the workspace version
 
@@ -78,7 +78,7 @@ def _metadata(version, root):
     readme = (root / "bindings/python/README.md").read_text()
     return "\n".join([
         "Metadata-Version: 2.1",
-        "Name: contextos",
+        "Name: contextos-client",
         f"Version: {version}",
         "Summary: ContextOS kernel: governed context, authorization and durable effects for AI agents",
         "License: Apache-2.0",
@@ -96,7 +96,7 @@ def build_python(out_dir, root=ROOT):
     version = workspace_version(root)
     check_facade_version(version, root)
     py_version = pep440(version)
-    dist_info = f"contextos-{py_version}.dist-info"
+    dist_info = f"contextos_client-{py_version}.dist-info"
     members = []
     for name in PY_SOURCES:
         members.append((f"contextos/{name}", (root / "bindings/python/contextos" / name).read_bytes()))
@@ -112,7 +112,7 @@ def build_python(out_dir, root=ROOT):
 
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    wheel = out_dir / f"contextos-{py_version}-py3-none-any.whl"
+    wheel = out_dir / f"contextos_client-{py_version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, data in members:
             info = zipfile.ZipInfo(path, EPOCH)

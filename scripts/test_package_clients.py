@@ -41,13 +41,13 @@ class PythonWheelTest(unittest.TestCase):
 
     def test_name_and_members(self):
         version = pc.pep440(pc.workspace_version())
-        self.assertEqual(self.wheel.name, f"contextos-{version}-py3-none-any.whl")
+        self.assertEqual(self.wheel.name, f"contextos_client-{version}-py3-none-any.whl")
         with zipfile.ZipFile(self.wheel) as archive:
             names = set(archive.namelist())
         package = {n for n in names if n.startswith("contextos/")}
         self.assertEqual(package, {f"contextos/{n}" for n in pc.PY_SOURCES})
         self.assertFalse(any(n.endswith((".so", ".pyd", ".pyc")) for n in names))
-        self.assertIn(f"contextos-{version}.dist-info/licenses/LICENSE", names)
+        self.assertIn(f"contextos_client-{version}.dist-info/licenses/LICENSE", names)
 
     def test_record_covers_every_member(self):
         with zipfile.ZipFile(self.wheel) as archive:
