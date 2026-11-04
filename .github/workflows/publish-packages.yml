@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: pypi
-      url: https://pypi.org/project/contextos/
+      url: https://pypi.org/project/contextos-client/
     permissions:
       contents: read
       id-token: write
@@ -44,7 +44,7 @@ jobs:
           test "v$(python3 scripts/package_clients.py version)" = "$TAG"
           ls dist
           # Three platform wheels and the pure-Python fallback, all of this version.
-          test "$(find dist -name "contextos-$version-*.whl" | wc -l)" -eq 4
+          test "$(find dist -name "contextos_client-$version-*.whl" | wc -l)" -eq 4
           test "$(find dist -name '*.whl' | wc -l)" -eq 4
           for wheel in dist/*.whl; do
             gh attestation verify "$wheel" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"

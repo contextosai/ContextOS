@@ -26,7 +26,7 @@ fencing, adapters and shared business guarantees as an opt-in runtime extension.
 The [research and strategy](docs/research/2026-10-22-value-proposition.md) explain the
 chosen opportunity, competing approaches and unvalidated assumptions.
 
-> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.12](docs/releases/v0.1.0-alpha.12.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
+> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.13](docs/releases/v0.1.0-alpha.13.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
 ## Quickstart
 
@@ -74,7 +74,7 @@ minutes; later examples reuse that build.
 
 ```sh
 ./examples/dev-server.sh          # prints CONTEXTOS_URL and CONTEXTOS_TOKEN; Ctrl-C stops it
-pip install --pre contextos       # the HTTP client (from 0.1.0-alpha.12; or PYTHONPATH=$PWD/bindings/python)
+pip install --pre contextos-client  # the HTTP client (from 0.1.0-alpha.13; or PYTHONPATH=$PWD/bindings/python)
 ```
 
 That serves the quickstart's support pack with synthetic providers on loopback. Admit
@@ -85,8 +85,8 @@ SDK, Google ADK, the Claude Agent SDK, CrewAI and six more, each with a runnable
 example. To serve your own tools, write a Context Pack and capability manifests
 ([GUIDE section 3](docs/GUIDE.md#3-run-contextosd)); `ctx init-tool` drafts a manifest
 from an MCP server's tool list for you to review; the [glossary](docs/GLOSSARY.md)
-explains the terms. The clients are `pip install --pre contextos` and
-`npm install contextos-client` from 0.1.0-alpha.12: see
+explains the terms. The clients are `pip install --pre contextos-client` (from 0.1.0-alpha.13) and
+`npm install contextos-client` (from 0.1.0-alpha.12): see
 [bindings/python](bindings/python/README.md) and [bindings/node](bindings/node/README.md).
 
 ## Why not a database transaction?

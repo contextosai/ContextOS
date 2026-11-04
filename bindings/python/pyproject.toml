@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "contextos"
+name = "contextos-client"
 description = "ContextOS kernel: governed context, authorization and durable effects for AI agents"
 readme = "README.md"
 requires-python = ">=3.9"
