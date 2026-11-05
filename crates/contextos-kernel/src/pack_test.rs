@@ -243,6 +243,26 @@ fn run_one(compiler: &ContextPackCompiler, base: &Value, test: &PackTest) -> Tes
     }
 }
 
+/// What `pack` decides for one case (`{request, run_context, deps?}`), read as admission
+/// reads it: the verdict, the rules that apply, obligations, surfaced capabilities,
+/// evidence gates and the compiled context hash. Errors name an invalid case or a
+/// compile refusal.
+pub fn decide(compiler: &ContextPackCompiler, case: &Value) -> Result<Value, String> {
+    let request = serde_json::from_value::<InvokeRequest>(case["request"].clone())
+        .map_err(|e| format!("request is invalid: {e}"))?;
+    let run_context = serde_json::from_value::<RunContext>(case["run_context"].clone())
+        .map_err(|e| format!("run_context is invalid: {e}"))?;
+    let observed = observe(compiler, &request, &run_context, &case["deps"]).map_err(|e| format!("refused: {e}"))?;
+    Ok(serde_json::json!({
+        "verdict": VERDICTS[observed.verdict],
+        "rules": observed.rules,
+        "obligations": observed.obligations,
+        "capabilities": observed.capabilities,
+        "evidence_gates": observed.gates,
+        "compiled_context_hash": observed.hash,
+    }))
+}
+
 /// Runs every test in `suite` against `pack`. Errors are for a suite that cannot run
 /// at all; a test whose case or expectations are invalid is reported as `error`.
 pub fn run_pack_tests(pack: &ContextPack, suite: &PackTestSuite) -> Result<SuiteReport, String> {

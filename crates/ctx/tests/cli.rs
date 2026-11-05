@@ -819,3 +819,71 @@ fn audit_verify_checks_only_the_spine_of_masked_entries_and_says_so() {
     ]);
     assert_eq!(code, 1);
 }
+
+#[test]
+fn inspect_summarizes_a_pack_and_names_what_does_not_resolve() {
+    let pack_path = format!("{}/../../examples/support-refund/pack.json", env!("CARGO_MANIFEST_DIR"));
+    let (code, out) = ctx(&["inspect", &pack_path]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["pack_ref"], "ctxpack.support@5.2.0");
+    assert_eq!(out["problems"], json!([]));
+    assert_eq!(
+        out["intents"]["support.refund"][1]["approval_gate"],
+        "GATE_FINANCE_APPROVAL"
+    );
+    assert_eq!(
+        out["decisions"][0]["bound_by"],
+        json!(["R_HIGH_VALUE_REQUIRES_APPROVAL"])
+    );
+    assert!(
+        out["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["capability_id"] == "adp_payments.issue_refund" && t["permitted"] == true)
+    );
+
+    let mut pack: Value = serde_json::from_str(&std::fs::read_to_string(&pack_path).unwrap()).unwrap();
+    let rules = &mut pack["policy_layer"]["policy_bundles"][0]["policy_dsl"]["rules"];
+    rules[1]["then"]["requires_approval_gate"] = json!("GATE_FINANCE_APROVAL");
+    rules[1]["decision_binding"] = json!("support.refund.exec");
+    rules[0]["then"]["prohibits"] = json!(["adp_payments.refund"]);
+    rules[0].as_object_mut().unwrap().remove("rationale");
+    let (code, out) = ctx(&["inspect", &write("broken_inspect.json", &pack)]);
+    assert_eq!(code, 0);
+    assert_eq!(out["problems"].as_array().unwrap().len(), 4, "{}", out["problems"]);
+}
+
+#[test]
+fn repl_answers_each_command_on_one_line() {
+    use std::io::Write as _;
+    let example = format!("{}/../../examples/support-refund", env!("CARGO_MANIFEST_DIR"));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ctx"))
+        .args([
+            "repl",
+            "--pack",
+            &format!("{example}/pack.json"),
+            "--run",
+            &format!("{example}/requests/run.json"),
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let script = "# comment\ndecide\nset request.input.context.refund_amount 4200\ndecide\n\
+        set run_context.user.role supervisor\nplan\nset nowhere.x 1\nreset\nshow run_context.user.role\nquit\ndecide\n";
+    child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let lines: Vec<Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 8, "quit ends the session: {lines:?}");
+    assert_eq!(lines[0]["result"]["verdict"], "allow");
+    assert_eq!(lines[2]["result"]["verdict"], "require_approval");
+    assert_eq!(lines[4]["result"]["possible_verdicts"], json!(["deny", "allow"]));
+    assert!(lines[5]["error"].as_str().unwrap().contains("starts with request"));
+    assert_eq!(lines[7]["result"], "support_agent");
+}

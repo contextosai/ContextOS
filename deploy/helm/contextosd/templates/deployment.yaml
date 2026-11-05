@@ -28,6 +28,11 @@ spec:
         fsGroup: 65532
         seccompProfile: { type: RuntimeDefault }
       terminationGracePeriodSeconds: 30
+      {{- if .Values.packSync.enabled }}
+      initContainers:
+        - name: pack-sync-init
+          {{- include "contextosd.packSync" (dict "root" . "oneTime" true) | nindent 10 }}
+      {{- end }}
       containers:
         - name: contextosd
           image: {{ include "contextosd.image" . | quote }}
@@ -76,15 +81,30 @@ spec:
               subPath: capability--{{ $name }}
               readOnly: true
             {{- end }}
+            {{- if .Values.packSync.enabled }}
+            - name: pack-sync
+              mountPath: /var/lib/contextos/pack-sync
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if .Values.packSync.enabled }}
+        - name: pack-sync
+          {{- include "contextosd.packSync" (dict "root" . "oneTime" false) | nindent 10 }}
+        {{- end }}
         {{- with .Values.extraContainers }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       volumes:
         - name: config
           configMap: { name: {{ include "contextosd.fullname" . }} }
+        {{- if .Values.packSync.enabled }}
+        - name: pack-sync
+          emptyDir: {}
+        - name: pack-sync-tmp
+          emptyDir: {}
+        {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

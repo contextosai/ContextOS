@@ -139,6 +139,35 @@ export interface CallOptions {
   toolCallId?: string;
 }
 
+export interface PlannedRule {
+  bundle_id: string;
+  priority: number;
+  rule_id: string;
+  branch: "then" | "else";
+  effect: "allow" | "require_approval" | "deny";
+  approval_gate?: string;
+  obligations: string[];
+  prohibits: string[];
+  applies: "always" | "when" | "unless";
+  /** Residual JsonLogic over `request.*`, for `when` and `unless`. */
+  condition?: Json;
+}
+
+export interface DecisionPlan {
+  intent: string;
+  verdict: "deny" | "escalate" | "require_approval" | "allow" | "conditional";
+  possible_verdicts: string[] | null;
+  conditions: Json[];
+  rules: PlannedRule[];
+}
+
+export interface PackReload {
+  added: { pack_ref: string; tenant_id: string; sha256: string; path: string }[];
+  refused: { path: string; pack_ref?: string; tenant_id?: string; reason: "invalid" | "pack_ref_immutable" | "tenant_not_configured"; detail: string }[];
+  unchanged: number;
+  other: { added: number; refused: number };
+}
+
 export declare class Client {
   constructor(baseUrl: string, options: { token: string; timeoutMs?: number; maxRetries?: number; fetch?: typeof fetch; checkServer?: boolean });
   /** Reads GET /v1/deployment: throws IncompatibleServer on another API generation, warns on another release. Runs once before the first admit. */
@@ -164,6 +193,10 @@ export declare class Client {
   revoke(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
   restore(kind: RevocationKind, target: string, reason: string): Promise<Revocations>;
   revocations(): Promise<Revocations>;
+  /** What a pack lets the run context's principal do for an intent, before any request (`compile`). */
+  plan(packRef: string, runContext: Json, options?: { intent?: string }): Promise<DecisionPlan>;
+  /** Re-reads the server's pack sources and adds new pack versions (`control`). */
+  reloadPacks(): Promise<PackReload>;
   auditEntries(options?: { from?: number; page?: number }): AsyncGenerator<Record<string, Json>>;
 }
 

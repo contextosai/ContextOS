@@ -298,3 +298,54 @@ async fn negotiate_validate_metrics_and_audit() {
         "a lone replica owns the full limits: {metrics}"
     );
 }
+
+#[tokio::test]
+async fn plans_answer_for_the_callers_packs_and_principals() {
+    let base = start(1 << 20).await;
+    let http = reqwest::Client::new();
+    let url = format!("{base}/v1/plan");
+    let run_context = case("grid:support.refund:true:4200:support_agent")["run_context"].clone();
+    let body = json!({"pack_ref": "ctxpack.support@5.2.0", "run_context": run_context, "intent": "support.refund"});
+    let post = |key: &'static str, body: Value| {
+        let request = http.post(&url).bearer_auth(key).json(&body);
+        async move {
+            let response = request.send().await.unwrap();
+            (
+                response.status().as_u16(),
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, out) = post("acme-key", body.clone()).await;
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["plan"]["verdict"], "conditional");
+    assert_eq!(
+        out["plan"]["possible_verdicts"],
+        json!(["deny", "require_approval", "allow"])
+    );
+    assert_eq!(
+        out["plan"]["conditions"][1],
+        json!({">": [{"var": "request.context.refund_amount"}, 3000]})
+    );
+    // Scope and tenancy: the reader lacks compile; another tenant sees no pack and may
+    // not plan for this tenant's principals.
+    assert_eq!(post("reader-key", body.clone()).await.0, 403);
+    assert_eq!(post("other-key", body.clone()).await.0, 403);
+    let mut theirs = body.clone();
+    theirs["run_context"]["tenant_id"] = json!("tenant_other");
+    assert_eq!(post("other-key", theirs).await.0, 404);
+    // A rule that fails on the principal alone is reported, not treated as false.
+    let mut broken = body.clone();
+    broken["pack_ref"] = json!("ctxpack.broken@5.2.0");
+    let (status, out) = post("acme-key", broken).await;
+    assert_eq!(
+        (status, out["error"]["code"].clone()),
+        (422, json!("policy_eval_failed")),
+        "{out}"
+    );
+    // Without an intent anywhere the plan cannot be made.
+    let mut no_intent = body;
+    no_intent.as_object_mut().unwrap().remove("intent");
+    no_intent["run_context"].as_object_mut().unwrap().remove("intent");
+    assert_eq!(post("acme-key", no_intent).await.0, 422);
+}

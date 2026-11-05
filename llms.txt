@@ -1,0 +1,54 @@
+# ContextOS
+
+> Shared business limits for AI agents. ContextOS is a Rust runtime that governs what agents may do: it compiles Context Packs (policy, tools, decisions, evidence) into bounded context, enforces authorization, approvals and shared resource limits before a tool acts, and records signed, hash-chained evidence of every effect. Agents keep their own framework; consequential tools sit behind the ContextOS gateway (`contextosd`, HTTP), with an offline CLI (`ctx`) and Python, Node and in-process bindings. Status: alpha.
+
+Key facts for agents working with this repository or a ContextOS deployment:
+
+- A Context Pack (`context-pack.v2`) is the governed contract for one tenant. Policy rules are JsonLogic; no applying rule means deny; the highest-priority applying rules decide. A pack reference (`pack_id@pack_version`) names one content forever.
+- Check a pack change offline with `ctx validate`, `ctx inspect`, `ctx test`, `ctx plan` and `ctx gate` before it ships; `ctx repl` tries one interactively.
+- Every governed tool call goes through dispatch; `POST /v1/runs/{run_id}/tool-calls/check` answers what dispatch would do without effect.
+- The audit chain is signed (Ed25519) and hash-chained per tenant; `ctx audit-verify` checks an export offline.
+
+## Docs
+
+- [Guide](https://github.com/contextosai/ContextOS/blob/main/docs/GUIDE.md): deploying and operating the runtime, every API area, pack testing, plans, rule libraries, rollouts, audit sinks
+- [Glossary](https://github.com/contextosai/ContextOS/blob/main/docs/GLOSSARY.md): the terms runs, packs, effects and decisions use
+- [Scope](https://github.com/contextosai/ContextOS/blob/main/docs/SCOPE.md): what ContextOS does not govern
+- [Shared business guarantees](https://github.com/contextosai/ContextOS/blob/main/docs/SHARED_GUARANTEES.md): conserved limits across independent runs and replicas
+- [Why not a database transaction?](https://github.com/contextosai/ContextOS/blob/main/docs/WHY_NOT_A_TRANSACTION.md): why effects on external systems need reservations and reconciliation
+- [Compensation](https://github.com/contextosai/ContextOS/blob/main/docs/COMPENSATION.md): sagas for confirmed effects
+- [Incident response](https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md): kill switch, revocations, recovery
+- [Threat model](https://github.com/contextosai/ContextOS/blob/main/docs/security/THREAT_MODEL.md): threats and the tests that cover each
+
+## API and schemas
+
+- [OpenAPI 3.1 for contextosd](https://github.com/contextosai/ContextOS/blob/main/openapi/contextosd.v1.json): every route with its scope (`x-contextos-scope`)
+- [Context Pack schema](https://github.com/contextosai/ContextOS/blob/main/schemas/context-pack.v2.schema.json)
+- [Run context schema](https://github.com/contextosai/ContextOS/blob/main/schemas/run-context.v1.schema.json)
+- [Agent invocation schema](https://github.com/contextosai/ContextOS/blob/main/schemas/invoke-agent.v1.schema.json)
+- [Tool envelope schema](https://github.com/contextosai/ContextOS/blob/main/schemas/tool-envelope.v1.schema.json)
+- [Decision record schema](https://github.com/contextosai/ContextOS/blob/main/schemas/decision-record.v1.schema.json)
+
+## Clients and integrations
+
+- [Python client](https://github.com/contextosai/ContextOS/blob/main/bindings/python/README.md) (`contextos-client` on PyPI)
+- [Node client](https://github.com/contextosai/ContextOS/blob/main/bindings/node/README.md) (`contextos-client` on npm)
+- [Framework integrations](https://github.com/contextosai/ContextOS/blob/main/docs/integrations/README.md): LangGraph, OpenAI Agents, Claude Agent SDK, CrewAI, Google ADK, Pydantic AI and others
+
+## Agent skills
+
+- [Pack authoring skill](https://github.com/contextosai/ContextOS/blob/main/skills/contextos-pack-authoring/SKILL.md): write, test, plan and gate Context Packs
+- [Pack composition reference](https://github.com/contextosai/ContextOS/blob/main/skills/contextos-pack-authoring/reference.md): how the runtime reads rules, and common mistakes
+
+## Examples
+
+- [Support refund quickstart](https://github.com/contextosai/ContextOS/blob/main/examples/support-refund/README.md): a pack, its tests, a pack built from a rule library, and a governed refund end to end
+- [Shared guarantees](https://github.com/contextosai/ContextOS/tree/main/examples/shared-guarantees): two agents against one shared ceiling
+- [Deployment recipes](https://github.com/contextosai/ContextOS/blob/main/deploy/README.md): Helm, pack publishing from git, audit sinks
+
+## Optional
+
+- [Delivery plan](https://github.com/contextosai/ContextOS/blob/main/docs/PLAN.md): what is built, slice by slice
+- [Architecture decisions](https://github.com/contextosai/ContextOS/tree/main/docs/adr)
+- [Changelog](https://github.com/contextosai/ContextOS/blob/main/CHANGELOG.md)
+- [Performance](https://github.com/contextosai/ContextOS/blob/main/docs/PERFORMANCE.md)

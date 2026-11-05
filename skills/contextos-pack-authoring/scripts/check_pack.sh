@@ -42,41 +42,16 @@ echo "== schema"
 echo "ok: conforms to context-pack.v2"
 
 echo "== references"
-python3 -I - "$pack" <<'PY'
+"$ctx" inspect "$pack" >"$scratch/inspect.json"
+python3 -I - "$scratch/inspect.json" <<'PY'
 import json, sys
-pack = json.load(open(sys.argv[1]))
-policy, tooling = pack["policy_layer"], pack["tooling_layer"]
-gates = {g["gate_id"] for g in policy.get("approval_gates", [])}
-specs = {s["decision_key"] for s in pack["decision_layer"]["decision_specs"]}
-caps = {f'{a["adapter_id"]}.{c}' for a in tooling["adapter_registry"] for c in a["capabilities"]}
-problems, rule_ids = [], set()
-for bundle in policy["policy_bundles"]:
-    for rule in bundle["policy_dsl"]["rules"]:
-        rid = f'{bundle["bundle_id"]}/{rule["rule_id"]}'
-        if rule["rule_id"] in rule_ids:
-            problems.append(f"{rid}: rule_id appears more than once")
-        rule_ids.add(rule["rule_id"])
-        then = rule["then"]
-        gate = then.get("requires_approval_gate")
-        if gate and gate not in gates:
-            problems.append(f"{rid}: requires_approval_gate {gate} is not an approval_gates gate_id")
-        binding = rule.get("decision_binding")
-        if binding and binding not in specs:
-            problems.append(f"{rid}: decision_binding {binding} has no decision_specs entry")
-        for cap in then.get("prohibits") or []:
-            if cap not in caps:
-                problems.append(f"{rid}: prohibits {cap}, which no adapter declares")
-        if not rule.get("rationale"):
-            problems.append(f"{rid}: no rationale")
-for p in tooling.get("permissions", []):
-    cap = f'{p["adapter_id"]}.{p["capability"]}'
-    if cap not in caps:
-        problems.append(f'permission {p["permission_id"]}: {cap} is not a declared capability')
-for problem in problems:
+summary = json.load(open(sys.argv[1]))
+for problem in summary["problems"]:
     print("problem:", problem)
-if problems:
+if summary["problems"]:
     sys.exit(1)
-print(f"ok: {len(rule_ids)} rule(s); gates, decision bindings, prohibitions and permissions resolve")
+rules = sum(len(r) for r in summary["intents"].values())
+print(f"ok: {rules} rule(s) over {len(summary['intents'])} intent(s); every name resolves")
 PY
 
 if [[ ${#tests[@]} -gt 0 ]]; then

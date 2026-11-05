@@ -52,7 +52,8 @@ Read [reference.md](reference.md) before writing rules: the composition semantic
      --pack PACK.json --tests PACK_TEST.json --run RUN.json --roles support_agent,supervisor
    ```
 
-   Read every plan: for each role, the rules listed as `always`, `when` or `unless`
+   To explore one case by hand, `ctx repl --pack PACK.json --run RUN.json` takes
+   `set request.input.context.<field> <json>` and `decide`. Read every plan: for each role, the rules listed as `always`, `when` or `unless`
    and `possible_verdicts` must match the requirement. A role that should never reach
    `allow` must not have it in `possible_verdicts`.
 

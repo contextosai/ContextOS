@@ -10,6 +10,7 @@ pub mod check;
 pub mod compensation;
 pub mod config;
 pub mod configs;
+pub mod decision_plans;
 pub mod evidence_admission;
 pub mod evidence_issuers;
 pub mod evidence_subjects;

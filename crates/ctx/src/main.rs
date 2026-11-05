@@ -9,9 +9,11 @@ use std::process::ExitCode;
 mod args;
 mod attest;
 mod init_tool;
+mod inspect;
 mod pack_build;
 mod pack_tests;
 mod plan;
+mod repl;
 
 use args::{Cli, Command};
 
@@ -134,6 +136,8 @@ fn run(command: Command) -> Result<Value, Failure> {
         }
         Command::Test { pack, suites, junit } => pack_tests::run(&pack, &suites, junit.as_ref()),
         Command::Plan { pack, run, intent } => plan::run(&pack, &run, intent.as_deref()),
+        Command::Inspect { pack } => inspect::run(&pack),
+        Command::Repl { .. } => unreachable!("handled in main"),
         Command::Build { source, out, check } => pack_build::run(&source, out.as_ref(), check.as_ref()),
         Command::Gate {
             baseline,
@@ -443,6 +447,20 @@ fn run(command: Command) -> Result<Value, Failure> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // A session prints its own answers, one JSON line each.
+    if let Command::Repl { pack, run } = &cli.command {
+        return match repl::run(pack, run) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(Failure::Rejected(value)) => {
+                println!("{value}");
+                ExitCode::from(1)
+            }
+            Err(Failure::Usage(message)) => {
+                eprintln!("ctx: {message}");
+                ExitCode::from(2)
+            }
+        };
+    }
     match run(cli.command) {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());

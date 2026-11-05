@@ -11,7 +11,7 @@ Stack and rationale: [ADR-0001](adr/0001-language-and-stack.md).
 ```
             ┌──────────────── agent frameworks (LangGraph, OpenAI Agents, ADK, Claude Agent SDK, …)
             │  in-process: contextos-py / contextos-node / contextos-wasm
-            │  remote:     HTTP/JSON + gRPC (contextosd)
+            │  remote:     HTTP/JSON (contextosd; gRPC deferred)
             ▼
 ┌──────────────────────────── contextosd (control plane + Tool Gateway) ────────────────────────────┐
 │ admission: negotiate profiles ─ authenticate principal ─ compile Context Pack                     │
@@ -34,7 +34,7 @@ Stack and rationale: [ADR-0001](adr/0001-language-and-stack.md).
 | `contextos-store` | Ports with CAS + fencing: operation ledger, budget ledger, approval redemption, checkpoints, audit chain, pack registry. In-memory and Postgres adapters; shared store conformance tests. |
 | `contextos-audit` | DecisionRecord builder, hash chain, ed25519 signing, replay packets. |
 | `contextos-gateway` | Async Tool Gateway pipeline (tower), adapter trait, MCP client adapter, HTTP/OpenAPI adapter, credential broker port, egress policy. |
-| `contextosd` | Server binary: HTTP/JSON (axum) + gRPC (tonic), config, OTEL, metrics, health. |
+| `contextosd` | Server binary: HTTP/JSON (axum), config, OTEL, metrics, health. gRPC is deferred (see milestone 12). |
 | `ctx` | CLI: validate packs/envelopes, compile, negotiate, digest, replay, conformance report. |
 | `contextos-py`, `contextos-node`, `contextos-wasm` | Bindings over the kernel and a thin client for the server. |
 
@@ -56,7 +56,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 9 | `contextos-store`: ports + in-memory + Postgres with fencing | Shared store suite passes on both; concurrency tests |
 | 10 | `contextos-audit`: DecisionRecord, hash chain, signatures, replay packets | Tamper-detection tests |
 | 11 | `contextos-gateway`: governed tool-call pipeline + adapters (MCP, HTTP) | End-to-end refund workflow: deny, approval, allow, unknown-outcome reconciliation |
-| 12 | `contextosd`: HTTP + gRPC APIs, config, OTEL, metrics, health | Integration tests; load test p99 budget |
+| 12 | `contextosd`: HTTP API, config, OTEL, metrics, health; gRPC **deferred** (2026-11-05) until a user needs it: the HTTP API and OpenAPI description cover every route, and a gRPC surface would add tonic and protobuf codegen and a second contract to keep equal. When built, start with a typed executor service (admit, check tool call, dispatch, plan) delegating to the HTTP handlers so auth, scopes and limits stay identical | Integration tests; load test p99 budget |
 | 13 | `ctx` CLI | Commands documented and tested |
 | 14 | Python / Node / WASM bindings | Binding tests reproduce kernel vectors |
 | 15 | Security hardening: threat model, fuzzing (cargo-fuzz), supply chain (cargo-deny, SBOM), signed releases | Fuzz targets in CI; deny.toml clean |
@@ -149,6 +149,11 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 70 Rule libraries | done — `ctx build`: pack sources (base + merge patch + rule-library imports with bundle subsets, priority and intent scoping that only narrows) assembled offline into plain context-pack.v2 documents; no runtime or spec change; `--check` drift gate in CI; example 5.3.0 pack built from the support pack and a chargeback library, with its own tests |
 | 71 Audit sinks | done — `[[audit_sinks]]`: chain-as-outbox delivery per sink and tenant (leader, cursor documents, signed batches, retry without skipping, kind filter, genesis or head start), payload masking by member name or wildcard JSON Pointer to keyed HMAC tokens, spine-only verification of masked copies (`verify_spine`, `verify_chain_withheld`, `ctx audit-verify` reports `payload_unverified_sequences`), batch metrics |
 | 72 Pack-authoring skill | done — `skills/contextos-pack-authoring`: SKILL.md workflow (cases → rules → tests → plans → gate, widenings reported not acknowledged), reference of composition semantics and pitfalls taken from the compiler, `check_pack.sh` (schema, unresolved names, tests, per-role plans, gate) exercised on the example packs in CI; shipped in release archives |
+| 73 Plans over HTTP | done — `POST /v1/plan` (`compile`), tenant-bound packs and principals, `policy_eval_failed` for rules that fail on the principal; Python and Node `plan`, plus `reload_packs` / `reloadPacks` |
+| 74 `ctx inspect` | done — review summary (intents → rules, tools, gates, decisions with binding rules) and `problems` (unresolved gates, bindings, prohibitions, permissions; duplicate ids; missing rationale), used by the pack-authoring skill |
+| 75 `ctx repl` | done — one-case sessions over an admission body or replay case (`set`/`unset`/`decide`/`plan`/`show`/`reset`), JSON-line answers, scriptable; `pack_test::decide` |
+| 76 `llms.txt` | done — agent-oriented index of docs, API, schemas, clients, skills and examples, links checked by a script test |
+| 77 Deployment recipes | done — `deploy/README.md` (packs from git with pack CI and rollout timing; audit to a SIEM with a signature-checking receiver), Helm `packSync` (git-sync init container + sidecar) rendered and validated in CI |
 
 ## Non-negotiables carried from the spec
 

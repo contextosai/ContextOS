@@ -134,6 +134,92 @@
         "x-contextos-scope": "compile"
       }
     },
+    "/v1/plan": {
+      "post": {
+        "operationId": "plan_decisions",
+        "summary": "What a pack lets a principal do for an intent, before any request",
+        "description": "Partially evaluates the pack's rules with everything but `request` known (the run context's user, agent and tenant, and the intent). Each rule that can apply is reported as applying `always`, or `when` / `unless` a residual JsonLogic condition over `request.*` holds, exact for every request; rules that never apply are left out. The intent defaults to the run context's. Nothing is stored or audited.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "pack_ref",
+                  "run_context"
+                ],
+                "properties": {
+                  "pack_ref": {
+                    "type": "string"
+                  },
+                  "run_context": {
+                    "$ref": "https://contextosai.com/schemas/run-context.v1.schema.json"
+                  },
+                  "intent": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "pack_ref",
+                    "plan"
+                  ],
+                  "properties": {
+                    "pack_ref": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "$ref": "#/components/schemas/DecisionPlan"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "compile"
+            ]
+          }
+        ],
+        "x-contextos-scope": "compile"
+      }
+    },
     "/v1/contracts/negotiate": {
       "post": {
         "operationId": "negotiate",
@@ -8039,6 +8125,116 @@
                 "minimum": 0
               }
             }
+          }
+        }
+      },
+      "DecisionPlan": {
+        "type": "object",
+        "required": [
+          "intent",
+          "verdict",
+          "possible_verdicts",
+          "conditions",
+          "rules"
+        ],
+        "properties": {
+          "intent": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "deny",
+              "escalate",
+              "require_approval",
+              "allow",
+              "conditional"
+            ],
+            "description": "The composed verdict when nothing depends on the request, else conditional."
+          },
+          "possible_verdicts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Verdicts some assignment of the conditions reaches, most restrictive first (conditions treated as independent, so possibly more than any request reaches); null past 10 conditions."
+          },
+          "conditions": {
+            "type": "array",
+            "items": {},
+            "description": "Distinct residual conditions."
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "bundle_id",
+                "priority",
+                "rule_id",
+                "branch",
+                "effect",
+                "obligations",
+                "prohibits",
+                "applies"
+              ],
+              "properties": {
+                "bundle_id": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string",
+                  "enum": [
+                    "then",
+                    "else"
+                  ]
+                },
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "require_approval",
+                    "deny"
+                  ]
+                },
+                "approval_gate": {
+                  "type": "string"
+                },
+                "obligations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "prohibits": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "applies": {
+                  "type": "string",
+                  "enum": [
+                    "always",
+                    "when",
+                    "unless"
+                  ]
+                },
+                "condition": {
+                  "description": "Residual JsonLogic condition over request.*, for when and unless."
+                }
+              }
+            },
+            "description": "Rules that apply for some request."
           }
         }
       }

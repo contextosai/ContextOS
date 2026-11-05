@@ -45,6 +45,28 @@ config: |
 packs: {}
 capabilities: {}
 
+# Publish packs from git instead of `packs`: git-sync checks out `repo` at `ref` into
+# a volume each pod reads as a pack directory, once before contextosd starts and then
+# every `periodSeconds`. Point the config at it and let the server pick up new
+# versions (docs/GUIDE.md, "Publish pack versions without a restart"):
+#   pack_dirs = ["/var/lib/contextos/pack-sync/current/<path in the repo>"]
+#   pack_reload_secs = 30
+# The checkout replaces itself atomically, and a reload only adds versions: a changed
+# file under a loaded pack reference is refused, never applied. Write access to the
+# repository is the authority to publish packs.
+packSync:
+  enabled: false
+  image: registry.k8s.io/git-sync/git-sync:v4.4.0
+  repo: ""           # https://… or git@…; required when enabled
+  ref: main          # branch, tag or commit
+  periodSeconds: 30
+  # Secret whose keys become git-sync's environment (for HTTPS: GITSYNC_USERNAME and
+  # GITSYNC_PASSWORD); empty for a public repository.
+  secretName: ""
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
 # Existing Secret whose keys become environment variables (for example
 # CONTEXTOS_DATABASE_URL, CONTEXTOS_AUDIT_SEED, provider tokens). Manage it with your
 # secret store (External Secrets, Vault, Sealed Secrets); the chart never creates it.
