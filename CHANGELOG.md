@@ -5,6 +5,22 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `contextosd --mcp-stdio <url>` connects MCP hosts that only launch local (stdio)
+  servers to a run's MCP endpoint. Token and executor generation come from
+  `CONTEXTOS_TOKEN` and `CONTEXTOS_EXECUTOR_GENERATION`; requests run concurrently.
+- The MCP endpoint refuses requests from browser origins other than `public_url`'s
+  and `[server] allowed_origins` (`403 origin_not_allowed`), so a web page cannot
+  reach the server through DNS rebinding. Callers that send no `Origin` are
+  unaffected.
+
+### Changed
+- The MCP endpoint refuses an unsupported `MCP-Protocol-Version` header with `400`
+  and echoes the version the request used; it previously always answered
+  `2026-07-28`. `initialize` answers with the negotiated version.
+- A JSON-RPC request without an `id` is refused with `400` instead of accepted and
+  dropped; only `notifications/*` may omit it.
+
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and

@@ -16,6 +16,8 @@ max_body_bytes = 4194304
 request_timeout_ms = 15000
 mode = "production"
 # public_url = "https://contextos.internal"  # publishes OAuth protected resource metadata for MCP hosts
+# Browser origins (besides public_url's) allowed to call MCP endpoints; others get 403.
+# allowed_origins = ["https://console.internal"]
 
 [store]
 kind = "postgres"
