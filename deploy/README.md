@@ -63,7 +63,9 @@ versions without a restart.
    pack directory must exist at startup); a sidecar keeps it current and swaps the
    checkout atomically. contextosd re-reads it every `pack_reload_secs`, adds new pack
    versions, audits each as `pack_loaded`, and refuses a changed file under a loaded
-   reference.
+   reference. A restart does not lift that: each reference is bound to its digest in
+   the store, so a pod that starts with an edited file (a force-pushed repository)
+   fails to start instead of serving other content under the old reference.
 
 4. **Roll out** once every replica has the version. `POST /v1/packs/reload` through a
    Service reaches one pod, so wait `periodSeconds + pack_reload_secs` after the merge

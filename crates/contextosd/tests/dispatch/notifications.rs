@@ -134,3 +134,55 @@ async fn escalations_in_the_chain_reach_the_webhook_signed_and_once() {
     dispatcher.tick().await; // still backing off
     assert_eq!(received.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn a_cursor_kept_by_an_earlier_release_is_carried_over() {
+    use contextos_store::{DocKey, DocKind, DocumentStore};
+    let (url, received) = receiver(Arc::new(AtomicBool::new(false))).await;
+    let hook = Webhook::new(
+        WebhookConfig {
+            id: "oncall".into(),
+            url,
+            secret_env: "CONTEXTOS_TEST_NOTIFY_SECRET".into(),
+            link_template: None,
+            max_attempts: 3,
+        },
+        SECRET.as_bytes(),
+    )
+    .unwrap();
+    let w = world(&ALL_CONTROLS).await;
+    let now = || w.state.gateway.as_ref().unwrap().now();
+    let pending = w
+        .state
+        .audit
+        .append(
+            TENANT,
+            "escalation_opened",
+            json!({"escalation_id": "esc_pending"}),
+            &now(),
+        )
+        .await
+        .unwrap();
+    // Up to alpha.13 the cursor was an escalation document; it still points before
+    // the pending event, which must be delivered rather than skipped.
+    w.state
+        .store
+        .create(
+            &DocKey::new(TENANT, DocKind::Escalation, "delivery:oncall"),
+            &json!({"next_sequence": pending.sequence}),
+        )
+        .await
+        .unwrap();
+    let mut dispatcher = Dispatcher::new(
+        w.state.store.clone(),
+        w.state.audit.clone(),
+        w.state.metrics.clone(),
+        vec![hook],
+        vec![TENANT.into()],
+        true,
+    );
+    dispatcher.tick().await;
+    let received = received.lock().unwrap();
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0].1["subject"], "esc_pending");
+}

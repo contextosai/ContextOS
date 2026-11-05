@@ -23,6 +23,10 @@ pub fn run(pack: &PathBuf, run: &PathBuf, intent: Option<&str>) -> Result<Value,
         .or_else(|| body["request"]["input"]["intent"].as_str().map(str::to_owned))
         .filter(|i| !i.is_empty())
         .ok_or_else(|| Failure::Usage("no intent: pass --intent or set run_context.intent".into()))?;
+    // The same bound as `POST /v1/plan`.
+    if intent.len() > 256 {
+        return Err(Failure::Usage("intent is longer than 256 bytes".into()));
+    }
     let run_context: RunContext = typed(run_context.clone(), "run context")?;
     let plan =
         plan_decisions(&pack, &run_context, &intent).map_err(|e| Failure::Rejected(serde_json::json!({"error": e})))?;

@@ -30,6 +30,7 @@ pub mod notifications;
 pub mod oidc;
 pub mod oidc_claims;
 pub mod outcome_witness;
+pub mod pack_binding;
 pub mod pack_intents;
 pub mod pack_registry;
 pub mod protected_resource;

@@ -87,6 +87,9 @@ pub enum DocKind {
     /// A confirmed effect's outcome contract: what its witness must observe, by when,
     /// and each run's and tenant's index of them.
     Outcome,
+    /// How far an outbound consumer of a tenant's audit chain (an escalation webhook,
+    /// an audit sink) has delivered.
+    DeliveryCursor,
 }
 
 impl DocKind {
@@ -125,6 +128,7 @@ impl DocKind {
             DocKind::Compensation => "compensation",
             DocKind::Findings => "findings",
             DocKind::Outcome => "outcome",
+            DocKind::DeliveryCursor => "delivery_cursor",
         }
     }
 }

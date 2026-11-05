@@ -3137,7 +3137,7 @@
       "post": {
         "operationId": "reload_packs",
         "summary": "Re-read the pack sources and add new pack versions",
-        "description": "Reads the files `packs` names and every JSON file under `pack_dirs` (names starting with `.` skipped) and adds pack versions not yet loaded; the server also does this every `pack_reload_secs`. A reload only adds: a file whose pack reference is loaded with other content is refused (`pack_ref_immutable`), a pack for a tenant no startup pack names is refused (`tenant_not_configured`), an invalid file is refused alone (`invalid`), and a removed file does not unload its pack (retire versions with a `pack` revocation). Each added pack is audited as `pack_loaded` in its tenant's chain. The answer lists what was added and refused for the caller's tenant and counts the rest.",
+        "description": "Reads the files `packs` names and every JSON file under `pack_dirs` (names starting with `.` skipped) and adds pack versions not yet loaded; the server also does this every `pack_reload_secs`. A reload only adds: a file whose pack reference is loaded, or bound in the store, with other content is refused (`pack_ref_immutable`), a pack for a tenant no startup pack names is refused (`tenant_not_configured`), an invalid file is refused alone (`invalid`), and a removed file does not unload its pack (retire versions with a `pack` revocation). Each added pack is audited as `pack_loaded` in its tenant's chain and bound to its digest before it serves traffic; one whose audit entry or binding cannot be written is not added (`unrecorded`). The answer lists what was added and refused for the caller's tenant and counts the rest.",
         "responses": {
           "200": {
             "description": "What the reload did",
@@ -3202,7 +3202,8 @@
                             "enum": [
                               "invalid",
                               "pack_ref_immutable",
-                              "tenant_not_configured"
+                              "tenant_not_configured",
+                              "unrecorded"
                             ]
                           },
                           "detail": {

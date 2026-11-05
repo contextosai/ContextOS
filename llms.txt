@@ -4,7 +4,7 @@
 
 Key facts for agents working with this repository or a ContextOS deployment:
 
-- A Context Pack (`context-pack.v2`) is the governed contract for one tenant. Policy rules are JsonLogic; no applying rule means deny; the highest-priority applying rules decide. A pack reference (`pack_id@pack_version`) names one content forever.
+- A Context Pack (`context-pack.v2`) is the governed contract for one tenant. Policy rules are JsonLogic; no applying rule means deny; the highest-priority applying rules decide. A pack reference (`pack_id@pack_version`) names one content forever: its digest is bound in the store at first load, and a later load with other content is refused.
 - Check a pack change offline with `ctx validate`, `ctx inspect`, `ctx test`, `ctx plan` and `ctx gate` before it ships; `ctx repl` tries one interactively.
 - Every governed tool call goes through dispatch; `POST /v1/runs/{run_id}/tool-calls/check` answers what dispatch would do without effect.
 - The audit chain is signed (Ed25519) and hash-chained per tenant; `ctx audit-verify` checks an export offline.

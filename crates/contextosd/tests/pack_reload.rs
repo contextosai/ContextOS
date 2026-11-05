@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use contextos_audit::AuditSigner;
-use contextos_store::{MemoryLog, MemoryStore};
+use contextos_store::{AppendLog, MemoryLog, MemoryStore};
 use contextosd::auth::hash_api_key;
 use contextosd::{Config, build_state, load_packs, router};
 use serde_json::{Value, json};
@@ -224,5 +224,89 @@ fn startup_refuses_one_reference_with_two_contents() {
     put(&dir, "b.json", &changed);
     let error = load_packs(&config(&dir, 0)).unwrap_err();
     assert!(error.contains("also loaded with other content"), "{error}");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Two boots of a server on one durable store: the second must load what the first bound.
+#[tokio::test]
+async fn a_restart_cannot_change_what_a_reference_names() {
+    let dir = scratch();
+    put(&dir, "5.2.0.json", &version("5.2.0"));
+    let config = config(&dir, 0);
+    let (store, log) = (Arc::new(MemoryStore::new()), Arc::new(MemoryLog::new()));
+    let boot = || {
+        build_state(
+            &config,
+            store.clone(),
+            log.clone(),
+            AuditSigner::from_seed("audit-test", [5; 32]),
+            load_packs(&config).unwrap(),
+            None,
+        )
+        .unwrap()
+    };
+    let loaded = |state: &contextosd::app::AppState<MemoryStore, Arc<MemoryLog>>| {
+        let state = state.audit.clone();
+        async move {
+            let rows = state.log().range("tenant_acme_prod", 1, 100).await.unwrap();
+            rows.iter().filter(|r| r.body["kind"] == "pack_loaded").count()
+        }
+    };
+
+    let first = boot();
+    contextosd::pack_registry::bind_startup(&first).await.unwrap();
+    assert_eq!(loaded(&first).await, 1, "the first boot records the pack");
+
+    // Same content: starts, and records nothing new.
+    let second = boot();
+    contextosd::pack_registry::bind_startup(&second).await.unwrap();
+    assert_eq!(loaded(&second).await, 1);
+
+    // The file edited in place (or the pack repository force-pushed): refused.
+    let mut changed = version("5.2.0");
+    changed["pack_meta"]["owner"] = json!("someone-else");
+    put(&dir, "5.2.0.json", &changed);
+    let third = boot();
+    let error = contextosd::pack_registry::bind_startup(&third).await.unwrap_err();
+    assert!(
+        error.contains("ctxpack.support@5.2.0") && error.contains("new version"),
+        "{error}"
+    );
+    assert_eq!(loaded(&third).await, 1);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A reload checks the store's binding too, so a replica cannot add other content
+/// under a reference another replica bound.
+#[tokio::test]
+async fn reload_refuses_a_reference_bound_elsewhere() {
+    use contextos_store::{DocKey, DocKind, DocumentStore};
+    let dir = scratch();
+    put(&dir, "5.2.0.json", &version("5.2.0"));
+    let config = config(&dir, 0);
+    let store = Arc::new(MemoryStore::new());
+    store
+        .create(
+            &DocKey::new("tenant_acme_prod", DocKind::ContextPack, "ctxpack.support@5.3.0"),
+            &json!({"pack_ref": "ctxpack.support@5.3.0", "sha256": "sha256:other"}),
+        )
+        .await
+        .unwrap();
+    let state = build_state(
+        &config,
+        store,
+        MemoryLog::new(),
+        AuditSigner::from_seed("audit-test", [5; 32]),
+        load_packs(&config).unwrap(),
+        None,
+    )
+    .unwrap();
+    put(&dir, "5.3.0.json", &version("5.3.0"));
+    let report = contextosd::pack_registry::reload(&state).await.unwrap();
+    assert!(report.added.is_empty(), "{report:?}");
+    assert_eq!(report.refused[0].reason, "pack_ref_immutable");
+    assert!(state.packs.get("ctxpack.support@5.3.0").is_none());
+    let rows = state.audit.log().range("tenant_acme_prod", 1, 100).await.unwrap();
+    assert!(rows.iter().all(|r| r.body["kind"] != "pack_loaded"), "nothing recorded");
     std::fs::remove_dir_all(dir).ok();
 }

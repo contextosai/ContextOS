@@ -31,6 +31,18 @@ fn fail(message: impl std::fmt::Display) -> ! {
     std::process::exit(2);
 }
 
+/// Records and binds each startup pack's content (see `contextosd::pack_binding`); a
+/// reference already bound to other content stops the server.
+async fn bind_packs<S, L>(state: &contextosd::app::AppState<S, L>)
+where
+    S: contextos_store::DocumentStore + 'static,
+    L: contextos_store::AppendLog + 'static,
+{
+    contextosd::pack_registry::bind_startup(state)
+        .await
+        .unwrap_or_else(|e| fail(format!("context pack {e}")));
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -149,18 +161,17 @@ async fn main() {
     let app = match &config.store {
         StoreConfig::Memory => {
             tracing::warn!("using in-memory store: state is lost on restart");
-            router(
-                build_state(
-                    &config,
-                    Arc::new(MemoryStore::new()),
-                    MemoryLog::new(),
-                    signer,
-                    packs,
-                    dispatch,
-                )
-                .unwrap_or_else(|e| fail(e)),
-                timeout,
+            let state = build_state(
+                &config,
+                Arc::new(MemoryStore::new()),
+                MemoryLog::new(),
+                signer,
+                packs,
+                dispatch,
             )
+            .unwrap_or_else(|e| fail(e));
+            bind_packs(&state).await;
+            router(state, timeout)
         }
         StoreConfig::Postgres {
             url_env,
@@ -181,11 +192,10 @@ async fn main() {
                 });
             }
             let store = Arc::new(store);
-            router(
-                build_state(&config, store.clone(), (*store).clone(), signer, packs, dispatch)
-                    .unwrap_or_else(|e| fail(e)),
-                timeout,
-            )
+            let state = build_state(&config, store.clone(), (*store).clone(), signer, packs, dispatch)
+                .unwrap_or_else(|e| fail(e));
+            bind_packs(&state).await;
+            router(state, timeout)
         }
     };
     let listener = tokio::net::TcpListener::bind(config.server.listen)

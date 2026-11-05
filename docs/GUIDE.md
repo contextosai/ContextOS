@@ -1346,17 +1346,25 @@ curl -X POST "$CONTEXTOS/v1/packs/reload" -H "Authorization: Bearer $OPS_TOKEN"
 ```
 
 A reload only adds versions. Runs, decision records and replay cases cite a pack by
-reference, so a reference names one content forever:
+reference, so a reference names one content forever. The first load of a reference
+records it as `pack_loaded` and binds it to its digest in the store, before any run
+can use it; every later load (a reload, another replica, a restart) must match:
 
-- a file whose reference is loaded with other content is refused
+- a file whose reference is loaded or bound with other content is refused
   (`pack_ref_immutable`): change `pack_version` to publish a change;
+- at startup such a file stops the server, so editing a pack in place (or
+  force-pushing the pack repository) cannot change a reference across a restart;
 - a removed file does not unload its version; retire one with a `pack` revocation;
 - a pack for a tenant no startup pack names is refused (`tenant_not_configured`);
 - an invalid file is refused alone (`invalid`) and the rest still load, while at
-  startup any invalid source stops the server.
+  startup any invalid source stops the server;
+- a version whose audit entry or binding cannot be written is not added
+  (`unrecorded`); the next reload tries again.
 
-Each added version is audited as `pack_loaded` (reference, digest, file) in its
-tenant's chain, and `GET /v1/packs` lists every version with its `sha256`. Loading a
+Each version is audited once, as `pack_loaded` (reference, digest, file, or `startup`
+for a pack the configuration names) in its tenant's chain, when it is first bound.
+Bindings live in the configured store, so they outlast a restart only with
+`kind = "postgres"`. `GET /v1/packs` lists every version with its `sha256`. Loading a
 version changes nothing on its own: runs use it only when they name it or a rollout
 routes them to it. With several replicas each reads its own copy of the directory, so
 reload every replica (or wait one interval) before a rollout names a new version; until
