@@ -9246,8 +9246,8 @@ DEALINGS IN THE SOFTWARE.
 ======================================================================
 MIT License (MIT)
 Used by:
-  jsonschema 0.60.1
-  referencing 0.60.1
+  jsonschema 0.60.2
+  referencing 0.60.2
 
 MIT License
 
@@ -9412,13 +9412,13 @@ SOFTWARE.
 ======================================================================
 MIT License (MIT)
 Used by:
-  jsonschema-regex 0.60.1
-  jsonschema-value 0.60.1
+  jsonschema-regex 0.60.2
+  jsonschema-value 0.60.2
   napi-build 2.6.0
-  napi-derive-backend 6.1.6
-  napi-derive 3.6.13
+  napi-derive-backend 7.0.0
+  napi-derive 3.7.0
   napi-sys 3.4.1
-  napi 3.15.0
+  napi 3.16.1
   uuid-simd 0.8.0
   vsimd 0.8.0
 
@@ -10234,7 +10234,7 @@ SOFTWARE.
 
 
 ======================================================================
-Tower: react-router 8.5.0
+Tower: react-router 8.5.1
 
 LICENSE.md
 MIT License
