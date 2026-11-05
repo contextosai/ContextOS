@@ -270,6 +270,22 @@ export class Client {
     return this.request("GET", "/v1/revocations");
   }
 
+  /**
+   * What `packRef` lets the run context's principal do for an intent before any request
+   * (`compile` scope): each rule applies `always`, or `when` / `unless` a residual
+   * condition over `request.*` holds, with the verdicts those conditions can reach.
+   */
+  async plan(packRef, runContext, { intent } = {}) {
+    const body = { pack_ref: packRef, run_context: runContext };
+    if (intent !== undefined) body.intent = intent;
+    return (await this.request("POST", "/v1/plan", { body })).plan;
+  }
+
+  /** Re-reads the server's pack sources and adds new pack versions (`control` scope). */
+  reloadPacks() {
+    return this.request("POST", "/v1/packs/reload");
+  }
+
   /** Yields the tenant's signed audit entries in order. */
   async *auditEntries({ from = 1, page = 500 } = {}) {
     let cursor = from;

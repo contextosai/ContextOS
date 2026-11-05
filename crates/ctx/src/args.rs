@@ -175,6 +175,20 @@ pub enum Command {
         #[arg(long)]
         intent: Option<String>,
     },
+    /// Summarize a Context Pack for review: intents and their rules, tools with approval
+    /// modes and permissions, approval gates, decisions and the evidence they require,
+    /// and `problems` (names a rule or permission uses that the pack does not define,
+    /// duplicate rule ids, rules without a rationale).
+    Inspect { pack: PathBuf },
+    /// Try a pack interactively: one case (from an admission body or replay case) edited
+    /// with `set PATH JSON` / `unset PATH`, checked with `decide` or `plan`. Each answer
+    /// is one JSON line, so a script can also be piped in. `help` lists the commands.
+    Repl {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        run: PathBuf,
+    },
     /// Build a Context Pack from a pack source (`contextos.pack_source.v1`): a `base`
     /// pack or source, a JSON merge `patch`, and `imports` of rule libraries
     /// (`contextos.rule_library.v1`), each optionally limited to some `bundles`, given a

@@ -185,7 +185,7 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 | `contextos-gateway` | Governed Tool Gateway pipeline and run admission |
 | `contextos-adapters` | MCP 2026-07-28 and HTTP adapters, remote fact providers |
 | `contextosd` | HTTP server: admission, dispatch, decisions, scoring, kill switch, rollouts, retention, conformance, audit, metrics |
-| `ctx` | Offline CLI: validate, compile, negotiate, review manifests, build packs from rule libraries, pack tests, decision plans, release and scorecard gates |
+| `ctx` | Offline CLI: validate, compile, negotiate, review manifests, inspect and try packs, build packs from rule libraries, pack tests, decision plans, release and scorecard gates |
 | `contextos-embed`, `-py`, `-node`, `-wasm` | In-process bindings over one JSON facade |
 | `contextos-kernel` | Context Pack compiler, ActionRisk, profile negotiation, authority/approval/authorization, execution boundary, data flow, memory lifecycle, run lifecycle and resume, operation ledger, budget ledger, conformance assessment |
 

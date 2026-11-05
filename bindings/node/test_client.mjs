@@ -80,6 +80,13 @@ try {
   assert.equal(warned.length, 2, `only the two mismatches warn (the server is this release): ${warned}`);
   assert.equal(run.executorGeneration, 2);
 
+  // A plan says what the pack lets this principal do, before any request.
+  const admission = JSON.parse(readFileSync(join(example, "requests/run.json"), "utf8"));
+  const plan = await client.plan("ctxpack.support@5.2.0", admission.run_context);
+  assert.equal(plan.verdict, "conditional");
+  assert.ok(plan.possible_verdicts.includes("require_approval"), JSON.stringify(plan));
+  assert.deepEqual((await new Client(client.baseUrl, { token: OPS_KEY }).reloadPacks()).added, []);
+
   const call = JSON.parse(readFileSync(join(example, "requests/tool_call.json"), "utf8"));
   const options = { approvalMode: "destructive", idempotencyKey: call.idempotency_key, evidenceRefs: call.evidence_refs };
   // A check answers what dispatch would do, without effect.

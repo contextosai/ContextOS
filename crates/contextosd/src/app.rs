@@ -7,6 +7,7 @@
 //! | `GET /metrics` | – | Prometheus metrics |
 //! | `GET /v1/openapi.json` | – | this API as OpenAPI 3.1 (`openapi/contextosd.v1.json`) |
 //! | `POST /v1/compile` | `compile` | compile a pinned Context Pack for a request |
+//! | `POST /v1/plan` | `compile` | a decision plan: what a pack lets the run context's principal do for an intent, before any request |
 //! | `POST /v1/contracts/negotiate` | `admit` | negotiate an execution contract against this deployment |
 //! | `POST /v1/schemas/{doc}/validate` | – (authenticated) | validate a payload against a published schema |
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
@@ -3215,6 +3216,7 @@ where
         .route("/metrics", get(metrics::<S, L>))
         .route("/v1/openapi.json", get(openapi))
         .route("/v1/compile", post(compile::<S, L>))
+        .route("/v1/plan", post(crate::decision_plans::plan::<S, L>))
         .route("/v1/contracts/negotiate", post(negotiate::<S, L>))
         .route("/v1/schemas/{doc}/validate", post(validate_schema::<S, L>))
         .route("/v1/audit/verify", get(audit_verify::<S, L>))

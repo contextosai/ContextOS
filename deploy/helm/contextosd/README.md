@@ -123,3 +123,23 @@ Prometheus rules file). Each alert links to its runbook in
 `deploy/alerts/` (`promtool test rules deploy/alerts/contextos-rules.test.yaml`). Import
 `deploy/grafana/contextos-governance.json` into Grafana for the matching dashboard; it
 uses the rules' recording rules.
+
+## Packs from git
+
+Instead of mounting packs from `packs`, `packSync` keeps a git checkout in each pod with
+git-sync (an init container before contextosd starts, then a sidecar). The config reads
+it as a pack directory and adds new versions while running:
+
+```yaml
+packSync:
+  enabled: true
+  repo: https://git.example.com/acme/packs.git
+  ref: main
+  secretName: pack-repo     # GITSYNC_USERNAME / GITSYNC_PASSWORD; omit for a public repo
+config: |
+  pack_dirs = ["/var/lib/contextos/pack-sync/current/packs"]
+  pack_reload_secs = 30
+```
+
+See [Publish packs from git](../../README.md#publish-packs-from-git) for the repository
+layout, the checks its CI runs, and rolling a new version out.

@@ -6,6 +6,23 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `POST /v1/plan` (`compile` scope): a decision plan for one of the caller's loaded
+  packs and a principal of its tenant. Clients: `Client.plan` (Python, sync and async;
+  Node) and `Client.reload_packs` / `reloadPacks` for `POST /v1/packs/reload`.
+- `ctx inspect`: a review summary of a pack (intents and their rules, tools, approval
+  gates, decisions and the rules that bind them), with `problems` for names that do not
+  resolve, duplicate rule ids and rules without a rationale. The pack-authoring skill
+  now uses it.
+- `ctx repl`: try a pack on one case interactively (`set`, `unset`, `decide`, `plan`,
+  `show`, `reset`), one JSON line per answer. `contextos_kernel::pack_test::decide`
+  reports what a pack decides for a case.
+- `llms.txt`: an index of the docs, API, schemas, clients, skills and examples for LLMs
+  and agents; a script test keeps its links resolving.
+- Deployment recipes (`deploy/README.md`): publishing packs from git (repository
+  layout, pack CI, `packSync`, rollout timing) and delivering audit to a SIEM (a
+  receiver that checks signatures and drops duplicates). The Helm chart's new
+  `packSync` runs git-sync as an init container and a sidecar, writing to a volume
+  contextosd reads as a pack directory.
 - `skills/contextos-pack-authoring`: an agent skill for writing and changing Context
   Packs. It covers a case-first workflow, the runtime's rule composition and its
   pitfalls, and `scripts/check_pack.sh`, which checks schema, unresolved names

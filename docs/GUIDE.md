@@ -1156,6 +1156,30 @@ names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
 "compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
 replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
 
+### Inspect and try a pack
+
+`ctx inspect PACK` summarizes a pack for review. It lists the intents and the rules
+scoped to each (effect, condition, `else`, approval gate, obligations, prohibitions,
+decision binding), the tools with their approval modes, permissions and argument
+constraints, the approval gates, and each decision with its required evidence and the
+rules that bind it. It also lists `problems`: names a rule or permission uses that the
+pack does not define, duplicate rule ids, and rules without a rationale. The compiler
+does not refuse those names at load, and a mistyped approval gate or decision binding
+only shows when its rule applies.
+
+`ctx repl --pack PACK --run RUN` tries a pack interactively on one case, starting from
+an admission body or replay case:
+
+```text
+ctx> set request.input.context.refund_amount 4200
+ctx> decide          # verdict, rules, obligations, capabilities, evidence gates
+ctx> set run_context.user.role "supervisor"
+ctx> plan            # this principal's plan for the intent
+ctx> reset
+```
+
+Each answer is one JSON line, so a script can be piped in (`help` lists the commands).
+
 ### Share rules across packs
 
 Rules that several packs need (no refund during an open chargeback, a data-residency
@@ -1293,6 +1317,13 @@ residual JsonLogic condition over `request.*`, exact for every request:
 
 Use it to review a pack change for one role, to show a UI what to ask for before
 offering an action, or to confirm that a principal can never reach `allow`.
+
+A running server answers the same question for its loaded packs with `POST /v1/plan`
+(`compile` scope), `{"pack_ref", "run_context", "intent"?}` →
+`{"pack_ref", "plan"}`; the run context must be the caller's tenant's. A UI can call it
+to show, before offering an action, what the request must establish
+(`client.plan(pack_ref, run_context)` in Python, `client.plan(packRef, runContext)` in
+Node). Nothing is stored or audited.
 
 ### Publish pack versions without a restart
 

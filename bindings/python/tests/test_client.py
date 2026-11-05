@@ -148,6 +148,11 @@ def main() -> None:
         assert client.check_server()["runtime_version"] == client.check_server()["client_version"]
         assert run.executor_generation == 2, run
 
+        # A plan says what the pack lets this principal do, before any request.
+        plan = client.plan("ctxpack.support@5.2.0", admission["run_context"])
+        assert plan["verdict"] == "conditional" and "require_approval" in plan["possible_verdicts"], plan
+        assert Client(base, OPS_KEY).reload_packs()["added"] == []
+
         call = json.loads((EXAMPLE / "requests/tool_call.json").read_text())
         # A check answers what dispatch would do, without effect.
         checked = run.check_tool_call(call["capability_id"], call["args"], approval_mode="destructive",

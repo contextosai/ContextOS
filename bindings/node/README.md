@@ -33,6 +33,11 @@ the same call (`allowed`, `approval_required`, `escalation_required`, `blocked` 
 reserved or sent, and the check is audited. It is advisory; `not_evaluated` names what
 only dispatch decides.
 
+`client.plan(packRef, runContext, { intent })` (`compile` scope) answers, before any
+request, what a pack lets that principal do: each rule applies `always`, or `when` /
+`unless` a residual condition over `request.*` holds. `client.reloadPacks()` (`control`
+scope) has the server re-read its pack sources and add new versions.
+
 Try it against a local server from a checkout: `./examples/dev-server.sh` prints
 `CONTEXTOS_URL` and `CONTEXTOS_TOKEN`. The
 [integration guides](https://github.com/contextosai/ContextOS/tree/main/docs/integrations)

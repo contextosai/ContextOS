@@ -84,7 +84,7 @@ exists: check it yourself (see Pitfalls).
   Check with `ctx plan` that the lower rules still decide where they should.
 - **Unknown names.** A typo in `decision_binding`, `requires_approval_gate`, a
   `prohibits` entry or a permission's `adapter_id`/`capability` is not always refused
-  at load. `check_pack.sh` lists names that do not resolve.
+  at load. `ctx inspect` (and so `check_pack.sh`) lists names that do not resolve.
 - **Role defaults.** Rules keyed on `user.role` see `support_agent` for runs that send
   no role, unless the deployment requires roles. Plan for a run without a role too.
 - **Editing a released version.** Bump `pack_meta.pack_version`; a reference with new
@@ -95,6 +95,7 @@ exists: check it yourself (see Pitfalls).
 | Command | What it proves |
 | --- | --- |
 | `ctx validate context-pack PACK` | the document conforms to context-pack.v2 |
+| `ctx inspect PACK` | a review summary: intents and rules, tools, gates, decisions, and `problems` (names that do not resolve) |
 | `ctx test --pack PACK SUITE... [--junit OUT]` | the pack decides the stated cases |
 | `ctx plan --pack PACK --run RUN [--intent I]` | what one principal may do, and on which request facts it depends |
 | `ctx gate --baseline OLD --candidate NEW --cases CASES [--acknowledge ACK]` | the change widens nothing unacknowledged on recorded cases |

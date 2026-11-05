@@ -41,6 +41,11 @@ with the same call (`allowed`, `approval_required`, `escalation_required`, `bloc
 reserved or sent, and the check is audited. It is advisory; `not_evaluated` names what
 only dispatch decides.
 
+`client.plan(pack_ref, run_context, intent=None)` (`compile` scope) answers, before any
+request, what a pack lets that principal do: each rule applies `always`, or `when` /
+`unless` a residual condition over `request.*` holds. `client.reload_packs()`
+(`control` scope) has the server re-read its pack sources and add new versions.
+
 ## The embedded kernel
 
 The platform wheels above include it. To build the extension yourself, use

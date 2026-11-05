@@ -285,6 +285,21 @@ class Client:
         """The tenant's revoked targets."""
         return self.request("GET", "/v1/revocations")
 
+    def plan(self, pack_ref: str, run_context: dict, intent: Optional[str] = None) -> dict:
+        """What `pack_ref` lets the run context's principal do for an intent before any
+        request (`compile` scope): each rule applies `always`, or `when` / `unless` a
+        residual condition over `request.*` holds, with the verdicts those conditions can
+        reach. The intent defaults to the run context's."""
+        body: Dict[str, Any] = {"pack_ref": pack_ref, "run_context": run_context}
+        if intent is not None:
+            body["intent"] = intent
+        return self.request("POST", "/v1/plan", body)["plan"]
+
+    def reload_packs(self) -> dict:
+        """Re-reads the server's pack sources and adds new pack versions (`control`
+        scope); returns what was added and refused for this tenant."""
+        return self.request("POST", "/v1/packs/reload")
+
     def audit_entries(self, start: int = 1, page: int = 500):
         """Yields the tenant's signed audit entries in order."""
         cursor: Optional[int] = start
