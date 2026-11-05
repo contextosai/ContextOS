@@ -82,8 +82,13 @@ try {
 
   const call = JSON.parse(readFileSync(join(example, "requests/tool_call.json"), "utf8"));
   const options = { approvalMode: "destructive", idempotencyKey: call.idempotency_key, evidenceRefs: call.evidence_refs };
+  // A check answers what dispatch would do, without effect.
+  const checked = await run.checkToolCall(call.capability_id, call.args, options);
+  assert.equal(checked.status, "allowed", JSON.stringify(checked));
+  assert.equal(checked.operation_exists, false);
   const output = await run.callTool(call.capability_id, call.args, { ...options, toolCallId: "tc_1" });
   assert.equal(output.refund_id, "rf_ord_881");
+  assert.equal((await run.checkToolCall(call.capability_id, call.args, options)).operation_exists, true);
 
   await assert.rejects(run.callTool(call.capability_id, call.args, options), (error) =>
     error instanceof ToolPaused && error.reasonCodes[0] === "retry_unsafe");

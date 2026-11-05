@@ -313,6 +313,16 @@ export class Run {
     return outcome(response);
   }
 
+  /**
+   * What callTool would do with this call, without effect (`status`: allowed,
+   * approval_required, escalation_required, blocked or rejected). Nothing is requested,
+   * reserved or claimed; the check is audited. Advisory: `not_evaluated` names what only
+   * dispatch decides.
+   */
+  async checkToolCall(capabilityId, args, options = {}) {
+    return (await this.#post("/tool-calls/check", this.envelope(capabilityId, args, options))).check;
+  }
+
   async provideInput(paused, envelope, responses) {
     return outcome(await this.#post(`/operations/${segment(paused.operationId ?? "")}/input`,
       { tool_call: envelope, input_responses: responses }));

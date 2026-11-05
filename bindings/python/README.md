@@ -35,6 +35,12 @@ Try it against a local server: `./examples/dev-server.sh` prints `CONTEXTOS_URL`
 `CONTEXTOS_TOKEN`, and `examples/support-refund/requests/run.json` is a run you can
 admit. `examples/frameworks/` shows the client inside eleven agent frameworks.
 
+`run.check_tool_call(capability_id, args, ...)` answers what `run.call_tool` would do
+with the same call (`allowed`, `approval_required`, `escalation_required`, `blocked` or
+`rejected`, with reason codes and obligations) without effect: nothing is requested,
+reserved or sent, and the check is audited. It is advisory; `not_evaluated` names what
+only dispatch decides.
+
 ## The embedded kernel
 
 The platform wheels above include it. To build the extension yourself, use

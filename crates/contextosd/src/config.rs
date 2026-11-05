@@ -282,6 +282,10 @@ pub struct Config {
     /// Webhooks told when escalations open and resolve (see [`crate::notifications`]).
     #[serde(default)]
     pub notifications: Vec<crate::notifications::WebhookConfig>,
+    /// Destinations the audit chain is delivered to, with masked payload fields (see
+    /// [`crate::audit_sinks`]).
+    #[serde(default)]
+    pub audit_sinks: Vec<crate::audit_sinks::AuditSinkConfig>,
     /// Trust anchors for conformance assessment (`POST /v1/conformance/assess`).
     #[serde(default)]
     pub conformance: ConformanceConfig,
@@ -291,6 +295,15 @@ pub struct Config {
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
+    /// Directories whose JSON files (recursively; names starting with `.` skipped) are
+    /// Context Packs, loaded at startup and re-read on reload (see
+    /// [`crate::pack_registry`]).
+    #[serde(default)]
+    pub pack_dirs: Vec<PathBuf>,
+    /// Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the
+    /// default) reads them at startup and on `POST /v1/packs/reload` only.
+    #[serde(default)]
+    pub pack_reload_secs: u64,
     /// Schemas delegated runs' results must meet, by the `output_schema_ref` a
     /// delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`.
     #[serde(default)]
@@ -374,6 +387,7 @@ impl Config {
         crate::evidence_issuers::Issuers::new(&config.evidence_issuers).map_err(ConfigError::Invalid)?;
         crate::evidence_subjects::check(&config.evidence_subjects).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
+        crate::audit_sinks::check(&config).map_err(ConfigError::Invalid)?;
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }

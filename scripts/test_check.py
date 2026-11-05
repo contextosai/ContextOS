@@ -49,6 +49,8 @@ class CheckScriptTests(unittest.TestCase):
                         text += "for ((i=0; i<10000; i++)); do echo 'additional example output'; done\n"
                     text += f"exit {agent_exit if name == 'agent-loop' else tower_exit}\n"
                 (example / "run.sh").write_text(text)
+                if name == "support-refund":
+                    (example / "check_packs.sh").write_text("#!/usr/bin/env bash\necho 'example packs checked'\n")
             # The drill runs only when a database is configured; never inherit one.
             env = {k: v for k, v in os.environ.items()
                    if k not in ("CONTEXTOS_DRILL_DATABASE_URL", "CONTEXTOS_KEYCLOAK_E2E")}

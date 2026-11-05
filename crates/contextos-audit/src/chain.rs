@@ -419,11 +419,18 @@ impl KeyRing {
 
 /// Verifies one entry in isolation (hashes and signature).
 pub fn verify_entry(entry: &AuditEntry, keys: &KeyRing, index: usize) -> Result<(), ChainError> {
-    if entry.entry_version != ENTRY_VERSION {
-        return Err(invalid(index, "unsupported entry version"));
-    }
     if sha256_canonical(&entry.payload)? != entry.payload_digest {
         return Err(invalid(index, "payload digest mismatch"));
+    }
+    verify_spine(entry, keys, index)
+}
+
+/// Verifies an entry's spine (record hash over the payload digest, and signature)
+/// without its payload: for a copy whose payload was masked before export, which
+/// proves the entry's place and authenticity but not what its payload said.
+pub fn verify_spine(entry: &AuditEntry, keys: &KeyRing, index: usize) -> Result<(), ChainError> {
+    if entry.entry_version != ENTRY_VERSION {
+        return Err(invalid(index, "unsupported entry version"));
     }
     let hash = record_hash(&Spine {
         entry_version: &entry.entry_version,
@@ -457,9 +464,25 @@ pub fn verify_entry(entry: &AuditEntry, keys: &KeyRing, index: usize) -> Result<
 /// the segment, already trusted) linkage is checked across the boundary; otherwise the
 /// segment must start at the genesis entry.
 pub fn verify_chain(entries: &[AuditEntry], anchor: Option<&AuditEntry>, keys: &KeyRing) -> Result<(), ChainError> {
+    verify_chain_withheld(entries, anchor, keys, &vec![false; entries.len()])
+}
+
+/// As [`verify_chain`], checking only the spine of the entries `withheld` marks (their
+/// payloads were masked): linkage and signatures are verified for every entry, payload
+/// digests only for the others.
+pub fn verify_chain_withheld(
+    entries: &[AuditEntry],
+    anchor: Option<&AuditEntry>,
+    keys: &KeyRing,
+    withheld: &[bool],
+) -> Result<(), ChainError> {
     let mut previous = anchor;
     for (index, entry) in entries.iter().enumerate() {
-        verify_entry(entry, keys, index)?;
+        if withheld.get(index).copied().unwrap_or(false) {
+            verify_spine(entry, keys, index)?;
+        } else {
+            verify_entry(entry, keys, index)?;
+        }
         match previous {
             None => {
                 if entry.sequence != 1 || entry.prev_hash.is_some() {

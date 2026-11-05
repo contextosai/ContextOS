@@ -1,0 +1,8 @@
+{
+  "pack_source": "contextos.pack_source.v1",
+  "base": "../pack.json",
+  "patch": {"pack_meta": {"pack_version": "5.3.0"}},
+  "imports": [
+    {"library": "libraries/chargebacks.json", "intent": "support.refund"}
+  ]
+}

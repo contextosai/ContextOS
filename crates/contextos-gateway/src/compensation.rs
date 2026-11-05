@@ -364,7 +364,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             )
             .await?;
         let mut outcome = self
-            .dispatch_inner(admission, &envelope, None, fence, Some(&original))
+            .dispatch_inner(admission, &envelope, None, fence, Some(&original), false)
             .await?;
         outcome.report.audit_sequences.insert(0, entry.sequence);
         tracing::Span::current().record("status", outcome.report.status.as_str());

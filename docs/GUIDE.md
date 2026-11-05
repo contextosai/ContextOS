@@ -359,6 +359,45 @@ sees it and reconciles it rather than repeating it. Adapters forward the generat
 `X-ContextOS-Executor-Generation` so providers that support target-side fencing can
 enforce it too.
 
+### Check a call before making it
+
+`POST /v1/runs/{run_id}/tool-calls/check` takes the same tool call envelope as
+`/tool-calls` and the `dispatch` scope, and answers what dispatch would do with it,
+without effect. The call goes through the same pipeline on the same facts: surfacing,
+binding, authority, pinned policy, constraints, approvals, the kill switch, the
+execution boundary, the loop and repeated-effect guards and data flow. It stops before
+approval redemption, budget reservation and the operation claim. Nothing is requested
+(no approval request, no escalation), redeemed, reserved or sent:
+
+```json
+{"check": {"status": "approval_required", "capability_id": "adp_payments.issue_refund",
+  "operation_id": "refund:ord_881", "action_digest": "sha256:…", "reason_codes": [],
+  "obligations": ["await_approval"], "message": "Approval is required before this effect.",
+  "operation_exists": false, "not_evaluated": ["budget_reservation", "operation_claim"],
+  "audit_sequence": 41}}
+```
+
+`status` is `allowed`, `approval_required`, `escalation_required`, `blocked` or
+`rejected`, with the reason codes and obligations dispatch would return. Use it to
+offer only the actions an agent or a person may take, to let a planner choose
+arguments a policy accepts, or to debug a refusal without causing an effect. Clients
+expose it as `run.check_tool_call(...)` (Python) and `run.checkToolCall(...)` (Node).
+
+- **Advisory.** The facts a check reads can change before the call: an approval can
+  expire, an operator can revoke the capability. Budget, shared-guarantee capacity
+  (`shared_guarantee_capacity` appears in `not_evaluated` for guaranteed capabilities)
+  and the operation claim are decided only at dispatch, atomically. A check never
+  authorizes anything; only dispatch does.
+- **Audited.** Each check appends one `tool_call_check` entry (capability, operation,
+  action digest, status, reason codes), so a principal probing which arguments a policy
+  allows leaves a record. The intermediate entries a dispatch writes (the authorization
+  decision, refusals) are not written for a check.
+- **Retries.** `operation_exists: true` means the run already has an operation with
+  this id, so dispatch treats the call as that operation's retry (duplicate and
+  reconciliation rules apply), not as a new effect.
+- **Fencing.** The executor generation header is optional, since a check has no
+  effect; when it is sent, a stale executor's check is refused like its dispatch.
+
 ### Decisions, evidence and audit export
 
 Report a decision with `POST /v1/runs/{run_id}/decisions` (executor, fenced):
@@ -455,6 +494,45 @@ refuses that context and the rule can never match.
 ledger with its compaction archives, and its decisions with replay packets.
 `GET /v1/audit/entries?from=&limit=` pages the tenant's signed chain out for SIEM
 ingestion; entries verify offline with the published keys.
+
+### Deliver the audit chain to a SIEM, masked
+
+Rather than polling, configure audit sinks: the leader replica delivers every
+tenant's chain in order, in signed batches, and masks the payload fields you name.
+
+```toml
+[[audit_sinks]]
+id = "siem"
+url = "https://siem.example.com/contextos"
+secret_env = "CONTEXTOS_SIEM_SECRET"      # signs each request, as notifications are
+mask = ["email", "/arguments/*/account_number"]
+mask_key_env = "CONTEXTOS_SIEM_MASK_KEY"  # at least 32 bytes; required with mask
+# kinds = ["authorization_decision", "dispatch_completed"]   # default: every kind
+# batch = 100                                                  # 1..=500
+# start = "head"                                               # default: "genesis"
+```
+
+Each request is `{"sink", "tenant_id", "from_sequence", "to_sequence", "entries"}`
+with a `ContextOS-Signature` header (see escalation notifications). A sink never skips
+an entry: a refused or failed batch is sent again, with backoff up to five minutes,
+before anything later, and its cursor moves only past accepted entries. Delivery is at
+least once, so drop duplicates by `(tenant_id, sequence)`. `kinds` filters what is sent;
+the cursor still passes the rest. `contextos_audit_sink_batches_total{sink, outcome}`
+counts batches.
+
+`mask` names payload fields: an entry starting with `/` is a JSON Pointer where `*`
+matches any member or index; any other entry is a member name masked wherever it
+occurs. A masked value becomes `masked:hmac-sha256:<hex>`, an HMAC of its canonical JSON
+under the sink's mask key: equal values give equal tokens, so the SIEM can still
+correlate one customer across entries, and without the key a token cannot be tested
+against guesses. A masked entry says so in `masked: {scheme, paths}`.
+
+Masking keeps the chain verifiable. An entry's record hash covers its payload's digest,
+not the payload, so a masked copy still proves its place in the chain and its
+signature. `ctx audit-verify` checks every spine and every unmasked payload, and lists
+the masked entries under `payload_unverified_sequences`: their payloads are the sink's
+masked copy, not evidence of what was recorded. To prove a masked payload, fetch the
+entry from `GET /v1/audit/entries`.
 
 ### Completing and cancelling runs
 
@@ -1077,6 +1155,182 @@ names exactly what it accepts: `{"capabilities": ["adp_crm.lookup"],
 "evidence_gates": ["support.refund.execute"], "policy_loosening": ["<case name>"],
 "compile_expansion": ["<case name>"]}`. A policy acknowledgement covers only the
 replay cases it names, so it cannot approve a loosening on a case nobody reviewed.
+
+### Share rules across packs
+
+Rules that several packs need (no refund during an open chargeback, a data-residency
+deny) belong in one rule library, imported by each pack, rather than copied. `ctx
+build` assembles a pack from a pack source:
+
+```json
+{"pack_source": "contextos.pack_source.v1",
+ "base": "../pack.json",
+ "patch": {"pack_meta": {"pack_version": "5.3.0"}},
+ "imports": [{"library": "libraries/chargebacks.json", "intent": "support.refund"}]}
+```
+
+```sh
+ctx build examples/support-refund/authoring/pack.source.json \
+          --out examples/support-refund/authoring/pack-5.3.0.json
+```
+
+- `base` is a pack, or another pack source (up to 8 deep, no cycles); paths are
+  relative to the file that names them.
+- `patch` is a JSON merge patch (RFC 7386) over the base.
+- `imports` names rule libraries: `{"rule_library": "contextos.rule_library.v1",
+  "library_id", "version", "policy_bundles": [...]}`. An import may take some
+  `bundles`, set their `priority`, and scope them to one `intent`, so every imported
+  rule applies to that intent only. Scoping narrows and never redirects: a rule that
+  already names another intent is refused. A bundle id already in the pack is refused.
+
+The output is an ordinary context-pack.v2 document, validated and compiled before it
+is written. Admission, the release gate, pack tests and plans see no difference, so a
+built pack is reviewed, tested and gated like a hand-written one, and the runtime never
+resolves an import. The report lists every input with its digest and where each
+imported bundle came from. Commit the built pack beside its source and run `ctx build
+SOURCE --check PACK` in CI: it exits 1 when the committed pack no longer matches its
+sources, for example after a library changed.
+
+### Author packs with a coding agent
+
+[`skills/contextos-pack-authoring`](../skills/contextos-pack-authoring/SKILL.md) is an
+agent skill for writing and changing packs. It has the agent write the requirement as
+cases first, then the rules, then a pack test per case, and check the change with
+`scripts/check_pack.sh`. That script checks the schema, flags names that do not
+resolve (approval gates, decision bindings, prohibited capabilities, permissions), and
+runs the tests, a decision plan per role and the release gate against the released
+version. The agent reports widenings to the release owner rather than acknowledging
+them. Install it as [skills/README.md](../skills/README.md) describes. Its reference
+spells out how the runtime composes rules (default deny, highest priority decides,
+`else` branches) and the usual mistakes.
+
+### Test a pack before release
+
+The release gate says how a candidate differs from the baseline; it cannot say
+whether either pack is right. Pack tests state what the pack must decide, and
+`ctx test` checks them offline, through the same compiler and policy composition
+admission uses:
+
+```sh
+ctx test --pack examples/support-refund/pack.json examples/support-refund/pack_test.json \
+         [--junit results.xml]
+```
+
+A suite names a base case and, per test, a JSON merge patch (RFC 7386) over it, so a
+test lists only what differs, and the expectations it checks:
+
+```json
+{"suite": "support refunds",
+ "base": "requests/run.json",
+ "tests": [
+   {"name": "a refund over INR 3000 needs finance approval",
+    "with": {"request": {"input": {"context": {"refund_amount": 4200}}}},
+    "expect": {"verdict": "require_approval",
+               "rules": ["R_REFUND_REQUIRES_IDV", "R_HIGH_VALUE_REQUIRES_APPROVAL"]}},
+   {"name": "a read-only run does not surface the refund tool",
+    "with": {"run_context": {"safety_mode": "read_only"}},
+    "expect": {"capabilities": {"exclude": ["adp_payments.issue_refund"]}}}]}
+```
+
+- `base` is `{request, run_context, deps?}`. It, or any of its parts, may be a file
+  path relative to the suite: an admission body like `run.json`, or a replay case from
+  `GET /v1/runs/{run_id}/replay-case`, so a test can start from a recorded run. Only
+  `request`, `run_context` and `deps` are kept from such a file.
+- `with` may set only `request`, `run_context` and `deps`; `null` removes a field.
+- `expect` checks only what it names: `compile` (`compiles` or `refused`), `verdict`
+  (`deny`, `escalate`, `require_approval`, `allow`, composed as admission composes
+  it), `rules` and `obligations` (exact sets), `capabilities` (`include` must be
+  surfaced, `exclude` must not, as `adapter_id.capability`), and `evidence_gates`
+  (decision key to whether commit is allowed). A test that names nothing, or a refused
+  case that expects more, is an `error`, never a pass.
+
+`ctx test` prints each test's result and the difference it found (for example
+`verdict: expected allow, got require_approval`), exits 1 if any test fails or errs,
+and with `--junit` also writes JUnit XML for CI. Run it beside `ctx gate` on every
+pack change: tests catch a pack that is wrong, and the gate catches a change nobody
+acknowledged.
+
+### Plan what a principal may do
+
+Before any request exists, `ctx plan` says what a pack lets one principal (user,
+agent, tenant) do for an intent: which rules always apply, which never do, and which
+depend on the request, and on exactly what.
+
+```sh
+ctx plan --pack examples/support-refund/pack.json \
+         --run examples/support-refund/requests/run.json [--intent support.refund]
+```
+
+Each rule condition is evaluated with everything but `request` known. A part that
+reads only the principal is decided (the high-value rule's `user.role ==
+"support_agent"` check is true for this agent and disappears); what remains is a
+residual JsonLogic condition over `request.*`, exact for every request:
+
+```json
+{"intent": "support.refund", "verdict": "conditional",
+ "possible_verdicts": ["deny", "require_approval", "allow"],
+ "conditions": [{"==": [{"var": "request.context.identity_verified"}, true]},
+                {">": [{"var": "request.context.refund_amount"}, 3000]}],
+ "rules": [{"rule_id": "R_REFUND_REQUIRES_IDV", "branch": "then", "effect": "allow",
+            "applies": "when", "condition": {"==": [...]}, "obligations": ["order_lookup"]},
+           {"rule_id": "R_REFUND_REQUIRES_IDV", "branch": "else", "effect": "deny",
+            "applies": "unless", "condition": {"==": [...]}},
+           {"rule_id": "R_HIGH_VALUE_REQUIRES_APPROVAL", "effect": "require_approval",
+            "applies": "when", "condition": {">": [...]}, "approval_gate": "GATE_FINANCE_APPROVAL"}]}
+```
+
+- `applies` is `always`, `when` (the condition holds) or `unless` (it does not, for a
+  rule's `else` branch). Rules that never apply to this principal are left out; for a
+  supervisor the high-value rule is absent and `possible_verdicts` is `deny, allow`.
+- `verdict` is stated when nothing depends on the request (an intent no rule covers is
+  `deny`, as admission's default). Otherwise it is `conditional`, and
+  `possible_verdicts` lists what some assignment of the conditions reaches, composed as
+  admission composes it. Conditions are treated as independent, so the list can include
+  a verdict no real request reaches, never omit one a request does. Past 10 distinct
+  conditions it is `null`.
+- A plan covers policy rules. Which tools are surfaced also depends on the run's
+  safety mode and evidence; each rule's `prohibits` says what it withholds.
+
+Use it to review a pack change for one role, to show a UI what to ask for before
+offering an action, or to confirm that a principal can never reach `allow`.
+
+### Publish pack versions without a restart
+
+Point `pack_dirs` at a directory of pack files and the server loads new versions while
+it runs:
+
+```toml
+pack_dirs = ["/srv/contextos/packs"]   # JSON files, searched recursively; .git etc. skipped
+pack_reload_secs = 30                  # 0 (default): startup and POST /v1/packs/reload only
+```
+
+Keep the directory current however packs are published: a git checkout updated by a
+sync sidecar, an image or configuration volume, a deploy step. `POST /v1/packs/reload`
+(`control` scope) reads it at once, for a pipeline that publishes and then rolls out:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/packs/reload" -H "Authorization: Bearer $OPS_TOKEN"
+# {"added": [{"pack_ref": "ctxpack.support@5.3.0", "sha256": "sha256:…", …}],
+#  "refused": [], "unchanged": 1, "other": {"added": 0, "refused": 0}}
+```
+
+A reload only adds versions. Runs, decision records and replay cases cite a pack by
+reference, so a reference names one content forever:
+
+- a file whose reference is loaded with other content is refused
+  (`pack_ref_immutable`): change `pack_version` to publish a change;
+- a removed file does not unload its version; retire one with a `pack` revocation;
+- a pack for a tenant no startup pack names is refused (`tenant_not_configured`);
+- an invalid file is refused alone (`invalid`) and the rest still load, while at
+  startup any invalid source stops the server.
+
+Each added version is audited as `pack_loaded` (reference, digest, file) in its
+tenant's chain, and `GET /v1/packs` lists every version with its `sha256`. Loading a
+version changes nothing on its own: runs use it only when they name it or a rollout
+routes them to it. With several replicas each reads its own copy of the directory, so
+reload every replica (or wait one interval) before a rollout names a new version; until
+then a replica that has not loaded it answers `pack_not_found`. Write access to the
+directory is the authority to publish packs: give it to the release pipeline only.
 
 ### Roll out in stages
 

@@ -6,7 +6,7 @@ pub mod decision;
 
 pub use chain::{
     AuditEntry, AuditSigner, ChainError, ChainHead, KeyRing, Link, RemoteSigner, UnsignedLink, assemble_entry, link,
-    link_entry, link_unsigned, next_entry, verify_chain, verify_entry,
+    link_entry, link_unsigned, next_entry, verify_chain, verify_chain_withheld, verify_entry, verify_spine,
 };
 pub use decision::{DecisionDraft, DecisionError, assemble_decision, decision_record_hash, replay_packet};
 

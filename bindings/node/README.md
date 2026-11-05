@@ -27,6 +27,12 @@ Results that are not plain success throw: `ToolPaused` (approval, input, or an u
 outcome to reconcile: never retry blindly), `ToolBlocked`, `ToolRejected`,
 `ToolFailed`. Only requests the server did not process (429, 503) are retried.
 
+`run.checkToolCall(capabilityId, args, options)` answers what `callTool` would do with
+the same call (`allowed`, `approval_required`, `escalation_required`, `blocked` or
+`rejected`, with reason codes and obligations) without effect: nothing is requested,
+reserved or sent, and the check is audited. It is advisory; `not_evaluated` names what
+only dispatch decides.
+
 Try it against a local server from a checkout: `./examples/dev-server.sh` prints
 `CONTEXTOS_URL` and `CONTEXTOS_TOKEN`. The
 [integration guides](https://github.com/contextosai/ContextOS/tree/main/docs/integrations)

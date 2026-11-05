@@ -681,6 +681,85 @@
         "x-contextos-scope": "dispatch"
       }
     },
+    "/v1/runs/{run_id}/tool-calls/check": {
+      "post": {
+        "operationId": "check_tool_call",
+        "summary": "Govern one tool call without effect",
+        "description": "Runs the dispatch pipeline on the same facts (policy, authority, constraints, approvals, kill switch, boundary, loop guard, data flow) and stops before approval redemption, budget reservation and the operation claim. Nothing is requested, redeemed, reserved or sent; one `tool_call_check` audit entry records the check. The answer is advisory: `not_evaluated` names what only dispatch decides.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "name": "ContextOS-Executor-Generation",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Optional: when given, a stale executor is refused as its dispatch would be."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://contextosai.com/schemas/tool-envelope.v1.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What dispatch would do with the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
     "/v1/runs/{run_id}/operations/{operation_id}/input": {
       "post": {
         "operationId": "provide_input",
@@ -2905,7 +2984,7 @@
       "get": {
         "operationId": "list_packs",
         "summary": "The caller tenant's loaded Context Packs",
-        "description": "Every Context Pack this deployment pinned for the caller's tenant, in full, by pack reference.",
+        "description": "Every Context Pack loaded for the caller's tenant, in full, by pack reference, with its digest. Packs read from `pack_dirs` after startup appear here once loaded.",
         "responses": {
           "200": {
             "description": "Packs, ordered by reference",
@@ -2923,11 +3002,16 @@
                         "type": "object",
                         "required": [
                           "pack_ref",
+                          "sha256",
                           "pack"
                         ],
                         "properties": {
                           "pack_ref": {
                             "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "description": "Canonical digest of the pack document; one reference always has one content."
                           },
                           "pack": {
                             "$ref": "https://contextosai.com/schemas/context-pack.v2.schema.json"
@@ -2961,6 +3045,135 @@
           }
         ],
         "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/packs/reload": {
+      "post": {
+        "operationId": "reload_packs",
+        "summary": "Re-read the pack sources and add new pack versions",
+        "description": "Reads the files `packs` names and every JSON file under `pack_dirs` (names starting with `.` skipped) and adds pack versions not yet loaded; the server also does this every `pack_reload_secs`. A reload only adds: a file whose pack reference is loaded with other content is refused (`pack_ref_immutable`), a pack for a tenant no startup pack names is refused (`tenant_not_configured`), an invalid file is refused alone (`invalid`), and a removed file does not unload its pack (retire versions with a `pack` revocation). Each added pack is audited as `pack_loaded` in its tenant's chain. The answer lists what was added and refused for the caller's tenant and counts the rest.",
+        "responses": {
+          "200": {
+            "description": "What the reload did",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "added",
+                    "refused",
+                    "unchanged",
+                    "other"
+                  ],
+                  "properties": {
+                    "added": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "pack_ref",
+                          "tenant_id",
+                          "sha256",
+                          "path"
+                        ],
+                        "properties": {
+                          "pack_ref": {
+                            "type": "string"
+                          },
+                          "tenant_id": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "refused": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "reason",
+                          "detail"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "pack_ref": {
+                            "type": "string"
+                          },
+                          "tenant_id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "invalid",
+                              "pack_ref_immutable",
+                              "tenant_not_configured"
+                            ]
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "unchanged": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Source files whose pack is already loaded with the same content, across tenants."
+                    },
+                    "other": {
+                      "type": "object",
+                      "required": [
+                        "added",
+                        "refused"
+                      ],
+                      "properties": {
+                        "added": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "refused": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "description": "Additions and refusals for other tenants or for files that are not packs."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
       }
     },
     "/v1/config": {
@@ -7745,6 +7958,89 @@
             }
           }
         ]
+      },
+      "ToolCallCheck": {
+        "type": "object",
+        "required": [
+          "check"
+        ],
+        "properties": {
+          "check": {
+            "type": "object",
+            "required": [
+              "status",
+              "capability_id",
+              "operation_id",
+              "action_digest",
+              "reason_codes",
+              "obligations",
+              "message",
+              "operation_exists",
+              "not_evaluated",
+              "audit_sequence"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "allowed",
+                  "approval_required",
+                  "escalation_required",
+                  "blocked",
+                  "rejected"
+                ]
+              },
+              "capability_id": {},
+              "operation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "action_digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason_codes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "obligations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "operation_exists": {
+                "type": "boolean",
+                "description": "The run already has an operation with this id: dispatch treats the call as its retry."
+              },
+              "not_evaluated": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "budget_reservation",
+                    "operation_claim",
+                    "shared_guarantee_capacity"
+                  ]
+                }
+              },
+              "audit_sequence": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -630,3 +630,192 @@ fn init_tool_drafts_a_manifest_that_cannot_be_pinned_unreviewed() {
         2
     );
 }
+
+#[test]
+fn pack_tests_exit_by_result_and_write_junit() {
+    let example = format!("{}/../../examples/support-refund", env!("CARGO_MANIFEST_DIR"));
+    let pack = format!("{example}/pack.json");
+    let (code, out) = ctx(&["test", "--pack", &pack, &format!("{example}/pack_test.json")]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["verdict"], "pass");
+    assert!(out["passed"].as_u64().unwrap() >= 6);
+
+    // A wrong expectation fails with exit 1, names what was observed, and is a JUnit failure.
+    let run: Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{example}/requests/run.json")).unwrap()).unwrap();
+    let suite = json!({"suite": "wrong <expectation>",
+        "base": {"request": run["request"], "run_context": run["run_context"]},
+        "tests": [{"name": "high value is allowed", "with": {"request": {"input": {"context": {"refund_amount": 9000}}}},
+            "expect": {"verdict": "allow"}}]});
+    let suite = write("wrong_test.json", &suite);
+    let junit = write("junit.xml", &Value::Null);
+    let (code, out) = ctx(&["test", "--pack", &pack, &suite, "--junit", &junit]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(
+        out["suites"][0]["tests"][0]["failures"][0],
+        "verdict: expected allow, got require_approval"
+    );
+    let xml = std::fs::read_to_string(&junit).unwrap();
+    assert!(
+        xml.contains("<testsuite name=\"wrong &lt;expectation&gt;\" tests=\"1\" failures=\"1\" errors=\"0\">"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<failure message=\"verdict: expected allow, got require_approval\">"),
+        "{xml}"
+    );
+
+    // A suite that cannot run is a usage error.
+    let empty = write("empty_test.json", &json!({"suite": "empty", "base": {}, "tests": []}));
+    assert_eq!(ctx(&["test", "--pack", &pack, &empty]).0, 2);
+}
+
+#[test]
+fn plan_reports_residual_conditions_and_needs_an_intent() {
+    let example = format!("{}/../../examples/support-refund", env!("CARGO_MANIFEST_DIR"));
+    let pack = format!("{example}/pack.json");
+    let run_path = format!("{example}/requests/run.json");
+    let (code, out) = ctx(&["plan", "--pack", &pack, "--run", &run_path]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["intent"], "support.refund");
+    assert_eq!(out["verdict"], "conditional");
+    assert_eq!(
+        out["conditions"][1],
+        json!({">": [{"var": "request.context.refund_amount"}, 3000]})
+    );
+
+    // A bare run context works too; without an intent anywhere it is a usage error.
+    let run: Value = serde_json::from_str(&std::fs::read_to_string(&run_path).unwrap()).unwrap();
+    let mut bare = run["run_context"].clone();
+    bare.as_object_mut().unwrap().remove("intent");
+    let bare = write("plan_run_context.json", &bare);
+    assert_eq!(ctx(&["plan", "--pack", &pack, "--run", &bare]).0, 2);
+    let (code, out) = ctx(&["plan", "--pack", &pack, "--run", &bare, "--intent", "data.lookup"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["verdict"], "deny");
+}
+
+#[test]
+fn build_assembles_a_pack_from_a_base_and_rule_libraries() {
+    let authoring = format!("{}/../../examples/support-refund/authoring", env!("CARGO_MANIFEST_DIR"));
+    let source = format!("{authoring}/pack.source.json");
+    // The committed example matches its sources.
+    let (code, out) = ctx(&["build", &source, "--check", &format!("{authoring}/pack-5.3.0.json")]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out["pack_ref"], "ctxpack.support@5.3.0");
+    assert_eq!(
+        out["imported_bundles"]["POLICY_CHARGEBACKS_V1"],
+        "acme.chargebacks@1.0.0"
+    );
+    assert_eq!(out["check"]["matches"], true);
+
+    // Printed without --out; the import is scoped to the intent.
+    let (code, pack) = ctx(&["build", &source]);
+    assert_eq!(code, 0);
+    let bundles = pack["policy_layer"]["policy_bundles"].as_array().unwrap();
+    assert_eq!(
+        bundles[1]["policy_dsl"]["rules"][0]["applies_to"]["intent"],
+        "support.refund"
+    );
+
+    // A pack that differs from its sources fails the check.
+    let base: Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{authoring}/../pack.json")).unwrap()).unwrap();
+    let stale = write("stale_pack.json", &base);
+    assert_eq!(ctx(&["build", &source, "--check", &stale]).0, 1);
+
+    let library = format!("{authoring}/libraries/chargebacks.json");
+    let pack_path = format!("{authoring}/../pack.json");
+    let attempt = |name: &str, imports: Value| {
+        let file = write(
+            name,
+            &json!({"pack_source": "contextos.pack_source.v1", "base": pack_path,
+                "patch": {"pack_meta": {"pack_version": "9.0.0"}}, "imports": imports}),
+        );
+        ctx(&["build", &file]).0
+    };
+    // Importing a bundle twice, or a bundle the library lacks, is refused.
+    assert_eq!(
+        attempt("twice.source.json", json!([{"library": library}, {"library": library}])),
+        2
+    );
+    assert_eq!(
+        attempt(
+            "missing.source.json",
+            json!([{"library": library, "bundles": ["NOPE"]}])
+        ),
+        2
+    );
+    // A priority override applies; an import still builds.
+    assert_eq!(
+        attempt("priority.source.json", json!([{"library": library, "priority": 50}])),
+        0
+    );
+
+    // Scoping narrows, never redirects: the base's support.refund rules cannot be
+    // imported for another intent.
+    let redirect = write(
+        "redirect_library.json",
+        &json!({"rule_library": "contextos.rule_library.v1", "library_id": "acme.returns", "version": "4.0.0",
+            "policy_bundles": [base["policy_layer"]["policy_bundles"][0].clone()]}),
+    );
+    let mut renamed = std::fs::read_to_string(&redirect).unwrap();
+    renamed = renamed.replace("POLICY_RETURNS_V4", "POLICY_RETURNS_COPY");
+    std::fs::write(&redirect, renamed).unwrap();
+    assert_eq!(
+        attempt(
+            "redirect.source.json",
+            json!([{"library": redirect, "intent": "data.lookup"}])
+        ),
+        2
+    );
+
+    // Sources that extend one another in a cycle are refused.
+    let a = write(
+        "cycle_a.source.json",
+        &json!({"pack_source": "contextos.pack_source.v1", "base": "cycle_b.source.json"}),
+    );
+    write(
+        "cycle_b.source.json",
+        &json!({"pack_source": "contextos.pack_source.v1", "base": "cycle_a.source.json"}),
+    );
+    assert_eq!(ctx(&["build", &a]).0, 2);
+}
+
+#[test]
+fn audit_verify_checks_only_the_spine_of_masked_entries_and_says_so() {
+    let (mut chain, keys) = signed_chain(3);
+    let k = write("masked_keys.json", &keys);
+    chain[1]["payload"]["step"] = json!("masked:hmac-sha256:00");
+    chain[1]["masked"] = json!({"scheme": "hmac-sha256", "paths": ["/step"]});
+    let (code, report) = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("masked_entries.json", &json!(chain)),
+        "--keys",
+        &k,
+    ]);
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["payload_unverified_sequences"], json!([2]));
+    // An unmarked change to a payload still fails.
+    chain[1].as_object_mut().unwrap().remove("masked");
+    let (code, _) = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("unmarked_entries.json", &json!(chain)),
+        "--keys",
+        &k,
+    ]);
+    assert_eq!(code, 1);
+    // Marking an entry masked never excuses a broken spine.
+    chain[1]["masked"] = json!({"scheme": "hmac-sha256", "paths": ["/step"]});
+    chain[1]["kind"] = json!("something_else");
+    let (code, _) = ctx(&[
+        "audit-verify",
+        "--entries",
+        &write("respined_entries.json", &json!(chain)),
+        "--keys",
+        &k,
+    ]);
+    assert_eq!(code, 1);
+}

@@ -149,6 +149,11 @@ def main() -> None:
         assert run.executor_generation == 2, run
 
         call = json.loads((EXAMPLE / "requests/tool_call.json").read_text())
+        # A check answers what dispatch would do, without effect.
+        checked = run.check_tool_call(call["capability_id"], call["args"], approval_mode="destructive",
+                                      idempotency_key=call["idempotency_key"], evidence_refs=call["evidence_refs"])
+        assert checked["status"] == "allowed" and not checked["operation_exists"], checked
+        assert "budget_reservation" in checked["not_evaluated"], checked
         output = run.call_tool(call["capability_id"], call["args"], approval_mode="destructive",
                                idempotency_key=call["idempotency_key"], evidence_refs=call["evidence_refs"],
                                tool_call_id="tc_1")

@@ -54,6 +54,7 @@ mod shared_guarantees;
 mod shared_inspection;
 pub mod step_up;
 pub mod task_authorization;
+pub mod tool_call_check;
 pub mod upstream_drift;
 mod usage;
 
@@ -284,6 +285,9 @@ struct Pipeline<'a> {
     escalation_id: Option<String>,
     /// The operation this call compensates.
     compensates: Option<String>,
+    /// Only check the call (see [`tool_call_check`]): nothing is written, requested or
+    /// claimed, and the pipeline stops before approval redemption.
+    check: bool,
 }
 
 impl<'a> Pipeline<'a> {
@@ -306,6 +310,7 @@ impl<'a> Pipeline<'a> {
             policy_decision_id: None,
             escalation_id: None,
             compensates: None,
+            check: false,
         }
     }
 
@@ -589,7 +594,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         )
     )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope, None, None, None).await;
+        let outcome = self.dispatch_inner(admission, envelope, None, None, None, false).await;
         let span = tracing::Span::current();
         match &outcome {
             Ok(outcome) => {
@@ -618,7 +623,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         envelope: &Value,
         executor_generation: u64,
     ) -> Result<DispatchOutcome, GatewayError> {
-        self.dispatch_inner(admission, envelope, None, Some(executor_generation), None)
+        self.dispatch_inner(admission, envelope, None, Some(executor_generation), None, false)
             .await
     }
 
@@ -643,6 +648,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Some(continuation),
                 continuation.executor_generation,
                 None,
+                false,
             )
             .await;
         if let Ok(outcome) = &outcome {
@@ -658,8 +664,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         continuation: Option<&Continuation>,
         fence: Option<u64>,
         compensates: Option<&Value>,
+        check: bool,
     ) -> Result<DispatchOutcome, GatewayError> {
         let mut p = Pipeline::new(admission, envelope);
+        p.check = check;
         let compensates_id = compensates.map(|op| op["intent"]["operation_id"].clone());
         p.compensates = compensates_id.as_ref().and_then(Value::as_str).map(str::to_owned);
 
@@ -927,16 +935,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             ("capability", manifest.capability_id.as_str()),
         ]);
         if let Some(reason) = revocations::matching(revoked.as_ref().map(|r| &r.body), &targets) {
-            let entry = self
-                .audit
-                .append(
-                    &admission.tenant_id,
-                    "revocation_refusal",
-                    json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": [reason]}),
-                    &now,
-                )
-                .await?;
-            p.report.audit_sequences.push(entry.sequence);
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": [reason]});
+            self.record(&mut p, "revocation_refusal", body, &now).await?;
             return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
         }
         if let Some(reason) = self.drift.refusal(manifest) {
@@ -948,17 +948,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(p.stop("blocked", vec![reason.into()], message));
         }
         if let Some(Err(reasons)) = boundary {
-            let entry = self
-                .audit
-                .append(
-                    &admission.tenant_id,
-                    "boundary_refusal",
-                    json!({"run_id": admission.run_id,
-                    "operation_id": operation_id, "reason_codes": reasons}),
-                    &now,
-                )
-                .await?;
-            p.report.audit_sequences.push(entry.sequence);
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": reasons});
+            self.record(&mut p, "boundary_refusal", body, &now).await?;
             return Ok(p.stop("blocked", reasons, "The run's execution boundary is not active."));
         }
         let existing_ledger = existing_ledger?;
@@ -976,17 +967,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             } else {
                 "loop_detected"
             };
-            let entry = self
-                .audit
-                .append(
-                    &admission.tenant_id,
-                    reason,
-                    json!({"run_id": admission.run_id, "operation_id": operation_id,
-                        "capability_id": manifest.capability_id, "call_signature": call_signature, "limit": limit}),
-                    &now,
-                )
-                .await?;
-            p.report.audit_sequences.push(entry.sequence);
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "call_signature": call_signature, "limit": limit});
+            self.record(&mut p, reason, body, &now).await?;
             p.report.obligations.push("change_approach".into());
             return Ok(p.stop(
                 "blocked",
@@ -1006,18 +989,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 } else {
                     "effect_guard_saturated"
                 };
-                let entry = self
-                    .audit
-                    .append(
-                        &admission.tenant_id,
-                        "repeated_effect_refusal",
-                        json!({"run_id": admission.run_id, "operation_id": operation_id,
-                            "capability_id": manifest.capability_id, "call_signature": call_signature,
-                            "applied_operation_id": applied, "reason_codes": [reason]}),
-                        &now,
-                    )
-                    .await?;
-                p.report.audit_sequences.push(entry.sequence);
+                let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                    "capability_id": manifest.capability_id, "call_signature": call_signature,
+                    "applied_operation_id": applied, "reason_codes": [reason]});
+                self.record(&mut p, "repeated_effect_refusal", body, &now).await?;
                 p.report.obligations.push("reconcile_existing_operation".into());
                 return Ok(p.stop(
                     "blocked",
@@ -1104,10 +1079,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 read.body
             } else {
                 let initial = json!({"approval_request_id": request_id, "revision": 0, "operation_id": null, "action_digest": null});
-                match self.store.create(&key, &initial).await {
-                    Ok(created) => created.body,
-                    Err(e) if e.is_conflict() => self.store.get(&key).await?.map(|r| r.body).unwrap_or(initial),
-                    Err(e) => return Err(e.into()),
+                // A check reads the state redemption would start from without creating it.
+                if p.check {
+                    initial
+                } else {
+                    match self.store.create(&key, &initial).await {
+                        Ok(created) => created.body,
+                        Err(e) if e.is_conflict() => self.store.get(&key).await?.map(|r| r.body).unwrap_or(initial),
+                        Err(e) => return Err(e.into()),
+                    }
                 }
             };
             material.insert("binding".into(), binding.clone());
@@ -1136,25 +1116,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "constraint_observations": constraint_observations,
         }));
         let decision = serde_json::to_value(&authorization.decision).unwrap_or(Value::Null);
-        let entry = self
-            .audit
-            .append(&admission.tenant_id, "authorization_decision", decision, &now)
-            .await?;
-        p.report.audit_sequences.push(entry.sequence);
+        self.record(&mut p, "authorization_decision", decision, &now).await?;
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
         p.report.reason_codes.extend(outside_task);
         if let Some(request_id) = step_up_refused {
-            let entry = self
-                .audit
-                .append(
-                    &admission.tenant_id,
-                    "approval_step_up_refused",
-                    json!({"run_id": admission.run_id, "operation_id": operation_id,
-                        "capability_id": manifest.capability_id, "approval_request_id": request_id}),
-                    &now,
-                )
-                .await?;
-            p.report.audit_sequences.push(entry.sequence);
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "approval_request_id": request_id});
+            self.record(&mut p, "approval_step_up_refused", body, &now).await?;
             p.report.reason_codes.push("approval_step_up_required".into());
             p.report.obligations.push("approve_with_step_up".into());
         }
@@ -1165,6 +1133,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .extend(authorization.decision.obligations.iter().cloned());
         match authorization.verdict.as_str() {
             "allow" => {}
+            "require_approval" if p.check => {
+                p.report.obligations.push("await_approval".into());
+                return Ok(p.stop("approval_required", vec![], "Approval is required before this effect."));
+            }
+            "escalate" if p.check => {
+                if !p.report.obligations.iter().any(|o| o == "escalate") {
+                    p.report.obligations.push("escalate".into());
+                }
+                return Ok(p.stop(
+                    "escalation_required",
+                    vec!["policy_escalation".into()],
+                    "Policy requires escalation to a human.",
+                ));
+            }
             "require_approval" => {
                 return Ok(
                     match self.ports.approvals.request(admission, &binding, &action_digest).await {
@@ -1242,20 +1224,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return refused(p, vec!["data_flow_binding_mismatch".into()]);
             }
             let flow = evaluate_data_flow(&request, &policy, &json!(now));
-            let entry = self
-                .audit
-                .append(
-                    &admission.tenant_id,
-                    "data_flow_decision",
-                    serde_json::to_value(&flow).unwrap_or(Value::Null),
-                    &now,
-                )
-                .await?;
-            p.report.audit_sequences.push(entry.sequence);
+            let body = serde_json::to_value(&flow).unwrap_or(Value::Null);
+            self.record(&mut p, "data_flow_decision", body, &now).await?;
             if !flow.allowed {
                 p.report.obligations.extend(flow.unsatisfied_obligations.clone());
                 return refused(p, flow.reason_codes);
             }
+        }
+        if p.check {
+            return Ok(tool_call_check::conclude(p, &approval_input, existing_ledger.is_some()));
         }
         let approved = redemption_key.is_some();
         if let Some(key) = redemption_key {
@@ -2411,6 +2388,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         self.audit
             .append(&admission.tenant_id, "effect_observation", observation, &observed_at)
             .await?;
+        Ok(())
+    }
+
+    /// Appends an audit entry for the pipeline's call, unless it only checks the call.
+    async fn record(&self, p: &mut Pipeline<'_>, kind: &str, body: Value, now: &str) -> Result<(), GatewayError> {
+        if !p.check {
+            let entry = self.audit.append(&p.admission.tenant_id, kind, body, now).await?;
+            p.report.audit_sequences.push(entry.sequence);
+        }
         Ok(())
     }
 

@@ -34,6 +34,7 @@ pub struct Metrics {
     pack_intent_mismatches: Mutex<BTreeMap<String, u64>>,
     over_limit_imports: Mutex<BTreeMap<String, u64>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
+    audit_sinks: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
     governance: Mutex<Option<String>>,
     /// Gauges from this replica's last upstream drift check (see `upstream_check`).
@@ -117,6 +118,11 @@ impl Metrics {
         bump(&self.notifications, (webhook.to_owned(), outcome.to_owned()));
     }
 
+    /// Counts an audit sink batch by sink and outcome (`delivered`, `failed`).
+    pub fn audit_sink(&self, sink: &str, outcome: &str) {
+        bump(&self.audit_sinks, (sink.to_owned(), outcome.to_owned()));
+    }
+
     /// Counts a recorded decision by its status.
     pub fn decision(&self, status: &str) {
         bump(&self.decisions, status.to_owned());
@@ -193,6 +199,16 @@ impl Metrics {
                 let _ = writeln!(
                     out,
                     "contextos_notifications_total{{webhook=\"{webhook}\",outcome=\"{outcome}\"}} {n}"
+                );
+            }
+        }
+        out.push_str("# HELP contextos_audit_sink_batches_total Audit sink batches by sink and outcome.\n");
+        out.push_str("# TYPE contextos_audit_sink_batches_total counter\n");
+        if let Ok(sinks) = self.audit_sinks.lock() {
+            for ((sink, outcome), n) in sinks.iter() {
+                let _ = writeln!(
+                    out,
+                    "contextos_audit_sink_batches_total{{sink=\"{sink}\",outcome=\"{outcome}\"}} {n}"
                 );
             }
         }
