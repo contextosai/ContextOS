@@ -18,7 +18,7 @@ export const RUN_HEADER = "ContextOS-Run-Id";
 export const RESERVATION_HEADER = "ContextOS-Usage-Reservation";
 // This client's release (scripts/package_clients.py checks it against Cargo.toml) and
 // the HTTP API generation it speaks; a server reports both in GET /v1/deployment.
-export const CLIENT_VERSION = "0.1.0-alpha.13";
+export const CLIENT_VERSION = "0.1.0-alpha.14";
 export const API_VERSION = "v1";
 
 /** The server speaks a different HTTP API generation than this client. */
