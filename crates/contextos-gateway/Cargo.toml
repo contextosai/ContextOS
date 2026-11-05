@@ -14,6 +14,7 @@ contextos-kernel.workspace = true
 contextos-store.workspace = true
 contextos-audit.workspace = true
 serde.workspace = true
+schemars.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

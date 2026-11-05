@@ -41,6 +41,14 @@ pub struct Metrics {
     upstream: Mutex<Option<String>>,
 }
 
+/// The `contextos_replicas` gauge, which the `/metrics` handler appends.
+#[must_use]
+pub fn replicas_exposition(replicas: usize) -> String {
+    format!(
+        "# HELP contextos_replicas Live replicas sharing tenant limits.\n# TYPE contextos_replicas gauge\ncontextos_replicas {replicas}\n"
+    )
+}
+
 /// One labelled counter: label value to count.
 type Counter = Mutex<BTreeMap<String, u64>>;
 

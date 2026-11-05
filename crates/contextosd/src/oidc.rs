@@ -54,7 +54,7 @@ const MAX_JWKS_BYTES: usize = 1024 * 1024;
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OidcConfig {
     /// Exact `iss` value.
@@ -86,10 +86,13 @@ pub struct OidcConfig {
     /// value itself is the agent id.
     #[serde(default)]
     pub agents: std::collections::BTreeMap<String, Vec<String>>,
+    /// Accepted signature algorithms (asymmetric only).
     #[serde(default = "default_algorithms")]
     pub algorithms: Vec<String>,
+    /// Clock skew tolerated on `exp` and `nbf`.
     #[serde(default = "default_leeway")]
     pub leeway_seconds: u64,
+    /// How often the JWKS is fetched again.
     #[serde(default = "default_refresh")]
     pub refresh_seconds: u64,
     /// Accept RFC 8693 delegated tokens: the caller is the actor, acting for a user.
@@ -98,7 +101,7 @@ pub struct OidcConfig {
 }
 
 /// `[oidc.delegation]`: how a delegated token names its actor and user.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DelegationConfig {
     /// Claim path of the actor object (its `sub` is the caller).

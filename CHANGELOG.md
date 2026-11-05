@@ -5,6 +5,16 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `docs/CONFIG.md` lists every configuration key with its type, default and meaning,
+  and `docs/METRICS.md` every metric with its type and labels. Both are generated from
+  the code (`CONTEXTOS_BLESS=1 cargo test -p contextosd --test generated`), and the
+  test fails when either is stale.
+- `contextosd --config-schema` prints the configuration's JSON Schema, also committed
+  as `deploy/contextosd-config.schema.json`. The example configuration names it in a
+  `#:schema` comment, so TOML editors complete and check keys. A test validates the
+  example configurations against it.
+
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and
