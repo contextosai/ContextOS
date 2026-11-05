@@ -52,7 +52,8 @@ capabilities: {}
 #   pack_dirs = ["/var/lib/contextos/pack-sync/current/<path in the repo>"]
 #   pack_reload_secs = 30
 # The checkout replaces itself atomically, and a reload only adds versions: a changed
-# file under a loaded pack reference is refused, never applied. Write access to the
+# file under a loaded pack reference is refused, never applied, and a pod that starts
+# with one fails to start (references are bound to their digest in the store). Write access to the
 # repository is the authority to publish packs.
 packSync:
   enabled: false

@@ -6,15 +6,18 @@
 //! configuration system is how a deployment publishes packs; the server re-reads its
 //! sources every `pack_reload_secs` and on `POST /v1/packs/reload`.
 //!
-//! A reload only adds. A pack reference names one version forever, because runs,
-//! decision records and replay cases cite it: a file whose reference is loaded with
-//! other content is refused (publish a new version), and a file that disappears does
-//! not unload its pack (retire a version with a `pack` revocation). A pack for a tenant
-//! no startup pack names is refused too, since the per-tenant sweeps are fixed at
-//! startup. Every added pack is recorded in its tenant's audit chain as `pack_loaded`.
+//! A reload only adds. A pack reference names one content, because runs, decision
+//! records and replay cases cite it: the first load of a reference records
+//! `pack_loaded` in its tenant's audit chain and binds the reference to the content's
+//! sha256 in the store (see [`crate::pack_binding`]), before the pack serves traffic.
+//! A file whose reference is bound to other content is refused (publish a new version),
+//! and a file that disappears does not unload its pack (retire a version with a `pack`
+//! revocation). A pack for a tenant no startup pack names is refused too, since the
+//! per-tenant sweeps are fixed at startup.
 //!
-//! At startup any invalid source stops the server; on reload an invalid file is
-//! refused alone and the rest still load.
+//! At startup any invalid source, and any pack whose reference is bound to other
+//! content, stops the server; on reload such a file is refused alone and the rest
+//! still load.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -31,6 +34,7 @@ use serde_json::json;
 
 use crate::app::{ApiResult, AppState, LoadedPack, authorize, load_pack};
 use crate::config::Config;
+use crate::pack_binding::{BindError, PackIdentity, bind};
 use crate::runtime::SystemClock;
 
 /// At most this many files are read per directory scan.
@@ -41,6 +45,8 @@ const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 type Packs = HashMap<String, Arc<LoadedPack>>;
 /// A source file and what reading it gave.
 type ReadPack = (PathBuf, Result<(String, LoadedPack), String>);
+/// A pack a reload may add once it is bound: its reference, the pack and its source.
+type Candidate = (String, LoadedPack, String);
 
 /// Where packs are read from.
 #[derive(Debug, Clone, Default)]
@@ -135,7 +141,7 @@ pub struct RefusedPack {
     pub pack_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
-    /// `invalid`, `pack_ref_immutable` or `tenant_not_configured`.
+    /// `invalid`, `pack_ref_immutable`, `tenant_not_configured` or `unrecorded`.
     pub reason: &'static str,
     pub detail: String,
 }
@@ -194,10 +200,12 @@ impl PackRegistry {
         &self.tenants
     }
 
-    /// Merges `read` (each source path and what reading it gave) into the loaded packs.
-    fn merge(&self, read: Vec<ReadPack>) -> ReloadReport {
+    /// Sorts `read` (each source path and what reading it gave) into packs already
+    /// loaded, refusals and candidates to add.
+    fn classify(&self, read: Vec<ReadPack>) -> (ReloadReport, Vec<Candidate>) {
         let mut report = ReloadReport::default();
-        let mut next: Packs = (*self.snapshot()).clone();
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let loaded = self.snapshot();
         for (path, result) in read {
             let path_text = path.display().to_string();
             let (pack_ref, pack) = match result {
@@ -220,35 +228,78 @@ impl PackRegistry {
                 reason,
                 detail,
             };
-            match next.get(&pack_ref) {
-                Some(loaded) if loaded.sha256 == pack.sha256 => report.unchanged += 1,
-                Some(loaded) => report.refused.push(refuse(
+            let seen = loaded
+                .get(&pack_ref)
+                .map(|p| p.sha256.clone())
+                .or_else(|| candidates.iter().find(|c| c.0 == pack_ref).map(|c| c.1.sha256.clone()));
+            match seen {
+                Some(sha256) if sha256 == pack.sha256 => report.unchanged += 1,
+                Some(sha256) => report.refused.push(refuse(
                     "pack_ref_immutable",
-                    format!(
-                        "{pack_ref} is loaded as {}; publish changes as a new version",
-                        loaded.sha256
-                    ),
+                    format!("{pack_ref} is loaded as {sha256}; publish changes as a new version"),
                 )),
                 None if !self.tenants.contains(&pack.tenant_id) => report.refused.push(refuse(
                     "tenant_not_configured",
                     format!("no startup pack is for tenant {}", pack.tenant_id),
                 )),
-                None => {
-                    report.added.push(AddedPack {
-                        pack_ref: pack_ref.clone(),
-                        tenant_id: pack.tenant_id.clone(),
-                        sha256: pack.sha256.clone(),
-                        path: path_text.clone(),
-                    });
-                    next.insert(pack_ref, Arc::new(pack));
-                }
+                None => candidates.push((pack_ref, pack, path_text)),
             }
         }
-        if !report.added.is_empty() {
-            *self.packs.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(next);
-        }
-        report
+        (report, candidates)
     }
+
+    /// Adds bound packs to the loaded ones.
+    fn add(&self, bound: Vec<(String, LoadedPack)>) {
+        if bound.is_empty() {
+            return;
+        }
+        let mut next: Packs = (*self.snapshot()).clone();
+        for (pack_ref, pack) in bound {
+            next.insert(pack_ref, Arc::new(pack));
+        }
+        *self.packs.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(next);
+    }
+}
+
+fn now<S, L>(state: &AppState<S, L>) -> String
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    state.gateway.as_ref().map_or_else(|| SystemClock.now(), |g| g.now())
+}
+
+/// Binds every pack loaded at startup (see [`crate::pack_binding`]); a reference bound
+/// to other content, or a binding that cannot be read or written, is an error.
+pub async fn bind_startup<S, L>(state: &AppState<S, L>) -> Result<(), String>
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    let _one = state.packs.reloading.lock().await;
+    let mut packs: Vec<(String, Arc<LoadedPack>)> = state
+        .packs
+        .snapshot()
+        .iter()
+        .map(|(r, p)| (r.clone(), p.clone()))
+        .collect();
+    packs.sort_by(|a, b| a.0.cmp(&b.0));
+    let now = now(state);
+    for (pack_ref, pack) in packs {
+        let identity = PackIdentity {
+            pack_ref: &pack_ref,
+            tenant_id: &pack.tenant_id,
+            sha256: &pack.sha256,
+            source: "startup",
+        };
+        if bind(state.store.as_ref(), &state.audit, identity, &now)
+            .await
+            .map_err(|e| format!("{pack_ref}: {e}"))?
+        {
+            tracing::info!(%pack_ref, sha256 = %pack.sha256, "bound context pack");
+        }
+    }
+    Ok(())
 }
 
 /// Re-reads every source, adds new pack versions and records each in its tenant's
@@ -274,15 +325,40 @@ where
     })
     .await
     .map_err(|e| e.to_string())??;
-    let report = registry.merge(read);
-    let now = state.gateway.as_ref().map_or_else(|| SystemClock.now(), |g| g.now());
-    for added in &report.added {
-        tracing::info!(pack_ref = %added.pack_ref, tenant = %added.tenant_id, "loaded context pack");
-        let entry = json!({"pack_ref": added.pack_ref, "sha256": added.sha256, "source": added.path});
-        if let Err(error) = state.audit.append(&added.tenant_id, "pack_loaded", entry, &now).await {
-            tracing::warn!(%error, pack_ref = %added.pack_ref, "pack load not recorded");
+    let (mut report, candidates) = registry.classify(read);
+    let now = now(state);
+    let mut bound = Vec::new();
+    for (pack_ref, pack, path) in candidates {
+        let identity = PackIdentity {
+            pack_ref: &pack_ref,
+            tenant_id: &pack.tenant_id,
+            sha256: &pack.sha256,
+            source: &path,
+        };
+        match bind(state.store.as_ref(), &state.audit, identity, &now).await {
+            Ok(_) => {
+                tracing::info!(%pack_ref, tenant = %pack.tenant_id, "loaded context pack");
+                report.added.push(AddedPack {
+                    pack_ref: pack_ref.clone(),
+                    tenant_id: pack.tenant_id.clone(),
+                    sha256: pack.sha256.clone(),
+                    path,
+                });
+                bound.push((pack_ref, pack));
+            }
+            Err(error) => report.refused.push(RefusedPack {
+                path,
+                pack_ref: Some(pack_ref.clone()),
+                tenant_id: Some(pack.tenant_id.clone()),
+                reason: match error {
+                    BindError::Changed { .. } => "pack_ref_immutable",
+                    BindError::Unrecorded(_) => "unrecorded",
+                },
+                detail: format!("{pack_ref}: {error}"),
+            }),
         }
     }
+    registry.add(bound);
     for refused in &report.refused {
         tracing::warn!(path = %refused.path, reason = refused.reason, detail = %refused.detail, "context pack refused");
     }

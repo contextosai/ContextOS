@@ -50,8 +50,13 @@ minor versions may break APIs and every break is listed.
   and on `POST /v1/packs/reload` (`control` scope). A reload only adds: a loaded
   reference with other content (`pack_ref_immutable`), a pack for a tenant no startup
   pack names (`tenant_not_configured`) and an invalid file (`invalid`) are refused, and
-  a removed file does not unload its version. Each addition is audited as
-  `pack_loaded`; `GET /v1/packs` now reports each pack's `sha256`. See GUIDE §5,
+  a removed file does not unload its version. The first load of each reference, at
+  startup or on reload, is audited as `pack_loaded` and binds the reference to its
+  digest in the store before the pack serves traffic; a later load with other content
+  is refused, and at startup stops the server, so an edited file cannot change a
+  reference across a restart (with a durable store). A version whose audit entry or
+  binding cannot be written is not added (`unrecorded`). `GET /v1/packs` now reports
+  each pack's `sha256`. See GUIDE §5,
   "Publish pack versions without a restart".
 - `ctx plan`: a decision plan of what a pack lets one principal do for an intent before
   any request exists. Each rule is reported as applying always, or when / unless a
@@ -80,6 +85,9 @@ Thirteenth alpha: the Python client on PyPI, as `contextos-client`. See the
 [release notes](docs/releases/v0.1.0-alpha.13.md).
 
 ### Changed
+- Escalation webhook cursors moved from the `escalation` documents to a new
+  `delivery_cursor` kind, beside the audit sinks' cursors; a cursor kept by an earlier
+  release is carried over on first use, so no event is skipped or replayed.
 - The Python package is published on PyPI as `contextos-client`, the npm package's
   name: PyPI refuses `contextos` as too similar to an existing project, so 0.1.0-alpha.12
   was not published there. Install with `pip install --pre contextos-client`; the
