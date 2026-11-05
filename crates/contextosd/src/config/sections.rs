@@ -33,6 +33,10 @@ pub struct ServerConfig {
     /// (see [`crate::protected_resource`]). Unset: no metadata is published.
     #[serde(default)]
     pub public_url: Option<String>,
+    /// Serve HTTPS (and require client certificates, with `client_ca_path`) without a
+    /// terminating proxy (see `tls_server`). Unset: plain HTTP behind your proxy.
+    #[serde(default)]
+    pub tls: Option<crate::tls_server::TlsConfig>,
 }
 
 fn default_max_body() -> usize {

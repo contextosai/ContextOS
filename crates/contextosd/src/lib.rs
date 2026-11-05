@@ -42,6 +42,7 @@ pub mod rollout;
 pub mod runtime;
 pub mod task_amendment;
 pub mod telemetry;
+pub mod tls_server;
 pub mod tool_call_check;
 pub mod upstream_check;
 pub mod user_binding;

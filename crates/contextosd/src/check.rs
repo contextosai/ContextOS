@@ -93,6 +93,13 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
             "{private_cas} private CA certificate(s) trusted from CONTEXTOS_CA_BUNDLE"
         ));
     }
+    if let Some(tls) = &config.server.tls {
+        crate::tls_server::server_config(tls).map_err(|e| format!("[server.tls] {e}"))?;
+        report.push(match &tls.client_ca_path {
+            Some(_) => "TLS certificate and client CA load (clients must present a certificate)".into(),
+            None => "TLS certificate loads".into(),
+        });
+    }
     let packs = load_packs(&config)?;
     report.push(format!("{} context pack(s) valid", packs.len()));
     if !config.pack_dirs.is_empty() {

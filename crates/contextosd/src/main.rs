@@ -207,13 +207,21 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
         .unwrap_or_else(|e| fail(e));
-    tracing::info!(listen = %config.server.listen, "contextosd listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
-        .await
-        .unwrap_or_else(|e| fail(e));
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+        tracing::info!("shutting down");
+    };
+    if let Some(tls) = config.server.tls.clone() {
+        tracing::info!(listen = %config.server.listen, mutual = tls.client_ca_path.is_some(), "contextosd listening (TLS)");
+        contextosd::tls_server::serve(listener, app, tls, shutdown)
+            .await
+            .unwrap_or_else(|e| fail(e));
+    } else {
+        tracing::info!(listen = %config.server.listen, "contextosd listening");
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .await
+            .unwrap_or_else(|e| fail(e));
+    }
     telemetry.shutdown().await;
 }
