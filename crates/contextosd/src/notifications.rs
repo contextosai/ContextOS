@@ -243,6 +243,11 @@ pub fn event(entry: &Value, link_template: Option<&str>) -> Option<Value> {
 }
 
 fn cursor_key(tenant: &str, webhook: &str) -> DocKey {
+    DocKey::new(tenant, DocKind::DeliveryCursor, format!("webhook:{webhook}"))
+}
+
+/// Where releases up to v0.1.0-alpha.13 kept the cursor, read once to carry it over.
+fn legacy_cursor_key(tenant: &str, webhook: &str) -> DocKey {
     DocKey::new(tenant, DocKind::Escalation, format!("delivery:{webhook}"))
 }
 
@@ -327,9 +332,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Dispatcher<S, L> {
         let (mut next, mut revision) = if let Some(doc) = cursor {
             (doc.body["next_sequence"].as_u64().unwrap_or(1), Some(doc.revision))
         } else {
-            // Start at the head: a new webhook is told about new transitions only.
-            let head = log.head(tenant).await.map_err(|e| e.to_string())?;
-            let start = head.map_or(1, |row| row.sequence + 1);
+            let legacy = self
+                .store
+                .get(&legacy_cursor_key(tenant, &hook.config.id))
+                .await
+                .map_err(|e| e.to_string())?;
+            let start = if let Some(doc) = legacy {
+                doc.body["next_sequence"].as_u64().unwrap_or(1)
+            } else {
+                // Start at the head: a new webhook is told about new transitions only.
+                let head = log.head(tenant).await.map_err(|e| e.to_string())?;
+                head.map_or(1, |row| row.sequence + 1)
+            };
             let created = self
                 .store
                 .create(&key, &json!({"next_sequence": start}))

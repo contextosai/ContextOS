@@ -98,13 +98,19 @@ fn scope(bundle: &mut Value, intent: &str, path: &Path) -> Result<(), Failure> {
         .as_array_mut()
         .ok_or_else(|| usage(path, format!("bundle {bundle_id} has no policy_dsl.rules")))?;
     for rule in rules {
+        let rule_id = rule["rule_id"].as_str().unwrap_or_default().to_owned();
+        if !rule.is_object() || !(rule["applies_to"].is_null() || rule["applies_to"].is_object()) {
+            return Err(usage(
+                path,
+                format!("rule {rule_id} in {bundle_id} must be an object whose applies_to is an object"),
+            ));
+        }
         let named = rule["applies_to"]["intent"].as_str().unwrap_or_default();
         if !named.is_empty() && named != intent {
             return Err(usage(
                 path,
                 format!(
-                    "rule {} in {bundle_id} applies to {named}; an import scoped to {intent} cannot redirect it",
-                    rule["rule_id"].as_str().unwrap_or_default()
+                    "rule {rule_id} in {bundle_id} applies to {named}; an import scoped to {intent} cannot redirect it"
                 ),
             ));
         }
@@ -227,5 +233,31 @@ pub fn run(source: &Path, out: Option<&PathBuf>, check: Option<&PathBuf>) -> Res
             Ok(report)
         }
         None => Ok(pack),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scope_refuses_malformed_rules_instead_of_panicking() {
+        let path = Path::new("library.json");
+        for rule in [
+            json!("not a rule"),
+            json!({"rule_id": "r1", "applies_to": "support.refund"}),
+        ] {
+            let mut bundle = json!({"bundle_id": "b", "policy_dsl": {"rules": [rule]}});
+            assert!(matches!(
+                scope(&mut bundle, "support.refund", path),
+                Err(Failure::Usage(_))
+            ));
+        }
+        let mut bundle = json!({"bundle_id": "b", "policy_dsl": {"rules": [{"rule_id": "r1"}]}});
+        assert!(scope(&mut bundle, "support.refund", path).is_ok());
+        assert_eq!(
+            bundle["policy_dsl"]["rules"][0]["applies_to"]["intent"],
+            "support.refund"
+        );
     }
 }

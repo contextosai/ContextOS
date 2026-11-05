@@ -190,7 +190,7 @@ Effort: D1 about 3 days, D2 about 3 days, D3 about 4 days.
 **Built** (GUIDE, policy escalations; `contextosd/src/notifications.rs`). The audit chain
 is the outbox. `escalation_opened` and `escalation_resolved` are appended exactly when
 a transition commits. The leader delivers them with a cursor per webhook and tenant
-(`Escalation` document `delivery:<webhook>`). Nothing needed to change in the
+(`DeliveryCursor` document `webhook:<webhook>`). Nothing needed to change in the
 escalation records, and a notification can neither be lost nor sent for a transition
 that did not happen.
 

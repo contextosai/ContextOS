@@ -269,7 +269,7 @@ pub fn sinks(config: &Config) -> Result<Vec<Sink>, String> {
 }
 
 fn cursor_key(tenant: &str, sink: &str) -> DocKey {
-    DocKey::new(tenant, DocKind::Escalation, format!("audit_sink:{sink}"))
+    DocKey::new(tenant, DocKind::DeliveryCursor, format!("audit_sink:{sink}"))
 }
 
 #[derive(Debug, Default)]
