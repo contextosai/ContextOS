@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+- Servers loading the same new pack version at once wrote one `pack_loaded` entry
+  each. Binding a reference now takes a leased claim; others wait for the holder, and
+  a server that finds an expired claim looks for its entry before writing one, so a
+  crash between the entry and the binding no longer records the version twice.
+
 ## 0.1.0-alpha.14 - 2026-11-05
 
 Fourteenth alpha: pack authoring and operations. Pack tests, decision plans, tool-call
