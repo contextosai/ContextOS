@@ -1048,6 +1048,14 @@
     "ServerConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowed_origins": {
+          "default": [],
+          "description": "Browser origins, besides `public_url`'s, that may call the MCP endpoint.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "listen": {
           "description": "Socket address to listen on, such as `0.0.0.0:8080`.",
           "type": "string"

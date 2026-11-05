@@ -244,6 +244,7 @@ One registered result schema.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `allowed_origins` | array of string | `[]` | Browser origins, besides `public_url`'s, that may call the MCP endpoint. |
 | `listen` | string | required | Socket address to listen on, such as `0.0.0.0:8080`. |
 | `max_body_bytes` | integer | `4194304` | Largest request body accepted, in bytes. |
 | `mode` | `"production"` \| `"development"` | `"production"` | `production` refuses development-only conveniences and warns about weak settings. |
