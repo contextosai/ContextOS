@@ -22,6 +22,7 @@ mod findings;
 mod harness;
 mod hold_owners;
 mod load;
+mod mcp_transport;
 mod memory;
 mod notifications;
 mod operations;

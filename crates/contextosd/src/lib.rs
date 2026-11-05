@@ -24,6 +24,8 @@ pub mod http;
 pub mod kms;
 pub mod limits;
 pub mod mcp;
+pub mod mcp_stdio;
+pub mod mcp_transport;
 pub mod membership;
 pub mod metrics;
 pub mod notifications;
@@ -309,6 +311,10 @@ where
         evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),
         evidence_subjects: Arc::new(config.evidence_subjects.clone()),
         public_url: config.server.public_url.clone(),
+        mcp_origins: crate::mcp_transport::AllowedOrigins::new(
+            config.server.public_url.as_deref(),
+            &config.server.allowed_origins,
+        ),
     });
     if config.pack_reload_secs > 0
         && let Ok(runtime) = tokio::runtime::Handle::try_current()
