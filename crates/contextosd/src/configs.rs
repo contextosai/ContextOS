@@ -395,6 +395,14 @@ fn classify(path: &str, from: &Value, to: &Value) -> (&'static str, Option<&'sta
             if added { "loosens" } else { "tightens" },
             Some("capabilities and packs pinned at startup"),
         ),
+        _ if path.starts_with("audit_sinks") => (
+            if from.is_null() { "loosens" } else { "changes" },
+            Some("where audit entries are exported and which payload fields are masked"),
+        ),
+        "pack_dirs" => (
+            if added { "loosens" } else { "tightens" },
+            Some("pack directories: new pack versions placed there load while the server runs"),
+        ),
         "retired_capabilities" => ("changes", Some("replaced versions, for their operations only")),
         _ if path.starts_with("limits") => match more() {
             Some(true) => ("loosens", Some("higher limits admit more load")),

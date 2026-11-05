@@ -812,13 +812,23 @@ fn classify_intent(request: &InvokeRequest) -> String {
     }
 }
 
-fn build_rule_eval_context(intent: &str, request: &InvokeRequest, run_ctx: &RunContext) -> Value {
+/// What a rule may read about the principal: everything but `request`.
+pub(crate) fn principal_eval_context(intent: &str, run_ctx: &RunContext) -> Value {
     let mut user = serde_json::to_value(&run_ctx.user).unwrap_or(Value::Null);
     if let Value::Object(map) = &mut user
         && run_ctx.user.role.is_none()
     {
         map.insert("role".into(), Value::String("support_agent".into()));
     }
+    serde_json::json!({
+        "intent": intent,
+        "user": user,
+        "agent": run_ctx.agent,
+        "tenant_id": run_ctx.tenant_id,
+    })
+}
+
+fn build_rule_eval_context(intent: &str, request: &InvokeRequest, run_ctx: &RunContext) -> Value {
     let mut request_view = Map::new();
     request_view.insert("request_id".into(), Value::String(request.request_id.clone()));
     if let Some(channel) = &request.input.channel {
@@ -831,13 +841,9 @@ fn build_rule_eval_context(intent: &str, request: &InvokeRequest, run_ctx: &RunC
         "context".into(),
         Value::Object(request.input.context.clone().unwrap_or_default()),
     );
-    serde_json::json!({
-        "intent": intent,
-        "user": user,
-        "agent": run_ctx.agent,
-        "tenant_id": run_ctx.tenant_id,
-        "request": request_view,
-    })
+    let mut context = principal_eval_context(intent, run_ctx);
+    context["request"] = Value::Object(request_view);
+    context
 }
 
 fn capability_kind(mode: ApprovalMode) -> CapabilityKind {

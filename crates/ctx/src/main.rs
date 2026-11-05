@@ -9,6 +9,9 @@ use std::process::ExitCode;
 mod args;
 mod attest;
 mod init_tool;
+mod pack_build;
+mod pack_tests;
+mod plan;
 
 use args::{Cli, Command};
 
@@ -129,6 +132,9 @@ fn run(command: Command) -> Result<Value, Failure> {
                 .map_err(|e| Failure::Rejected(json!({"error": e.to_string()})))?;
             Ok(json!({"valid": true, "capability_id": manifest.capability_id}))
         }
+        Command::Test { pack, suites, junit } => pack_tests::run(&pack, &suites, junit.as_ref()),
+        Command::Plan { pack, run, intent } => plan::run(&pack, &run, intent.as_deref()),
+        Command::Build { source, out, check } => pack_build::run(&source, out.as_ref(), check.as_ref()),
         Command::Gate {
             baseline,
             candidate,
@@ -186,9 +192,15 @@ fn run(command: Command) -> Result<Value, Failure> {
             continues,
         } => {
             use base64::Engine as _;
-            use contextos_audit::{AuditEntry, KeyRing, verify_chain};
+            use contextos_audit::{AuditEntry, KeyRing, verify_chain_withheld};
             let loaded = read(&entries)?;
             let list = loaded.get("entries").cloned().unwrap_or(loaded);
+            // Entries an audit sink delivered with masked payloads say so; only their
+            // spine (linkage and signature) can be verified.
+            let withheld: Vec<bool> = list
+                .as_array()
+                .map(|l| l.iter().map(|e| e.get("masked").is_some()).collect())
+                .unwrap_or_default();
             let chain: Vec<AuditEntry> = typed(list, "entries")?;
             let mut ring = KeyRing::new();
             let published = read(&keys)?;
@@ -230,7 +242,13 @@ fn run(command: Command) -> Result<Value, Failure> {
                     json!({"verified": false, "error": "no entries to verify"}),
                 ));
             }
-            match verify_chain(&chain, anchor.as_ref(), &ring) {
+            let unverified: Vec<u64> = chain
+                .iter()
+                .zip(&withheld)
+                .filter(|(_, w)| **w)
+                .map(|(e, _)| e.sequence)
+                .collect();
+            match verify_chain_withheld(&chain, anchor.as_ref(), &ring, &withheld) {
                 // The anchor is assumed, not checked: report it so a reader sees which
                 // verified prefix the result rests on.
                 Ok(()) => Ok(json!({"verified": true, "entries": chain.len(),
@@ -238,7 +256,8 @@ fn run(command: Command) -> Result<Value, Failure> {
                     "anchor_record_hash": anchor.as_ref().map(|a| a.record_hash.clone()),
                     "tenant_id": chain.first().map(|e| e.tenant_id.clone()),
                     "last_sequence": chain.last().map(|e| e.sequence),
-                    "last_record_hash": chain.last().map(|e| e.record_hash.clone())})),
+                    "last_record_hash": chain.last().map(|e| e.record_hash.clone()),
+                    "payload_unverified_sequences": unverified})),
                 Err(error) => Err(Failure::Rejected(
                     json!({"verified": false, "error": error.to_string()}),
                 )),

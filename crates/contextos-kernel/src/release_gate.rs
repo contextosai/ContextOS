@@ -20,17 +20,18 @@
 //! The gate fails on any widening or regression that the operator did not
 //! acknowledge. Acknowledgements are inputs to the gate, never part of the candidate.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use contextos_contract::types::{CompiledContext, ContextPack, InvokeRequest, RunContext};
+use contextos_contract::types::{ContextPack, InvokeRequest, RunContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use contextos_contract::canonical::sha256_canonical;
-use serde_json::json;
+use crate::ContextPackCompiler;
+use crate::pack_observation::{Observed, VERDICTS};
 
-use crate::authorization::compose_policy_outcomes;
-use crate::{CompileDeps, ContextPackCompiler};
+fn observe(compiler: &ContextPackCompiler, case: &ReplayCase) -> Result<Observed, String> {
+    crate::pack_observation::observe(compiler, &case.request, &case.run_context, &case.deps)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,83 +84,6 @@ pub struct GateReport {
     pub verdict: String,
     pub cases: Vec<CaseReport>,
     pub unacknowledged: usize,
-}
-
-#[derive(Debug, Clone)]
-struct Observed {
-    capabilities: BTreeSet<String>,
-    verdict: usize,
-    obligations: BTreeSet<String>,
-    gates: BTreeMap<String, bool>,
-    hash: String,
-}
-
-/// Composed verdicts from most to least restrictive (`error` counts as `deny`).
-const VERDICTS: [&str; 4] = ["deny", "escalate", "require_approval", "allow"];
-
-fn deps(value: &Value) -> CompileDeps {
-    let list = |key: &str| value[key].as_array().cloned().unwrap_or_default();
-    CompileDeps {
-        evidence: list("evidence"),
-        evidence_conflicts: list("evidence_conflicts"),
-        promoted_memory: list("promoted_memory"),
-    }
-}
-
-fn observe(compiler: &ContextPackCompiler, case: &ReplayCase) -> Result<Observed, String> {
-    let compiled: CompiledContext = compiler
-        .compile(&case.request, &case.run_context, &deps(&case.deps))
-        .map_err(|e| e.to_string())?;
-    let rules = compiler
-        .resolve_active_rules(&case.request, &case.run_context)
-        .map_err(|e| e.to_string())?;
-    // The verdict the runtime would reach: the same normalized business outcomes
-    // admission pins, composed by the kernel (highest-priority bundles decide).
-    let pack = compiler.pack();
-    let outcomes: Vec<Value> = rules
-        .iter()
-        .map(|rule| {
-            let digest = pack
-                .policy_layer
-                .policy_bundles
-                .iter()
-                .find(|b| b.bundle_id == rule.bundle_id)
-                .and_then(|b| serde_json::to_value(b).ok())
-                .and_then(|b| sha256_canonical(&b).ok())
-                .unwrap_or_else(|| format!("sha256:{}", "0".repeat(64)));
-            let verdict = if !rule.allow {
-                "deny"
-            } else if rule.approval_gate.is_some() {
-                "require_approval"
-            } else {
-                "allow"
-            };
-            json!({"category": "business", "priority": rule.priority, "verdict": verdict, "rule_id": rule.rule_id,
-                "bundle_ref": {"artifact_type": "policy_bundle", "artifact_id": rule.bundle_id, "version": "1", "sha256": digest},
-                "obligations": rule.requires})
-        })
-        .collect();
-    let composed = compose_policy_outcomes(&Value::Array(outcomes));
-    let verdict = VERDICTS.iter().position(|v| *v == composed.verdict).unwrap_or(0);
-    let capabilities = compiled
-        .manifests
-        .tool_manifest
-        .iter()
-        .flat_map(|t| t.capabilities.iter().map(move |c| format!("{}.{c}", t.adapter_id)))
-        .collect();
-    let gates = compiled
-        .runtime_controls
-        .evidence_gates
-        .iter()
-        .map(|g| (g.decision_key.clone(), g.commit_allowed))
-        .collect();
-    Ok(Observed {
-        capabilities,
-        verdict,
-        obligations: composed.obligations.into_iter().collect(),
-        gates,
-        hash: compiled.context_ledger.compiled_context_hash,
-    })
 }
 
 fn change(kind: &str, effect: &str, detail: String, acknowledged: bool) -> Change {

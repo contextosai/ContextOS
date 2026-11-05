@@ -1,0 +1,372 @@
+{
+  "business_context": {
+    "non_negotiables": [
+      "never charge a customer without consent"
+    ],
+    "summary": {
+      "differentiators": [
+        "fast resolution"
+      ],
+      "what_we_do": "Post-purchase customer support.",
+      "who_we_serve": [
+        "consumers"
+      ]
+    }
+  },
+  "contract_meta": {
+    "compatibility": {
+      "requires": {
+        "ontology": ">=4.2.0",
+        "runtime": ">=2.0.0"
+      }
+    },
+    "contract_name": "ctxpack.support",
+    "contract_version": "2.0.0",
+    "created_at": "2026-04-15T10:00:00Z",
+    "issuer": "tenant_acme_prod"
+  },
+  "decision_layer": {
+    "decision_specs": [
+      {
+        "allowed_outcomes": [
+          "approved",
+          "denied",
+          "escalated"
+        ],
+        "approval_mode": "destructive",
+        "decision_key": "support.refund.execute",
+        "decision_right": "execute",
+        "owner_role": "support_ops",
+        "required_evidence": [
+          "order_lookup",
+          "policy.eval",
+          "identity_verified"
+        ],
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "evaluation_layer": {
+    "eval_targets": [
+      {
+        "economics_cents_per_decision": 1.5,
+        "intent": "support.refund",
+        "latency_p99_ms": 3000,
+        "policy": 1,
+        "safety": 1,
+        "utility": 0.9
+      }
+    ]
+  },
+  "intelligence_refs": {
+    "identity_layer": {
+      "ceid_namespaces": [
+        "customer",
+        "order"
+      ]
+    },
+    "knowledge_graph": {
+      "snapshot_pin_rule": "alias:prod"
+    },
+    "ontology": {
+      "entity_types": [
+        "Customer",
+        "Order"
+      ],
+      "namespace": "ont.support",
+      "relationship_types": [
+        "order_belongs_to_customer"
+      ],
+      "version": "4.2.0"
+    }
+  },
+  "memory_layer": {
+    "memory_policy": {
+      "consent_gating": {
+        "pii_write_back_allowed": false
+      },
+      "tier_ttls": {
+        "durable": "1825d",
+        "episodic": "24h",
+        "semantic": "365d",
+        "working": "1h"
+      },
+      "write_classes_allowed": [
+        "preference",
+        "decision_outcome",
+        "correction"
+      ]
+    },
+    "promotion_thresholds": {
+      "auto_promote_confidence": 0.95
+    }
+  },
+  "pack_meta": {
+    "data_classification": "INTERNAL",
+    "environment_defaults": {
+      "currency": "INR",
+      "language": "en",
+      "region": "ap-south-1",
+      "timezone": "Asia/Kolkata"
+    },
+    "pack_id": "ctxpack.support",
+    "pack_version": "5.3.0",
+    "tenant": {
+      "name": "Acme Support",
+      "tenant_id": "tenant_acme_prod"
+    },
+    "ttl_seconds": 86400
+  },
+  "policy_layer": {
+    "action_risk_policy": {
+      "allowed_authorities": [
+        "agent",
+        "service",
+        "user_delegated",
+        "human_approved"
+      ],
+      "allowed_effects": [
+        "none",
+        "local_state",
+        "external_state"
+      ],
+      "allowed_interactions": [
+        "api",
+        "browser",
+        "computer",
+        "agent_to_agent",
+        "human_handoff"
+      ],
+      "allowed_reversibility": [
+        "read_only",
+        "reversible",
+        "compensatable",
+        "irreversible"
+      ],
+      "data_scope_ceiling": "CONFIDENTIAL"
+    },
+    "approval_gates": [
+      {
+        "gate_id": "GATE_FINANCE_APPROVAL",
+        "required_approver_role": "finance_lead",
+        "ttl_seconds": 7200,
+        "when": {
+          ">": [
+            {
+              "var": "request.context.refund_amount"
+            },
+            3000
+          ]
+        }
+      }
+    ],
+    "guardrails": {
+      "must_escalate": [
+        "fraud_signal_high"
+      ],
+      "must_refuse": [
+        "refund_without_identity"
+      ],
+      "redaction_rules": [
+        "pan",
+        "credit_card"
+      ]
+    },
+    "policy_bundles": [
+      {
+        "bundle_id": "POLICY_RETURNS_V4",
+        "policy_dsl": {
+          "language": "jsonlogic",
+          "rules": [
+            {
+              "applies_to": {
+                "intent": "support.refund"
+              },
+              "else": {
+                "allow": false,
+                "reason": "Identity not verified; refund path blocked."
+              },
+              "if": {
+                "==": [
+                  {
+                    "var": "request.context.identity_verified"
+                  },
+                  true
+                ]
+              },
+              "rationale": "Refunds require verified identity.",
+              "rule_id": "R_REFUND_REQUIRES_IDV",
+              "then": {
+                "allow": true,
+                "requires": [
+                  "order_lookup"
+                ]
+              }
+            },
+            {
+              "applies_to": {
+                "intent": "support.refund"
+              },
+              "decision_binding": "support.refund.execute",
+              "if": {
+                "and": [
+                  {
+                    "==": [
+                      {
+                        "var": "user.role"
+                      },
+                      "support_agent"
+                    ]
+                  },
+                  {
+                    ">": [
+                      {
+                        "var": "request.context.refund_amount"
+                      },
+                      3000
+                    ]
+                  }
+                ]
+              },
+              "rationale": "High-value refunds require finance approval.",
+              "rule_id": "R_HIGH_VALUE_REQUIRES_APPROVAL",
+              "then": {
+                "allow": true,
+                "approval_mode": "destructive",
+                "requires_approval_gate": "GATE_FINANCE_APPROVAL"
+              }
+            }
+          ]
+        },
+        "priority": 10
+      },
+      {
+        "bundle_id": "POLICY_CHARGEBACKS_V1",
+        "policy_dsl": {
+          "language": "jsonlogic",
+          "rules": [
+            {
+              "applies_to": {
+                "intent": "support.refund"
+              },
+              "if": {
+                "==": [
+                  {
+                    "var": "request.context.chargeback_open"
+                  },
+                  true
+                ]
+              },
+              "rationale": "A refund during an open chargeback pays the customer twice.",
+              "rule_id": "R_NO_REFUND_DURING_CHARGEBACK",
+              "then": {
+                "allow": false
+              }
+            }
+          ]
+        },
+        "priority": 10
+      }
+    ]
+  },
+  "tone_and_comms": {
+    "do": [
+      "cite policy"
+    ],
+    "dont": [
+      "promise outcomes"
+    ],
+    "voice_attributes": [
+      "clear",
+      "neutral"
+    ]
+  },
+  "tooling_layer": {
+    "adapter_registry": [
+      {
+        "adapter_id": "adp_orders",
+        "approval_mode": "read_only",
+        "capabilities": [
+          "lookup"
+        ],
+        "capability_risks": {
+          "lookup": {
+            "authority": "service",
+            "data_scope": "CONFIDENTIAL",
+            "effect": "none",
+            "interaction": "api",
+            "reversibility": "read_only"
+          }
+        },
+        "endpoint_ref": "internal://orders",
+        "type": "OPENAPI"
+      },
+      {
+        "adapter_id": "adp_policy",
+        "approval_mode": "read_only",
+        "capabilities": [
+          "eval"
+        ],
+        "capability_risks": {
+          "eval": {
+            "authority": "service",
+            "data_scope": "INTERNAL",
+            "effect": "none",
+            "interaction": "api",
+            "reversibility": "read_only"
+          }
+        },
+        "endpoint_ref": "internal://policy",
+        "type": "INTERNAL"
+      },
+      {
+        "adapter_id": "adp_payments",
+        "approval_mode": "destructive",
+        "capabilities": [
+          "issue_refund"
+        ],
+        "capability_risks": {
+          "issue_refund": {
+            "authority": "human_approved",
+            "data_scope": "CONFIDENTIAL",
+            "decision_ttl_seconds": 300,
+            "effect": "external_state",
+            "interaction": "api",
+            "reversibility": "compensatable"
+          }
+        },
+        "endpoint_ref": "internal://payments",
+        "type": "OPENAPI"
+      }
+    ],
+    "permissions": [
+      {
+        "adapter_id": "adp_orders",
+        "allow": true,
+        "capability": "lookup",
+        "permission_id": "p1"
+      },
+      {
+        "adapter_id": "adp_policy",
+        "allow": true,
+        "capability": "eval",
+        "permission_id": "p2"
+      },
+      {
+        "adapter_id": "adp_payments",
+        "allow": true,
+        "arg_constraints": {
+          "amount_inr": {
+            "max": 50000,
+            "min": 1
+          },
+          "idempotency_key": {
+            "required": true
+          }
+        },
+        "capability": "issue_refund",
+        "permission_id": "p3"
+      }
+    ]
+  }
+}

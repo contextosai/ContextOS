@@ -1,0 +1,44 @@
+{
+  "suite": "support refunds",
+  "description": "What ctxpack.support@5.2.0 decides for refund requests. Run with: ctx test --pack examples/support-refund/pack.json examples/support-refund/pack_test.json",
+  "base": "requests/run.json",
+  "tests": [
+    {
+      "name": "a verified low-value refund is allowed after an order lookup",
+      "expect": {
+        "verdict": "allow",
+        "rules": ["R_REFUND_REQUIRES_IDV"],
+        "obligations": ["order_lookup"],
+        "capabilities": {"include": ["adp_orders.lookup", "adp_payments.issue_refund"]}
+      }
+    },
+    {
+      "name": "a refund over INR 3000 needs finance approval",
+      "with": {"request": {"input": {"context": {"refund_amount": 4200}}}},
+      "expect": {
+        "verdict": "require_approval",
+        "rules": ["R_REFUND_REQUIRES_IDV", "R_HIGH_VALUE_REQUIRES_APPROVAL"]
+      }
+    },
+    {
+      "name": "exactly INR 3000 does not need approval",
+      "with": {"request": {"input": {"context": {"refund_amount": 3000}}}},
+      "expect": {"verdict": "allow"}
+    },
+    {
+      "name": "an unverified customer cannot be refunded",
+      "with": {"request": {"input": {"context": {"identity_verified": false}}}},
+      "expect": {"verdict": "deny", "rules": ["R_REFUND_REQUIRES_IDV"]}
+    },
+    {
+      "name": "a missing identity check is treated as unverified",
+      "with": {"request": {"input": {"context": {"identity_verified": null}}}},
+      "expect": {"verdict": "deny"}
+    },
+    {
+      "name": "a read-only run does not surface the refund tool",
+      "with": {"run_context": {"safety_mode": "read_only"}},
+      "expect": {"capabilities": {"include": ["adp_orders.lookup"], "exclude": ["adp_payments.issue_refund"]}}
+    }
+  ]
+}

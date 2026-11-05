@@ -100,6 +100,9 @@ class AsyncRun(_Async):
     async def call_tool(self, capability_id: str, args: dict, **options: Any) -> dict:
         return await self._call(self._target.call_tool, capability_id, args, **options)
 
+    async def check_tool_call(self, capability_id: str, args: dict, **options: Any) -> dict:
+        return await self._call(self._target.check_tool_call, capability_id, args, **options)
+
     def metering_headers(self, reservation_id: str) -> dict:
         return self._target.metering_headers(reservation_id)
 

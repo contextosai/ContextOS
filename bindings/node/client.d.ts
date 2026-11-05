@@ -1,3 +1,18 @@
+/** The answer of `Run.checkToolCall`. */
+export interface ToolCallCheck {
+  status: "allowed" | "approval_required" | "escalation_required" | "blocked" | "rejected";
+  capability_id: Json;
+  operation_id: string | null;
+  action_digest: string | null;
+  reason_codes: string[];
+  obligations: string[];
+  message: string | null;
+  /** The run already has an operation with this id: dispatch treats the call as its retry. */
+  operation_exists: boolean;
+  not_evaluated: ("budget_reservation" | "operation_claim" | "shared_guarantee_capacity")[];
+  audit_sequence: number;
+}
+
 export declare const GENERATION_HEADER: "ContextOS-Executor-Generation";
 
 export type ApprovalMode = "read_only" | "local_write" | "network" | "delegated" | "destructive";
@@ -197,6 +212,8 @@ export declare class Run {
   readonly principalChain: { kind: string; id: string }[];
   envelope(capabilityId: string, args: Record<string, Json>, options?: CallOptions): Record<string, Json>;
   callTool(capabilityId: string, args: Record<string, Json>, options?: CallOptions): Promise<Record<string, Json>>;
+  /** What callTool would do with this call, without effect; audited and advisory. */
+  checkToolCall(capabilityId: string, args: Record<string, Json>, options?: CallOptions): Promise<ToolCallCheck>;
   provideInput(paused: ToolPaused, envelope: Record<string, Json>, responses: Record<string, Json>): Promise<Record<string, Json>>;
   reconcile(operationId: string, options?: { outcome?: "confirmed" | "not_applied" | "partial"; evidenceRef?: Record<string, string> }): Promise<any>;
   /** Relays an outcome witness's signed reading (compact JWS); needs `outcome:report`. */

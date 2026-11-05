@@ -340,6 +340,18 @@ class Run:
         self.last_notices = (response.get("result", {}).get("metadata") or {}).get("notices")
         return _outcome(response)
 
+    def check_tool_call(self, capability_id: str, args: dict, *, approval_mode: str = "read_only",
+                        idempotency_key: Optional[str] = None, evidence_refs: Optional[List[str]] = None,
+                        tool_call_id: Optional[str] = None) -> dict:
+        """What ``call_tool`` would do with this call, without effect: ``status`` is ``allowed``,
+        ``approval_required``, ``escalation_required``, ``blocked`` or ``rejected``, with the
+        ``reason_codes`` and ``obligations`` dispatch would return. Nothing is requested, reserved
+        or claimed; the check is audited. Advisory: ``not_evaluated`` names what only dispatch
+        decides, and the facts it read can change before the call."""
+        envelope = self.envelope(capability_id, args, approval_mode=approval_mode, idempotency_key=idempotency_key,
+                                 evidence_refs=evidence_refs, tool_call_id=tool_call_id)
+        return self._post("/tool-calls/check", envelope)["check"]
+
     def provide_input(self, paused: ToolPaused, envelope: dict, responses: dict) -> dict:
         """Answers a tool's input requests and continues the same operation."""
         body = {"tool_call": envelope, "input_responses": responses}

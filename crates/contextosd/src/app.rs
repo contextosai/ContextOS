@@ -12,6 +12,7 @@
 //! | `GET /v1/audit/verify` | `audit:read` | verify the caller tenant's audit chain |
 //! | `GET /v1/deployment` | – (authenticated) | the caller's identity and scopes, and what this deployment enforces |
 //! | `GET /v1/packs` | `audit:read` | the caller tenant's loaded Context Packs |
+//! | `POST /v1/packs/reload` | `control` | re-read the pack sources and add new pack versions (see [`crate::pack_registry`]) |
 //! | `GET /v1/config` | `config` | the configuration this replica runs: text, digest, effective values, posture |
 //! | `POST /v1/config/validate` | `config` | dry-run a proposed configuration: errors, effective values, classified changes |
 //! | `POST /v1/runs/{run_id}/checkpoint` | `dispatch` | save the orchestrator's checkpoint (current executor; optimistic on revision) |
@@ -55,6 +56,7 @@
 //! | `POST /v1/runs/{run_id}/cancel` | `admit` | cancel the run and its children; stops dispatch, settles children |
 //! | `POST /v1/runs/{run_id}/close` | `admit` | close a delegated child (`accept`/`reject`) and settle its usage into the parent |
 //! | `POST /v1/runs/{run_id}/tool-calls` | `dispatch` | govern and dispatch one tool call |
+//! | `POST /v1/runs/{run_id}/tool-calls/check` | `dispatch` | govern one tool call without effect: would dispatch proceed, and why not (audited) |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/input` | `dispatch` | answer a tool's `input_required` and continue the same operation |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/reconcile` | `reconcile` | resolve an unknown effect by provider query or evidenced operator assertion |
 //! | `POST /v1/runs/{run_id}/operations/{operation_id}/outcome` | `outcome:report` | a witness's signed observation that an applied effect reached its postcondition |
@@ -68,7 +70,6 @@
 //! Every body is parsed with strict ingress (duplicate keys rejected). Every request is
 //! bound to the caller's tenant; a mismatched tenant is refused without detail.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -103,6 +104,8 @@ use crate::metrics::Metrics;
 #[derive(Debug)]
 pub struct LoadedPack {
     pub tenant_id: String,
+    /// Canonical digest of the pack document: one reference, one content.
+    pub sha256: String,
     pub compiler: ContextPackCompiler,
 }
 
@@ -112,7 +115,7 @@ pub struct AppState<S, L> {
     pub audit_keys: KeyRing,
     pub auth: Authenticator,
     pub metrics: Arc<Metrics>,
-    pub packs: HashMap<String, LoadedPack>,
+    pub packs: crate::pack_registry::PackRegistry,
     /// `RuntimeSupportDeclaration` for this deployment.
     pub support: Value,
     pub max_body_bytes: usize,
@@ -156,7 +159,7 @@ pub struct AppState<S, L> {
 impl<S, L> std::fmt::Debug for AppState<S, L> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
-            .field("packs", &self.packs.keys().collect::<Vec<_>>())
+            .field("packs", &self.packs)
             .finish_non_exhaustive()
     }
 }
@@ -2416,10 +2419,15 @@ where
         )
         .with_detail(json!({"runs": unavailable_cases})));
     }
-    let (baseline, candidate) = (
-        state.packs[&change.baseline].compiler.pack().clone(),
-        state.packs[&change.candidate].compiler.pack().clone(),
-    );
+    // Checked above; packs are never unloaded.
+    let pack_of = |r: &str| state.packs.get(r).map(|p| p.compiler.pack().clone());
+    let (Some(baseline), Some(candidate)) = (pack_of(&change.baseline), pack_of(&change.candidate)) else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "pack_not_found",
+            "No such Context Pack for this tenant.",
+        ));
+    };
     let acknowledged = change.acknowledge.clone();
     let report = tokio::task::spawn_blocking(move || {
         contextos_kernel::release_gate::evaluate_release_gate(&baseline, &candidate, &cases, &acknowledged)
@@ -2946,8 +2954,8 @@ async fn audit_entries<S, L: AppendLog>(
 /// which actions the caller's scopes allow before offering them.
 async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
     let caller = authorize(&state, &headers, None)?;
-    let mut packs: Vec<&str> = state
-        .packs
+    let loaded = state.packs.snapshot();
+    let mut packs: Vec<&str> = loaded
         .iter()
         .filter(|(_, p)| p.tenant_id == caller.tenant_id)
         .map(|(r, _)| r.as_str())
@@ -3026,15 +3034,13 @@ async fn validate_config<S, L>(State(state): State<Arc<AppState<S, L>>>, headers
 /// The caller tenant's loaded Context Packs, in full.
 async fn list_packs<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
     let caller = authorize(&state, &headers, Some("audit:read"))?;
-    let mut packs: Vec<(&String, &LoadedPack)> = state
-        .packs
-        .iter()
-        .filter(|(_, p)| p.tenant_id == caller.tenant_id)
-        .collect();
+    let loaded = state.packs.snapshot();
+    let mut packs: Vec<(&String, &Arc<LoadedPack>)> =
+        loaded.iter().filter(|(_, p)| p.tenant_id == caller.tenant_id).collect();
     packs.sort_unstable_by_key(|(r, _)| r.as_str());
     let packs: Vec<Value> = packs
         .into_iter()
-        .map(|(r, p)| json!({"pack_ref": r, "pack": p.compiler.pack()}))
+        .map(|(r, p)| json!({"pack_ref": r, "sha256": p.sha256, "pack": p.compiler.pack()}))
         .collect();
     Ok(axum::Json(json!({"packs": packs})).into_response())
 }
@@ -3216,6 +3222,7 @@ where
         .route("/v1/audit/keys", get(audit_keys::<S, L>))
         .route("/v1/deployment", get(deployment::<S, L>))
         .route("/v1/packs", get(list_packs::<S, L>))
+        .route("/v1/packs/reload", post(crate::pack_registry::reload_handler::<S, L>))
         .route("/v1/guarantees", get(list_guarantees::<S, L>))
         .route(
             "/v1/guarantees/{id}/resources/{resource_digest}",
@@ -3250,6 +3257,10 @@ where
         .route("/v1/rollouts/clear", post(clear_rollout::<S, L>))
         .route("/v1/runs", post(admit::<S, L>))
         .route("/v1/runs/{run_id}/tool-calls", post(tool_call::<S, L>))
+        .route(
+            "/v1/runs/{run_id}/tool-calls/check",
+            post(crate::tool_call_check::check::<S, L>),
+        )
         .route("/v1/runs/{run_id}", get(run_status::<S, L>))
         .route(
             "/v1/runs/{run_id}/task-authorization",
@@ -3361,9 +3372,17 @@ pub fn load_pack(text: &str) -> Result<(String, LoadedPack), String> {
             e.violations.len()
         )
     })?;
+    let sha256 = contextos_contract::canonical::sha256_canonical(&value).map_err(|e| e.to_string())?;
     let pack: ContextPack = serde_json::from_value(value).map_err(|e| e.to_string())?;
     let pack_ref = pack.pack_meta.pack_ref();
     let tenant_id = pack.pack_meta.tenant.tenant_id.clone();
     let compiler = ContextPackCompiler::new(pack).map_err(|e| e.to_string())?;
-    Ok((pack_ref, LoadedPack { tenant_id, compiler }))
+    Ok((
+        pack_ref,
+        LoadedPack {
+            tenant_id,
+            sha256,
+            compiler,
+        },
+    ))
 }

@@ -1,0 +1,24 @@
+{
+  "rule_library": "contextos.rule_library.v1",
+  "library_id": "acme.chargebacks",
+  "version": "1.0.0",
+  "description": "Shared by every pack that moves money back to a customer: no refund while a chargeback is open.",
+  "policy_bundles": [
+    {
+      "bundle_id": "POLICY_CHARGEBACKS_V1",
+      "priority": 10,
+      "policy_dsl": {
+        "language": "jsonlogic",
+        "rules": [
+          {
+            "rule_id": "R_NO_REFUND_DURING_CHARGEBACK",
+            "applies_to": {},
+            "if": {"==": [{"var": "request.context.chargeback_open"}, true]},
+            "then": {"allow": false},
+            "rationale": "A refund during an open chargeback pays the customer twice."
+          }
+        ]
+      }
+    }
+  ]
+}

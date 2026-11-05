@@ -4,6 +4,7 @@ pub mod absence;
 pub mod agent_binding;
 pub mod app;
 pub mod attest;
+pub mod audit_sinks;
 pub mod auth;
 pub mod check;
 pub mod compensation;
@@ -29,6 +30,7 @@ pub mod oidc;
 pub mod oidc_claims;
 pub mod outcome_witness;
 pub mod pack_intents;
+pub mod pack_registry;
 pub mod protected_resource;
 pub mod reconcile;
 pub mod retention;
@@ -36,6 +38,7 @@ pub mod rollout;
 pub mod runtime;
 pub mod task_amendment;
 pub mod telemetry;
+pub mod tool_call_check;
 pub mod upstream_check;
 pub mod user_binding;
 
@@ -166,13 +169,7 @@ pub fn deployment_summary(config: &Config) -> Value {
 
 /// Reads and validates the configured context packs, keyed by pack reference.
 pub fn load_packs(config: &Config) -> Result<HashMap<String, LoadedPack>, String> {
-    let mut packs = HashMap::new();
-    for pack_path in &config.packs {
-        let text = std::fs::read_to_string(pack_path).map_err(|e| format!("{}: {e}", pack_path.display()))?;
-        let (pack_ref, pack) = load_pack(&text).map_err(|e| format!("{}: {e}", pack_path.display()))?;
-        packs.insert(pack_ref, pack);
-    }
-    Ok(packs)
+    pack_registry::load_all(&pack_registry::PackSources::of(config))
 }
 
 fn guarantees_need_dispatch(config: &Config, dispatch: bool) -> Result<(), String> {
@@ -234,6 +231,18 @@ where
             runtime.spawn(issuer.clone().run_refresh());
         }
         let leader = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        runtime.spawn(audit_sinks::run(
+            audit_sinks::Exporter::new(
+                store.clone(),
+                audit.clone(),
+                metrics.clone(),
+                audit_sinks::sinks(config)?,
+                packs.values().map(|p| p.tenant_id.clone()).collect(),
+                development,
+            ),
+            leader.clone(),
+            std::time::Duration::from_secs(5),
+        ));
         runtime.spawn(membership::run(
             store.clone(),
             limits.clone(),
@@ -270,13 +279,13 @@ where
             ));
         }
     }
-    Ok(Arc::new(AppState {
+    let state = Arc::new(AppState {
         store,
         audit,
         audit_keys: keys,
         auth: auth::Authenticator::new(&config.api_keys).with_issuers(issuers),
         metrics,
-        packs,
+        packs: pack_registry::PackRegistry::new(packs, pack_registry::PackSources::of(config)),
         support: support_declaration(config),
         deployment: deployment_summary(config),
         running: Arc::new(configs::Running::of(config)),
@@ -298,5 +307,14 @@ where
         evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),
         evidence_subjects: Arc::new(config.evidence_subjects.clone()),
         public_url: config.server.public_url.clone(),
-    }))
+    });
+    if config.pack_reload_secs > 0
+        && let Ok(runtime) = tokio::runtime::Handle::try_current()
+    {
+        runtime.spawn(pack_registry::run(
+            Arc::downgrade(&state),
+            std::time::Duration::from_secs(config.pack_reload_secs),
+        ));
+    }
+    Ok(state)
 }

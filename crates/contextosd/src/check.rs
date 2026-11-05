@@ -95,6 +95,15 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     }
     let packs = load_packs(&config)?;
     report.push(format!("{} context pack(s) valid", packs.len()));
+    if !config.pack_dirs.is_empty() {
+        report.push(match config.pack_reload_secs {
+            0 => format!(
+                "{} pack dir(s), reloaded on POST /v1/packs/reload",
+                config.pack_dirs.len()
+            ),
+            secs => format!("{} pack dir(s), reloaded every {secs} s", config.pack_dirs.len()),
+        });
+    }
 
     if config.api_keys.is_empty() && config.oidc.is_empty() {
         report.push("warning: no [[api_keys]] or [[oidc]] issuers: no caller can authenticate".into());
@@ -108,6 +117,14 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         ),
         None => "no dispatch gateway configured".into(),
     });
+    let sinks = crate::audit_sinks::sinks(&config)?;
+    if !sinks.is_empty() {
+        let masked = sinks.iter().filter(|s| !s.config.mask.is_empty()).count();
+        report.push(format!(
+            "{} audit sink(s), {masked} with masked fields; secrets set (not contacted)",
+            sinks.len()
+        ));
+    }
     let hooks = crate::notifications::webhooks(&config)?;
     if !hooks.is_empty() {
         report.push(format!(

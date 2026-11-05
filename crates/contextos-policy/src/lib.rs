@@ -9,7 +9,9 @@
 #![allow(clippy::return_self_not_must_use)]
 
 pub mod jsonlogic;
+pub mod partial;
 pub mod value;
 
 pub use jsonlogic::{EvalError, EvalErrorKind, Limits, apply, apply_with_limits, predicate};
+pub use partial::{Partial, partial_apply};
 pub use value::JsVal;

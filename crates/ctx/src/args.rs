@@ -146,6 +146,48 @@ pub enum Command {
         #[arg(long)]
         thresholds: PathBuf,
     },
+    /// Pack tests: check what a Context Pack decides against the author's expectations.
+    /// Each suite is `{suite, base: {request, run_context, deps?}, tests: [{name, with?,
+    /// expect}]}`; `with` is a JSON merge patch over the base and `expect` names any of
+    /// `compile`, `verdict`, `rules`, `obligations`, `capabilities: {include, exclude}`,
+    /// `evidence_gates`. The base, or any of its parts, may be a file path relative to
+    /// the suite (for example a replay case). Fails (exit 1) on any failed test.
+    Test {
+        #[arg(long)]
+        pack: PathBuf,
+        /// Suite files.
+        #[arg(required = true)]
+        suites: Vec<PathBuf>,
+        /// Also write the results as JUnit XML to this file.
+        #[arg(long)]
+        junit: Option<PathBuf>,
+    },
+    /// Decision plan: what a Context Pack lets a principal do for an intent before any
+    /// request exists. Each rule is reported as applying always, or when / unless a
+    /// residual condition over `request.*` holds, with the verdicts those conditions
+    /// can reach. `--run` is a run context, or an admission body carrying
+    /// `run_context`; the intent defaults to the run context's, then the request's.
+    Plan {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        run: PathBuf,
+        #[arg(long)]
+        intent: Option<String>,
+    },
+    /// Build a Context Pack from a pack source (`contextos.pack_source.v1`): a `base`
+    /// pack or source, a JSON merge `patch`, and `imports` of rule libraries
+    /// (`contextos.rule_library.v1`), each optionally limited to some `bundles`, given a
+    /// `priority` or scoped to one `intent`. The result is validated as context-pack.v2.
+    /// Without `--out` the pack is printed; `--check` compares it with an existing file
+    /// instead (exit 1 if they differ).
+    Build {
+        source: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, conflicts_with = "out")]
+        check: Option<PathBuf>,
+    },
     /// Release gate: compare a candidate Context Pack with the baseline on replay
     /// cases; fails on unacknowledged widenings of capabilities, policy or evidence
     /// gates, and on cases the candidate cannot compile.

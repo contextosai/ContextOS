@@ -1,0 +1,18 @@
+{
+  "suite": "support refunds 5.3.0 (with the chargeback library)",
+  "base": "../requests/run.json",
+  "tests": [
+    {"name": "an open chargeback blocks a low-value refund",
+     "with": {"request": {"input": {"context": {"chargeback_open": true}}}},
+     "expect": {"verdict": "deny",
+                "rules": ["R_REFUND_REQUIRES_IDV", "R_NO_REFUND_DURING_CHARGEBACK"]}},
+    {"name": "an open chargeback blocks a refund that would need approval",
+     "with": {"request": {"input": {"context": {"chargeback_open": true, "refund_amount": 4200}}}},
+     "expect": {"verdict": "deny"}},
+    {"name": "without a chargeback the 5.2.0 decisions hold",
+     "expect": {"verdict": "allow", "rules": ["R_REFUND_REQUIRES_IDV"], "obligations": ["order_lookup"]}},
+    {"name": "a high-value refund still needs finance approval",
+     "with": {"request": {"input": {"context": {"refund_amount": 4200}}}},
+     "expect": {"verdict": "require_approval"}}
+  ]
+}

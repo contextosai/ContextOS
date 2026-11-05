@@ -5,6 +5,58 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `skills/contextos-pack-authoring`: an agent skill for writing and changing Context
+  Packs. It covers a case-first workflow, the runtime's rule composition and its
+  pitfalls, and `scripts/check_pack.sh`, which checks schema, unresolved names
+  (approval gates, decision bindings, prohibitions, permissions), pack tests, a
+  decision plan per role and the release gate. The gate runs the script on the
+  example packs, and release archives include `skills/`.
+- Audit sinks (`[[audit_sinks]]`): the leader delivers every tenant's audit chain, in
+  order and in signed batches, to a SIEM or archive, at least once and never skipping
+  an entry (a failed batch is retried before anything later). Payload fields named by
+  `mask` (member names or JSON Pointers with `*`) become keyed HMAC tokens, so equal
+  values still correlate; masked entries say what was masked, and `ctx audit-verify`
+  checks their spine and signature and reports their payloads as unverified
+  (`payload_unverified_sequences`). `contextos_audit::verify_spine` and
+  `verify_chain_withheld` do the same for embedders. See GUIDE, "Deliver the audit
+  chain to a SIEM, masked".
+- `ctx build`: assemble a Context Pack from a pack source
+  (`contextos.pack_source.v1`): a base pack or source, a JSON merge patch, and imports
+  of rule libraries (`contextos.rule_library.v1`), each optionally limited to some
+  bundles, given a priority or scoped to one intent (narrowing only). The output is a
+  plain context-pack.v2 document, validated and compiled; `--check` fails when a
+  committed pack no longer matches its sources. See GUIDE §5, "Share rules across
+  packs", and `examples/support-refund/authoring`.
+- Pack versions published while the server runs: `pack_dirs` names directories of pack
+  files (searched recursively, dot entries skipped), re-read every `pack_reload_secs`
+  and on `POST /v1/packs/reload` (`control` scope). A reload only adds: a loaded
+  reference with other content (`pack_ref_immutable`), a pack for a tenant no startup
+  pack names (`tenant_not_configured`) and an invalid file (`invalid`) are refused, and
+  a removed file does not unload its version. Each addition is audited as
+  `pack_loaded`; `GET /v1/packs` now reports each pack's `sha256`. See GUIDE §5,
+  "Publish pack versions without a restart".
+- `ctx plan`: a decision plan of what a pack lets one principal do for an intent before
+  any request exists. Each rule is reported as applying always, or when / unless a
+  residual JsonLogic condition over `request.*` holds; the principal's own facts are
+  decided. The plan states the verdict when nothing depends on the request, and
+  otherwise the verdicts the conditions can reach. Residuals come from a new exact
+  partial evaluator in `contextos-policy` (`partial_apply`). See GUIDE §5, "Plan what a
+  principal may do".
+- `ctx test`: pack tests. A suite names a base case (an admission body or replay case
+  may be the base) and, per test, a JSON merge patch over it and the expected verdict,
+  applied rules, obligations, surfaced or withheld capabilities and evidence gates.
+  The tests run offline through admission's own compiler and policy composition; the
+  command exits 1 on any failure and can write JUnit XML (`--junit`). See GUIDE §5,
+  "Test a pack before release", and `examples/support-refund/pack_test.json`.
+- `POST /v1/runs/{run_id}/tool-calls/check` (`dispatch` scope): governs a tool call as
+  dispatch would and stops before approval redemption, budget reservation and the
+  operation claim, answering `allowed`, `approval_required`, `escalation_required`,
+  `blocked` or `rejected` with dispatch's reason codes and obligations. Nothing is
+  requested, redeemed, reserved or sent; one `tool_call_check` audit entry records each
+  check. Clients: `Run.check_tool_call` (Python, sync and async) and
+  `Run.checkToolCall` (Node). See GUIDE §3, "Check a call before making it".
+
 ## 0.1.0-alpha.13 - 2026-11-04
 
 Thirteenth alpha: the Python client on PyPI, as `contextos-client`. See the

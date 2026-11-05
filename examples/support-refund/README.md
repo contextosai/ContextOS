@@ -49,4 +49,27 @@ dispatch pauses for approval. Approving the request in the development approval 
 call redeems the approval once; `./examples/frameworks/run.sh <framework> --approval`
 does this through each framework's human-in-the-loop path.
 
+[`pack_test.json`](pack_test.json) states what this pack must decide (a refund over
+INR 3000 needs approval, an unverified customer is denied, a read-only run does not
+surface the refund tool). Check it offline, without starting anything:
+
+```sh
+ctx test --pack examples/support-refund/pack.json examples/support-refund/pack_test.json
+```
+
+[`authoring/`](authoring) builds version 5.3.0 from this pack and a shared rule
+library (no refund while a chargeback is open), scoped to refunds, and tests it:
+
+```sh
+ctx build examples/support-refund/authoring/pack.source.json --check examples/support-refund/authoring/pack-5.3.0.json
+ctx test --pack examples/support-refund/authoring/pack-5.3.0.json examples/support-refund/authoring/pack_test.json
+```
+
+To see what the pack lets this support agent do before any request, and on what the
+answer depends (identity verification and whether the amount exceeds INR 3000):
+
+```sh
+ctx plan --pack examples/support-refund/pack.json --run examples/support-refund/requests/run.json
+```
+
 `dev_services.py` vouches for anything and is for local development only.

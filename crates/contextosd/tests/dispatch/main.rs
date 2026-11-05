@@ -3,7 +3,9 @@
 
 mod agent_binding;
 mod api;
+mod audit_sinks;
 mod budgets;
+mod checks;
 mod compensation;
 mod coordination;
 mod decisions;

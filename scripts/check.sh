@@ -32,6 +32,7 @@ step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/
 step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
 step quickstart; bash examples/support-refund/run.sh >/dev/null 2>&1    || fail quickstart
+step packs; check_example examples/support-refund/check_packs.sh "example packs checked" || fail "example packs"
 step shared-guarantees; check_example examples/shared-guarantees/run.sh "Offline audit verification:" || fail "shared guarantees"
 step agent-loop; check_example examples/agent-loop/run.sh "run completed" || fail "agent loop"
 step peer-coordination; check_example examples/peer-coordination/run.sh "peer coordination complete" || fail "peer coordination"

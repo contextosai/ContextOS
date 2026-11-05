@@ -151,7 +151,8 @@ for vulnerabilities.
   capacity; exact-attempt dispatch activation, conservative recovery and read-only
   operator inspection. This extension is opt-in and covers mediated tools only.
 - **Every effect**: authority chain, policy, constraints, exact approvals, data flow and
-  the execution boundary are checked for one bound action before anything is claimed;
+  the execution boundary are checked for one bound action before anything is claimed,
+  and the same check runs without effect on request (`/tool-calls/check`);
   MCP hosts can use it as a governed tool server (`/v1/runs/{id}/mcp`).
 - **Runs end to end**: admission against a negotiated execution contract, delegated
   child runs with sub-budgets, executor failover with generation fencing, input
@@ -159,10 +160,10 @@ for vulnerabilities.
 - **Peer work coordination**: an optional root-owned task board with dependency
   discovery, atomic leased claims and recovery across admitted peers. Task reports
   remain advisory; [limits and trust boundaries](docs/PEER_COORDINATION.md) apply.
-- **Evidence**: signed, hash-chained audit; DecisionRecords with verified lineage and
+- **Evidence**: signed, hash-chained audit, delivered to SIEMs with masked fields that still verify; DecisionRecords with verified lineage and
   replay packets; scores from independent evaluators; conformance assessment against
   signed attestations.
-- **Change**: release gates on replayed cases (`ctx gate`) and on scorecards
+- **Change**: rule libraries shared across packs (`ctx build`), pack tests of what a pack must decide (`ctx test`), decision plans of what a principal may do (`ctx plan`), pack versions published from a directory without a restart, release gates on replayed cases (`ctx gate`) and on scorecards
   (`ctx scorecard-gate`), staged rollout of pack versions with shadow governance
   diffs, and a kill switch for tenants, packs, principals, agents, adapters and
   capabilities.
@@ -184,9 +185,11 @@ Stack rationale: [ADR-0001](docs/adr/0001-language-and-stack.md). JsonLogic sema
 | `contextos-gateway` | Governed Tool Gateway pipeline and run admission |
 | `contextos-adapters` | MCP 2026-07-28 and HTTP adapters, remote fact providers |
 | `contextosd` | HTTP server: admission, dispatch, decisions, scoring, kill switch, rollouts, retention, conformance, audit, metrics |
-| `ctx` | Offline CLI: validate, compile, negotiate, review manifests, release and scorecard gates |
+| `ctx` | Offline CLI: validate, compile, negotiate, review manifests, build packs from rule libraries, pack tests, decision plans, release and scorecard gates |
 | `contextos-embed`, `-py`, `-node`, `-wasm` | In-process bindings over one JSON facade |
 | `contextos-kernel` | Context Pack compiler, ActionRisk, profile negotiation, authority/approval/authorization, execution boundary, data flow, memory lifecycle, run lifecycle and resume, operation ledger, budget ledger, conformance assessment |
+
+Agent skills live in [`skills/`](skills/README.md): [pack authoring](skills/contextos-pack-authoring/SKILL.md) teaches a coding agent to write packs and check them with `ctx`.
 
 ## Start
 
