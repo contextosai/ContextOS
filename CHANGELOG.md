@@ -5,6 +5,18 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- The release image is published for `linux/amd64` and `linux/arm64` under one tag.
+  Each architecture builds natively and is smoke-tested on its own runner before
+  the index is tagged, signed (cosign, recursively) and attested.
+- Coverage-guided fuzz targets (`fuzz/`, cargo-fuzz) for the kernel's entry points,
+  JsonLogic evaluation, canonical JSON and upstream MCP response parsing, run
+  weekly and on changes to the code they cover.
+
+### Changed
+- Every GitHub Action is pinned to a commit SHA with its tag in a comment, and a
+  script test refuses unpinned ones.
+
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and

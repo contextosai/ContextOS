@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Coverage-guided fuzz targets build on nightly with cargo-fuzz (see fuzz/README.md).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0-alpha.14"
@@ -62,6 +64,8 @@ jsonschema = { version = "0.60", default-features = false }
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
+# cargo-fuzz builds with `--cfg fuzzing`, which exposes private parsers to fuzz/.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
