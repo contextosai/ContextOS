@@ -5,6 +5,24 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.14 - 2026-11-05
+
+Fourteenth alpha: pack authoring and operations. Pack tests, decision plans, tool-call
+checks, pack builds from shared rule libraries, packs published while the server runs
+and bound to their digest, audit delivery to a SIEM, and deployment recipes. See the
+[release notes](docs/releases/v0.1.0-alpha.14.md) before upgrading.
+
+### Changed
+- A pack reference is bound to its digest in the store when first loaded, and a
+  startup whose pack file has other content under a bound reference stops the server
+  (see "Pack versions published while the server runs" below). Packs edited in place
+  must take a new `pack_version`.
+- Escalation webhook cursors moved from the `escalation` documents to a new
+  `delivery_cursor` kind, beside the audit sinks' cursors; a cursor kept by an earlier
+  release is carried over on first use, so no event is skipped or replayed.
+- Dependencies: napi 3.16.1, napi-derive 3.7.0, jsonschema 0.60.2, react-router
+  8.5.1 (Tower), the node 26.13.0 image, and example and CI updates.
+
 ### Added
 - `POST /v1/plan` (`compile` scope): a decision plan for one of the caller's loaded
   packs and a principal of its tenant. Clients: `Client.plan` (Python, sync and async;
@@ -85,9 +103,6 @@ Thirteenth alpha: the Python client on PyPI, as `contextos-client`. See the
 [release notes](docs/releases/v0.1.0-alpha.13.md).
 
 ### Changed
-- Escalation webhook cursors moved from the `escalation` documents to a new
-  `delivery_cursor` kind, beside the audit sinks' cursors; a cursor kept by an earlier
-  release is carried over on first use, so no event is skipped or replayed.
 - The Python package is published on PyPI as `contextos-client`, the npm package's
   name: PyPI refuses `contextos` as too similar to an existing project, so 0.1.0-alpha.12
   was not published there. Install with `pip install --pre contextos-client`; the
