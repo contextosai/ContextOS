@@ -5,6 +5,11 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Documentation
+- GUIDE.md lists what happens when each dependency fails: decision services fail
+  closed with a named reason code, providers distinguish not-sent from unknown, and
+  record-shipping services (audit sinks, webhooks) retry without blocking work.
+
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and
