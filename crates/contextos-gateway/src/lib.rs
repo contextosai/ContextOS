@@ -39,6 +39,7 @@ mod lifecycle;
 mod loop_guard;
 pub mod manifest;
 mod memory;
+mod observe;
 pub mod outcome_fence;
 mod outcome_sweep;
 pub mod outcomes;
@@ -288,6 +289,8 @@ struct Pipeline<'a> {
     /// Only check the call (see [`tool_call_check`]): nothing is written, requested or
     /// claimed, and the pipeline stops before approval redemption.
     check: bool,
+    /// The stages reached, for the call's span and access event.
+    stages: observe::Stages,
 }
 
 impl<'a> Pipeline<'a> {
@@ -311,6 +314,7 @@ impl<'a> Pipeline<'a> {
             escalation_id: None,
             compensates: None,
             check: false,
+            stages: observe::Stages::new(),
         }
     }
 
@@ -322,7 +326,23 @@ impl<'a> Pipeline<'a> {
         mutations: Vec<String>,
     ) -> DispatchOutcome {
         status.clone_into(&mut self.report.status);
-        let latency_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let elapsed = self.started.elapsed();
+        let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        let stages = self.stages.summary();
+        observe::finished(&observe::Finished {
+            tenant_id: &self.admission.tenant_id,
+            run_id: &self.admission.run_id,
+            capability_id: self.envelope["capability_id"].as_str().unwrap_or_default(),
+            tool_call_id: self.envelope["tool_call_id"].as_str().unwrap_or_default(),
+            operation_id: self.report.operation_id.as_deref(),
+            action_digest: self.report.action_digest.as_deref(),
+            status,
+            reason_codes: &self.report.reason_codes,
+            stage: self.stages.current(),
+            stages: &stages,
+            duration_ms: elapsed.as_secs_f64() * 1000.0,
+            check: self.check,
+        });
         let mut metadata = Map::new();
         if let Some(digest) = &self.report.action_digest {
             metadata.insert("action_digest".into(), json!(digest));
@@ -578,40 +598,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// Governs one tool call end to end. Errors are infrastructure failures (store,
     /// audit); every governance outcome is a normal `DispatchOutcome`.
-    #[tracing::instrument(
-        name = "contextos.dispatch",
-        skip_all,
-        fields(
-            tenant_id = %admission.tenant_id,
-            run_id = %admission.run_id,
-            trace_id = %admission.trace_id,
-            capability_id = envelope["capability_id"].as_str().unwrap_or_default(),
-            tool_call_id = envelope["tool_call_id"].as_str().unwrap_or_default(),
-            operation_id = tracing::field::Empty,
-            action_digest = tracing::field::Empty,
-            status = tracing::field::Empty,
-            reason_codes = tracing::field::Empty,
-        )
-    )]
     pub async fn dispatch(&self, admission: &RunAdmission, envelope: &Value) -> Result<DispatchOutcome, GatewayError> {
-        let outcome = self.dispatch_inner(admission, envelope, None, None, None, false).await;
-        let span = tracing::Span::current();
-        match &outcome {
-            Ok(outcome) => {
-                let report = &outcome.report;
-                if let Some(id) = &report.operation_id {
-                    span.record("operation_id", id.as_str());
-                }
-                if let Some(digest) = &report.action_digest {
-                    span.record("action_digest", digest.as_str());
-                }
-                span.record("status", report.status.as_str());
-                span.record("reason_codes", report.reason_codes.join(",").as_str());
-                tracing::info!(status = %report.status, "governed dispatch");
-            }
-            Err(error) => tracing::error!(%error, "governed dispatch failed"),
-        }
-        outcome
+        self.dispatch_inner(admission, envelope, None, None, None, false).await
     }
 
     /// [`Gateway::dispatch`] for an executor fenced at `executor_generation` (see
@@ -630,34 +618,73 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// Continues an operation whose tool asked for input (`input_required`). The tool
     /// call must be the same operation with the same action digest; it is governed
     /// again end to end, and the answers are validated against the pending requests.
-    #[tracing::instrument(
-        name = "contextos.continue",
-        skip_all,
-        fields(run_id = %admission.run_id, operation_id = %continuation.operation_id, status = tracing::field::Empty)
-    )]
     pub async fn continue_with_input(
         &self,
         admission: &RunAdmission,
         envelope: &Value,
         continuation: &Continuation,
     ) -> Result<DispatchOutcome, GatewayError> {
+        self.dispatch_inner(
+            admission,
+            envelope,
+            Some(continuation),
+            continuation.executor_generation,
+            None,
+            false,
+        )
+        .await
+    }
+
+    /// Every governed call runs here, in its own `contextos.dispatch` span (see
+    /// [`observe`]): direct and MCP dispatch, continuations, checks and compensations.
+    #[tracing::instrument(
+        name = "contextos.dispatch",
+        skip_all,
+        fields(
+            otel.name = %format_args!("execute_tool {}", envelope["capability_id"].as_str().unwrap_or_default()),
+            otel.kind = "internal",
+            gen_ai.operation.name = "execute_tool",
+            gen_ai.tool.type = "function",
+            gen_ai.tool.name = envelope["capability_id"].as_str().unwrap_or_default(),
+            gen_ai.tool.call.id = envelope["tool_call_id"].as_str().unwrap_or_default(),
+            contextos.tenant_id = %admission.tenant_id,
+            contextos.run_id = %admission.run_id,
+            contextos.trace_id = %admission.trace_id,
+            contextos.continuation = continuation.is_some(),
+            contextos.compensation = compensates.is_some(),
+            contextos.check = check,
+            contextos.operation_id = tracing::field::Empty,
+            contextos.action_digest = tracing::field::Empty,
+            contextos.status = tracing::field::Empty,
+            contextos.reason_codes = tracing::field::Empty,
+            contextos.stage = tracing::field::Empty,
+            contextos.stages = tracing::field::Empty,
+            error.type = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+        )
+    )]
+    async fn dispatch_inner(
+        &self,
+        admission: &RunAdmission,
+        envelope: &Value,
+        continuation: Option<&Continuation>,
+        fence: Option<u64>,
+        compensates: Option<&Value>,
+        check: bool,
+    ) -> Result<DispatchOutcome, GatewayError> {
         let outcome = self
-            .dispatch_inner(
-                admission,
-                envelope,
-                Some(continuation),
-                continuation.executor_generation,
-                None,
-                false,
-            )
+            .run_pipeline(admission, envelope, continuation, fence, compensates, check)
             .await;
-        if let Ok(outcome) = &outcome {
-            tracing::Span::current().record("status", outcome.report.status.as_str());
+        if let Err(error) = &outcome {
+            let span = tracing::Span::current();
+            span.record("otel.status_code", "ERROR");
+            span.record("error.type", "infrastructure");
+            tracing::error!(%error, "governed call failed");
         }
         outcome
     }
 
-    async fn dispatch_inner(
+    async fn run_pipeline(
         &self,
         admission: &RunAdmission,
         envelope: &Value,
@@ -688,6 +715,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .unwrap_or(0);
 
         // 1. Surface.
+        p.stages.enter("surface");
         if validate(
             &SchemaTarget::def(SchemaDoc::ToolEnvelope, "ToolCallEnvelope"),
             envelope,
@@ -776,6 +804,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 2. Bind.
+        p.stages.enter("bind");
         let arguments = envelope["args"].clone();
         let tool_call_id = envelope["tool_call_id"].as_str().unwrap_or_default().to_owned();
         let operation_id = envelope["idempotency_key"]
@@ -889,6 +918,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 3. Authorize.
+        p.stages.enter("authorize");
         let facts = match self.ports.authority.authority(admission, &binding).await {
             Ok(facts) => facts,
             Err(e) => return Ok(p.stop("blocked", vec!["authority_unavailable".into()], &e.to_string())),
@@ -1338,6 +1368,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 4. Reserve.
+        p.stages.enter("reserve");
         let attempt_id = self.ports.ids.new_id("attempt");
         p.report.attempt_id = Some(attempt_id.clone());
         let budget_key = DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id);
@@ -1431,6 +1462,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 5. Claim.
+        p.stages.enter("claim");
         let idempotency = manifest.recovery.idempotency.as_ref();
         let provider_key = idempotency.map(|_| {
             persisted_key
@@ -1876,6 +1908,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 6. Dispatch.
+        p.stages.enter("dispatch");
         let deadline = add_contract_seconds(&now, manifest.timeout_ms.div_ceil(1000))
             .unwrap_or_else(|| admission.deadline.clone());
         if self.dispatch_stalled(&now) {
@@ -2009,6 +2042,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 7. Observe & settle.
+        p.stages.enter("settle");
         let observed_at = later(self.now(), &now);
         let valid_until =
             add_contract_seconds(&observed_at, OBSERVATION_VALIDITY_SECONDS).unwrap_or_else(|| observed_at.clone());
@@ -2100,6 +2134,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
 
         // 8. Result.
+        p.stages.enter("result");
         let mutations = if matches!(response.outcome, EffectOutcome::Confirmed | EffectOutcome::Partial) {
             vec![operation_id.clone()]
         } else {

@@ -5,6 +5,23 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- An access log: one JSON line per governed call on target `contextos::access`, with
+  tenant, run, capability, tool call, operation, status, reason codes, the stage the
+  pipeline stopped in and each stage's duration. `RUST_LOG` selects it.
+- Governed calls are exported as `execute_tool <capability>` spans with the
+  OpenTelemetry GenAI attributes (`gen_ai.operation.name`, `gen_ai.tool.name`,
+  `gen_ai.tool.call.id`), the outcome, `contextos.stage` and `contextos.stages`
+  timings, and `error.type` set to the first reason code of a refusal.
+
+### Fixed
+- Tool calls through the server (REST `tool-calls` and MCP `tools/call`) recorded no
+  `contextos.dispatch` span or log line: only the embedded `Gateway::dispatch` entry
+  point was instrumented. Every entry point (including continuations, checks and
+  compensations) now runs in the same span. The separate `contextos.continue` span
+  is gone; a continuation is a `contextos.dispatch` span with
+  `contextos.continuation = true`.
+
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and
