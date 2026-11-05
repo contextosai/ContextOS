@@ -8,7 +8,7 @@ RUN grep -Fxq "channel = \"$RUST_VERSION\"" rust-toolchain.toml \
         -p contextosd -p towerd
 
 # The Tower UI: static files, served by towerd when [tower] dir points at them.
-FROM node:26.12.1-bookworm-slim AS console
+FROM node:26.13.0-bookworm-slim AS console
 WORKDIR /src/tower
 COPY tower/package.json tower/package-lock.json ./
 RUN npm ci --no-audit --no-fund
