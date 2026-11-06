@@ -10,6 +10,7 @@ use std::time::Duration;
 use contextosd::tls_server::{TlsConfig, serve};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn openssl(dir: &Path, args: &[&str]) -> bool {
     Command::new("openssl")
@@ -88,16 +89,33 @@ fn certificates(dir: &Path) -> bool {
         && leaf(dir, "agent", "client-ca", "URI:spiffe://contextos.test/agent")
 }
 
-async fn start(dir: &Path, mutual: bool) -> String {
-    let tls = TlsConfig {
+fn config(dir: &Path, mutual: bool) -> TlsConfig {
+    TlsConfig {
         cert_path: dir.join("server.pem"),
         key_path: dir.join("server.key"),
         client_ca_path: mutual.then(|| dir.join("client-ca.pem")),
         reload_secs: 1,
-    };
+        max_connections: 10_000,
+        header_timeout_secs: 30,
+    }
+}
+
+async fn start(dir: &Path, mutual: bool) -> String {
+    serve_with(config(dir, mutual)).await
+}
+
+async fn serve_with(tls: TlsConfig) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = axum::Router::new().route("/healthz", axum::routing::get(|| async { "ok" }));
+    let app = axum::Router::new()
+        .route("/healthz", axum::routing::get(|| async { "ok" }))
+        .route(
+            "/slow",
+            axum::routing::get(|| async {
+                tokio::time::sleep(Duration::from_millis(2500)).await;
+                "done"
+            }),
+        );
     tokio::spawn(async move { serve(listener, app, tls, std::future::pending()).await.unwrap() });
     format!("https://{addr}/healthz")
 }
@@ -113,8 +131,8 @@ fn client(dir: &Path, identity: Option<&str>) -> reqwest::Client {
     builder.build().unwrap()
 }
 
-/// The certificate the server presents to a new connection.
-async fn presented(dir: &Path, url: &str) -> CertificateDer<'static> {
+/// A TLS connection to the server at `url`, speaking HTTP/1.1.
+async fn connect(dir: &Path, url: &str) -> tokio_rustls::client::TlsStream<tokio::net::TcpStream> {
     let mut roots = rustls::RootCertStore::empty();
     roots
         .add(CertificateDer::from_pem_file(dir.join("server-ca.pem")).unwrap())
@@ -126,11 +144,99 @@ async fn presented(dir: &Path, url: &str) -> CertificateDer<'static> {
         .with_no_client_auth();
     let addr = url.trim_start_matches("https://").split('/').next().unwrap();
     let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let stream = tokio_rustls::TlsConnector::from(Arc::new(config))
+    tokio_rustls::TlsConnector::from(Arc::new(config))
         .connect(ServerName::try_from("127.0.0.1").unwrap(), tcp)
         .await
-        .unwrap();
+        .unwrap()
+}
+
+/// The certificate the server presents to a new connection.
+async fn presented(dir: &Path, url: &str) -> CertificateDer<'static> {
+    let stream = connect(dir, url).await;
     stream.get_ref().1.peer_certificates().unwrap()[0].clone().into_owned()
+}
+
+/// Whether the server closes `stream` within `within`.
+async fn closed_within(stream: &mut tokio_rustls::client::TlsStream<tokio::net::TcpStream>, within: Duration) -> bool {
+    let mut buf = [0u8; 1024];
+    loop {
+        match tokio::time::timeout(within, stream.read(&mut buf)).await {
+            Err(_) => return false,
+            Ok(Ok(0) | Err(_)) => return true,
+            // A 408 or similar before closing is fine; keep reading to the close.
+            Ok(Ok(_)) => {}
+        }
+    }
+}
+
+fn temp_dir(name: &str) -> Option<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join(format!("contextos-tls-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    if certificates(&dir) {
+        Some(dir)
+    } else {
+        eprintln!("skipped: the openssl CLI is not available");
+        None
+    }
+}
+
+#[tokio::test]
+async fn a_client_trickling_headers_is_disconnected() {
+    let Some(dir) = temp_dir("slow") else { return };
+    let url = serve_with(TlsConfig {
+        header_timeout_secs: 1,
+        ..config(&dir, false)
+    })
+    .await;
+    // Half a request line, then nothing more.
+    let mut slow = connect(&dir, &url).await;
+    slow.write_all(b"GET /healthz HTTP/1.1\r\nHost: 127").await.unwrap();
+    slow.flush().await.unwrap();
+    assert!(
+        closed_within(&mut slow, Duration::from_secs(5)).await,
+        "slow headers closed"
+    );
+    // A connection that never sends a request is closed too.
+    let mut idle = connect(&dir, &url).await;
+    assert!(
+        closed_within(&mut idle, Duration::from_secs(5)).await,
+        "idle connection closed"
+    );
+    // A prompt client is served, and a request slower than the limit is not cut off.
+    let ok = client(&dir, None).get(&url).send().await.unwrap();
+    assert_eq!(ok.text().await.unwrap(), "ok");
+    let slow = client(&dir, None)
+        .get(url.replace("/healthz", "/slow"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(slow.text().await.unwrap(), "done");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn connections_past_the_cap_wait_for_a_slot() {
+    let Some(dir) = temp_dir("cap") else { return };
+    let url = serve_with(TlsConfig {
+        max_connections: 1,
+        ..config(&dir, false)
+    })
+    .await;
+    let held = connect(&dir, &url).await;
+    // The second connection is not accepted (no handshake) while the first is open.
+    let waiting = tokio::spawn({
+        let (dir, url) = (dir.clone(), url.clone());
+        async move { connect(&dir, &url).await }
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!waiting.is_finished(), "a connection past the cap waits");
+    drop(held);
+    let second = tokio::time::timeout(Duration::from_secs(5), waiting).await;
+    assert!(
+        second.is_ok_and(|s| s.is_ok()),
+        "the waiting connection gets the freed slot"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

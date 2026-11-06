@@ -2038,6 +2038,8 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   key_path = "/etc/contextos/tls/tls.key"
   client_ca_path = "/etc/contextos/tls/clients.pem"   # optional: require client certs
   # reload_secs = 60                            # pick up rotated files; 0 never
+  # max_connections = 10000                     # past this, clients wait to be accepted
+  # header_timeout_secs = 30                    # idle connections and slow headers close
   ```
 
   HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
@@ -2046,6 +2048,15 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   Callers still authenticate with their token: mTLS decides who may connect, not who
   they are. `--check-config` loads the files. The Helm chart mounts them with
   `extraVolumes` and `extraVolumeMounts`.
+
+  Without a proxy the server bounds slow clients itself: a TLS handshake has 10
+  seconds; a connection with no request in progress for `header_timeout_secs` is
+  closed, and an HTTP/1.1 request must finish its headers within it; HTTP/2 allows
+  200 concurrent requests per connection and closes connections that stop answering
+  pings. At most `max_connections` are open at once; further clients wait in the
+  accept queue rather than being refused. A failed accept (for example, out of file
+  descriptors) backs off up to a second instead of spinning. Set the process's file
+  descriptor limit above `max_connections`.
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
   natively), signed with cosign (keyless) and with build provenance; verify before

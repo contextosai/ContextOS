@@ -1359,9 +1359,23 @@
             "null"
           ]
         },
+        "header_timeout_secs": {
+          "default": 30,
+          "description": "Seconds a connection may sit with no request in progress, and an HTTP/1.1 client may take to send a request's headers, before it is closed (at least 1).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "key_path": {
           "description": "PEM file with the server's private key (PKCS#8, PKCS#1 or SEC1).",
           "type": "string"
+        },
+        "max_connections": {
+          "default": 10000,
+          "description": "Most connections open at once (at least 1); further clients wait to be accepted.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         },
         "reload_secs": {
           "default": 60,

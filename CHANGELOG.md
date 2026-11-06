@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `[server.tls] max_connections` (default 10000) caps open connections; further
+  clients wait in the accept queue. `header_timeout_secs` (default 30) closes a
+  connection with no request in progress for that long and an HTTP/1.1 request whose
+  headers take longer.
+
 ### Fixed
 
 - Provider failover: a capability's `timeout_ms` now covers every endpoint attempt. A
@@ -16,6 +22,11 @@ minor versions may break APIs and every break is listed.
   `500` is ejected; a `500` still moves no call on.
 - A fallback endpoint on another origin than `endpoint` is logged as a warning at
   startup: every listed endpoint is sent the provider credential.
+- The built-in TLS server no longer spins at full CPU when accepting fails (for
+  example, out of file descriptors): it backs off from 5 ms to one second. A client
+  that trickles HTTP/1.1 headers, or connects and sends nothing, is disconnected
+  instead of holding a connection forever. HTTP/2 connections are pinged and closed
+  when they stop answering.
 
 ## 0.1.0-alpha.15 - 2026-11-06
 
