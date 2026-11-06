@@ -6,13 +6,25 @@
 //!   effect can have happened. A read-only call also moves on when its response was
 //!   lost or the endpoint answered 502, 503 or 504. An effectful call whose request may
 //!   have been delivered never moves on: its outcome is unknown and goes to
-//!   reconciliation, as with one endpoint.
-//! - **Outlier detection.** Three consecutive failures eject an endpoint for 30
+//!   reconciliation, as with one endpoint. A 500 (or any other status) does not move
+//!   a call on: the endpoint answered, and a 500 is as often the tool's own error,
+//!   which every replica would repeat.
+//! - **One time budget.** The call's timeout covers every attempt. A read-only call
+//!   gives each attempt an equal share of what remains, so a hung endpoint is
+//!   classified as lost in time for the next one to answer. An effectful call gives
+//!   each attempt all that remains: it can move on only after a request that never
+//!   left, so a hang stays unknown, exactly as with one endpoint.
+//! - **Outlier detection.** Three consecutive failures (unreachable, lost, or any 5xx
+//!   answer) eject an endpoint for 30
 //!   seconds, doubling with each ejection up to five minutes; a success restores it.
 //!   Healthy endpoints are tried first in configured order, then ejected ones, soonest
 //!   to return first, so a call is never refused without an attempt.
 //!
 //! With a single endpoint every call behaves exactly as before: one attempt.
+//!
+//! Every endpoint receives the same request, credential included, so fallbacks must
+//! sit in the provider's trust domain; a fallback on another origin is logged at
+//! startup.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -53,7 +65,17 @@ impl Endpoints {
     pub fn new(primary: &str, fallbacks: &[String], policy: &TransportPolicy) -> Result<Self, EndpointError> {
         let mut urls = vec![pinned_endpoint(primary, policy)?];
         for fallback in fallbacks {
-            urls.push(pinned_endpoint(fallback, policy)?);
+            let url = pinned_endpoint(fallback, policy)?;
+            if url.origin() != urls[0].origin() {
+                // Legitimate for replicas on other hosts, but the primary's credential
+                // is presented here too.
+                tracing::warn!(
+                    primary = %urls[0].origin().ascii_serialization(),
+                    fallback = %url.origin().ascii_serialization(),
+                    "fallback endpoint is on another origin and receives the provider credential"
+                );
+            }
+            urls.push(url);
         }
         let health = Mutex::new(vec![Health::default(); urls.len()]);
         Ok(Self { urls, health })
@@ -122,7 +144,8 @@ impl Endpoints {
     }
 
     /// Sends the request `build` makes for each endpoint in turn, as `retry` allows,
-    /// and returns the exchange to classify: the first usable one, or the last.
+    /// within `timeout` for the whole call, and returns the exchange to classify: the
+    /// first usable one, or the last. An endpoint `build` cannot address is skipped.
     pub(crate) async fn send(
         &self,
         build: impl Fn(&Url) -> Option<reqwest::RequestBuilder>,
@@ -130,16 +153,24 @@ impl Endpoints {
         max_bytes: usize,
         retry: Retry,
     ) -> Exchange {
+        let deadline = Instant::now() + timeout;
+        let order = self.order(Instant::now());
         let mut last = Exchange::NotSent;
-        for index in self.order(Instant::now()) {
+        for (tried, &index) in order.iter().enumerate() {
             let Some(request) = build(&self.urls[index]) else {
-                return Exchange::NotSent;
+                continue;
             };
-            let exchange = send(request, timeout, max_bytes).await;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let attempt = attempt_budget(remaining, order.len() - tried, retry);
+            let exchange = send(request, attempt, max_bytes).await;
             let (healthy, move_on) = match &exchange {
                 Exchange::NotSent => (false, true),
                 Exchange::Lost => (false, retry == Retry::ReadOnly),
                 Exchange::Response { status: 502..=504, .. } => (false, retry == Retry::ReadOnly),
+                Exchange::Response { status: 500..=599, .. } => (false, false),
                 Exchange::Response { .. } => (true, false),
             };
             self.record(index, healthy, Instant::now());
@@ -149,6 +180,17 @@ impl Endpoints {
             last = exchange;
         }
         last
+    }
+}
+
+/// The time one attempt may take, with `left` endpoints (this one included) still to
+/// try. Only a read-only call shares the budget: an effectful call that loses its
+/// response never moves on, so cutting its attempt short would only turn a slow
+/// success into an unknown outcome.
+fn attempt_budget(remaining: Duration, left: usize, retry: Retry) -> Duration {
+    match retry {
+        Retry::ReadOnly => remaining / u32::try_from(left.max(1)).unwrap_or(u32::MAX),
+        Retry::NotSentOnly => remaining,
     }
 }
 
@@ -208,6 +250,14 @@ mod tests {
             e.record(0, false, later);
         }
         assert_eq!(e.order(later), [2, 1, 0]);
+    }
+
+    #[test]
+    fn only_read_only_calls_share_the_budget() {
+        let budget = Duration::from_millis(3000);
+        assert_eq!(attempt_budget(budget, 3, Retry::ReadOnly), Duration::from_millis(1000));
+        assert_eq!(attempt_budget(budget, 1, Retry::ReadOnly), budget);
+        assert_eq!(attempt_budget(budget, 3, Retry::NotSentOnly), budget);
     }
 
     #[test]
