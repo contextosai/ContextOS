@@ -7,6 +7,14 @@
           "description": "The provider's URL.",
           "type": "string"
         },
+        "fallback_endpoints": {
+          "default": [],
+          "description": "Replicas of the same provider, tried after `endpoint`. A call moves on only when its request never left, or (read-only capabilities) when its response was lost or the endpoint answered 502, 503 or 504; three consecutive failures eject an endpoint for 30 seconds, doubling up to five minutes. Each must serve the same tools and share the provider's state; OAuth tokens name `endpoint` as their resource unless `oauth.resource` is set.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "id": {
           "description": "Adapter id that capability manifests name.",
           "type": "string"
@@ -1048,6 +1056,14 @@
     "ServerConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowed_origins": {
+          "default": [],
+          "description": "Browser origins, besides `public_url`'s, that may call the MCP endpoint.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "listen": {
           "description": "Socket address to listen on, such as `0.0.0.0:8080`.",
           "type": "string"

@@ -1,0 +1,45 @@
+name: fuzz
+
+# Coverage-guided fuzzing (fuzz/README.md): briefly on changes to the code the targets
+# cover, and longer every week. Crashing inputs are uploaded as artifacts.
+on:
+  pull_request:
+    paths:
+      - fuzz/**
+      - crates/contextos-contract/**
+      - crates/contextos-policy/**
+      - crates/contextos-kernel/**
+      - crates/contextos-embed/**
+      - crates/contextos-adapters/src/mcp.rs
+      - .github/workflows/fuzz.yml
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [kernel_call, jsonlogic, canonical_json, upstream_response]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install nightly and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz
+        env:
+          SECONDS_TO_RUN: ${{ github.event_name == 'schedule' && '1800' || '120' }}
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -dict=fuzz/json.dict -max_total_time="$SECONDS_TO_RUN" -rss_limit_mb=2048
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}

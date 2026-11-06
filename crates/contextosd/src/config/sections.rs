@@ -33,6 +33,9 @@ pub struct ServerConfig {
     /// (see [`crate::protected_resource`]). Unset: no metadata is published.
     #[serde(default)]
     pub public_url: Option<String>,
+    /// Browser origins, besides `public_url`'s, that may call the MCP endpoint.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
     /// Serve HTTPS (and require client certificates, with `client_ca_path`) without a
     /// terminating proxy (see `tls_server`). Unset: plain HTTP behind your proxy.
     #[serde(default)]
@@ -226,6 +229,14 @@ pub struct AdapterConfig {
     pub kind: AdapterKind,
     /// The provider's URL.
     pub endpoint: String,
+    /// Replicas of the same provider, tried after `endpoint`. A call moves on only when
+    /// its request never left, or (read-only capabilities) when its response was lost
+    /// or the endpoint answered 502, 503 or 504; three consecutive failures eject an
+    /// endpoint for 30 seconds, doubling up to five minutes. Each must serve the same
+    /// tools and share the provider's state; OAuth tokens name `endpoint` as their
+    /// resource unless `oauth.resource` is set.
+    #[serde(default)]
+    pub fallback_endpoints: Vec<String>,
     /// Environment variable holding the provider credential issued by your broker.
     #[serde(default)]
     pub token_env: Option<String>,

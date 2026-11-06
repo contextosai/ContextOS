@@ -151,6 +151,8 @@ pub struct AppState<S, L> {
     pub evidence_subjects: Arc<Vec<crate::evidence_subjects::EvidenceSubject>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// Browser origins that may call the MCP endpoint.
+    pub mcp_origins: crate::mcp_transport::AllowedOrigins,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
     pub deployment: Value,
     /// The configuration this replica runs (see [`crate::configs`]).
@@ -3057,6 +3059,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    let requested_version = crate::mcp_transport::check(&headers, &state.mcp_origins)?;
     let resource = format!("/v1/runs/{run_id}/mcp");
     let caller = crate::http::authorize_resource(&state, &headers, Some("dispatch"), &resource)?;
     let gateway = dispatch_gateway(&state)?;
@@ -3073,10 +3076,7 @@ where
         .retry_after(std::time::Duration::from_secs(1))
     })?;
     let mut response = crate::mcp::handle(gateway, &admission, &caller.principal_id, &headers, &request).await;
-    response.headers_mut().insert(
-        "mcp-protocol-version",
-        header::HeaderValue::from_static(crate::mcp::PROTOCOL_VERSION),
-    );
+    crate::mcp_transport::set_version(&mut response, requested_version);
     Ok(response)
 }
 

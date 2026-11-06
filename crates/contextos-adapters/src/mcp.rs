@@ -40,19 +40,17 @@
 
 use std::time::Duration;
 
+use crate::endpoints::{Endpoints, Retry};
+use crate::http::{not_dispatched, object, rejected_before_execution};
+use crate::transport::{
+    Credential, CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers, traceparent,
+};
 use async_trait::async_trait;
 use contextos_contract::ingress::parse_strict;
 use contextos_contract::types::ActionEffect;
 use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifest, EffectOutcome, PortError};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::{Map, Value, json};
-use url::Url;
-
-use crate::http::{not_dispatched, object, rejected_before_execution};
-use crate::transport::{
-    Credential, CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers,
-    pinned_endpoint, send, traceparent,
-};
 
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
 const PRE_EXECUTION_ERRORS: [i64; 4] = [-32700, -32600, -32601, -32602];
@@ -75,7 +73,7 @@ pub enum ResultProjection {
 }
 
 pub struct McpAdapter {
-    endpoint: Url,
+    endpoints: Endpoints,
     policy: TransportPolicy,
     client: reqwest::Client,
     credentials: std::sync::Arc<dyn CredentialBroker>,
@@ -86,7 +84,8 @@ pub struct McpAdapter {
 impl std::fmt::Debug for McpAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("McpAdapter")
-            .field("endpoint", &self.endpoint.as_str())
+            .field("endpoint", &self.endpoints.primary().as_str())
+            .field("endpoints", &self.endpoints.len())
             .finish_non_exhaustive()
     }
 }
@@ -99,13 +98,20 @@ impl McpAdapter {
         client_name: impl Into<String>,
     ) -> Result<Self, EndpointError> {
         Ok(Self {
-            endpoint: pinned_endpoint(endpoint, &policy)?,
+            endpoints: Endpoints::new(endpoint, &[], &policy)?,
             client: client(&policy),
             policy,
             credentials,
             client_name: client_name.into(),
             projection: ResultProjection::Flat,
         })
+    }
+
+    /// Adds replicas of the same server, tried as [`Endpoints`] describes. Each must
+    /// serve the same tools: upstream pins are checked against whichever answers.
+    pub fn with_fallback_endpoints(mut self, fallbacks: &[String]) -> Result<Self, EndpointError> {
+        self.endpoints = Endpoints::new(self.endpoints.primary().as_str(), fallbacks, &self.policy)?;
+        Ok(self)
     }
 
     /// Selects the result projection. Changing it changes the output shape consumers
@@ -115,6 +121,12 @@ impl McpAdapter {
         self.projection = projection;
         self
     }
+}
+
+/// [`rpc_response`] for the fuzz targets.
+#[cfg(fuzzing)]
+pub fn fuzz_rpc_response(content_type: &str, body: &[u8], id: &str, max: usize) -> Option<Value> {
+    rpc_response(content_type, body, id, max)
 }
 
 /// Extracts the JSON-RPC response with `id` from a JSON or SSE body.
@@ -177,14 +189,21 @@ impl McpAdapter {
         headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/event-stream"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert("mcp-protocol-version", HeaderValue::from_static(PROTOCOL_VERSION));
-        let request = self.client.post(self.endpoint.clone()).headers(headers).json(body);
-        let (content_type, body) = match send(
-            request,
-            Duration::from_millis(manifest.timeout_ms),
-            self.policy.max_response_bytes,
-        )
-        .await
-        {
+        let retry = if manifest.action_risk.effect == ActionEffect::None {
+            Retry::ReadOnly
+        } else {
+            Retry::NotSentOnly
+        };
+        let exchange = self
+            .endpoints
+            .send(
+                |url| Some(self.client.post(url.clone()).headers(headers.clone()).json(body)),
+                Duration::from_millis(manifest.timeout_ms),
+                self.policy.max_response_bytes,
+                retry,
+            )
+            .await;
+        let (content_type, body) = match exchange {
             Exchange::NotSent => return Err(not_dispatched()),
             Exchange::Lost => return Err(AdapterResponse::unknown()),
             Exchange::Response {
@@ -247,20 +266,32 @@ impl McpAdapter {
             if let Some(cursor) = &cursor {
                 params["cursor"] = json!(cursor);
             }
-            let mut request = self
-                .client
-                .post(self.endpoint.clone())
-                .header(ACCEPT, "application/json, text/event-stream")
-                .header("mcp-protocol-version", PROTOCOL_VERSION)
-                .json(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params}));
-            if let Some(value) = credential.as_ref().and_then(Credential::header) {
-                request = request.header(reqwest::header::AUTHORIZATION, value);
-            }
+            let message = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params});
+            let build = |url: &url::Url| {
+                let mut request = self
+                    .client
+                    .post(url.clone())
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .header("mcp-protocol-version", PROTOCOL_VERSION)
+                    .json(&message);
+                if let Some(value) = credential.as_ref().and_then(Credential::header) {
+                    request = request.header(reqwest::header::AUTHORIZATION, value);
+                }
+                Some(request)
+            };
             let Exchange::Response {
                 status,
                 content_type,
                 body,
-            } = send(request, Duration::from_secs(10), self.policy.max_response_bytes).await
+            } = self
+                .endpoints
+                .send(
+                    build,
+                    Duration::from_secs(10),
+                    self.policy.max_response_bytes,
+                    Retry::ReadOnly,
+                )
+                .await
             else {
                 return Err(failed("tools/list unreachable"));
             };

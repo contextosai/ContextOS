@@ -1,5 +1,6 @@
 //! `contextosd --config <path>`, `contextosd --check-config <path>`,
-//! `contextosd --pin-mcp-tools <path>` or `contextosd --version`
+//! `contextosd --pin-mcp-tools <path>`, `contextosd --mcp-stdio <url>` or
+//! `contextosd --version`
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,8 @@ usage: contextosd <command>
   --pin-mcp-tools <path>  print upstream MCP tool digests to pin in capability manifests
   --migrate <path>        create or upgrade the PostgreSQL schema (as a role that owns it)
   --config-schema         print the configuration's JSON Schema
+  --mcp-stdio <url>       connect a stdio MCP host to a run's MCP endpoint (token in CONTEXTOS_TOKEN,
+                          executor generation in CONTEXTOS_EXECUTOR_GENERATION)
   --version               print the version
   --help                  print this help
 
@@ -60,7 +63,13 @@ async fn main() {
         println!("{USAGE}");
         return;
     }
-    let known = ["--config", "--check-config", "--pin-mcp-tools", "--migrate"];
+    let known = [
+        "--config",
+        "--check-config",
+        "--pin-mcp-tools",
+        "--migrate",
+        "--mcp-stdio",
+    ];
     if !matches!(args.as_slice(), [_, flag, _] if known.contains(&flag.as_str())) {
         eprintln!("{USAGE}");
         std::process::exit(2);
@@ -102,6 +111,17 @@ async fn main() {
                 std::process::exit(2);
             }
         }
+    }
+    if let [_, flag, url] = args.as_slice()
+        && flag == "--mcp-stdio"
+    {
+        // No telemetry: stdout carries the protocol.
+        contextos_adapters::tls::init().unwrap_or_else(|e| fail(e));
+        if let Err(e) = contextosd::mcp_stdio::run(url).await {
+            eprintln!("contextosd --mcp-stdio: {e}");
+            std::process::exit(2);
+        }
+        return;
     }
     if let [_, flag, path] = args.as_slice()
         && flag == "--migrate"

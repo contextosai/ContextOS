@@ -8,7 +8,7 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Validate version and release notes
         run: |
           python3 - <<'PY'
@@ -27,13 +27,13 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24.12.0
       - run: npm ci --no-audit --no-fund && npm run build
         working-directory: tower
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: tower-dist
           path: tower/dist
@@ -53,8 +53,8 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         if: ${{ !matrix.linux }}
         with:
           targets: ${{ matrix.target }}
@@ -68,7 +68,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src almalinux:8 \
             scripts/build-linux-release.sh ${{ matrix.target }}
           sudo chown -R "$(id -u):$(id -g)" target
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: tower-dist
           path: tower-dist
@@ -87,10 +87,10 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e ARCHIVE="contextos-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" \
             almalinux:8 bash -c 'sed -i -e "s/^mirrorlist=/#mirrorlist=/" -e "s/^# *baseurl=/baseurl=/" /etc/yum.repos.d/almalinux*.repo &&
               dnf install -y -q --setopt=retries=10 --setopt=timeout=300 python39 tar >/dev/null && scripts/smoke-archive.sh "$ARCHIVE"'
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: contextos-*.tar.gz
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binaries-${{ matrix.target }}
           path: contextos-*.tar.gz*
@@ -112,11 +112,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.9"
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           maturin-version: v1.16.0
           rust-toolchain: 1.99.1
@@ -132,10 +132,10 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install --no-index bindings/python/dist/*.whl
           "$RUNNER_TEMP/venv/bin/python" -I bindings/python/tests/test_contextos.py
           "$RUNNER_TEMP/venv/bin/python" -I -c 'import contextos, os; assert contextos.__version__ == os.environ["GITHUB_REF_NAME"][1:]'
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: bindings/python/dist/*.whl
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wheels-${{ matrix.target }}
           path: bindings/python/dist/*.whl
@@ -151,11 +151,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.9"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24.12.0
       - run: npm install --global npm@11.8.0 --ignore-scripts --no-audit --no-fund
@@ -177,12 +177,12 @@ jobs:
           node -e 'import("contextos-client").then(m => { if (typeof m.Client !== "function") process.exit(1) })'
           printf 'import { Client, governedTool } from "contextos-client";\nconst c: Client = new Client("http://x", { token: "t" });\nvoid c; void governedTool;\n' > check.mts
           npx tsc --noEmit --strict --module nodenext --moduleResolution nodenext --lib es2022,dom check.mts
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             dist/*.whl
             dist/*.tgz
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: clients
           path: dist/*
@@ -192,8 +192,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - run: cargo install --locked cargo-cyclonedx@0.5.7
       # Source inventories cover every target and feature, rather than describing
       # only the Linux host used by this job. One <crate>.cdx.json per member.
@@ -213,14 +213,56 @@ jobs:
               if bom.get("bomFormat") != "CycloneDX" or bom.get("metadata", {}).get("component", {}).get("version") != version:
                   raise SystemExit(f"invalid or incorrectly versioned inventory: {path}")
           PY
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom
           path: crates/*/*.cdx.json
           if-no-files-found: error
 
-  image:
+  # Each architecture builds natively (no emulation), pushes by digest only, and the
+  # image job joins them into one multi-platform index that is tagged, signed and
+  # attested once.
+  image-build:
     needs: validate
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04, platform: linux/amd64, arch: amd64 }
+          - { os: ubuntu-24.04-arm, platform: linux/arm64, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/contextosd,push-by-digest=true,name-canonical=true,push=true
+          sbom: true
+          provenance: mode=max
+      - name: Smoke test the image on its own architecture
+        run: |
+          image=ghcr.io/${{ github.repository_owner }}/contextosd@${{ steps.build.outputs.digest }}
+          docker run --rm --platform ${{ matrix.platform }} "$image" --version
+          docker run --rm --platform ${{ matrix.platform }} --entrypoint /usr/local/bin/towerd "$image" --version
+      - run: echo "${{ steps.build.outputs.digest }}" > digest-${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: digest-${{ matrix.arch }}
+          if-no-files-found: error
+
+  image:
+    needs: image-build
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -228,33 +270,37 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: image-digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image version
-        id: version
-        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/contextosd:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/contextosd:${{ steps.version.outputs.tag }}
-          sbom: true
-          provenance: mode=max
-      - uses: sigstore/cosign-installer@v3
+      - name: Join the architectures into one tagged index
+        id: index
+        run: |
+          repo=ghcr.io/${{ github.repository_owner }}/contextosd
+          sources=$(for f in digest-*; do echo "$repo@$(cat "$f")"; done)
+          # shellcheck disable=SC2086
+          docker buildx imagetools create \
+            --tag "$repo:${GITHUB_REF_NAME}" --tag "$repo:${GITHUB_REF_NAME#v}" $sources
+          docker buildx imagetools inspect "$repo:${GITHUB_REF_NAME}"
+          digest=$(docker buildx imagetools inspect "$repo:${GITHUB_REF_NAME}" --format '{{json .Manifest}}' | jq -r .digest)
+          platforms=$(docker buildx imagetools inspect "$repo:${GITHUB_REF_NAME}" --format '{{json .Manifest}}' \
+            | jq -r '[.manifests[].platform | select(.os != "unknown") | "\(.os)/\(.architecture)"] | sort | join(",")')
+          test "$platforms" = "linux/amd64,linux/arm64" || { echo "unexpected platforms: $platforms"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign image (keyless)
-        run: cosign sign --yes ghcr.io/${{ github.repository_owner }}/contextosd@${{ steps.build.outputs.digest }}
-      - uses: actions/attest-build-provenance@v4
+        run: cosign sign --yes --recursive ghcr.io/${{ github.repository_owner }}/contextosd@${{ steps.index.outputs.digest }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/contextosd
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.index.outputs.digest }}
           push-to-registry: true
 
   publish:
@@ -263,23 +309,23 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: binaries-*
           merge-multiple: true
       # Packages ride on the draft; publish-packages.yml sends them to PyPI and npm
       # only when a maintainer publishes the release.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: wheels-*
           merge-multiple: true
           path: packages
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: clients
           path: packages
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: sbom
           path: sbom
