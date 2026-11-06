@@ -1,5 +1,6 @@
 //! `contextosd --config <path>`, `contextosd --check-config <path>`,
-//! `contextosd --pin-mcp-tools <path>` or `contextosd --version`
+//! `contextosd --pin-mcp-tools <path>`, `contextosd --mcp-stdio <url>` or
+//! `contextosd --version`
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +21,9 @@ usage: contextosd <command>
   --check-config <path>   validate the configuration and its environment, then exit
   --pin-mcp-tools <path>  print upstream MCP tool digests to pin in capability manifests
   --migrate <path>        create or upgrade the PostgreSQL schema (as a role that owns it)
+  --config-schema         print the configuration's JSON Schema
+  --mcp-stdio <url>       connect a stdio MCP host to a run's MCP endpoint (token in CONTEXTOS_TOKEN,
+                          executor generation in CONTEXTOS_EXECUTOR_GENERATION)
   --version               print the version
   --help                  print this help
 
@@ -50,11 +54,22 @@ async fn main() {
         println!("contextosd {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    if matches!(args.as_slice(), [_, flag] if flag == "--config-schema") {
+        let schema = contextosd::config_schema::schema();
+        println!("{}", serde_json::to_string_pretty(&schema).unwrap_or_default());
+        return;
+    }
     if matches!(args.as_slice(), [_, flag] if flag == "--help" || flag == "-h") {
         println!("{USAGE}");
         return;
     }
-    let known = ["--config", "--check-config", "--pin-mcp-tools", "--migrate"];
+    let known = [
+        "--config",
+        "--check-config",
+        "--pin-mcp-tools",
+        "--migrate",
+        "--mcp-stdio",
+    ];
     if !matches!(args.as_slice(), [_, flag, _] if known.contains(&flag.as_str())) {
         eprintln!("{USAGE}");
         std::process::exit(2);
@@ -96,6 +111,17 @@ async fn main() {
                 std::process::exit(2);
             }
         }
+    }
+    if let [_, flag, url] = args.as_slice()
+        && flag == "--mcp-stdio"
+    {
+        // No telemetry: stdout carries the protocol.
+        contextos_adapters::tls::init().unwrap_or_else(|e| fail(e));
+        if let Err(e) = contextosd::mcp_stdio::run(url).await {
+            eprintln!("contextosd --mcp-stdio: {e}");
+            std::process::exit(2);
+        }
+        return;
     }
     if let [_, flag, path] = args.as_slice()
         && flag == "--migrate"
@@ -201,13 +227,21 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(config.server.listen)
         .await
         .unwrap_or_else(|e| fail(e));
-    tracing::info!(listen = %config.server.listen, "contextosd listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
-        .await
-        .unwrap_or_else(|e| fail(e));
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+        tracing::info!("shutting down");
+    };
+    if let Some(tls) = config.server.tls.clone() {
+        tracing::info!(listen = %config.server.listen, mutual = tls.client_ca_path.is_some(), "contextosd listening (TLS)");
+        contextosd::tls_server::serve(listener, app, tls, shutdown)
+            .await
+            .unwrap_or_else(|e| fail(e));
+    } else {
+        tracing::info!(listen = %config.server.listen, "contextosd listening");
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .await
+            .unwrap_or_else(|e| fail(e));
+    }
     telemetry.shutdown().await;
 }

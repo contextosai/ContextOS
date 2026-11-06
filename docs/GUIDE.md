@@ -115,6 +115,29 @@ the executor generation as headers, for example:
 }
 ```
 
+Hosts that only start local (stdio) servers use the bridge built into `contextosd`,
+which forwards each message to the run's endpoint and decides nothing itself:
+
+```json
+{
+  "mcpServers": {
+    "contextos": {
+      "command": "contextosd",
+      "args": ["--mcp-stdio", "https://contextos.internal/v1/runs/run_123/mcp"],
+      "env": {"CONTEXTOS_TOKEN": "…", "CONTEXTOS_EXECUTOR_GENERATION": "2"}
+    }
+  }
+}
+```
+
+The endpoint checks the transport before reading a message. A request carrying a
+browser `Origin` is refused (`403 origin_not_allowed`) unless the origin is
+`[server] public_url`'s or listed in `[server] allowed_origins`, so a web page cannot
+reach the server through DNS rebinding. Hosts and SDKs send no `Origin` and are not
+affected. An unsupported `MCP-Protocol-Version` header is refused with
+`400 protocol_version_unsupported`, and responses echo the version the request used.
+A request without an `id` is refused with `400`; only `notifications/*` may omit it.
+
 Hosts that implement MCP authorization can discover where to get that token. Set
 `[server] public_url` to the URL clients reach the server at. A `401` then names the
 run's OAuth protected resource metadata (RFC 9728) in `WWW-Authenticate`
@@ -174,6 +197,12 @@ contextosd --check-config deploy/contextosd.example.toml
 contextosd --migrate deploy/contextosd.example.toml    # PostgreSQL schema, as its owner
 contextosd --config deploy/contextosd.example.toml
 ```
+
+Every configuration key, with its type, default and meaning, is in
+[CONFIG.md](CONFIG.md), generated from the server's own types. The same schema is
+`deploy/contextosd-config.schema.json` (or `contextosd --config-schema`); TOML editors
+that read `#:schema` comments, as the example file has, complete and check keys with
+it. Every metric `/metrics` exports is listed in [METRICS.md](METRICS.md).
 
 To try a configuration on your machine first, `./examples/dev-server.sh` runs the
 quickstart's development configuration. Moving that example to production mode
@@ -255,8 +284,9 @@ records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit thei
 parent's binding (`bound: "inherited"`); their agent is the one the parent's
 delegation names, and `named_by_credential` says whether the admitting credential
 names it too. SPIRE's OIDC discovery provider publishes the
-JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
-accepted.
+JWKS for JWT-SVIDs, so they need no other integration. X.509 SVIDs can restrict who
+may connect at all (`[server.tls] client_ca_path`, under Operate), but they do not
+name the agent: binding still comes from the token.
 
 #### Bind runs to the user the agent acts for
 
@@ -1054,7 +1084,7 @@ and never hold up governed work.
 | Memory-governance service | memory operations are refused | `memory_policy_unavailable` |
 | Resource identity service | calls under a guarantee with `resource_canonicalizer = "provider"` are refused | `shared_guarantee_identity_unavailable` |
 | Result-screening service | the effect stands; its output is withheld from the agent | `result_screening_unavailable`, audited `result_screened` |
-| Provider (adapter) | a request that never left is `not_dispatched` and safe to retry; once it may have been sent, the outcome is unknown and is reconciled, never retried blindly | `not_dispatched`, or `reconcile_effect_before_retry` |
+| Provider (adapter) | a request that never left moves to the next `fallback_endpoints` entry, or is `not_dispatched` and safe to retry; once it may have been sent, the outcome is unknown and is reconciled, never retried blindly | `not_dispatched`, or `reconcile_effect_before_retry` |
 | PostgreSQL | requests that need the store answer `503`; nothing is dispatched without its claim | `store_unavailable` |
 | Audit signing (KMS) | requests that must record an entry answer `503` | `audit_unavailable` |
 | OIDC issuer (JWKS) | keys already fetched keep working; a refresh failure is logged and retried; `/readyz` fails until the first keys load | log `jwks refresh failed` |
@@ -1130,6 +1160,31 @@ scope = "payments.refund"          # optional
 - **Rules.** The token endpoint follows the same transport rules as provider
   endpoints: HTTPS, no redirects, bounded responses. Set either `token_env` or
   `oauth`, not both.
+
+A provider that runs as several replicas (or in several regions) can list them, so
+one being down does not stop governed work:
+
+```toml
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"
+endpoint = "https://payments-a.internal/mcp"
+fallback_endpoints = ["https://payments-b.internal/mcp"]
+```
+
+- **What moves on.** A call goes to the next endpoint when its request never left
+  (connection refused, DNS or TLS failure), which is safe for any effect because
+  nothing was delivered. A read-only capability's call also moves on after a lost
+  response or a `502`, `503` or `504`. An effectful call that may have been delivered
+  never does: its outcome is unknown and is reconciled, exactly as with one endpoint.
+- **Ejection.** Three consecutive failures eject an endpoint for 30 seconds, doubling
+  with each ejection up to five minutes, and a success restores it. Ejected endpoints
+  are tried last rather than skipped, so no call is refused without an attempt. Each
+  ejection is logged as a warning with the endpoint.
+- **Same provider.** Replicas must share the provider's state (an idempotency key or
+  task id sent to one must be known to the others) and serve the same tools: upstream
+  pins are checked against whichever endpoint answers. OAuth tokens name `endpoint` as
+  their resource unless `oauth.resource` says otherwise.
 
 An MCP server can change what a tool does without renaming it. Agents only ever see
 your reviewed manifest, but the calls still go to the server's current tool. Pin each
@@ -1937,10 +1992,26 @@ Production refuses runs without `user.role` (see the threat model's residual ris
 - **Alerts:** the Helm chart's `prometheusRule.enabled` installs rules for all of the
   above; each links its runbook in [INCIDENT.md](INCIDENT.md#alerts).
 - **Spans:** `http.request`, with `contextos.compile`, `contextos.admit`,
-  `contextos.delegate`, `contextos.dispatch` (run, operation, capability, digest,
-  status, reasons), `contextos.continue`, `contextos.reconcile`, `contextos.decision`,
+  `contextos.delegate`, `contextos.dispatch`, `contextos.reconcile`, `contextos.decision`,
   `contextos.score`, `contextos.memory` and `contextos.erase` inside it, each carrying the
   tenant, run and trace ids. Logs are JSON with the same spans.
+- **Governed calls:** every tool call (REST, MCP, continuation, check or compensation)
+  gets one `contextos.dispatch` span, exported as `execute_tool <capability>` with the
+  OpenTelemetry GenAI attributes (`gen_ai.operation.name = "execute_tool"`,
+  `gen_ai.tool.name`, `gen_ai.tool.call.id`), so agent-trace views show it as a tool
+  step. It also carries `contextos.status`, `contextos.reason_codes`,
+  `contextos.operation_id`, `contextos.action_digest`, the stage the pipeline stopped
+  in (`contextos.stage`: `fence`, `surface`, `bind`, `authorize`, `reserve`, `claim`,
+  `dispatch`, `settle` or `result`) and the milliseconds each stage took
+  (`contextos.stages = "fence=0.1 surface=0.2 bind=0.4 authorize=3.1 …"`). A refusal
+  sets `error.type` to its first reason code; an infrastructure failure also sets the
+  span's status to error.
+- **Access log:** one JSON line per governed call on target `contextos::access`, with
+  tenant, run, capability, tool call, operation, status, reason codes, stage, stage
+  timings and duration. It follows `RUST_LOG`; `RUST_LOG=info,contextos::access=off`
+  turns it off and `RUST_LOG=warn,contextos::access=info` keeps only it. The signed
+  audit chain stays the record of what happened; the access log is for searching and
+  dashboards.
 - **Private CAs:** outgoing TLS (providers, adapters, the KMS, OIDC issuers,
   notification webhooks, the OTLP exporter, Tower's sources) trusts the public roots
   bundled in the binary. For services behind your own CA, set `CONTEXTOS_CA_BUNDLE` to
@@ -1948,8 +2019,28 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   that holds none, and `--check-config` reports it. PostgreSQL takes its CA in the URL
   (`?sslmode=verify-full&sslrootcert=/path/ca.pem`). The Helm chart mounts the bundle
   with `extraVolumes`, `extraVolumeMounts` and `extraEnv` (see its README).
+- **TLS:** most deployments terminate TLS at an ingress or mesh. Without one, serve
+  HTTPS directly, and optionally require client certificates (mutual TLS) so only
+  workloads holding one can connect:
+
+  ```toml
+  [server.tls]
+  cert_path = "/etc/contextos/tls/tls.crt"     # chain: certificate, then intermediates
+  key_path = "/etc/contextos/tls/tls.key"
+  client_ca_path = "/etc/contextos/tls/clients.pem"   # optional: require client certs
+  # reload_secs = 60                            # pick up rotated files; 0 never
+  ```
+
+  HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
+  cert-manager Secret) are served to new connections within `reload_secs`; a
+  rotation that does not load keeps the previous certificate and logs a warning.
+  Callers still authenticate with their token: mTLS decides who may connect, not who
+  they are. `--check-config` loads the files. The Helm chart mounts them with
+  `extraVolumes` and `extraVolumeMounts`.
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
-  GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
+  GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
+  natively), signed with cosign (keyless) and with build provenance; verify before
+  deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).
 
 ### Backup and restore

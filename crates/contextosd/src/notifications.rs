@@ -37,9 +37,10 @@ pub const EVENT_KINDS: [&str; 2] = ["escalation_opened", "escalation_resolved"];
 const MAX_WEBHOOKS: usize = 8;
 const PAGE: usize = 100;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WebhookConfig {
+    /// Webhook id, which guarantees name in `owner_route` and metrics label.
     pub id: String,
     /// HTTPS endpoint (HTTP only in development).
     pub url: String,

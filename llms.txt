@@ -45,6 +45,8 @@ Key facts for agents working with this repository or a ContextOS deployment:
 - [Support refund quickstart](https://github.com/contextosai/ContextOS/blob/main/examples/support-refund/README.md): a pack, its tests, a pack built from a rule library, and a governed refund end to end
 - [Shared guarantees](https://github.com/contextosai/ContextOS/tree/main/examples/shared-guarantees): two agents against one shared ceiling
 - [Deployment recipes](https://github.com/contextosai/ContextOS/blob/main/deploy/README.md): Helm, pack publishing from git, audit sinks
+- [Configuration reference](https://github.com/contextosai/ContextOS/blob/main/docs/CONFIG.md): every contextosd key, generated from the code
+- [Metric reference](https://github.com/contextosai/ContextOS/blob/main/docs/METRICS.md): every metric `/metrics` exports
 
 ## Optional
 

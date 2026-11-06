@@ -32,7 +32,7 @@ use crate::auth::Caller;
 use crate::http::ApiError;
 use crate::metrics::Metrics;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserBinding {
     Required,

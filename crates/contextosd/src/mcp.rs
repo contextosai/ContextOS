@@ -39,7 +39,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
-const SUPPORTED_VERSIONS: [&str; 4] = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
+pub const SUPPORTED_VERSIONS: [&str; 4] = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -250,25 +250,36 @@ where
     }
     let id = &request["id"];
     let method = request["method"].as_str().unwrap_or_default();
-    if id.is_null() {
-        // Notifications (e.g. notifications/initialized) need no response.
-        return StatusCode::ACCEPTED.into_response();
+    if request.get("id").is_none() {
+        // Notifications (e.g. notifications/initialized) need no response. A request
+        // without an id is not one: refuse it rather than accept and drop it.
+        if method.starts_with("notifications/") {
+            return StatusCode::ACCEPTED.into_response();
+        }
+        let mut refused = rpc_error(&Value::Null, INVALID_REQUEST, "a request needs an id");
+        *refused.status_mut() = StatusCode::BAD_REQUEST;
+        return refused;
     }
     let params = &request["params"];
     match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or(PROTOCOL_VERSION);
-            let version = if SUPPORTED_VERSIONS.contains(&asked) {
-                asked
-            } else {
-                PROTOCOL_VERSION
-            };
-            rpc_result(
+            let version: &'static str = SUPPORTED_VERSIONS
+                .iter()
+                .find(|v| **v == asked)
+                .copied()
+                .unwrap_or(PROTOCOL_VERSION);
+            let mut response = rpc_result(
                 id,
                 json!({"protocolVersion": version, "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "contextosd", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": "Tools are governed by ContextOS. A tool error with reason codes means the action was not performed; do not retry it unchanged."}),
-            )
+            );
+            response.headers_mut().insert(
+                crate::mcp_transport::VERSION_HEADER,
+                axum::http::HeaderValue::from_static(version),
+            );
+            response
         }
         "ping" => rpc_result(id, json!({})),
         "tools/list" => {

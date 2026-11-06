@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::Config;
 use crate::auth::Caller;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentBinding {
     Required,

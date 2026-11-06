@@ -1,0 +1,48 @@
+[package]
+name = "contextos-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+contextos-contract = { path = "../crates/contextos-contract" }
+contextos-policy = { path = "../crates/contextos-policy" }
+contextos-embed = { path = "../crates/contextos-embed" }
+contextos-adapters = { path = "../crates/contextos-adapters" }
+
+# Its own workspace: the fuzz crate builds on nightly only.
+[workspace]
+
+[[bin]]
+name = "kernel_call"
+path = "fuzz_targets/kernel_call.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jsonlogic"
+path = "fuzz_targets/jsonlogic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "canonical_json"
+path = "fuzz_targets/canonical_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "upstream_response"
+path = "fuzz_targets/upstream_response.rs"
+test = false
+doc = false
+bench = false

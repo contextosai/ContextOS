@@ -27,7 +27,7 @@ use crate::http::ApiError;
 
 const ENTERPRISE: &str = "contextos.enterprise";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceMode {
     Strict,
