@@ -11,7 +11,9 @@
 //!   is visible without a debugger.
 //! - The event on target `contextos::access` is the access log: one JSON line per
 //!   governed call with tenant, run, capability, status, reason codes, stage and
-//!   duration. Select it with `RUST_LOG=info,contextos::access=info`, or silence it
+//!   duration. A call that fails on infrastructure (the store or the audit chain)
+//!   leaves one too, with `status="error"`, the failing dependency as its reason and
+//!   an empty stage. Select it with `RUST_LOG=info,contextos::access=info`, or silence it
 //!   with `contextos::access=off`. The signed audit chain remains the record of what
 //!   happened; this line is for searching and dashboards.
 
@@ -135,6 +137,55 @@ pub(crate) fn finished(call: &Finished<'_>) {
         reason_codes = reasons.as_str(),
         stage = call.stage,
         stages = call.stages,
+        duration_ms = call.duration_ms,
+        check = call.check,
+        "governed call"
+    );
+}
+
+/// A call that failed on infrastructure rather than ending in a governance outcome.
+#[derive(Debug)]
+pub(crate) struct Failed<'a> {
+    pub tenant_id: &'a str,
+    pub run_id: &'a str,
+    pub capability_id: &'a str,
+    pub tool_call_id: &'a str,
+    pub error: &'a crate::GatewayError,
+    pub duration_ms: f64,
+    pub check: bool,
+}
+
+/// The reason code an infrastructure failure is logged under.
+fn failure_reason(error: &crate::GatewayError) -> &'static str {
+    use crate::GatewayError as E;
+    match error {
+        E::Store(_) => "store_unavailable",
+        E::Audit(_) => "audit_unavailable",
+        E::Guarantee(_) => "shared_guarantee_failed",
+        E::Manifest(_) => "manifest_invalid",
+        E::Outcome(_) => "outcome_contract_failed",
+    }
+}
+
+/// Marks the current span failed and writes the access event with `status="error"`.
+pub(crate) fn failed(call: &Failed<'_>) {
+    let span = tracing::Span::current();
+    let reason = failure_reason(call.error);
+    span.record("otel.status_code", "ERROR");
+    span.record("error.type", "infrastructure");
+    span.record("contextos.status", "error");
+    span.record("contextos.reason_codes", reason);
+    tracing::info!(
+        target: "contextos::access",
+        tenant_id = call.tenant_id,
+        run_id = call.run_id,
+        capability_id = call.capability_id,
+        tool_call_id = call.tool_call_id,
+        operation_id = "",
+        status = "error",
+        reason_codes = reason,
+        stage = "",
+        stages = "",
         duration_ms = call.duration_ms,
         check = call.check,
         "governed call"

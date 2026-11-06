@@ -672,14 +672,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         compensates: Option<&Value>,
         check: bool,
     ) -> Result<DispatchOutcome, GatewayError> {
+        let started = std::time::Instant::now();
         let outcome = self
             .run_pipeline(admission, envelope, continuation, fence, compensates, check)
             .await;
         if let Err(error) = &outcome {
-            let span = tracing::Span::current();
-            span.record("otel.status_code", "ERROR");
-            span.record("error.type", "infrastructure");
             tracing::error!(%error, "governed call failed");
+            // Governance outcomes leave their access line as the pipeline stops; an
+            // infrastructure failure (store or audit) leaves one here, so dashboards
+            // counting access lines count failed calls too.
+            observe::failed(&observe::Failed {
+                tenant_id: &admission.tenant_id,
+                run_id: &admission.run_id,
+                capability_id: envelope["capability_id"].as_str().unwrap_or_default(),
+                tool_call_id: envelope["tool_call_id"].as_str().unwrap_or_default(),
+                error,
+                duration_ms: started.elapsed().as_secs_f64() * 1000.0,
+                check,
+            });
         }
         outcome
     }
