@@ -23,7 +23,7 @@ use contextos_audit::{AuditSigner, RemoteSigner};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KmsConfig {
     /// `vault_transit`.

@@ -27,7 +27,7 @@ fn default_max_age() -> u64 {
 }
 
 /// An amount at or above which approvals need step-up, in one currency.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AmountThreshold {
     /// ISO 4217 code, as the action's bound `amount.currency`.
@@ -36,7 +36,7 @@ pub struct AmountThreshold {
 }
 
 /// `[guards.approval_step_up]`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StepUpPolicy {
     /// Applies to actions whose bound amount reaches the threshold for its currency,

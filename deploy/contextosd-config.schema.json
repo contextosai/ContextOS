@@ -1,0 +1,1603 @@
+{
+  "$defs": {
+    "AdapterConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "description": "The provider's URL.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Adapter id that capability manifests name.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AdapterKind",
+          "description": "Protocol: `mcp` (Streamable HTTP) or `http`."
+        },
+        "oauth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OAuthClientConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Obtain provider tokens with the OAuth client credentials grant instead of a fixed token (see `runtime::oauth_broker`)."
+        },
+        "result_projection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResultProjectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MCP only: how a tool result becomes the tool output. `flat` (the default) is the original mapping; `mcp_result_v1` preserves structured content losslessly."
+        },
+        "token_env": {
+          "default": null,
+          "description": "Environment variable holding the provider credential issued by your broker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "AdapterKind": {
+      "enum": [
+        "mcp",
+        "http"
+      ],
+      "type": "string"
+    },
+    "AgentBinding": {
+      "enum": [
+        "required",
+        "observe",
+        "off"
+      ],
+      "type": "string"
+    },
+    "AmountThreshold": {
+      "additionalProperties": false,
+      "description": "An amount at or above which approvals need step-up, in one currency.",
+      "properties": {
+        "currency": {
+          "description": "ISO 4217 code, as the action's bound `amount.currency`.",
+          "type": "string"
+        },
+        "minor_units": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "currency",
+        "minor_units"
+      ],
+      "type": "object"
+    },
+    "ApiKey": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_ids": {
+          "description": "The agent ids this key is issued for (see `agent_binding`).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "key_sha256": {
+          "description": "`sha256:<hex>` of the raw key.",
+          "type": "string"
+        },
+        "principal_id": {
+          "description": "Principal the key authenticates.",
+          "type": "string"
+        },
+        "scopes": {
+          "description": "API scopes granted, such as `admit`, `dispatch` or `audit:read`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tenant_id": {
+          "description": "Tenant the key acts in.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key_sha256",
+        "tenant_id",
+        "principal_id",
+        "scopes"
+      ],
+      "type": "object"
+    },
+    "AuditConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "key_id": {
+          "description": "Key id (`kid`) recorded on every entry the current key signs.",
+          "type": "string"
+        },
+        "kms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KmsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign with a key held in a KMS instead (the runtime then never holds it)."
+        },
+        "retired_keys": {
+          "default": [],
+          "description": "Public keys of retired signing keys. Entries they signed stay verifiable after a rotation: verifiers trust them, and `GET /v1/audit/keys` publishes them, but nothing signs with them.",
+          "items": {
+            "$ref": "#/$defs/RetiredKey"
+          },
+          "type": "array"
+        },
+        "signing_seed_env": {
+          "default": "",
+          "description": "Environment variable holding the 32-byte ed25519 seed as hex (development, or a secret store that only hands out seeds). Unused when `kms` is set.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key_id"
+      ],
+      "type": "object"
+    },
+    "AuditSinkConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "batch": {
+          "default": 100,
+          "description": "Entries per request.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "description": "Sink id, used in metrics and delivery cursors.",
+          "type": "string"
+        },
+        "kinds": {
+          "default": [],
+          "description": "Entry kinds to deliver; every kind when empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mask": {
+          "default": [],
+          "description": "Payload fields to mask (see the module documentation).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mask_key_env": {
+          "description": "Environment variable holding the masking key (at least 32 bytes); required with `mask`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret_env": {
+          "description": "Environment variable holding the request signing secret (at least 32 bytes).",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/Start",
+          "default": "genesis",
+          "description": "`genesis` (default): deliver each tenant's whole chain; `head`: from now on."
+        },
+        "url": {
+          "description": "HTTPS endpoint (HTTP only in development).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "secret_env"
+      ],
+      "type": "object"
+    },
+    "Canonicalizer": {
+      "description": "How subjects are compared.",
+      "oneOf": [
+        {
+          "enum": [
+            "exact"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "ascii_casefold",
+          "description": "ASCII letters compared without case (`ORD_881` is `ord_881`).",
+          "type": "string"
+        }
+      ]
+    },
+    "CompletionScores": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ScoreFloors"
+        }
+      ],
+      "description": "`[guards] completion_requires_scores`: on or off, or explicit floors."
+    },
+    "ConformanceConfig": {
+      "additionalProperties": false,
+      "description": "Principals whose conformance reports and control evidence this deployment trusts, with the Ed25519 keys their attestations are signed with (see `attest`). Each principal names its tenant; an assessment uses those of the caller's tenant only. The caller of an assessment never supplies these.",
+      "properties": {
+        "trusted_assessors": {
+          "default": [],
+          "description": "Principals whose conformance reports are trusted.",
+          "items": {
+            "$ref": "#/$defs/TrustedSigner"
+          },
+          "type": "array"
+        },
+        "trusted_evidence_observers": {
+          "default": [],
+          "description": "Principals whose control evidence is trusted.",
+          "items": {
+            "$ref": "#/$defs/TrustedSigner"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DelegationConfig": {
+      "additionalProperties": false,
+      "description": "`[oidc.delegation]`: how a delegated token names its actor and user.",
+      "properties": {
+        "actor_agent_claim": {
+          "default": null,
+          "description": "Field of the actor object naming the agent, mapped through the issuer's `agents` table (Keycloak: `client_id`). Unset: the issuer's `agent_claim`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actor_claim": {
+          "default": "act",
+          "description": "Claim path of the actor object (its `sub` is the caller).",
+          "type": "string"
+        },
+        "user_roles_claim": {
+          "default": null,
+          "description": "Claim path listing the user's roles (Keycloak: `realm_access.roles`). Set, a run may declare only a role the user holds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "EvidenceIssuerConfig": {
+      "additionalProperties": false,
+      "description": "`[[evidence_issuers]]`: one service trusted to vouch for named facts.",
+      "properties": {
+        "algorithm": {
+          "description": "Its signing algorithm (`EdDSA`, `ES256`, `ES384`, `RS256`, `PS256`, …).",
+          "type": "string"
+        },
+        "issuer": {
+          "description": "Exact `iss` of its attestations.",
+          "type": "string"
+        },
+        "jwks": {
+          "description": "Its public keys as a JWK Set (JSON text, as the issuer publishes it). A `kid` in an attestation's header selects one; several keys allow rotation.",
+          "type": "string"
+        },
+        "max_validity_seconds": {
+          "description": "The longest `valid_until - observed_at` it may claim.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "satisfies": {
+          "description": "The `required_evidence` names it may satisfy.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tenants": {
+          "description": "Tenants whose runs may rely on it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "issuer",
+        "tenants",
+        "satisfies",
+        "max_validity_seconds",
+        "algorithm",
+        "jwks"
+      ],
+      "type": "object"
+    },
+    "EvidenceMode": {
+      "enum": [
+        "strict",
+        "caller"
+      ],
+      "type": "string"
+    },
+    "EvidenceSubject": {
+      "additionalProperties": false,
+      "description": "`[[evidence_subjects]]`.",
+      "properties": {
+        "canonicalizer": {
+          "$ref": "#/$defs/Canonicalizer",
+          "default": "exact"
+        },
+        "from": {
+          "description": "JSON Pointer into `{\"request\": …, \"run_context\": …}` to a string or number.",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "",
+          "description": "Prepended to the run's value to form the expected `sub`.",
+          "type": "string"
+        },
+        "requirement": {
+          "description": "The `required_evidence` name this binds.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement",
+        "from"
+      ],
+      "type": "object"
+    },
+    "GuardsConfig": {
+      "additionalProperties": false,
+      "description": "Guards on agent behaviour.",
+      "properties": {
+        "agent_binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise."
+        },
+        "approval_step_up": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StepUpPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`)."
+        },
+        "completion_requires_scores": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompletionScores"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them."
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What may satisfy a decision's evidence gate (`strict`, `caller`; see `evidence_admission`). Unset: `strict` with the `contextos.enterprise` profile, which requires it, `caller` otherwise."
+        },
+        "identical_tool_calls": {
+          "default": 5,
+          "description": "Identical tool calls (same capability and arguments, new operation) a run may make before the next is refused with `loop_detected`; 0 disables the guard.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model_call_min_tokens": {
+          "default": 1000,
+          "description": "Tokens every model-call reservation covers at least, so an executor cannot reserve (and self-settle) a model call for nothing.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pack_intents": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackIntents"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a run's intent must be one its Context Pack's rules name (`required`, `observe`, `off`; see `pack_intents`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise."
+        },
+        "refuse_repeated_effects": {
+          "default": true,
+          "description": "Refuse a new operation whose effect is identical (same capability and arguments) to one the run already applied, unless the capability is `repeatable`: `effect_repeated`. On by default.",
+          "type": "boolean"
+        },
+        "require_completion_contracts": {
+          "default": null,
+          "description": "Refuse to start with an effectful MCP capability that declares no `recovery.completion`, so a finished result is confirmed by the state the tool reports, not by the absence of `isError`. Unset: on in production, off in development. (Effectful HTTP capabilities always need one.)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "require_task_authorization": {
+          "default": false,
+          "description": "Refuse runs that can apply effects unless they state what their principal authorized (`task_authorization`), so no effect relies on the agent's own reading of the request.",
+          "type": "boolean"
+        },
+        "require_tool_schemas": {
+          "default": false,
+          "description": "Refuse to start with a capability that lacks an `input_schema` or `output_schema`, so every call's arguments and results are checked against a reviewed shape (read-only tools too: their results carry most injected content).",
+          "type": "boolean"
+        },
+        "require_user_role": {
+          "default": null,
+          "description": "Refuse runs whose user claims carry no `role`, so policy never evaluates a role nobody asserted (the reference compiler defaults it; see the threat model). Unset: on in production, off in development.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "required_release_refs": {
+          "default": null,
+          "description": "Release artifact types every run's execution contract must pin in `release_refs` (e.g. `[\"model_profile\", \"evaluator_suite\"]`), so each decision records which model and evaluators produced it. Unset: `model_profile` and `evaluator_suite` in production, none in development; `[]` opts out explicitly.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "trust_supplied_memory": {
+          "default": false,
+          "description": "Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless.",
+          "type": "boolean"
+        },
+        "user_binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a run's declared user must be the user its caller's delegated token acts for (`required`, `observe`, `off`; see `user_binding`). Unset: `observe`."
+        }
+      },
+      "type": "object"
+    },
+    "IdentityConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "gateway_principal_id": {
+          "description": "Principal id the gateway uses for its own observations.",
+          "type": "string"
+        },
+        "trust_domain": {
+          "description": "Trust domain of agent principals admitted by this deployment.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trust_domain",
+        "gateway_principal_id"
+      ],
+      "type": "object"
+    },
+    "KmsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "key_name": {
+          "description": "The Transit key name (an `ed25519` key).",
+          "type": "string"
+        },
+        "key_version": {
+          "description": "The Transit key version that signs (pinned: a rotation inside Vault does not silently change what this `key_id` means).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "description": "`vault_transit`.",
+          "type": "string"
+        },
+        "mount": {
+          "default": "transit",
+          "description": "Transit mount path (default `transit`).",
+          "type": "string"
+        },
+        "public_key": {
+          "description": "The expected Ed25519 public key (base64url, unpadded) of that version. Startup fails if the KMS reports another, so a hijacked endpoint cannot substitute its own.",
+          "type": "string"
+        },
+        "token_env": {
+          "description": "Environment variable holding the Vault token.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Base URL, e.g. `https://vault.internal:8200` (HTTPS outside development).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "url",
+        "key_name",
+        "token_env",
+        "key_version",
+        "public_key"
+      ],
+      "type": "object"
+    },
+    "LimitsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "burst": {
+          "default": 1000.0,
+          "description": "Default per-tenant bucket size.",
+          "format": "double",
+          "type": "number"
+        },
+        "heartbeat_ms": {
+          "default": 5000,
+          "description": "How often replicas record their heartbeat for shared tenant limits.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_concurrent_dispatch": {
+          "default": 256,
+          "description": "Default per-tenant governed effects in progress at once.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_in_flight": {
+          "default": 4096,
+          "description": "Requests in progress across all tenants; beyond it the server answers 503.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requests_per_second": {
+          "default": 500.0,
+          "description": "Default per-tenant request rate (token bucket refill), shared across replicas.",
+          "format": "double",
+          "type": "number"
+        },
+        "tenants": {
+          "default": [],
+          "description": "Per-tenant overrides of the defaults.",
+          "items": {
+            "$ref": "#/$defs/TenantLimits"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Mode": {
+      "oneOf": [
+        {
+          "enum": [
+            "production"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "development",
+          "description": "Enables development-only conveniences; never use with real tenants.",
+          "type": "string"
+        }
+      ]
+    },
+    "OAuthClientConfig": {
+      "additionalProperties": false,
+      "description": "OAuth 2.0 client credentials for one adapter's provider.",
+      "properties": {
+        "client_id": {
+          "description": "OAuth client id.",
+          "type": "string"
+        },
+        "client_secret_env": {
+          "description": "Environment variable holding the client secret.",
+          "type": "string"
+        },
+        "refresh_before_seconds": {
+          "default": 60,
+          "description": "Replace a cached token this long before it expires.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resource": {
+          "default": null,
+          "description": "RFC 8707 resource the token is for; defaults to the adapter's endpoint.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "default": null,
+          "description": "Scope to request, if the server needs one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token_url": {
+          "description": "Token endpoint of the authorization server.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token_url",
+        "client_id",
+        "client_secret_env"
+      ],
+      "type": "object"
+    },
+    "OidcConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_claim": {
+          "default": null,
+          "description": "Claim naming the agent the token is issued for (for example `sub` of a SPIFFE JWT-SVID, or `azp`), checked against the run's declared agent at admission.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agents": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Maps an `agent_claim` value to the agent ids it may run as. Empty: the claim value itself is the agent id.",
+          "type": "object"
+        },
+        "algorithms": {
+          "default": [
+            "RS256",
+            "ES256"
+          ],
+          "description": "Accepted signature algorithms (asymmetric only).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "audience": {
+          "description": "Required `aud` value.",
+          "type": "string"
+        },
+        "delegation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Accept RFC 8693 delegated tokens: the caller is the actor, acting for a user."
+        },
+        "issuer": {
+          "description": "Exact `iss` value.",
+          "type": "string"
+        },
+        "jwks_url": {
+          "default": null,
+          "description": "HTTPS URL of the issuer's JWKS (HTTP is allowed only in development mode). Unset: discovered from the issuer's OpenID Provider Metadata.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leeway_seconds": {
+          "default": 60,
+          "description": "Clock skew tolerated on `exp` and `nbf`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refresh_seconds": {
+          "default": 300,
+          "description": "How often the JWKS is fetched again.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scope_claim": {
+          "default": "scope",
+          "description": "Space-separated string or array of scopes.",
+          "type": "string"
+        },
+        "tenant_claim": {
+          "default": "tenant_id",
+          "description": "Claim path naming the tenant: a string, an array or an object keyed by name (Keycloak's `organization`). It must name exactly one of `tenants`.",
+          "type": "string"
+        },
+        "tenant_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Maps `tenant_claim` values (for example Keycloak organization aliases) to tenant ids. Empty: the claim value itself is the tenant id.",
+          "type": "object"
+        },
+        "tenants": {
+          "description": "Tenants this issuer may assert. A token naming any other tenant is rejected.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "issuer",
+        "audience",
+        "tenants"
+      ],
+      "type": "object"
+    },
+    "PackIntents": {
+      "enum": [
+        "required",
+        "observe",
+        "off"
+      ],
+      "type": "string"
+    },
+    "ProvidersConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "approvals": {
+          "$ref": "#/$defs/RemoteProvider",
+          "description": "Approvals service: human approval requests and decisions."
+        },
+        "authority": {
+          "$ref": "#/$defs/RemoteProvider",
+          "description": "Authority service: who may act for whom."
+        },
+        "boundary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Execution-boundary controller; when set, run start, resume and every dispatch require the kernel to find the run's boundary active."
+        },
+        "constraints": {
+          "$ref": "#/$defs/RemoteProvider",
+          "description": "Constraints service: verified observations for the controls a pack requires."
+        },
+        "data_flow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Data-governance service; when set, data sent to destinations must pass the kernel's data-flow policy evaluation."
+        },
+        "idempotency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider idempotency status service, for reconciling unknown outcomes."
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Memory-governance service; enables governed memory lifecycle operations."
+        },
+        "resource_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Resource identity service; maps identifiers to canonical ids for guarantees with `resource_canonicalizer = \"provider\"`."
+        },
+        "result_screening": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Result-screening service; judges every confirmed effect's output before the agent sees it."
+        }
+      },
+      "required": [
+        "authority",
+        "constraints",
+        "approvals"
+      ],
+      "type": "object"
+    },
+    "RemoteProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "timeout_ms": {
+          "default": 2000,
+          "description": "Time a call may take before it counts as failed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token_env": {
+          "default": null,
+          "description": "Environment variable holding this service's bearer credential.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Base URL of the service.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "ResourceCanonicalizer": {
+      "description": "How a guarantee makes a resource identifier canonical before keying its ledger.",
+      "enum": [
+        "exact",
+        "ascii_casefold",
+        "provider"
+      ],
+      "type": "string"
+    },
+    "ResultProjectionConfig": {
+      "enum": [
+        "flat",
+        "mcp_result_v1"
+      ],
+      "type": "string"
+    },
+    "ResultSchemaConfig": {
+      "additionalProperties": false,
+      "description": "One registered result schema.",
+      "properties": {
+        "path": {
+          "description": "JSON Schema file the result must meet.",
+          "type": "string"
+        },
+        "ref": {
+          "description": "The `output_schema_ref` delegations name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "path"
+      ],
+      "type": "object"
+    },
+    "RetentionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "batch": {
+          "default": 500,
+          "description": "Runs erased per sweep at most.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "run_content_days": {
+          "default": null,
+          "description": "Erase a run's personal content this many days after admission; unset keeps it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sweep_interval_ms": {
+          "default": 60000,
+          "description": "How often the erasure sweep runs.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RetiredKey": {
+      "additionalProperties": false,
+      "properties": {
+        "kid": {
+          "description": "The retired key's id, as recorded on the entries it signed.",
+          "type": "string"
+        },
+        "public_key": {
+          "description": "Base64url (unpadded) of the 32-byte Ed25519 public key, as `GET /v1/audit/keys` published it.",
+          "type": "string"
+        },
+        "retired_at": {
+          "description": "When the key stopped signing: it verifies only entries emitted up to then, so a retired key that later leaks cannot sign new history.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kid",
+        "public_key",
+        "retired_at"
+      ],
+      "type": "object"
+    },
+    "ScoreFloors": {
+      "additionalProperties": false,
+      "description": "Score floors for `GuardsConfig::completion_requires_scores`, each in 0..=1.",
+      "properties": {
+        "policy_floor": {
+          "format": "double",
+          "type": "number"
+        },
+        "safety_floor": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "policy_floor",
+        "safety_floor"
+      ],
+      "type": "object"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_origins": {
+          "default": [],
+          "description": "Browser origins, besides `public_url`'s, that may call the MCP endpoint.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen": {
+          "description": "Socket address to listen on, such as `0.0.0.0:8080`.",
+          "type": "string"
+        },
+        "max_body_bytes": {
+          "default": 4194304,
+          "description": "Largest request body accepted, in bytes.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode",
+          "default": "production",
+          "description": "`production` refuses development-only conveniences and warns about weak settings."
+        },
+        "public_url": {
+          "default": null,
+          "description": "The URL clients reach this server at, for OAuth protected resource metadata (see `protected_resource`). Unset: no metadata is published.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_timeout_ms": {
+          "default": 15000,
+          "description": "Time a request may take before the server answers 504.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "listen"
+      ],
+      "type": "object"
+    },
+    "SharedGuarantee": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_pointer": {
+          "description": "JSON pointer to the amount in the call's arguments, such as `/amount_minor`.",
+          "type": "string"
+        },
+        "capability_ids": {
+          "description": "Capabilities whose effects draw on this limit.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "description": "Guarantee id, recorded on every reservation.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Total amount all runs together may commit per resource.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owner_after_seconds": {
+          "description": "How old a hold is before its owner is told (default 1,800 seconds).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "owner_route": {
+          "description": "The notification webhook that tells this guarantee's business owner about a hold older than `owner_after_seconds` (see `hold_owners`). Routing only: not part of the pinned definition.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resource_canonicalizer": {
+          "$ref": "#/$defs/ResourceCanonicalizer",
+          "description": "How the extracted identifier is made canonical (see `resource_identity`); omitted from the definition when `exact`."
+        },
+        "resource_pointer": {
+          "description": "JSON pointer to the resource identifier in the call's arguments, such as `/order_id`.",
+          "type": "string"
+        },
+        "unit": {
+          "description": "Unit of `limit` and the amounts, such as `INR_minor`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "capability_ids",
+        "resource_pointer",
+        "amount_pointer",
+        "limit",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Start": {
+      "enum": [
+        "genesis",
+        "head"
+      ],
+      "type": "string"
+    },
+    "StepUpPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.approval_step_up]`.",
+      "properties": {
+        "acr_values": {
+          "default": [],
+          "description": "Accepted `acr` values (any one).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "amount_at_least": {
+          "default": [],
+          "description": "Applies to actions whose bound amount reaches the threshold for its currency, and to any bound amount in a currency without one (or without a currency).",
+          "items": {
+            "$ref": "#/$defs/AmountThreshold"
+          },
+          "type": "array"
+        },
+        "amr_values": {
+          "default": [],
+          "description": "Accepted `amr` methods (any one present), for example `mfa`, `hwk`, `otp`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "description": "Applies to every approval of these capabilities.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_age_seconds": {
+          "default": 300,
+          "description": "How long before the decision the approver may have authenticated.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StoreConfig": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "memory",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "postgres",
+              "type": "string"
+            },
+            "max_connections": {
+              "default": 32,
+              "description": "PostgreSQL connection pool size.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "url_env": {
+              "description": "Environment variable holding the connection URL.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url_env"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SupportConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "controls": {
+          "description": "Controls this deployment actually enforces through its integrated providers. Declaring a control here is a claim about the deployment, not a grant.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "implementation_id": {
+          "description": "Implementation id published in the support declaration.",
+          "type": "string"
+        },
+        "implementation_version": {
+          "description": "Implementation version published in the support declaration.",
+          "type": "string"
+        },
+        "profiles": {
+          "description": "Conformance profiles this deployment claims.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "implementation_id",
+        "implementation_version",
+        "controls",
+        "profiles"
+      ],
+      "type": "object"
+    },
+    "TenantLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "burst": {
+          "description": "This tenant's bucket size; unset uses the default.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_concurrent_dispatch": {
+          "description": "This tenant's concurrent effects; unset uses the default.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "requests_per_second": {
+          "description": "This tenant's request rate; unset uses the default.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tenant_id": {
+          "description": "The tenant these limits apply to.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_id"
+      ],
+      "type": "object"
+    },
+    "TrustedSigner": {
+      "additionalProperties": false,
+      "description": "A trusted principal and the Ed25519 key its attestations are signed with.",
+      "properties": {
+        "principal": {
+          "description": "The signer's principal, including its tenant."
+        },
+        "public_key": {
+          "description": "Base64 (standard) of the 32-byte Ed25519 public key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal",
+        "public_key"
+      ],
+      "type": "object"
+    },
+    "UserBinding": {
+      "enum": [
+        "required",
+        "observe",
+        "off"
+      ],
+      "type": "string"
+    },
+    "WebhookConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Webhook id, which guarantees name in `owner_route` and metrics label.",
+          "type": "string"
+        },
+        "link_template": {
+          "description": "Link to the decision, with `{escalation_id}`, `{run_id}` and `{tenant_id}` replaced (for example your Tower URL).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_attempts": {
+          "default": 12,
+          "description": "Attempts per event before it is given up (logged and counted).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secret_env": {
+          "description": "Environment variable holding the signing secret (at least 32 bytes).",
+          "type": "string"
+        },
+        "url": {
+          "description": "HTTPS endpoint (HTTP only in development).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "secret_env"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adapters": {
+      "default": [],
+      "description": "Providers that perform effects: MCP servers or HTTP services.",
+      "items": {
+        "$ref": "#/$defs/AdapterConfig"
+      },
+      "type": "array"
+    },
+    "api_keys": {
+      "default": [],
+      "description": "API keys, configured as hashes only (`ctx hash-key`).",
+      "items": {
+        "$ref": "#/$defs/ApiKey"
+      },
+      "type": "array"
+    },
+    "audit": {
+      "$ref": "#/$defs/AuditConfig",
+      "description": "The audit chain's signing key."
+    },
+    "audit_sinks": {
+      "default": [],
+      "description": "Destinations the audit chain is delivered to, with masked payload fields (see `audit_sinks`).",
+      "items": {
+        "$ref": "#/$defs/AuditSinkConfig"
+      },
+      "type": "array"
+    },
+    "capabilities": {
+      "default": [],
+      "description": "Reviewed capability manifest JSON files to pin at startup.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "conformance": {
+      "$ref": "#/$defs/ConformanceConfig",
+      "default": {
+        "trusted_assessors": [],
+        "trusted_evidence_observers": []
+      },
+      "description": "Trust anchors for conformance assessment (`POST /v1/conformance/assess`)."
+    },
+    "evidence_issuers": {
+      "default": [],
+      "description": "Services trusted to vouch for gated evidence (see `evidence_issuers`).",
+      "items": {
+        "$ref": "#/$defs/EvidenceIssuerConfig"
+      },
+      "type": "array"
+    },
+    "evidence_subjects": {
+      "default": [],
+      "description": "What each gated requirement's evidence must be about (see `evidence_subjects`).",
+      "items": {
+        "$ref": "#/$defs/EvidenceSubject"
+      },
+      "type": "array"
+    },
+    "guarantees": {
+      "default": [],
+      "description": "Trusted business-resource limits shared by unrelated agent runs.",
+      "items": {
+        "$ref": "#/$defs/SharedGuarantee"
+      },
+      "type": "array"
+    },
+    "guards": {
+      "$ref": "#/$defs/GuardsConfig",
+      "default": {
+        "agent_binding": null,
+        "approval_step_up": null,
+        "completion_requires_scores": null,
+        "evidence": null,
+        "identical_tool_calls": 5,
+        "model_call_min_tokens": 1000,
+        "pack_intents": null,
+        "refuse_repeated_effects": true,
+        "require_completion_contracts": null,
+        "require_task_authorization": false,
+        "require_tool_schemas": false,
+        "require_user_role": null,
+        "required_release_refs": null,
+        "trust_supplied_memory": false,
+        "user_binding": null
+      },
+      "description": "Runtime guards on agent behaviour."
+    },
+    "identity": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IdentityConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Agent trust domain and the gateway's own principal; defaults suit one deployment."
+    },
+    "limits": {
+      "$ref": "#/$defs/LimitsConfig",
+      "default": {
+        "burst": 1000.0,
+        "heartbeat_ms": 5000,
+        "max_concurrent_dispatch": 256,
+        "max_in_flight": 4096,
+        "requests_per_second": 500.0,
+        "tenants": []
+      },
+      "description": "Overload protection (see `limits`)."
+    },
+    "notifications": {
+      "default": [],
+      "description": "Webhooks told when escalations open and resolve (see `notifications`).",
+      "items": {
+        "$ref": "#/$defs/WebhookConfig"
+      },
+      "type": "array"
+    },
+    "oidc": {
+      "default": [],
+      "description": "OIDC issuers whose JWTs authenticate callers.",
+      "items": {
+        "$ref": "#/$defs/OidcConfig"
+      },
+      "type": "array"
+    },
+    "pack_dirs": {
+      "default": [],
+      "description": "Directories whose JSON files (recursively; names starting with `.` skipped) are Context Packs, loaded at startup and re-read on reload (see `pack_registry`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pack_reload_secs": {
+      "default": 0,
+      "description": "Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "packs": {
+      "default": [],
+      "description": "Context Pack JSON files to load at startup.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "providers": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProvidersConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Remote fact services; dispatch is disabled without them."
+    },
+    "result_schemas": {
+      "default": [],
+      "description": "Schemas delegated runs' results must meet, by the `output_schema_ref` a delegation names: `[[result_schemas]] ref = \"schema://…\", path = \"…json\"`.",
+      "items": {
+        "$ref": "#/$defs/ResultSchemaConfig"
+      },
+      "type": "array"
+    },
+    "retention": {
+      "$ref": "#/$defs/RetentionConfig",
+      "default": {
+        "batch": 500,
+        "run_content_days": null,
+        "sweep_interval_ms": 60000
+      },
+      "description": "Retention of runs' personal content (see `retention`); off by default."
+    },
+    "retired_capabilities": {
+      "default": [],
+      "description": "Manifests of versions `capabilities` replaced, kept while operations claimed under them may still need reconciliation or attestation. Never dispatched.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfig",
+      "description": "The listener, request limits and mode."
+    },
+    "store": {
+      "$ref": "#/$defs/StoreConfig",
+      "description": "Where runs, ledgers and the audit chain are kept."
+    },
+    "support": {
+      "$ref": "#/$defs/SupportConfig",
+      "description": "What this deployment declares it implements (`RuntimeSupportDeclaration`)."
+    }
+  },
+  "required": [
+    "server",
+    "store",
+    "audit",
+    "support"
+  ],
+  "title": "contextosd configuration",
+  "type": "object"
+}

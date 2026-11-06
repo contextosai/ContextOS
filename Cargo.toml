@@ -22,6 +22,7 @@ contextos-gateway = { path = "crates/contextos-gateway" }
 contextos-adapters = { path = "crates/contextos-adapters" }
 contextos-embed = { path = "crates/contextos-embed", default-features = false }
 serde = { version = "1", features = ["derive"] }
+schemars = "1.2"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11"
 hex = "0.4"

@@ -2,10 +2,6 @@
 //! metric cannot silently disable an alert.
 
 use std::collections::BTreeSet;
-use std::time::Duration;
-
-use contextosd::governance_sweep::Census;
-use contextosd::metrics::Metrics;
 
 fn rules() -> String {
     let path = concat!(
@@ -37,21 +33,7 @@ fn referenced(rules: &str) -> BTreeSet<String> {
 
 /// Everything `/metrics` can export, with each labelled family present.
 fn exposition() -> String {
-    let metrics = Metrics::default();
-    metrics.observe("/v1/runs/{run_id}/dispatch", 200, Duration::from_millis(3));
-    metrics.dispatch_outcome("x.y", "blocked", &["shared_guarantee_saturated".into()]);
-    metrics.notification("oncall", "abandoned");
-    // The leader's governance gauges.
-    metrics.set_governance(Some(Census::empty_exposition(vec!["refunds".into()])));
-    metrics.set_upstream(Some(contextosd::upstream_check::exposition(
-        &[(
-            "adp_payments.issue_refund".to_owned(),
-            contextos_gateway::upstream_drift::UpstreamStatus::Drifted,
-        )]
-        .into(),
-    )));
-    // `contextos_replicas` is appended by the `/metrics` handler.
-    format!("{}# TYPE contextos_replicas gauge\n", metrics.render())
+    contextosd::metrics_reference::full_exposition()
 }
 
 fn assert_exported(names: &BTreeSet<String>, source: &str) {

@@ -50,14 +50,20 @@ pub(crate) fn record_shared_observation(ledger: &Value, observation: &Value) -> 
     contextos_kernel::operation_ledger::record_effect_observation(ledger, observation, &ledger["revision"])
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SharedGuarantee {
+    /// Guarantee id, recorded on every reservation.
     pub id: String,
+    /// Capabilities whose effects draw on this limit.
     pub capability_ids: Vec<String>,
+    /// JSON pointer to the resource identifier in the call's arguments, such as `/order_id`.
     pub resource_pointer: String,
+    /// JSON pointer to the amount in the call's arguments, such as `/amount_minor`.
     pub amount_pointer: String,
+    /// Total amount all runs together may commit per resource.
     pub limit: u64,
+    /// Unit of `limit` and the amounts, such as `INR_minor`.
     pub unit: String,
     /// How the extracted identifier is made canonical (see
     /// [`crate::resource_identity`]); omitted from the definition when `exact`.

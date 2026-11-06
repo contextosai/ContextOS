@@ -6,6 +6,21 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `docs/CONFIG.md` lists every configuration key with its type, default and meaning,
+  and `docs/METRICS.md` every metric with its type and labels. Both are generated from
+  the code (`CONTEXTOS_BLESS=1 cargo test -p contextosd --test generated`), and the
+  test fails when either is stale.
+- `contextosd --config-schema` prints the configuration's JSON Schema, also committed
+  as `deploy/contextosd-config.schema.json`. The example configuration names it in a
+  `#:schema` comment, so TOML editors complete and check keys. A test validates the
+  example configurations against it.
+- `contextosd --mcp-stdio <url>` connects MCP hosts that only launch local (stdio)
+  servers to a run's MCP endpoint. Token and executor generation come from
+  `CONTEXTOS_TOKEN` and `CONTEXTOS_EXECUTOR_GENERATION`; requests run concurrently.
+- The MCP endpoint refuses requests from browser origins other than `public_url`'s
+  and `[server] allowed_origins` (`403 origin_not_allowed`), so a web page cannot
+  reach the server through DNS rebinding. Callers that send no `Origin` are
+  unaffected.
 - The release image is published for `linux/amd64` and `linux/arm64` under one tag.
   Each architecture builds natively and is smoke-tested on its own runner before
   the index is tagged, signed (cosign, recursively) and attested.
@@ -14,6 +29,11 @@ minor versions may break APIs and every break is listed.
   weekly and on changes to the code they cover.
 
 ### Changed
+- The MCP endpoint refuses an unsupported `MCP-Protocol-Version` header with `400`
+  and echoes the version the request used; it previously always answered
+  `2026-07-28`. `initialize` answers with the negotiated version.
+- A JSON-RPC request without an `id` is refused with `400` instead of accepted and
+  dropped; only `notifications/*` may omit it.
 - Every GitHub Action is pinned to a commit SHA with its tag in a comment, and a
   script test refuses unpinned ones.
 
