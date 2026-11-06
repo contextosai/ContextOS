@@ -11,6 +11,11 @@ minor versions may break APIs and every break is listed.
   after a lost response or a 502/503/504; an effect that may have been delivered is
   never sent again. Three consecutive failures eject an endpoint for 30 seconds,
   backing off to five minutes, and ejected endpoints are tried last.
+- `[server.tls]` serves HTTPS without a terminating proxy, with HTTP/2 by ALPN.
+  `client_ca_path` requires client certificates (mutual TLS), so only workloads
+  holding one, such as SPIFFE X.509 SVIDs, can connect. Rotated certificate files
+  are picked up without a restart, and a rotation that fails to load keeps the
+  previous certificate. `--check-config` loads the files.
 - `docs/CONFIG.md` lists every configuration key with its type, default and meaning,
   and `docs/METRICS.md` every metric with its type and labels. Both are generated from
   the code (`CONTEXTOS_BLESS=1 cargo test -p contextosd --test generated`), and the

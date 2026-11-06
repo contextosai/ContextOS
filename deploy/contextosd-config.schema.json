@@ -1094,6 +1094,18 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Serve HTTPS (and require client certificates, with `client_ca_path`) without a terminating proxy (see `tls_server`). Unset: plain HTTP behind your proxy."
         }
       },
       "required": [
@@ -1328,6 +1340,40 @@
       },
       "required": [
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "TlsConfig": {
+      "additionalProperties": false,
+      "description": "`[server.tls]`.",
+      "properties": {
+        "cert_path": {
+          "description": "PEM file with the server certificate, then its intermediates.",
+          "type": "string"
+        },
+        "client_ca_path": {
+          "default": null,
+          "description": "PEM file of the CAs that issue client certificates. Set: every client must present one (mutual TLS). Unset: clients are not asked for a certificate.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key_path": {
+          "description": "PEM file with the server's private key (PKCS#8, PKCS#1 or SEC1).",
+          "type": "string"
+        },
+        "reload_secs": {
+          "default": 60,
+          "description": "How often to check the files for a rotated certificate; 0 never reloads.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cert_path",
+        "key_path"
       ],
       "type": "object"
     },

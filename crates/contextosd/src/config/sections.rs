@@ -36,6 +36,10 @@ pub struct ServerConfig {
     /// Browser origins, besides `public_url`'s, that may call the MCP endpoint.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// Serve HTTPS (and require client certificates, with `client_ca_path`) without a
+    /// terminating proxy (see `tls_server`). Unset: plain HTTP behind your proxy.
+    #[serde(default)]
+    pub tls: Option<crate::tls_server::TlsConfig>,
 }
 
 fn default_max_body() -> usize {

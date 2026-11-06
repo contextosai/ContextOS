@@ -284,8 +284,9 @@ records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit thei
 parent's binding (`bound: "inherited"`); their agent is the one the parent's
 delegation names, and `named_by_credential` says whether the admitting credential
 names it too. SPIRE's OIDC discovery provider publishes the
-JWKS for JWT-SVIDs, so they need no other integration; X.509 SVIDs (mTLS) are not
-accepted.
+JWKS for JWT-SVIDs, so they need no other integration. X.509 SVIDs can restrict who
+may connect at all (`[server.tls] client_ca_path`, under Operate), but they do not
+name the agent: binding still comes from the token.
 
 #### Bind runs to the user the agent acts for
 
@@ -1993,6 +1994,24 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   that holds none, and `--check-config` reports it. PostgreSQL takes its CA in the URL
   (`?sslmode=verify-full&sslrootcert=/path/ca.pem`). The Helm chart mounts the bundle
   with `extraVolumes`, `extraVolumeMounts` and `extraEnv` (see its README).
+- **TLS:** most deployments terminate TLS at an ingress or mesh. Without one, serve
+  HTTPS directly, and optionally require client certificates (mutual TLS) so only
+  workloads holding one can connect:
+
+  ```toml
+  [server.tls]
+  cert_path = "/etc/contextos/tls/tls.crt"     # chain: certificate, then intermediates
+  key_path = "/etc/contextos/tls/tls.key"
+  client_ca_path = "/etc/contextos/tls/clients.pem"   # optional: require client certs
+  # reload_secs = 60                            # pick up rotated files; 0 never
+  ```
+
+  HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
+  cert-manager Secret) are served to new connections within `reload_secs`; a
+  rotation that does not load keeps the previous certificate and logs a warning.
+  Callers still authenticate with their token: mTLS decides who may connect, not who
+  they are. `--check-config` loads the files. The Helm chart mounts them with
+  `extraVolumes` and `extraVolumeMounts`.
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
   natively), signed with cosign (keyless) and with build provenance; verify before

@@ -251,6 +251,7 @@ One registered result schema.
 | `mode` | `"production"` \| `"development"` | `"production"` | `production` refuses development-only conveniences and warns about weak settings. |
 | `public_url` | string | unset | The URL clients reach this server at, for OAuth protected resource metadata (see `protected_resource`). Unset: no metadata is published. |
 | `request_timeout_ms` | integer | `15000` | Time a request may take before the server answers 504. |
+| `tls` | table | unset | Serve HTTPS (and require client certificates, with `client_ca_path`) without a terminating proxy (see `tls_server`). Unset: plain HTTP behind your proxy. |
 
 ## `[store]`
 
