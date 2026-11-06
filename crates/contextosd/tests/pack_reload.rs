@@ -41,12 +41,16 @@ fn scratch() -> PathBuf {
     dir
 }
 
+/// Unique per test: tests run in parallel, and the clock alone can repeat (macOS
+/// reports microseconds), which would hand two tests one directory.
 fn uuid_like() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("{}-{nanos}", std::process::id())
+    format!("{}-{nanos}-{n}", std::process::id())
 }
 
 fn config(dir: &std::path::Path, reload_secs: u64) -> Config {
