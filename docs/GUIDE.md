@@ -1941,10 +1941,26 @@ Production refuses runs without `user.role` (see the threat model's residual ris
 - **Alerts:** the Helm chart's `prometheusRule.enabled` installs rules for all of the
   above; each links its runbook in [INCIDENT.md](INCIDENT.md#alerts).
 - **Spans:** `http.request`, with `contextos.compile`, `contextos.admit`,
-  `contextos.delegate`, `contextos.dispatch` (run, operation, capability, digest,
-  status, reasons), `contextos.continue`, `contextos.reconcile`, `contextos.decision`,
+  `contextos.delegate`, `contextos.dispatch`, `contextos.reconcile`, `contextos.decision`,
   `contextos.score`, `contextos.memory` and `contextos.erase` inside it, each carrying the
   tenant, run and trace ids. Logs are JSON with the same spans.
+- **Governed calls:** every tool call (REST, MCP, continuation, check or compensation)
+  gets one `contextos.dispatch` span, exported as `execute_tool <capability>` with the
+  OpenTelemetry GenAI attributes (`gen_ai.operation.name = "execute_tool"`,
+  `gen_ai.tool.name`, `gen_ai.tool.call.id`), so agent-trace views show it as a tool
+  step. It also carries `contextos.status`, `contextos.reason_codes`,
+  `contextos.operation_id`, `contextos.action_digest`, the stage the pipeline stopped
+  in (`contextos.stage`: `fence`, `surface`, `bind`, `authorize`, `reserve`, `claim`,
+  `dispatch`, `settle` or `result`) and the milliseconds each stage took
+  (`contextos.stages = "fence=0.1 surface=0.2 bind=0.4 authorize=3.1 …"`). A refusal
+  sets `error.type` to its first reason code; an infrastructure failure also sets the
+  span's status to error.
+- **Access log:** one JSON line per governed call on target `contextos::access`, with
+  tenant, run, capability, tool call, operation, status, reason codes, stage, stage
+  timings and duration. It follows `RUST_LOG`; `RUST_LOG=info,contextos::access=off`
+  turns it off and `RUST_LOG=warn,contextos::access=info` keeps only it. The signed
+  audit chain stays the record of what happened; the access log is for searching and
+  dashboards.
 - **Private CAs:** outgoing TLS (providers, adapters, the KMS, OIDC issuers,
   notification webhooks, the OTLP exporter, Tower's sources) trusts the public roots
   bundled in the binary. For services behind your own CA, set `CONTEXTOS_CA_BUNDLE` to
