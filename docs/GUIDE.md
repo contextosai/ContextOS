@@ -1177,7 +1177,13 @@ fallback_endpoints = ["https://payments-b.internal/mcp"]
   nothing was delivered. A read-only capability's call also moves on after a lost
   response or a `502`, `503` or `504`. An effectful call that may have been delivered
   never does: its outcome is unknown and is reconciled, exactly as with one endpoint.
-- **Ejection.** Three consecutive failures eject an endpoint for 30 seconds, doubling
+  A `500` moves no call on: the endpoint answered, and the error is as often the
+  tool's own, which every replica would repeat.
+- **One time budget.** The capability's `timeout_ms` covers every attempt. A read-only
+  call gives each attempt an equal share of what remains, so a hung endpoint is given
+  up in time for the next to answer; an effectful call gives its attempt all of it,
+  so a hang stays unknown and is never resent.
+- **Ejection.** Three consecutive failures (unreachable, lost, or any `5xx`) eject an endpoint for 30 seconds, doubling
   with each ejection up to five minutes, and a success restores it. Ejected endpoints
   are tried last rather than skipped, so no call is refused without an attempt. Each
   ejection is logged as a warning with the endpoint.
@@ -1185,6 +1191,9 @@ fallback_endpoints = ["https://payments-b.internal/mcp"]
   task id sent to one must be known to the others) and serve the same tools: upstream
   pins are checked against whichever endpoint answers. OAuth tokens name `endpoint` as
   their resource unless `oauth.resource` says otherwise.
+- **Same trust domain.** Every endpoint receives the same request, credential
+  included. List only endpoints you would hand the primary's token to; a fallback on
+  another origin is logged as a warning at startup.
 
 An MCP server can change what a tool does without renaming it. Agents only ever see
 your reviewed manifest, but the calls still go to the server's current tool. Pin each
@@ -2032,6 +2041,8 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   key_path = "/etc/contextos/tls/tls.key"
   client_ca_path = "/etc/contextos/tls/clients.pem"   # optional: require client certs
   # reload_secs = 60                            # pick up rotated files; 0 never
+  # max_connections = 10000                     # past this, clients wait to be accepted
+  # header_timeout_secs = 30                    # idle connections and slow headers close
   ```
 
   HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
@@ -2040,6 +2051,15 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   Callers still authenticate with their token: mTLS decides who may connect, not who
   they are. `--check-config` loads the files. The Helm chart mounts them with
   `extraVolumes` and `extraVolumeMounts`.
+
+  Without a proxy the server bounds slow clients itself: a TLS handshake has 10
+  seconds; a connection with no request in progress for `header_timeout_secs` is
+  closed, and an HTTP/1.1 request must finish its headers within it; HTTP/2 allows
+  200 concurrent requests per connection and closes connections that stop answering
+  pings. At most `max_connections` are open at once; further clients wait in the
+  accept queue rather than being refused. A failed accept (for example, out of file
+  descriptors) backs off up to a second instead of spinning. Set the process's file
+  descriptor limit above `max_connections`.
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
   GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
   natively), signed with cosign (keyless) and with build provenance; verify before

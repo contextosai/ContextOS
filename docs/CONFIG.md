@@ -42,7 +42,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `endpoint` | string | required | The provider's URL. |
-| `fallback_endpoints` | array of string | `[]` | Replicas of the same provider, tried after `endpoint`. A call moves on only when its request never left, or (read-only capabilities) when its response was lost or the endpoint answered 502, 503 or 504; three consecutive failures eject an endpoint for 30 seconds, doubling up to five minutes. Each must serve the same tools and share the provider's state; OAuth tokens name `endpoint` as their resource unless `oauth.resource` is set. |
+| `fallback_endpoints` | array of string | `[]` | Replicas of the same provider, tried after `endpoint`. A call moves on only when its request never left, or (read-only capabilities) when its response was lost or the endpoint answered 502, 503 or 504, each attempt getting an equal share of the remaining `timeout_ms`; three consecutive failures (any 5xx included) eject an endpoint for 30 seconds, doubling up to five minutes. Each must serve the same tools and share the provider's state; OAuth tokens name `endpoint` as their resource unless `oauth.resource` is set. Every endpoint is sent the provider credential, so list only endpoints in the provider's trust domain (another origin is logged at startup). |
 | `id` | string | required | Adapter id that capability manifests name. |
 | `kind` | `"mcp"` \| `"http"` | required | Protocol: `mcp` (Streamable HTTP) or `http`. |
 | `oauth` | table | unset | Obtain provider tokens with the OAuth client credentials grant instead of a fixed token (see `runtime::oauth_broker`). |

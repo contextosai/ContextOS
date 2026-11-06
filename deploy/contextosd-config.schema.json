@@ -9,7 +9,7 @@
         },
         "fallback_endpoints": {
           "default": [],
-          "description": "Replicas of the same provider, tried after `endpoint`. A call moves on only when its request never left, or (read-only capabilities) when its response was lost or the endpoint answered 502, 503 or 504; three consecutive failures eject an endpoint for 30 seconds, doubling up to five minutes. Each must serve the same tools and share the provider's state; OAuth tokens name `endpoint` as their resource unless `oauth.resource` is set.",
+          "description": "Replicas of the same provider, tried after `endpoint`. A call moves on only when its request never left, or (read-only capabilities) when its response was lost or the endpoint answered 502, 503 or 504, each attempt getting an equal share of the remaining `timeout_ms`; three consecutive failures (any 5xx included) eject an endpoint for 30 seconds, doubling up to five minutes. Each must serve the same tools and share the provider's state; OAuth tokens name `endpoint` as their resource unless `oauth.resource` is set. Every endpoint is sent the provider credential, so list only endpoints in the provider's trust domain (another origin is logged at startup).",
           "items": {
             "type": "string"
           },
@@ -1359,9 +1359,23 @@
             "null"
           ]
         },
+        "header_timeout_secs": {
+          "default": 30,
+          "description": "Seconds a connection may sit with no request in progress, and an HTTP/1.1 client may take to send a request's headers, before it is closed (at least 1).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "key_path": {
           "description": "PEM file with the server's private key (PKCS#8, PKCS#1 or SEC1).",
           "type": "string"
+        },
+        "max_connections": {
+          "default": 10000,
+          "description": "Most connections open at once (at least 1); further clients wait to be accepted.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         },
         "reload_secs": {
           "default": 60,
