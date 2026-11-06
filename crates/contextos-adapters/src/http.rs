@@ -39,9 +39,8 @@ use contextos_gateway::{Adapter, AdapterCall, AdapterResponse, CapabilityManifes
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::transport::{
-    CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers, pinned_endpoint, send,
-};
+use crate::endpoints::{Endpoints, Retry};
+use crate::transport::{CredentialBroker, EndpointError, Exchange, TransportPolicy, client, governance_headers};
 
 const REJECTED_BEFORE_EXECUTION: [u16; 8] = [400, 401, 403, 404, 405, 413, 415, 422];
 /// Successful statuses that do not establish the effect: accepted, partial content and
@@ -49,7 +48,7 @@ const REJECTED_BEFORE_EXECUTION: [u16; 8] = [400, 401, 403, 404, 405, 413, 415, 
 const UNFINISHED: [u16; 3] = [202, 206, 207];
 
 pub struct HttpAdapter {
-    endpoint: Url,
+    endpoints: Endpoints,
     policy: TransportPolicy,
     client: reqwest::Client,
     credentials: std::sync::Arc<dyn CredentialBroker>,
@@ -58,7 +57,8 @@ pub struct HttpAdapter {
 impl std::fmt::Debug for HttpAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HttpAdapter")
-            .field("endpoint", &self.endpoint.as_str())
+            .field("endpoint", &self.endpoints.primary().as_str())
+            .field("endpoints", &self.endpoints.len())
             .finish_non_exhaustive()
     }
 }
@@ -69,17 +69,27 @@ impl HttpAdapter {
         policy: TransportPolicy,
         credentials: std::sync::Arc<dyn CredentialBroker>,
     ) -> Result<Self, EndpointError> {
-        let mut endpoint = pinned_endpoint(endpoint, &policy)?;
-        if !endpoint.path().ends_with('/') {
-            let path = format!("{}/", endpoint.path());
-            endpoint.set_path(&path);
-        }
         Ok(Self {
             client: client(&policy),
-            endpoint,
+            endpoints: Endpoints::new(endpoint, &[], &policy)?.map_urls(directory),
             policy,
             credentials,
         })
+    }
+
+    /// Adds replicas of the same service, tried as [`Endpoints`] describes.
+    pub fn with_fallback_endpoints(mut self, fallbacks: &[String]) -> Result<Self, EndpointError> {
+        let primary = self.endpoints.primary().as_str().to_owned();
+        self.endpoints = Endpoints::new(&primary, fallbacks, &self.policy)?.map_urls(directory);
+        Ok(self)
+    }
+}
+
+/// Tool names join under the endpoint's path, so it ends in `/`.
+fn directory(url: &mut Url) {
+    if !url.path().ends_with('/') {
+        let path = format!("{}/", url.path());
+        url.set_path(&path);
     }
 }
 
@@ -107,23 +117,28 @@ impl Adapter for HttpAdapter {
         if manifest.action_risk.effect != ActionEffect::None && manifest.recovery.completion.is_none() {
             return not_dispatched();
         }
-        let Ok(url) = self.endpoint.join(&manifest.protocol_tool) else {
-            return not_dispatched();
-        };
         let Ok(credential) = self.credentials.credential(manifest, call).await else {
             return not_dispatched();
         };
-        let request = self
-            .client
-            .post(url)
-            .headers(governance_headers(call, credential.as_ref()))
-            .json(&call.arguments);
-        match send(
-            request,
-            Duration::from_millis(manifest.timeout_ms),
-            self.policy.max_response_bytes,
-        )
-        .await
+        let headers = governance_headers(call, credential.as_ref());
+        let retry = if manifest.action_risk.effect == ActionEffect::None {
+            Retry::ReadOnly
+        } else {
+            Retry::NotSentOnly
+        };
+        let build = |endpoint: &Url| {
+            let url = endpoint.join(&manifest.protocol_tool).ok()?;
+            Some(self.client.post(url).headers(headers.clone()).json(&call.arguments))
+        };
+        match self
+            .endpoints
+            .send(
+                build,
+                Duration::from_millis(manifest.timeout_ms),
+                self.policy.max_response_bytes,
+                retry,
+            )
+            .await
         {
             Exchange::NotSent => not_dispatched(),
             Exchange::Lost => AdapterResponse::unknown(),
@@ -201,28 +216,26 @@ impl HttpAdapter {
         if !is_path_segment(&check.status_tool) {
             return AdapterResponse::unknown();
         }
-        let Ok(mut url) = self.endpoint.join(&format!("{}/", check.status_tool)) else {
-            return AdapterResponse::unknown();
-        };
-        // The reference is percent-encoded as one segment: it cannot add path or query.
-        if let Ok(mut segments) = url.path_segments_mut() {
-            segments.pop_if_empty().push(external_ref);
-        } else {
-            return AdapterResponse::unknown();
-        }
         let Ok(credential) = self.credentials.credential(manifest, call).await else {
             return AdapterResponse::unknown();
         };
-        let request = self
-            .client
-            .get(url)
-            .headers(governance_headers(call, credential.as_ref()));
-        let Exchange::Response { status: 200, body, .. } = send(
-            request,
-            Duration::from_millis(manifest.timeout_ms),
-            self.policy.max_response_bytes,
-        )
-        .await
+        let headers = governance_headers(call, credential.as_ref());
+        let build = |endpoint: &Url| {
+            let mut url = endpoint.join(&format!("{}/", check.status_tool)).ok()?;
+            // The reference is percent-encoded as one segment: it cannot add path or query.
+            url.path_segments_mut().ok()?.pop_if_empty().push(external_ref);
+            Some(self.client.get(url).headers(headers.clone()))
+        };
+        // Reading a status changes nothing, so any replica may answer.
+        let Exchange::Response { status: 200, body, .. } = self
+            .endpoints
+            .send(
+                build,
+                Duration::from_millis(manifest.timeout_ms),
+                self.policy.max_response_bytes,
+                Retry::ReadOnly,
+            )
+            .await
         else {
             return AdapterResponse::unknown();
         };

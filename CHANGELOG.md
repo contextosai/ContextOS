@@ -6,6 +6,11 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[[adapters]] fallback_endpoints` lists replicas of a provider. A call moves to the
+  next endpoint only when its request never left, or, for read-only capabilities,
+  after a lost response or a 502/503/504; an effect that may have been delivered is
+  never sent again. Three consecutive failures eject an endpoint for 30 seconds,
+  backing off to five minutes, and ejected endpoints are tried last.
 - `docs/CONFIG.md` lists every configuration key with its type, default and meaning,
   and `docs/METRICS.md` every metric with its type and labels. Both are generated from
   the code (`CONTEXTOS_BLESS=1 cargo test -p contextosd --test generated`), and the

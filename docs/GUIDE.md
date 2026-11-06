@@ -1135,6 +1135,31 @@ scope = "payments.refund"          # optional
   endpoints: HTTPS, no redirects, bounded responses. Set either `token_env` or
   `oauth`, not both.
 
+A provider that runs as several replicas (or in several regions) can list them, so
+one being down does not stop governed work:
+
+```toml
+[[adapters]]
+id = "adp_payments"
+kind = "mcp"
+endpoint = "https://payments-a.internal/mcp"
+fallback_endpoints = ["https://payments-b.internal/mcp"]
+```
+
+- **What moves on.** A call goes to the next endpoint when its request never left
+  (connection refused, DNS or TLS failure), which is safe for any effect because
+  nothing was delivered. A read-only capability's call also moves on after a lost
+  response or a `502`, `503` or `504`. An effectful call that may have been delivered
+  never does: its outcome is unknown and is reconciled, exactly as with one endpoint.
+- **Ejection.** Three consecutive failures eject an endpoint for 30 seconds, doubling
+  with each ejection up to five minutes, and a success restores it. Ejected endpoints
+  are tried last rather than skipped, so no call is refused without an attempt. Each
+  ejection is logged as a warning with the endpoint.
+- **Same provider.** Replicas must share the provider's state (an idempotency key or
+  task id sent to one must be known to the others) and serve the same tools: upstream
+  pins are checked against whichever endpoint answers. OAuth tokens name `endpoint` as
+  their resource unless `oauth.resource` says otherwise.
+
 An MCP server can change what a tool does without renaming it. Agents only ever see
 your reviewed manifest, but the calls still go to the server's current tool. Pin each
 capability to the upstream definition you reviewed:

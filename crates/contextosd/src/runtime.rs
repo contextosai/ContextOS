@@ -280,11 +280,13 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         let built: Arc<dyn Adapter> = match adapter.kind {
             crate::config::AdapterKind::Mcp => Arc::new(
                 McpAdapter::new(&adapter.endpoint, policy.clone(), broker, "contextosd")
+                    .and_then(|a| a.with_fallback_endpoints(&adapter.fallback_endpoints))
                     .map_err(|e| format!("{}: {e}", adapter.id))?
                     .with_projection(projection),
             ),
             crate::config::AdapterKind::Http => Arc::new(
                 HttpAdapter::new(&adapter.endpoint, policy.clone(), broker)
+                    .and_then(|a| a.with_fallback_endpoints(&adapter.fallback_endpoints))
                     .map_err(|e| format!("{}: {e}", adapter.id))?,
             ),
         };
