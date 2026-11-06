@@ -52,6 +52,35 @@ async fn black_hole() -> (String, Arc<AtomicUsize>) {
     (format!("http://{addr}/mcp"), hits)
 }
 
+/// A server that accepts the connection, reads the request and then holds the
+/// connection open without ever answering.
+async fn hang() -> (String, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                drop(socket);
+            });
+        }
+    });
+    (format!("http://{addr}/mcp"), hits)
+}
+
+/// Invokes as the gateway does: the whole call under the capability's timeout.
+async fn invoke_under_timeout(primary: &str, fallbacks: &[String], effect: &str) -> contextos_gateway::AdapterResponse {
+    let timeout = std::time::Duration::from_millis(manifest(effect).timeout_ms);
+    tokio::time::timeout(timeout, invoke(primary, fallbacks, effect))
+        .await
+        .unwrap_or_else(|_| contextos_gateway::AdapterResponse::unknown())
+}
+
 fn closed_port() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
@@ -157,4 +186,48 @@ async fn a_failing_endpoint_is_ejected_and_tried_last() {
     // Three failures ejected the primary; later calls went straight to the replica.
     assert_eq!(busy_hits.load(Ordering::SeqCst), 3);
     assert_eq!(replica_hits.load(Ordering::SeqCst), 5);
+}
+
+#[tokio::test]
+async fn a_hung_endpoint_hands_a_read_only_call_to_the_next_within_the_timeout() {
+    let (hung, hung_hits) = hang().await;
+    let (replica, replica_hits) = server(StatusCode::OK).await;
+    let response = invoke_under_timeout(&hung, &[replica], "none").await;
+    assert_eq!(response.outcome, EffectOutcome::Confirmed, "{response:?}");
+    assert_eq!(hung_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(replica_hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_hung_endpoint_leaves_an_effect_unknown_and_never_resends_it() {
+    let (hung, hung_hits) = hang().await;
+    let (replica, replica_hits) = server(StatusCode::OK).await;
+    let response = invoke_under_timeout(&hung, &[replica], "external_state").await;
+    assert_eq!(response.outcome, EffectOutcome::Unknown, "{response:?}");
+    assert_eq!(hung_hits.load(Ordering::SeqCst), 1);
+    assert_eq!(replica_hits.load(Ordering::SeqCst), 0, "no second delivery");
+}
+
+#[tokio::test]
+async fn a_500_counts_toward_ejection_without_moving_a_call_on() {
+    let (broken, broken_hits) = server(StatusCode::INTERNAL_SERVER_ERROR).await;
+    let (replica, replica_hits) = server(StatusCode::OK).await;
+    let policy = TransportPolicy {
+        allow_loopback_http: true,
+        ..TransportPolicy::default()
+    };
+    let adapter = McpAdapter::new(&broken, policy, Arc::new(NoCredentials), "contextos-test")
+        .unwrap()
+        .with_fallback_endpoints(&[replica])
+        .unwrap();
+    for _ in 0..3 {
+        let response = adapter.invoke(&manifest("none"), &call()).await;
+        assert_ne!(response.outcome, EffectOutcome::Confirmed, "a 500 is not moved past");
+    }
+    assert_eq!(replica_hits.load(Ordering::SeqCst), 0);
+    // Three 500s ejected the primary; the replica now answers first.
+    let response = adapter.invoke(&manifest("none"), &call()).await;
+    assert_eq!(response.outcome, EffectOutcome::Confirmed);
+    assert_eq!(broken_hits.load(Ordering::SeqCst), 3);
+    assert_eq!(replica_hits.load(Ordering::SeqCst), 1);
 }

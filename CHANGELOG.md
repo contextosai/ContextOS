@@ -5,6 +5,18 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+
+- Provider failover: a capability's `timeout_ms` now covers every endpoint attempt. A
+  read-only call gives each attempt an equal share of what remains, so a hung
+  endpoint is given up in time for a fallback to answer (before, the whole call timed
+  out as `unknown`). Effectful calls are unchanged: a hang stays unknown and is never
+  resent.
+- Any `5xx` answer counts toward outlier ejection, so a replica that keeps answering
+  `500` is ejected; a `500` still moves no call on.
+- A fallback endpoint on another origin than `endpoint` is logged as a warning at
+  startup: every listed endpoint is sent the provider credential.
+
 ## 0.1.0-alpha.15 - 2026-11-06
 
 Fifteenth alpha: running the gateway in production. Inbound TLS and mutual TLS,
