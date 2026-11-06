@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.16 - 2026-11-06
+
+Sixteenth alpha: hardening for production. Provider failover survives an endpoint that
+hangs, the built-in TLS server bounds slow and abusive clients, and calls that fail on
+infrastructure leave an access-log line. See the
+[release notes](docs/releases/v0.1.0-alpha.16.md) before upgrading.
+
 ### Added
 - `[server.tls] max_connections` (default 10000) caps open connections; further
   clients wait in the accept queue. `header_timeout_secs` (default 30) closes a
