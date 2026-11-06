@@ -115,6 +115,29 @@ the executor generation as headers, for example:
 }
 ```
 
+Hosts that only start local (stdio) servers use the bridge built into `contextosd`,
+which forwards each message to the run's endpoint and decides nothing itself:
+
+```json
+{
+  "mcpServers": {
+    "contextos": {
+      "command": "contextosd",
+      "args": ["--mcp-stdio", "https://contextos.internal/v1/runs/run_123/mcp"],
+      "env": {"CONTEXTOS_TOKEN": "…", "CONTEXTOS_EXECUTOR_GENERATION": "2"}
+    }
+  }
+}
+```
+
+The endpoint checks the transport before reading a message. A request carrying a
+browser `Origin` is refused (`403 origin_not_allowed`) unless the origin is
+`[server] public_url`'s or listed in `[server] allowed_origins`, so a web page cannot
+reach the server through DNS rebinding. Hosts and SDKs send no `Origin` and are not
+affected. An unsupported `MCP-Protocol-Version` header is refused with
+`400 protocol_version_unsupported`, and responses echo the version the request used.
+A request without an `id` is refused with `400`; only `notifications/*` may omit it.
+
 Hosts that implement MCP authorization can discover where to get that token. Set
 `[server] public_url` to the URL clients reach the server at. A `401` then names the
 run's OAuth protected resource metadata (RFC 9728) in `WWW-Authenticate`
@@ -174,6 +197,12 @@ contextosd --check-config deploy/contextosd.example.toml
 contextosd --migrate deploy/contextosd.example.toml    # PostgreSQL schema, as its owner
 contextosd --config deploy/contextosd.example.toml
 ```
+
+Every configuration key, with its type, default and meaning, is in
+[CONFIG.md](CONFIG.md), generated from the server's own types. The same schema is
+`deploy/contextosd-config.schema.json` (or `contextosd --config-schema`); TOML editors
+that read `#:schema` comments, as the example file has, complete and check keys with
+it. Every metric `/metrics` exports is listed in [METRICS.md](METRICS.md).
 
 To try a configuration on your machine first, `./examples/dev-server.sh` runs the
 quickstart's development configuration. Moving that example to production mode
@@ -1940,7 +1969,9 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   (`?sslmode=verify-full&sslrootcert=/path/ca.pem`). The Helm chart mounts the bundle
   with `extraVolumes`, `extraVolumeMounts` and `extraEnv` (see its README).
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
-  GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
+  GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
+  natively), signed with cosign (keyless) and with build provenance; verify before
+  deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).
 
 ### Backup and restore

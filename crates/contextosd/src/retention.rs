@@ -19,14 +19,16 @@ use serde::{Deserialize, Serialize};
 /// The principal recorded on retention erasures.
 pub const RETENTION_PRINCIPAL: &str = "contextos.retention";
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionConfig {
     /// Erase a run's personal content this many days after admission; unset keeps it.
     #[serde(default)]
     pub run_content_days: Option<u32>,
+    /// How often the erasure sweep runs.
     #[serde(default = "default_interval")]
     pub sweep_interval_ms: u64,
+    /// Runs erased per sweep at most.
     #[serde(default = "default_batch")]
     pub batch: usize,
 }

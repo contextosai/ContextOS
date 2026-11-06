@@ -29,7 +29,7 @@ use crate::{Gateway, PortError, RunAdmission};
 const MAX_EVIDENCE_REF: usize = 512;
 
 /// How a guarantee makes a resource identifier canonical before keying its ledger.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceCanonicalizer {
     #[default]
