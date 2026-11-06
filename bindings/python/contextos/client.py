@@ -57,7 +57,7 @@ RESERVATION_HEADER = "ContextOS-Usage-Reservation"
 # ``GET /v1/deployment``.
 API_VERSION = "v1"
 # This client's release (scripts/package_clients.py checks it against Cargo.toml).
-CLIENT_VERSION = "0.1.0-alpha.14"
+CLIENT_VERSION = "0.1.0-alpha.15"
 
 
 def _check_versions(deployment: Any, client_version: str) -> dict:
