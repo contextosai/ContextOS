@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.15 - 2026-11-06
+
+Fifteenth alpha: running the gateway in production. Inbound TLS and mutual TLS,
+provider failover that never repeats an effect, a span and access-log line for every
+governed call, MCP transport hardening and a stdio bridge, generated configuration and
+metrics references, and a multi-architecture image. See the
+[release notes](docs/releases/v0.1.0-alpha.15.md) before upgrading.
+
 ### Added
 - `[[adapters]] fallback_endpoints` lists replicas of a provider. A call moves to the
   next endpoint only when its request never left, or, for read-only capabilities,
