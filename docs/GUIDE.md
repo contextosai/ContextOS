@@ -1066,6 +1066,31 @@ minimal, development-only implementation):
   - Every non-`pass` verdict is audited (`result_screened`) with pointers and reasons,
     never content.
 
+#### When a dependency fails
+
+Every service ContextOS asks for a decision fails closed: when it cannot answer, the
+call is refused with a reason code that names it, and nothing reaches the provider.
+There is no fail-open switch, because a decision made without its facts is not a
+governed decision. Services that only carry records out of ContextOS retry instead,
+and never hold up governed work.
+
+| Dependency | When it fails | What you see |
+|---|---|---|
+| Authority service | the call is blocked before anything is sent | `blocked`, `authority_unavailable` |
+| Constraints service | blocked | `blocked`, `constraints_unavailable` |
+| Approvals service | blocked; an approval cannot be requested or redeemed | `blocked`, `approval_unavailable` |
+| Data-governance service | an action that sends data is refused | `data_flow_unavailable` |
+| Boundary controller | run start, resume and dispatch are refused | `boundary_unavailable` |
+| Memory-governance service | memory operations are refused | `memory_policy_unavailable` |
+| Resource identity service | calls under a guarantee with `resource_canonicalizer = "provider"` are refused | `shared_guarantee_identity_unavailable` |
+| Result-screening service | the effect stands; its output is withheld from the agent | `result_screening_unavailable`, audited `result_screened` |
+| Provider (adapter) | a request that never left moves to the next `fallback_endpoints` entry, or is `not_dispatched` and safe to retry; once it may have been sent, the outcome is unknown and is reconciled, never retried blindly | `not_dispatched`, or `reconcile_effect_before_retry` |
+| PostgreSQL | requests that need the store answer `503`; nothing is dispatched without its claim | `store_unavailable` |
+| Audit signing (KMS) | requests that must record an entry answer `503` | `audit_unavailable` |
+| OIDC issuer (JWKS) | keys already fetched keep working; a refresh failure is logged and retried; `/readyz` fails until the first keys load | log `jwks refresh failed` |
+| Audit sinks | delivery resumes from the sink's cursor with backoff; nothing is lost | `contextos_audit_sink_batches_total{outcome}` |
+| Notification webhooks | retried up to `max_attempts`, then abandoned | `contextos_notifications_total{outcome="abandoned"}` |
+
 Capabilities are admitted only from reviewed manifests (`ctx manifest <file>`); protocol
 discovery is never permission.
 

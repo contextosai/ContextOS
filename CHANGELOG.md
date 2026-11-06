@@ -54,6 +54,11 @@ minor versions may break APIs and every break is listed.
 - Every GitHub Action is pinned to a commit SHA with its tag in a comment, and a
   script test refuses unpinned ones.
 
+### Documentation
+- GUIDE.md lists what happens when each dependency fails: decision services fail
+  closed with a named reason code, providers distinguish not-sent from unknown, and
+  record-shipping services (audit sinks, webhooks) retry without blocking work.
+
 ### Fixed
 - Tool calls through the server (REST `tool-calls` and MCP `tools/call`) recorded no
   `contextos.dispatch` span or log line: only the embedded `Gateway::dispatch` entry
