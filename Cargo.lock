@@ -640,6 +640,7 @@ dependencies = [
  "flate2",
  "hex",
  "http",
+ "http-body",
  "hyper-util",
  "jsonschema",
  "jsonwebtoken",
