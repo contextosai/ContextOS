@@ -21,6 +21,12 @@ minor versions may break APIs and every break is listed.
   and `[server] allowed_origins` (`403 origin_not_allowed`), so a web page cannot
   reach the server through DNS rebinding. Callers that send no `Origin` are
   unaffected.
+- The release image is published for `linux/amd64` and `linux/arm64` under one tag.
+  Each architecture builds natively and is smoke-tested on its own runner before
+  the index is tagged, signed (cosign, recursively) and attested.
+- Coverage-guided fuzz targets (`fuzz/`, cargo-fuzz) for the kernel's entry points,
+  JsonLogic evaluation, canonical JSON and upstream MCP response parsing, run
+  weekly and on changes to the code they cover.
 
 ### Changed
 - The MCP endpoint refuses an unsupported `MCP-Protocol-Version` header with `400`
@@ -28,6 +34,8 @@ minor versions may break APIs and every break is listed.
   `2026-07-28`. `initialize` answers with the negotiated version.
 - A JSON-RPC request without an `id` is refused with `400` instead of accepted and
   dropped; only `notifications/*` may omit it.
+- Every GitHub Action is pinned to a commit SHA with its tag in a comment, and a
+  script test refuses unpinned ones.
 
 ### Fixed
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry

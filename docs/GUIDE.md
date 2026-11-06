@@ -1953,7 +1953,9 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   (`?sslmode=verify-full&sslrootcert=/path/ca.pem`). The Helm chart mounts the bundle
   with `extraVolumes`, `extraVolumeMounts` and `extraEnv` (see its README).
 - **Image:** `Dockerfile` builds a distroless, non-root image. Releases publish it to
-  GHCR signed with cosign (keyless) and with build provenance; verify before deploying.
+  GHCR for `linux/amd64` and `linux/arm64` (one tag, each architecture built
+  natively), signed with cosign (keyless) and with build provenance; verify before
+  deploying.
 - **Kubernetes:** `deploy/helm/contextosd` (see its README).
 
 ### Backup and restore
