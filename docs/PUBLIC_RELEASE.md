@@ -99,6 +99,14 @@ tags or replace their assets; ship a new alpha for corrections. A failed candida
 can remain unpublished with its failure explained, rather than being presented as a
 working release.
 
+The same day a release is published, move contextosai.com to it: in the site
+repository, the runtime row, download commands, release-notes link and a new
+Releases row in `src/content/docs/status.mdx`, the trial card in `src/app/page.tsx`,
+and those two files' final-byte records in
+`tasks/contract-evolution-2026-10-16/coverage.json`
+(`node scripts/audit-contract-coverage.mjs --require-complete` must pass). A release
+is not finished while the site names the previous one.
+
 ## Package registries
 
 Publishing the draft release runs `.github/workflows/publish-packages.yml`. It

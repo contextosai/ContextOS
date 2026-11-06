@@ -15,6 +15,11 @@
 //! not recorded twice. Only a claim holder stalled past its lease between its last
 //! check and the append can still be recorded twice.
 //!
+//! A lease's end (`until_ms`) is the holder's wall clock, compared against the
+//! waiter's, so leases assume replicas with synchronized clocks (NTP or equivalent).
+//! A holder whose clock runs behind looks expired while it is still healthy, which
+//! widens that window across replicas; a duplicate entry leaves the chain verifiable.
+//!
 //! The binding lives in the configured store, so it outlasts a restart only with a
 //! durable store (`postgres`); the in-memory store, which loses the audit chain on a
 //! restart as well, starts with no bindings.

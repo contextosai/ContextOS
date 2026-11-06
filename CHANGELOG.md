@@ -27,6 +27,19 @@ minor versions may break APIs and every break is listed.
   that trickles HTTP/1.1 headers, or connects and sends nothing, is disconnected
   instead of holding a connection forever. HTTP/2 connections are pinged and closed
   when they stop answering.
+- A governed call that fails on infrastructure (store or audit chain) now leaves a
+  `contextos::access` line with `status="error"` and the failing dependency as its
+  reason (`store_unavailable`, `audit_unavailable`, …), so dashboards counting access
+  lines count failed calls.
+- `contextosd --mcp-stdio` forwards `initialize` and every notification in order
+  (`notifications/initialized` can no longer trail the first `tools/call`), and bounds
+  each stdin line at 16 MiB while reading it instead of after buffering it whole.
+
+### Documentation
+- Pack-binding claim leases assume synchronized replica clocks (NTP); the GUIDE says so.
+- The concurrent same-operation dispatch race that can reject the claim winner with
+  `outcome_not_armed` (never a double send; a retry succeeds) is documented in the
+  outcome fence.
 
 ## 0.1.0-alpha.15 - 2026-11-06
 

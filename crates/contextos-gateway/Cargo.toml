@@ -31,6 +31,7 @@ criterion = { workspace = true, features = ["async_tokio"] }
 contextos-policy.workspace = true
 proptest.workspace = true
 sqlx.workspace = true
+tracing-subscriber.workspace = true
 
 [[bench]]
 name = "dispatch"

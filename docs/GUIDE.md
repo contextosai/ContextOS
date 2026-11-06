@@ -1453,7 +1453,10 @@ can use it; every later load (a reload, another replica, a restart) must match:
 Each version is audited once, as `pack_loaded` (reference, digest, file, or `startup`
 for a pack the configuration names) in its tenant's chain, when it is first bound.
 When several replicas load a new version at once, one claims the binding and writes
-the entry while the others wait for it.
+the entry while the others wait for it. The claim is a lease timed by wall clock, so
+keep replica clocks synchronized (NTP or equivalent): a replica whose clock runs well
+behind another's can be taken for stalled while healthy, and the version is then
+audited twice (the chain still verifies).
 Bindings live in the configured store, so they outlast a restart only with
 `kind = "postgres"`. `GET /v1/packs` lists every version with its `sha256`. Loading a
 version changes nothing on its own: runs use it only when they name it or a rollout

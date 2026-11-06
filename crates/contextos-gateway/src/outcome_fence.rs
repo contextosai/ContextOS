@@ -105,6 +105,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     self.store.compare_and_swap(&key, doc.revision, &record).await
                 }
                 // Not yet armed: this attempt takes it over (the other cannot arm).
+                //
+                // Registration runs before the operation claim, so two concurrent
+                // dispatches of one operation can interleave: the later registration
+                // takes the record over, then loses the claim, and the claim winner
+                // then cannot arm (the record names the loser's attempt) and is
+                // withheld with `outcome_not_armed`. Accepted on purpose: nothing is
+                // sent by either attempt, the record stays owed and unarmed (so the
+                // sweep may abandon it after the grace period), and sending the call
+                // again registers, claims and arms one attempt. The cost is a
+                // spurious rejection under a race, never a double send, so the
+                // record-before-claim order this module is built on stays.
                 Some(doc) if doc.body["state"] == "awaiting_effect" && doc.body["armed"] == false => {
                     self.store.compare_and_swap(&key, doc.revision, &record).await
                 }
