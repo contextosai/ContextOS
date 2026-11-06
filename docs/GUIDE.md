@@ -198,6 +198,12 @@ contextosd --migrate deploy/contextosd.example.toml    # PostgreSQL schema, as i
 contextosd --config deploy/contextosd.example.toml
 ```
 
+Every configuration key, with its type, default and meaning, is in
+[CONFIG.md](CONFIG.md), generated from the server's own types. The same schema is
+`deploy/contextosd-config.schema.json` (or `contextosd --config-schema`); TOML editors
+that read `#:schema` comments, as the example file has, complete and check keys with
+it. Every metric `/metrics` exports is listed in [METRICS.md](METRICS.md).
+
 To try a configuration on your machine first, `./examples/dev-server.sh` runs the
 quickstart's development configuration. Moving that example to production mode
 switches on defaults that its development files do not meet; each refusal names its

@@ -1,3 +1,4 @@
+#:schema ./contextosd-config.schema.json
 # contextosd example configuration. Secrets never live in this file: it names
 # environment variables, and API keys are configured as SHA-256 hashes only.
 

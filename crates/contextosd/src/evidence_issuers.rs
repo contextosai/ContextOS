@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// `[[evidence_issuers]]`: one service trusted to vouch for named facts.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceIssuerConfig {
     /// Exact `iss` of its attestations.

@@ -24,9 +24,10 @@ pub const VERIFICATION_DOMAIN: &str = "contextos.conformance_verification_attest
 pub const OBSERVATION_DOMAIN: &str = "contextos.control_evidence_attestation.v1";
 
 /// A trusted principal and the Ed25519 key its attestations are signed with.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedSigner {
+    /// The signer's principal, including its tenant.
     pub principal: Value,
     /// Base64 (standard) of the 32-byte Ed25519 public key.
     pub public_key: String,

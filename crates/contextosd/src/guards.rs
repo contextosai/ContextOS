@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Guards on agent behaviour.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct GuardsConfig {
@@ -86,7 +86,7 @@ pub struct GuardsConfig {
 }
 
 /// `[guards] completion_requires_scores`: on or off, or explicit floors.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum CompletionScores {
     Enabled(bool),
@@ -100,7 +100,7 @@ pub const DEFAULT_SCORE_FLOORS: ScoreFloors = ScoreFloors {
 };
 
 /// Score floors for [`GuardsConfig::completion_requires_scores`], each in 0..=1.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScoreFloors {
     pub policy_floor: f64,

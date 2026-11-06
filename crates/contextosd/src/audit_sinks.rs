@@ -45,9 +45,10 @@ const MAX_BATCH: usize = 500;
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
 pub const MASK_SCHEME: &str = "hmac-sha256";
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuditSinkConfig {
+    /// Sink id, used in metrics and delivery cursors.
     pub id: String,
     /// HTTPS endpoint (HTTP only in development).
     pub url: String,
@@ -71,7 +72,7 @@ pub struct AuditSinkConfig {
     pub start: Start,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Start {
     #[default]

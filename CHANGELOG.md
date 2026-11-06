@@ -6,6 +6,14 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `docs/CONFIG.md` lists every configuration key with its type, default and meaning,
+  and `docs/METRICS.md` every metric with its type and labels. Both are generated from
+  the code (`CONTEXTOS_BLESS=1 cargo test -p contextosd --test generated`), and the
+  test fails when either is stale.
+- `contextosd --config-schema` prints the configuration's JSON Schema, also committed
+  as `deploy/contextosd-config.schema.json`. The example configuration names it in a
+  `#:schema` comment, so TOML editors complete and check keys. A test validates the
+  example configurations against it.
 - `contextosd --mcp-stdio <url>` connects MCP hosts that only launch local (stdio)
   servers to a run's MCP endpoint. Token and executor generation come from
   `CONTEXTOS_TOKEN` and `CONTEXTOS_EXECUTOR_GENERATION`; requests run concurrently.

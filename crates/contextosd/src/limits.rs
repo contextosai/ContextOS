@@ -28,17 +28,22 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
+    /// Requests in progress across all tenants; beyond it the server answers 503.
     #[serde(default = "default_in_flight")]
     pub max_in_flight: usize,
+    /// Default per-tenant request rate (token bucket refill), shared across replicas.
     #[serde(default = "default_rate")]
     pub requests_per_second: f64,
+    /// Default per-tenant bucket size.
     #[serde(default = "default_burst")]
     pub burst: f64,
+    /// Default per-tenant governed effects in progress at once.
     #[serde(default = "default_dispatch")]
     pub max_concurrent_dispatch: usize,
+    /// Per-tenant overrides of the defaults.
     #[serde(default)]
     pub tenants: Vec<TenantLimits>,
     /// How often replicas record their heartbeat for shared tenant limits.
@@ -50,12 +55,16 @@ fn default_heartbeat() -> u64 {
     5_000
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TenantLimits {
+    /// The tenant these limits apply to.
     pub tenant_id: String,
+    /// This tenant's request rate; unset uses the default.
     pub requests_per_second: Option<f64>,
+    /// This tenant's bucket size; unset uses the default.
     pub burst: Option<f64>,
+    /// This tenant's concurrent effects; unset uses the default.
     pub max_concurrent_dispatch: Option<usize>,
 }
 

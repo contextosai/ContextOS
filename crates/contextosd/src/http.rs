@@ -222,9 +222,9 @@ pub(crate) async fn metrics<S, L>(State(state): State<Arc<AppState<S, L>>>) -> R
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
         format!(
-            "{}# HELP contextos_replicas Live replicas sharing tenant limits.\n# TYPE contextos_replicas gauge\ncontextos_replicas {}\n",
+            "{}{}",
             state.metrics.render(),
-            state.limits.replicas()
+            crate::metrics::replicas_exposition(state.limits.replicas())
         ),
     )
         .into_response()

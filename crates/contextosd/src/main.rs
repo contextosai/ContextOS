@@ -21,6 +21,7 @@ usage: contextosd <command>
   --check-config <path>   validate the configuration and its environment, then exit
   --pin-mcp-tools <path>  print upstream MCP tool digests to pin in capability manifests
   --migrate <path>        create or upgrade the PostgreSQL schema (as a role that owns it)
+  --config-schema         print the configuration's JSON Schema
   --mcp-stdio <url>       connect a stdio MCP host to a run's MCP endpoint (token in CONTEXTOS_TOKEN,
                           executor generation in CONTEXTOS_EXECUTOR_GENERATION)
   --version               print the version
@@ -51,6 +52,11 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     if matches!(args.as_slice(), [_, flag] if flag == "--version") {
         println!("contextosd {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if matches!(args.as_slice(), [_, flag] if flag == "--config-schema") {
+        let schema = contextosd::config_schema::schema();
+        println!("{}", serde_json::to_string_pretty(&schema).unwrap_or_default());
         return;
     }
     if matches!(args.as_slice(), [_, flag] if flag == "--help" || flag == "-h") {

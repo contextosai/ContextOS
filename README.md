@@ -205,7 +205,7 @@ Agent skills live in [`skills/`](skills/README.md): [pack authoring](skills/cont
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)
-- Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md)
+- Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md); every configuration key in [docs/CONFIG.md](docs/CONFIG.md) and metric in [docs/METRICS.md](docs/METRICS.md)
 - Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md), [what ContextOS does not govern](docs/SCOPE.md)
 - Public release checklist: [docs/PUBLIC_RELEASE.md](docs/PUBLIC_RELEASE.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
