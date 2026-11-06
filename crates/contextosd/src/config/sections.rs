@@ -33,6 +33,9 @@ pub struct ServerConfig {
     /// (see [`crate::protected_resource`]). Unset: no metadata is published.
     #[serde(default)]
     pub public_url: Option<String>,
+    /// Browser origins, besides `public_url`'s, that may call the MCP endpoint.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 fn default_max_body() -> usize {

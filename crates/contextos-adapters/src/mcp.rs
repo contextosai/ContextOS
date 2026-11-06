@@ -123,6 +123,12 @@ impl McpAdapter {
     }
 }
 
+/// [`rpc_response`] for the fuzz targets.
+#[cfg(fuzzing)]
+pub fn fuzz_rpc_response(content_type: &str, body: &[u8], id: &str, max: usize) -> Option<Value> {
+    rpc_response(content_type, body, id, max)
+}
+
 /// Extracts the JSON-RPC response with `id` from a JSON or SSE body.
 fn rpc_response(content_type: &str, body: &[u8], id: &str, max: usize) -> Option<Value> {
     let matches =

@@ -19,8 +19,43 @@ minor versions may break APIs and every break is listed.
   as `deploy/contextosd-config.schema.json`. The example configuration names it in a
   `#:schema` comment, so TOML editors complete and check keys. A test validates the
   example configurations against it.
+- `contextosd --mcp-stdio <url>` connects MCP hosts that only launch local (stdio)
+  servers to a run's MCP endpoint. Token and executor generation come from
+  `CONTEXTOS_TOKEN` and `CONTEXTOS_EXECUTOR_GENERATION`; requests run concurrently.
+- The MCP endpoint refuses requests from browser origins other than `public_url`'s
+  and `[server] allowed_origins` (`403 origin_not_allowed`), so a web page cannot
+  reach the server through DNS rebinding. Callers that send no `Origin` are
+  unaffected.
+- The release image is published for `linux/amd64` and `linux/arm64` under one tag.
+  Each architecture builds natively and is smoke-tested on its own runner before
+  the index is tagged, signed (cosign, recursively) and attested.
+- Coverage-guided fuzz targets (`fuzz/`, cargo-fuzz) for the kernel's entry points,
+  JsonLogic evaluation, canonical JSON and upstream MCP response parsing, run
+  weekly and on changes to the code they cover.
+- An access log: one JSON line per governed call on target `contextos::access`, with
+  tenant, run, capability, tool call, operation, status, reason codes, the stage the
+  pipeline stopped in and each stage's duration. `RUST_LOG` selects it.
+- Governed calls are exported as `execute_tool <capability>` spans with the
+  OpenTelemetry GenAI attributes (`gen_ai.operation.name`, `gen_ai.tool.name`,
+  `gen_ai.tool.call.id`), the outcome, `contextos.stage` and `contextos.stages`
+  timings, and `error.type` set to the first reason code of a refusal.
+
+### Changed
+- The MCP endpoint refuses an unsupported `MCP-Protocol-Version` header with `400`
+  and echoes the version the request used; it previously always answered
+  `2026-07-28`. `initialize` answers with the negotiated version.
+- A JSON-RPC request without an `id` is refused with `400` instead of accepted and
+  dropped; only `notifications/*` may omit it.
+- Every GitHub Action is pinned to a commit SHA with its tag in a comment, and a
+  script test refuses unpinned ones.
 
 ### Fixed
+- Tool calls through the server (REST `tool-calls` and MCP `tools/call`) recorded no
+  `contextos.dispatch` span or log line: only the embedded `Gateway::dispatch` entry
+  point was instrumented. Every entry point (including continuations, checks and
+  compensations) now runs in the same span. The separate `contextos.continue` span
+  is gone; a continuation is a `contextos.dispatch` span with
+  `contextos.continuation = true`.
 - Servers loading the same new pack version at once wrote one `pack_loaded` entry
   each. Binding a reference now takes a leased claim; others wait for the holder, and
   a server that finds an expired claim looks for its entry before writing one, so a

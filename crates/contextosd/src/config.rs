@@ -160,6 +160,7 @@ impl Config {
             crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)
                 .map_err(ConfigError::Invalid)?;
         }
+        crate::mcp_transport::check_allowed_origins(&config.server.allowed_origins).map_err(ConfigError::Invalid)?;
         text.clone_into(&mut config.source);
         Ok(config)
     }
