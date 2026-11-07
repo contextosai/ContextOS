@@ -152,6 +152,16 @@ Informational: revocations are refusing dispatches. During an incident this conf
 containment. Outside one, list `GET /v1/revocations` and check each `reason` names an
 incident or change.
 
+### ContextOSCircuitBreakerOpen
+
+An agent, principal or tenant crossed a `[[guards.circuit_breakers]]` threshold: too
+many effects, or too many refusals, in the breaker's window. Find the trip with
+`GET /v1/audit/entries` (`circuit_breaker_tripped` names the breaker, the target and
+the estimate) and look at what the agent did just before it. A `refuse` breaker closes
+by itself as the window slides. A `revoke` breaker has also revoked the target
+(`by: circuit_breaker:<id>` in `GET /v1/revocations`). Restore it only after you know
+why it ran away. Do not raise the threshold to make the page stop.
+
 ### ContextOSHeldEffectsAging
 
 A held effect under a shared guarantee has waited more than 15 minutes. The leader

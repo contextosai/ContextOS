@@ -23,6 +23,7 @@
 pub mod admission;
 mod attestation;
 mod checkpoints;
+pub mod circuit_breakers;
 mod compensation;
 mod coordination;
 mod decisions;
@@ -268,6 +269,8 @@ pub struct Gateway<S, L> {
     approval_step_up: Option<step_up::StepUpPolicy>,
     /// Information-flow labels and the rules on them (see [`information_flow`]).
     information_flow: Option<information_flow::FlowPolicy>,
+    /// Rate-based stops across runs (see [`circuit_breakers`]).
+    breakers: Vec<circuit_breakers::BreakerRule>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -503,7 +506,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             resource_identity: None,
             approval_step_up: None,
             information_flow: None,
+            breakers: Vec::new(),
         }
+    }
+
+    /// Counts and refuses calls by `rules` (see [`circuit_breakers`]).
+    pub fn set_circuit_breakers(&mut self, rules: Vec<circuit_breakers::BreakerRule>) {
+        self.breakers = rules;
     }
 
     /// Tracks what each run's agent has read and applies `policy` to its calls (see
@@ -688,6 +697,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let outcome = self
             .run_pipeline(admission, envelope, continuation, fence, compensates, check)
             .await;
+        if let Ok(done) = &outcome
+            && !check
+            && compensates.is_none()
+            && !self.breakers.is_empty()
+            && let Some(manifest) = envelope["capability_id"].as_str().and_then(|id| self.manifests.get(id))
+            && let Err(error) = self.count_breakers(admission, manifest, &done.report).await
+        {
+            // The call itself stands; a lost count only makes a breaker later to open.
+            tracing::warn!(%error, "circuit breaker count failed");
+        }
         if let Err(error) = &outcome {
             tracing::error!(%error, "governed call failed");
             // Governance outcomes leave their access line as the pipeline stops; an
@@ -971,6 +990,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             revoked,
             loops,
             flow,
+            breaker,
         ) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
@@ -994,6 +1014,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     Ok(None)
                 }
             },
+            self.open_breaker(admission, manifest, &now),
         );
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
@@ -1007,6 +1028,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": [reason]});
             self.record(&mut p, "revocation_refusal", body, &now).await?;
             return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
+        }
+        // Circuit breakers: too many effects or refusals for this agent, principal or
+        // tenant across runs stops the call (and, once per window, trips the breaker).
+        if let Some(open) = breaker? {
+            let tripped = self.trip_breaker(admission, &open, &now).await?;
+            p.report.audit_sequences.extend(tripped);
+            p.report.obligations.push("wait_for_circuit".into());
+            return Ok(p.stop(
+                "blocked",
+                vec!["circuit_open".into()],
+                &format!("Circuit breaker {} is open.", open.rule.id),
+            ));
         }
         if let Some(reason) = self.drift.refusal(manifest) {
             let message = if reason == "upstream_tool_drifted" {

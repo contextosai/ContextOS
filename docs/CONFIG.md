@@ -162,6 +162,7 @@ Guards on agent behaviour.
 |---|---|---|---|
 | `agent_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise. |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
+| `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |
 | `completion_requires_scores` | boolean \| table | unset | Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them. |
 | `evidence` | `"strict"` \| `"caller"` | unset | What may satisfy a decision's evidence gate (`strict`, `caller`; see `evidence_admission`). Unset: `strict` with the `contextos.enterprise` profile, which requires it, `caller` otherwise. |
 | `identical_tool_calls` | integer | `5` | Identical tool calls (same capability and arguments, new operation) a run may make before the next is refused with `loop_detected`; 0 disables the guard. |
@@ -176,6 +177,20 @@ Guards on agent behaviour.
 | `required_release_refs` | array of string | unset | Release artifact types every run's execution contract must pin in `release_refs` (e.g. `["model_profile", "evaluator_suite"]`), so each decision records which model and evaluators produced it. Unset: `model_profile` and `evaluator_suite` in production, none in development; `[]` opts out explicitly. |
 | `trust_supplied_memory` | boolean | `false` | Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless. |
 | `user_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared user must be the user its caller's delegated token acts for (`required`, `observe`, `off`; see `user_binding`). Unset: `observe`. |
+
+### `[[guards.circuit_breakers]]`
+
+One `[[guards.circuit_breakers]]` rule.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `capabilities` | array of string | `[]` | Capabilities the breaker counts and refuses; empty is every capability (for `effects`, every effectful one). |
+| `count` | `"effects"` \| `"refusals"` | required | What a breaker counts. |
+| `id` | string | required | Names the breaker in audit entries, reason details and revocations. |
+| `scope` | `"tenant"` \| `"agent"` \| `"principal"` | required | Whose events a breaker counts together. |
+| `threshold` | integer | required | Events per window at which the breaker opens. |
+| `trip` | `"refuse"` \| `"revoke"` | `"refuse"` | What a trip does besides refusing. |
+| `window_seconds` | integer | `60` |  |
 
 ## `[limits]`
 

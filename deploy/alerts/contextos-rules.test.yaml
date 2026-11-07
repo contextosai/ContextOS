@@ -100,6 +100,22 @@ tests:
               description: 4 dispatches were refused by a revocation in the last 15 minutes. Expected while an incident is contained; otherwise check who revoked what.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosrevocationenforced
 
+  - name: an open circuit breaker pages
+    interval: 1m
+    input_series:
+      - series: 'contextos_dispatch_refusals_total{reason="circuit_open",pod="a"}'
+        values: '0 3x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ContextOSCircuitBreakerOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "A circuit breaker is refusing an agent's calls."
+              description: 3 dispatches were refused by an open circuit breaker in the last 15 minutes. An agent is making effects or collecting refusals faster than its breaker allows.
+              runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextoscircuitbreakeropen
+
   - name: server errors above 1% for 10 minutes
     interval: 1m
     input_series:

@@ -153,6 +153,7 @@ impl Config {
         crate::evidence_subjects::check(&config.evidence_subjects).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         crate::audit_sinks::check(&config).map_err(ConfigError::Invalid)?;
+        contextos_gateway::circuit_breakers::validate(&config.guards.circuit_breakers).map_err(ConfigError::Invalid)?;
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }

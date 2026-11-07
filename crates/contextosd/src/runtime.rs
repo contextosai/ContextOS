@@ -59,6 +59,8 @@ pub struct DispatchSetup {
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// `[guards.information_flow]`.
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
+    /// `[[guards.circuit_breakers]]`.
+    pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
     /// `[providers.result_screening]`.
     pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
     /// `[providers.resource_identity]`.
@@ -108,6 +110,7 @@ where
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
     gateway.set_information_flow(setup.information_flow);
+    gateway.set_circuit_breakers(setup.circuit_breakers);
     if let Some(screening) = setup.result_screening {
         gateway.set_result_screening(screening);
     }
@@ -410,6 +413,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         guarantees: config.guarantees.clone(),
         approval_step_up: config.guards.approval_step_up.clone(),
         information_flow: config.guards.information_flow.clone(),
+        circuit_breakers: config.guards.circuit_breakers.clone(),
         result_screening: match &providers.result_screening {
             Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
             None => None,

@@ -6,6 +6,13 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[[guards.circuit_breakers]]`: automatic stops across runs. A breaker counts
+  effects (attempts sent to providers) or refusals per agent, admitting principal or
+  tenant in a sliding window. At its threshold it refuses the calls it governs
+  (`circuit_open`). It audits the trip once per window (`circuit_breaker_tripped`), and
+  with `trip = "revoke"` it revokes the target in the kill switch
+  (`by: circuit_breaker:<id>`). New alert `ContextOSCircuitBreakerOpen` with a runbook
+  entry.
 - `[guards.information_flow]`: each run carries integrity and classification labels
   that rise with the tool output its agent receives (capability manifests declare
   `flow.output_integrity`, `flow.output_classification` and `flow.egress_ceiling`;

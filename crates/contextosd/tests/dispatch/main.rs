@@ -6,6 +6,7 @@ mod api;
 mod audit_sinks;
 mod budgets;
 mod checks;
+mod circuit_breakers;
 mod compensation;
 mod coordination;
 mod decisions;

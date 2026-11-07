@@ -77,6 +77,11 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::information_flow`]). Unset: off.
     #[serde(default)]
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
+    /// Rate-based stops across runs: too many effects or refusals per agent, principal
+    /// or tenant in a window refuse further calls, and can revoke the target (see
+    /// [`contextos_gateway::circuit_breakers`]).
+    #[serde(default)]
+    pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -143,6 +148,7 @@ impl Default for GuardsConfig {
             evidence: None,
             approval_step_up: None,
             information_flow: None,
+            circuit_breakers: Vec::new(),
         }
     }
 }
