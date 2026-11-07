@@ -3,6 +3,7 @@ import { api, can, useMe } from "../lib/api";
 import { ago, n } from "../lib/format";
 import { openAction } from "../components/actions";
 import { Badge, Card, ErrorNote, Kv, PageHead } from "../components/ui";
+import { SourceHealthCard } from "../components/SourceAdmin";
 
 interface SourceRow {
   id: string;
@@ -11,6 +12,8 @@ interface SourceRow {
   region: string | null;
   environment: string | null;
   can_revoke: boolean;
+  origin: "config" | "console";
+  paused: boolean;
   mode: string | null;
   tenant: string | null;
   packs: string[] | null;
@@ -57,6 +60,7 @@ export function Fleet() {
         }
       />
       <ErrorNote error={error} />
+      <SourceHealthCard />
       <div className="grid two">
         {(data?.sources ?? []).map((s) => (
           <Card
@@ -64,7 +68,7 @@ export function Fleet() {
             title={
               <span className="row wrap">
                 <h2 className="mono">{s.id}</h2>
-                {s.state?.broken ? <Badge tone="bad">chain broken</Badge> : s.state?.last_error ? <Badge tone="warn">unreachable</Badge> : <Badge tone="ok">verified</Badge>}
+                {s.paused ? <Badge>paused</Badge> : s.state?.broken ? <Badge tone="bad">chain broken</Badge> : s.state?.last_error ? <Badge tone="warn">unreachable</Badge> : <Badge tone="ok">verified</Badge>}
                 {s.mode && <Badge tone={s.mode === "production" ? "primary" : "warn"}>{s.mode}</Badge>}
               </span>
             }

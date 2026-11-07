@@ -5,6 +5,16 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Tower: runtime sources managed from the console (Runtimes page, `admin`). Probe a
+  runtime before adding it (keys, scopes, tenant, conflicts), then add, pause, resume,
+  retry verification of a broken chain from its last verified entry, reload keys, or
+  remove console sources, each with a reason in Tower's journal. Every replica converges
+  on these changes within `[collector] reconcile_ms` (default 10 s).
+  `GET /api/sources/health` reports each collector's state, lag and sync age.
+- Tower: source keys may be read from mounted secret files (`token_file`,
+  `control_token_file`) as well as environment variables, and re-read on *Reload keys*.
+
 ## 0.1.0-alpha.16 - 2026-11-06
 
 Sixteenth alpha: hardening for production. Provider failover survives an endpoint that

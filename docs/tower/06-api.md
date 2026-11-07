@@ -124,6 +124,18 @@ The fleet change feed (newest 200), and each source with its business unit, regi
 environment, `can_revoke`, verification `state`, `mode`, `tenant`, `packs`, `guards`
 and declared `controls`.
 
+### `GET /api/sources/health`
+
+Each source's collector, most useful for on-call: `origin` (`config` for
+`towerd.toml`, `console` when added here), `state` (`current`, `starting`, `stale`,
+`error`, `stopped`, `broken`, `paused`, or `unavailable` when this replica cannot read
+a console source's keys), `verified_to`, `head`, `lag`, `last_sync`,
+`last_sync_age_seconds`, `last_error`, `broken`, `unattributed`, `can_revoke`, who
+added it and the last change with its reason. Admins also see `keys`: the variable
+names and file paths the keys are read from, never the keys. The response also gives
+when this replica last converged (`reconciled_at`, `reconcile_error`) and
+`stale_after_seconds`.
+
 ### `GET /api/journal?from=&limit=`, `GET /api/journal/keys`
 
 Tower's signed journal (newest `limit` when `from` is omitted; at most 500 per page) and
@@ -189,6 +201,41 @@ t -X POST $TOWER/api/waivers/<id>/decide -d '{"approve": true, "reason": "Tracke
 ```
 
 Journal: `waiver_requested`, `waiver_decided`.
+
+### `POST /api/sources/probe`, `POST /api/sources` (admin)
+
+```sh
+t -X POST $TOWER/api/sources/probe -d '{"id": "us-claims", "url": "https://contextos.us.internal",
+  "token_file": "/run/secrets/us-claims-audit", "control_token_env": "TOWER_US_CLAIMS_CONTROL",
+  "business_unit": "Claims"}'
+# → {"tenant_id": "tenant_claims", "scopes": ["audit:read"], "can_revoke": true, "warnings": [], …}
+t -X POST $TOWER/api/sources -d '{"source": {…the same…}, "reason": "CHG-311: claims agents go live"}'
+```
+
+A source names each key by reference: exactly one of `token_env` (a variable on every
+Tower host) or `token_file` (an absolute path to a mounted secret), and at most one of
+`control_token_env` / `control_token_file`. The probe changes nothing: it loads the keys
+on this replica, reads `/v1/deployment` and the audit signing keys with the read key,
+and refuses a read key without `audit:read` (`source_scope_missing`), a control key for
+another tenant (`source_tenant_mismatch`) or without `control`, keys this replica cannot
+read (`source_key_unavailable`), a taken id (`source_exists`) and a tenant another
+source already governs (`tenant_governed`). It warns when the read key holds more than
+`audit:read`. Adding probes again, then stores the definition and the tenant; every
+replica starts collecting within `[collector] reconcile_ms`. Journal: `source_added`
+(id, URL, tenant, key references, who, why).
+
+### `POST /api/sources/{id}/{action}` (admin)
+
+`{"reason": "…"}` is required. Actions:
+
+| Action | Effect | Journal |
+|---|---|---|
+| `pause` / `resume` | Stop or restart reading the chain on every replica; verified history stays | `source_paused` / `source_resumed` |
+| `retry` | Clear a broken mark and verify again from the last verified entry | `source_retried` |
+| `reload` | Read the keys again from their references (a rotated secret file) | `source_keys_reloaded` |
+| `remove` | Console sources only (`409 source_in_config` for `towerd.toml` ones) | `source_removed` |
+
+Pausing an already paused source, or resuming a running one, is `409`.
 
 ### `POST /api/fleet/revoke`, `POST /api/fleet/restore` (operator)
 

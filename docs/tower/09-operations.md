@@ -37,8 +37,13 @@ under tenant `tower`). A dedicated database is recommended.
 |---|---|---|
 | `id` | required | Unique name, shown everywhere (`eu-support`) |
 | `url` | required | Runtime base URL; `https://` unless development |
-| `token_env` | required | Variable holding that tenant's `audit:read` key. Startup fails if unset |
-| `control_token_env` | none | Variable holding a `control` key; without it the kill switch skips this source |
+| `token_env` or `token_file` | one required | Variable, or absolute path of a mounted secret file, holding that tenant's `audit:read` key. Startup fails if it cannot be read |
+| `control_token_env` or `control_token_file` | none | Variable or secret file holding a `control` key; without it the kill switch skips this source |
+
+Sources can also be added from the console (Runtimes → Add runtime, `admin`), with the
+same fields. Those are kept in Tower's store, not in this file; every replica converges
+on them (see Scaling). Keys are always referenced, so a key file can be rotated in place
+and picked up with *Reload keys*.
 | `business_unit`, `region`, `environment` | none | Labels for people and the analyst |
 
 ### `[[api_keys]]` (people and services)
@@ -68,6 +73,7 @@ under tenant `tower`). A dedicated database is recommended.
 | `poll_ms` | `2000` | How often each source is polled for new entries |
 | `recent_runs` | `50000` | Run summaries kept for search and drill-down |
 | `hours` | `720` | Hours of per-agent activity kept (30 days) |
+| `reconcile_ms` | `10000` | How often each replica converges with the sources, pauses, retries and key reloads made from the console |
 
 Deployment descriptions and packs refresh every 60 seconds; audit pages are read 1 000
 entries at a time.
@@ -126,6 +132,11 @@ the number of agents and active guardrails, not with traffic.
 - **Restart.** The fleet model is rebuilt by verifying every source's chain from
   genesis. For long chains this takes time proportional to chain length; persisting
   collector anchors and aggregates is the next increment (see Limits).
+- **Console-managed sources.** Additions, pauses, retries, key reloads and removals
+  are records in the store; each replica applies them when it next converges (at most
+  `reconcile_ms`), and immediately on the replica that took the request. A replica that
+  cannot read a console source's key file or variable lists it as *keys unavailable*
+  and keeps governing the others; mount the secret on every replica.
 - **Many sources.** One task per source; sources are independent, so a slow or broken
   runtime never delays the others.
 
@@ -134,9 +145,9 @@ the number of agents and active guardrails, not with traffic.
 - `GET /healthz` returns `ok` while the process serves.
 - Logs are JSON (`RUST_LOG` filters). Watch for `audit chain failed verification`
   (error), and `startup failed`.
-- The Runtimes page and `GET /api/sources` show each source's `verified_to`, `head`,
-  `last_sync`, `last_error` and `broken`. Alert when `head − verified_to` grows or
-  `last_sync` is stale.
+- The Runtimes page and `GET /api/sources/health` show each source's `state`, `lag`
+  (`head − verified_to`), `last_sync_age_seconds`, `last_error` and `broken`. Alert on
+  `state` other than `current` or `paused`, a growing `lag`, or `reconcile_error`.
 - `GET /api/posture` is a cheap summary for dashboards (critical findings, anomalies).
 
 ## Backup and audit
@@ -153,7 +164,9 @@ the number of agents and active guardrails, not with traffic.
 | `towerd: source X: TOWER_… is not set` at start | A source's key variable is missing | Set it; Tower refuses to start rather than silently skip a business unit |
 | Source shows *unreachable* with `401` | The key is wrong or lacks `audit:read` for that tenant | Check the runtime's `[[api_keys]]` entry and the hash |
 | Source shows *unreachable* with `describe: …` | `/v1/deployment` or `/v1/packs` failed | Runtime too old (needs the governance reads), or network |
-| *Chain broken at #n* | An entry failed verification | Treat as an incident; export and run `ctx audit-verify` against the runtime's keys to confirm; after investigation, restart Tower to re-verify |
+| *Chain broken at #n* | An entry failed verification | Treat as an incident; export and run `ctx audit-verify` against the runtime's keys to confirm; after investigation, *Retry verification* (admin, with the reason) continues from the last verified entry |
+| Source shows *keys unavailable* | This replica cannot read a console source's key variable or file | Mount the secret (or set the variable) on every replica, then *Reload keys* |
+| Source shows *stale* | No successful sync for `stale_after_seconds` | Check `last_error`, the runtime's health and network; *Pause* it during planned maintenance |
 | An agent appears twice | Runs sometimes set `agent_urn` and sometimes not | Set `agent_urn` consistently in `run_context.agent` |
 | Capabilities show *unknown risk* | Runs surfaced a capability no loaded pack pins | Load the pack in the runtime, or check the pack's `adapter_registry` |
 | `profile_understated` on every agent | Orchestrators request `contextos.core` in contracts | Request the profiles Tower lists as required |
