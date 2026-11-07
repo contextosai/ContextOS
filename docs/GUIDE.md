@@ -1871,6 +1871,34 @@ with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
 
+### Circuit breakers
+
+A kill switch needs someone to pull it. A circuit breaker pulls it automatically when an
+agent, an admitting principal or a tenant does too much too fast across all its runs:
+
+```toml
+[[guards.circuit_breakers]]
+id = "refund_rate"
+scope = "agent"            # agent | principal | tenant
+count = "effects"          # effects: attempts sent to providers | refusals: blocked or rejected calls
+capabilities = ["adp_payments.issue_refund"]   # empty: every capability (every effectful one for effects)
+threshold = 50
+window_seconds = 60
+trip = "revoke"            # refuse: refuse while over | revoke: also revoke the target
+```
+
+The breaker estimates the events in a sliding window (two fixed windows, weighted).
+While the estimate is at or over `threshold`, a call it governs is refused before
+authorization (`circuit_open`, obligation `wait_for_circuit`). The first refusal in a
+window trips the breaker. That is audited (`circuit_breaker_tripped`, with the target and
+the estimate) and pages (`ContextOSCircuitBreakerOpen`). With `trip = "revoke"`, the
+trip also revokes the scope's target, recorded `by: circuit_breaker:<id>`, so the agent
+stays stopped until an operator restores it. Breaker refusals do not count towards a
+`refusals` breaker, so it reopens once the agent stops being refused. Calls racing in
+parallel may overshoot the threshold by their concurrency: a breaker bounds a
+runaway, it is not an exact quota. Scope `agent` is as strong as agent binding: turn
+on `[guards] agent_binding` so a credential cannot pose as another agent.
+
 ## 9. Erase personal content
 
 A run's user-provided content lives in its replay case (the original request), its

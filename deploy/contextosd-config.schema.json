@@ -235,6 +235,104 @@
       ],
       "type": "object"
     },
+    "BreakerCount": {
+      "description": "What a breaker counts.",
+      "oneOf": [
+        {
+          "const": "effects",
+          "description": "Attempts of effectful capabilities sent to providers.",
+          "type": "string"
+        },
+        {
+          "const": "refusals",
+          "description": "Calls governance refused (blocked or rejected).",
+          "type": "string"
+        }
+      ]
+    },
+    "BreakerRule": {
+      "additionalProperties": false,
+      "description": "One `[[guards.circuit_breakers]]` rule.",
+      "properties": {
+        "capabilities": {
+          "default": [],
+          "description": "Capabilities the breaker counts and refuses; empty is every capability (for `effects`, every effectful one).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "count": {
+          "$ref": "#/$defs/BreakerCount"
+        },
+        "id": {
+          "description": "Names the breaker in audit entries, reason details and revocations.",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/BreakerScope"
+        },
+        "threshold": {
+          "description": "Events per window at which the breaker opens.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trip": {
+          "$ref": "#/$defs/BreakerTrip",
+          "default": "refuse"
+        },
+        "window_seconds": {
+          "default": 60,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "count",
+        "threshold"
+      ],
+      "type": "object"
+    },
+    "BreakerScope": {
+      "description": "Whose events a breaker counts together.",
+      "oneOf": [
+        {
+          "enum": [
+            "tenant"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "The agent a run declares (bind it to credentials with `agent_binding`).",
+          "type": "string"
+        },
+        {
+          "const": "principal",
+          "description": "The authenticated principal that admitted the run.",
+          "type": "string"
+        }
+      ]
+    },
+    "BreakerTrip": {
+      "description": "What a trip does besides refusing.",
+      "oneOf": [
+        {
+          "const": "refuse",
+          "description": "Refuse while the estimate is over the threshold; close by itself.",
+          "type": "string"
+        },
+        {
+          "const": "revoke",
+          "description": "Also revoke the scope's target, so it stays stopped until an operator restores it.",
+          "type": "string"
+        }
+      ]
+    },
     "Canonicalizer": {
       "description": "How subjects are compared.",
       "oneOf": [
@@ -492,6 +590,14 @@
           ],
           "default": null,
           "description": "Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`)."
+        },
+        "circuit_breakers": {
+          "default": [],
+          "description": "Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`).",
+          "items": {
+            "$ref": "#/$defs/BreakerRule"
+          },
+          "type": "array"
         },
         "completion_requires_scores": {
           "anyOf": [
@@ -1629,6 +1735,7 @@
       "default": {
         "agent_binding": null,
         "approval_step_up": null,
+        "circuit_breakers": [],
         "completion_requires_scores": null,
         "evidence": null,
         "identical_tool_calls": 5,

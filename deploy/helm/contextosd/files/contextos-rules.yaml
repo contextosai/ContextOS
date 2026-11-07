@@ -81,6 +81,18 @@ groups:
             minutes. Expected while an incident is contained; otherwise check who revoked what.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosrevocationenforced
 
+      - alert: ContextOSCircuitBreakerOpen
+        expr: sum(increase(contextos_dispatch_refusals_total{reason="circuit_open"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'A circuit breaker is refusing an agent''s calls.'
+          description: >-
+            {{ $value | humanize }} dispatches were refused by an open circuit breaker in the
+            last 15 minutes. An agent is making effects or collecting refusals faster than its
+            breaker allows.
+          runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextoscircuitbreakeropen
+
   # Gauges from the leader's governance sweep: only the leader exports them, so
   # aggregate with max, which survives a leader change.
   - name: contextos.holds

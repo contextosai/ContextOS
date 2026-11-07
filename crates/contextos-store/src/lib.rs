@@ -94,6 +94,8 @@ pub enum DocKind {
     UsageClaim,
     /// A run's information-flow labels (what its agent has read).
     FlowLabels,
+    /// A circuit breaker's sliding-window count for one agent, principal or tenant.
+    CircuitBreaker,
 }
 
 impl DocKind {
@@ -135,6 +137,7 @@ impl DocKind {
             DocKind::DeliveryCursor => "delivery_cursor",
             DocKind::UsageClaim => "usage_claim",
             DocKind::FlowLabels => "flow_labels",
+            DocKind::CircuitBreaker => "circuit_breaker",
         }
     }
 }
