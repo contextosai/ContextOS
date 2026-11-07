@@ -72,6 +72,11 @@ pub struct GuardsConfig {
     /// approver's recent strong sign-in (see [`contextos_gateway::step_up`]).
     #[serde(default)]
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
+    /// Track what each run's agent has read (integrity and classification labels
+    /// from capabilities' `flow`) and gate its later effects and egress on it (see
+    /// [`contextos_gateway::information_flow`]). Unset: off.
+    #[serde(default)]
+    pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -137,6 +142,7 @@ impl Default for GuardsConfig {
             pack_intents: None,
             evidence: None,
             approval_step_up: None,
+            information_flow: None,
         }
     }
 }

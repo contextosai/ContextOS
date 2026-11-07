@@ -251,6 +251,16 @@
         }
       ]
     },
+    "Classification": {
+      "description": "Data sensitivity; `Ord` is the rank.",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "CONFIDENTIAL",
+        "RESTRICTED"
+      ],
+      "type": "string"
+    },
     "CompletionScores": {
       "anyOf": [
         {
@@ -395,6 +405,66 @@
       ],
       "type": "object"
     },
+    "FlowMode": {
+      "description": "`enforce` composes the guard's outcome; `observe` only audits what it would do.",
+      "enum": [
+        "enforce",
+        "observe"
+      ],
+      "type": "string"
+    },
+    "FlowPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.information_flow]`.",
+      "properties": {
+        "classified_egress": {
+          "$ref": "#/$defs/FlowVerdict",
+          "default": "deny",
+          "description": "An egress call carrying data above its capability's `egress_ceiling`."
+        },
+        "initial_classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "PUBLIC"
+        },
+        "initial_integrity": {
+          "$ref": "#/$defs/Integrity",
+          "default": "trusted",
+          "description": "Labels every run starts with; raise them for runs whose request itself carries untrusted text or sensitive data."
+        },
+        "mode": {
+          "$ref": "#/$defs/FlowMode",
+          "default": "enforce"
+        },
+        "rule_of_two": {
+          "default": true,
+          "description": "Untrusted input, `CONFIDENTIAL`+ data and egress or an external effect together need at least an approval.",
+          "type": "boolean"
+        },
+        "untrusted_effects": {
+          "$ref": "#/$defs/FlowVerdict",
+          "default": "ask",
+          "description": "An effectful call in a run that has read untrusted output."
+        }
+      },
+      "type": "object"
+    },
+    "FlowVerdict": {
+      "description": "What a rule does to a call it matches.",
+      "oneOf": [
+        {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "ask",
+          "description": "Needs an approval of this exact action.",
+          "type": "string"
+        }
+      ]
+    },
     "GuardsConfig": {
       "additionalProperties": false,
       "description": "Guards on agent behaviour.",
@@ -453,6 +523,18 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "information_flow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Track what each run's agent has read (integrity and classification labels from capabilities' `flow`) and gate its later effects and egress on it (see `contextos_gateway::information_flow`). Unset: off."
         },
         "model_call_min_tokens": {
           "default": 1000,
@@ -552,6 +634,22 @@
         "gateway_principal_id"
       ],
       "type": "object"
+    },
+    "Integrity": {
+      "description": "Whether content can be relied on not to carry instructions.",
+      "oneOf": [
+        {
+          "enum": [
+            "trusted"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "untrusted",
+          "description": "The default: content an outsider could have written.",
+          "type": "string"
+        }
+      ]
     },
     "KmsConfig": {
       "additionalProperties": false,
@@ -1534,6 +1632,7 @@
         "completion_requires_scores": null,
         "evidence": null,
         "identical_tool_calls": 5,
+        "information_flow": null,
         "model_call_min_tokens": 1000,
         "pack_intents": null,
         "refuse_repeated_effects": true,

@@ -92,6 +92,8 @@ pub enum DocKind {
     DeliveryCursor,
     /// Which metering gateway claimed a model-call usage reservation (one call each).
     UsageClaim,
+    /// A run's information-flow labels (what its agent has read).
+    FlowLabels,
 }
 
 impl DocKind {
@@ -132,6 +134,7 @@ impl DocKind {
             DocKind::Outcome => "outcome",
             DocKind::DeliveryCursor => "delivery_cursor",
             DocKind::UsageClaim => "usage_claim",
+            DocKind::FlowLabels => "flow_labels",
         }
     }
 }

@@ -59,6 +59,10 @@ pub struct RunAdmission {
     /// The pinned Context Pack (release tuple) the run was compiled from.
     #[serde(default)]
     pub pack_ref: String,
+    /// The information-flow policy the run was admitted under, cited by every
+    /// decision while the guard is on (see [`crate::information_flow`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_policy_ref: Option<Value>,
     /// What the principal authorized for this task; every effect must fall inside each
     /// one. A delegated run carries its parent's and may add narrower ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -91,6 +95,11 @@ impl RunAdmission {
             if !refs.contains(&task_ref) {
                 refs.push(task_ref);
             }
+        }
+        if let Some(flow_ref) = &self.flow_policy_ref
+            && !refs.contains(flow_ref)
+        {
+            refs.push(flow_ref.clone());
         }
         refs
     }
@@ -309,6 +318,7 @@ pub async fn admit_run<S: DocumentStore>(
         admitted_at: request.admitted_at,
         admitted_by: request.admitted_by,
         pack_ref: request.compiled.context_ledger.pack_ref.clone(),
+        flow_policy_ref: None,
         task_authorizations: Vec::new(),
         inherited_task_authorizations: 0,
         task_authorization_origins: Vec::new(),

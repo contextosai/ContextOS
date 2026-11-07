@@ -686,6 +686,7 @@ where
     admission.task_authorizations = task_authorizations;
     admission.inherited_task_authorizations = inherited_task_authorizations;
     admission.task_authorization_origins = task_authorization_origins;
+    admission.flow_policy_ref = gateway.flow_policy_ref();
     let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
     state
         .store

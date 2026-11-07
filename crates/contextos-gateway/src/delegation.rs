@@ -268,6 +268,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         })
         .await
         .map_err(|e| AdmissionError::Unavailable(e.to_string()))?;
+        // The child knows what its parent read when it was delegated.
+        self.flow_inherit(parent, &child)
+            .await
+            .map_err(|e| AdmissionError::Unavailable(e.to_string()))?;
         Ok(child)
     }
 
@@ -320,6 +324,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         {
             out.reason_codes.push(reason.into());
             return Ok(out);
+        }
+        // What the child read reaches the parent with its output, unless the parent
+        // rejects an isolated child's output (it is never admitted).
+        let isolated = child
+            .lineage
+            .as_ref()
+            .is_some_and(|l| l.effect_policy == "isolate_until_accepted");
+        if decision == CloseDecision::Accept || !isolated {
+            self.flow_return(parent, child).await?;
         }
         let now = self.now();
         // Lock the child's remaining capacity inside its own ledger, atomically.

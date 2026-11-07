@@ -226,6 +226,10 @@ pub struct CapabilityManifest {
     /// done (see [`crate::outcomes`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<OutcomeContract>,
+    /// Information-flow labels of the tool's output and what it may send out (see
+    /// [`crate::information_flow`]); absent, its output is untrusted `INTERNAL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<crate::information_flow::FlowLabels>,
 }
 
 /// What happens when an outcome's witness has not reported by its deadline.

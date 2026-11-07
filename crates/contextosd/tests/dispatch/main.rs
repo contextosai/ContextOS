@@ -21,6 +21,7 @@ mod exposure_import;
 mod findings;
 mod harness;
 mod hold_owners;
+mod information_flow;
 mod load;
 mod mcp_transport;
 mod memory;

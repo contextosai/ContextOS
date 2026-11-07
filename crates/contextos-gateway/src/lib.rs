@@ -34,6 +34,7 @@ mod findings;
 mod findings_api;
 pub mod hold_census;
 pub mod hold_owners;
+pub mod information_flow;
 mod input;
 mod lifecycle;
 mod loop_guard;
@@ -265,6 +266,8 @@ pub struct Gateway<S, L> {
     resource_identity: Option<Arc<dyn resource_identity::ResourceIdentityProvider>>,
     /// Approvals that count only after the approver's step-up (see [`step_up`]).
     approval_step_up: Option<step_up::StepUpPolicy>,
+    /// Information-flow labels and the rules on them (see [`information_flow`]).
+    information_flow: Option<information_flow::FlowPolicy>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -499,7 +502,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             result_screening: None,
             resource_identity: None,
             approval_step_up: None,
+            information_flow: None,
         }
+    }
+
+    /// Tracks what each run's agent has read and applies `policy` to its calls (see
+    /// [`information_flow`]).
+    pub fn set_information_flow(&mut self, policy: Option<information_flow::FlowPolicy>) {
+        self.information_flow = policy;
     }
 
     /// Requires approvers' step-up for the approvals `policy` covers (see [`step_up`]).
@@ -951,7 +961,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let revocations_key = revocations::revocations_key(&admission.tenant_id);
         let call_signature = loop_guard::signature(&manifest.capability_id, &binding["arguments"]);
         let loop_key = loop_guard::key(admission);
-        let (policy_outcomes, constraint_observations, approval_material, existing_ledger, boundary, revoked, loops) = tokio::join!(
+        let flow_key = information_flow::key(&admission.tenant_id, &admission.run_id);
+        let (
+            policy_outcomes,
+            constraint_observations,
+            approval_material,
+            existing_ledger,
+            boundary,
+            revoked,
+            loops,
+            flow,
+        ) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
                 .constraints
@@ -963,6 +983,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             async {
                 if self.loop_limit.is_some() || self.refuse_repeated_effects {
                     self.store.get(&loop_key).await
+                } else {
+                    Ok(None)
+                }
+            },
+            async {
+                if self.information_flow.is_some() {
+                    self.store.get(&flow_key).await
                 } else {
                     Ok(None)
                 }
@@ -1076,6 +1103,27 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 if !outside_task.contains(&code) {
                     outside_task.push(code);
                 }
+            }
+        }
+        // What the run has read decides what it may do next (information flow).
+        match self
+            .flow_guard(
+                &mut p,
+                admission,
+                manifest,
+                &operation_id,
+                flow?.as_ref().map(|f| &f.body),
+                &now,
+            )
+            .await?
+        {
+            information_flow::FlowGate::Pass => {}
+            information_flow::FlowGate::Outcome(outcome, codes) => {
+                policy_outcomes.push(outcome);
+                outside_task.extend(codes);
+            }
+            information_flow::FlowGate::Refuse(codes) => {
+                return Ok(p.stop("blocked", codes, "What this run has read does not allow this call."));
             }
         }
         let constraint_observations = match constraint_observations {
@@ -2237,6 +2285,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     ));
                 }
             }
+        }
+        // The agent is about to read this output: the run's labels rise with it.
+        if !response.output.is_empty() {
+            self.flow_received(admission, manifest, &operation_id).await?;
         }
         Ok(match (response.outcome, known) {
             (EffectOutcome::Confirmed, true) => p.finish(

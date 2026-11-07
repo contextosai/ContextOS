@@ -6,6 +6,17 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[guards.information_flow]`: each run carries integrity and classification labels
+  that rise with the tool output its agent receives (capability manifests declare
+  `flow.output_integrity`, `flow.output_classification` and `flow.egress_ceiling`;
+  undeclared output is untrusted `INTERNAL`). Effects after untrusted input
+  (`untrusted_effects`, default `ask`), egress above a capability's ceiling
+  (`classified_egress`, default `deny`), and untrusted input with `CONFIDENTIAL` data
+  and egress or an external effect (`rule_of_two`) compose a guardrail outcome, so they
+  need an approval of the exact action or are denied. Labels pass to delegated
+  children and back. Each run pins the policy it was admitted under
+  (`flow_policy_ref`). Matches are audited (`information_flow_decision`); `mode =
+  "observe"` only audits. Off unless configured.
 - `contextos-litellm` (`integrations/litellm`): a LiteLLM proxy callback that meters
   every model call against its run's budget. It claims the call's reservation before
   forwarding it (refusing forged, reused and revoked ones, and failing closed when
