@@ -13,6 +13,7 @@ pub mod ops;
 pub mod records;
 pub mod registry;
 pub mod source;
+pub mod spend;
 
 use std::sync::Arc;
 

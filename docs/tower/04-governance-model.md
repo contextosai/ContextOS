@@ -212,7 +212,8 @@ document of the quickstart agent in `examples/tower`, abridged only in the contr
 
 ## 4.5 Built-in findings
 
-`governance::builtin` checks every agent; `governance::findings` adds source health. A
+`governance::builtin` checks every agent; `governance::findings` adds source health
+and model spend (§4.10). A
 finding's id is `rule:agent` (or `rule:agent:source`), so the same problem keeps the same
 id across requests.
 
@@ -233,6 +234,8 @@ id across requests.
 | `agent_looping` | medium | the loop guard fired or repeated effects were withheld | Inspect the runs |
 | `ungoverned_or_dormant` | high | declared `production` but no governed run in 30 days | Route its tools through a runtime, or deprecate and revoke |
 | `retired_but_running` | high | declared `retired` or `deprecated` and ran in the last 24 hours | Revoke it fleet-wide, or fix the lifecycle |
+| `uncovered_model_usage` | high | in the last 7 days, measured model usage exceeded what the run's budget could still cover (§4.10) | Reserve each call's expected size; review the contract's budget ceilings |
+| `unmetered_model_spend` | medium | in the last 7 days, more than half of at least 10,000 charged model tokens were self-reported (§4.10) | Route model calls through a metering gateway (the ContextOS LiteLLM plugin) and reserve with `metered=True` |
 | `chain_broken` | critical | a source's chain failed verification | Treat as a security incident |
 | `pack_version_conflict` | high | sources publish different content under one pack `id@version` (fleet-wide, not per agent) | Publish changes under a new version |
 
@@ -335,6 +338,9 @@ anomaly   = value ≥ threshold and value ≥ floor
 | `failed_runs` | runs that failed or expired | 3 |
 | `guard_hits` | kill switch, boundary, loop and repeated-effect refusals | 3 |
 | `effects` | claimed effects | 50 |
+| `model_tokens` | model tokens charged (§4.10) | 200,000 |
+| `model_cost` | model cost charged, in hundredths of a cent (§4.10) | 100,000 ($10) |
+| `model_budget_refused` | model-call and replan reservations the budget refused | 5 |
 
 Deterministic and explainable: the anomaly shows the value and the agent's usual mean.
 The floors keep quiet agents from alerting on a single event; the unknown-outcome floor
@@ -348,3 +354,28 @@ lifecycle), unwaived findings by severity and rule, waived count, anomaly count,
 eight agents with the most critical, then high, findings and irreversible capabilities,
 the top eight findings, source verification state, unattributed entries and active
 guardrails.
+
+## 4.10 Model spend
+
+The runtime reserves budget before every model call and settles it afterwards
+(`POST /v1/runs/{run_id}/usage/reserve`, `…/usage/settle`). `spend.rs` folds the
+budget events from each verified chain into per-agent spend, attributed through the
+run like every other entry (usage of a run outside the recent window counts as
+unattributed on its source):
+
+| Event | Folded as |
+|---|---|
+| `usage_settled` | a model call (unless it settles a replan) with its charged tokens and cost; `verified: true` means a metering gateway settled it from the provider's usage (*measured*), otherwise the executor settled it and the whole reservation was charged (*self-reported*); counted per `model` (unnamed: `(unreported)`) |
+| `usage_overage` | *uncovered* usage: what was measured beyond what the run's budget could still charge |
+| `usage_refused` | a reservation the budget or a revocation refused, by reason code |
+| `usage_claimed` | a metering gateway took a reservation for one call; claims not yet settled are shown as *awaiting settlement* (still reserved, never zero) |
+
+Costs are kept in the ledger's unit, hundredths of a cent. Spend lives in hourly
+buckets for the collector's `hours` window, plus totals since Tower started reading;
+each agent keeps at most 16 model names, the rest counted as `(other models)`.
+
+Tower separates measured from self-reported spend because an agent's own account of
+its usage is not evidence: self-reported spend is the reservation, an upper bound the
+agent chose. `unmetered_model_spend` (§4.5) names agents whose spend is mostly
+self-reported, `uncovered_model_usage` those whose measured usage ran past their budget,
+and the `model_*` anomalies (§4.8) spend spikes against the agent's own week.

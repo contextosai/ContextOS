@@ -1,6 +1,8 @@
 //! Operational console APIs, one module per job, each adding its own routes to
 //! [`crate::api::router`] through [`routes`].
 
+pub mod spend;
+
 use axum::Router;
 use contextos_store::{AppendLog, DocumentStore};
 
@@ -12,5 +14,5 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    Router::new()
+    Router::new().merge(spend::routes())
 }

@@ -48,6 +48,7 @@ export function Shell() {
         { to: "/agents", label: "Agents", plane: "intelligence" },
         { to: "/findings", label: "Findings", plane: "decision", count: critical },
         { to: "/activity", label: "Activity", plane: "action", count: posture?.anomalies },
+        { to: "/spend", label: "Spend", plane: "action" },
       ],
     ],
     [
