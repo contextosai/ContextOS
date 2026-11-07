@@ -180,6 +180,10 @@ pub struct SourceState {
     pub deployment: Value,
     #[serde(skip)]
     pub packs: Value,
+    /// The last entry verified and folded in: a restarted collector continues from it
+    /// instead of folding the chain in again.
+    #[serde(skip)]
+    pub anchor: Option<AuditEntry>,
 }
 
 #[derive(Debug)]

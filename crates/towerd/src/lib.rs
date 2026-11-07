@@ -9,7 +9,9 @@ pub mod console;
 pub mod fleet;
 pub mod governance;
 pub mod intel;
+pub mod ops;
 pub mod records;
+pub mod registry;
 pub mod source;
 
 use std::sync::Arc;
@@ -25,7 +27,8 @@ pub use config::Config;
 pub struct Tower<S, L> {
     pub config: Config,
     pub fleet: Arc<RwLock<fleet::Fleet>>,
-    pub sources: Vec<Arc<source::Source>>,
+    /// The runtime sources and their collectors.
+    pub sources: registry::Registry,
     pub records: records::Records<S, L>,
     pub model: Option<Arc<dyn intel::Model>>,
     pub callers: api::Callers,
@@ -37,7 +40,7 @@ pub struct Tower<S, L> {
 impl<S, L> std::fmt::Debug for Tower<S, L> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tower")
-            .field("sources", &self.sources.len())
+            .field("sources", &self.sources)
             .finish_non_exhaustive()
     }
 }
@@ -95,7 +98,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         Ok(Self {
             callers: api::Callers::new(&config.api_keys),
             fleet: Arc::new(RwLock::new(fleet)),
-            sources,
+            sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config))),
             records: records::Records::new(store, journal),
             model,
             console,
@@ -122,12 +125,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         });
     }
 
-    /// Starts one collector per source.
+    /// How often each collector polls its source.
+    pub fn poll_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.config.collector.poll_ms)
+    }
+
+    /// Starts one collector per source that is not paused.
     pub fn spawn_collectors(&self) {
-        let every = std::time::Duration::from_millis(self.config.collector.poll_ms);
-        for source in &self.sources {
-            tokio::spawn(collector::run(source.clone(), self.fleet.clone(), every));
-        }
+        self.sources.start_all(&self.fleet, self.poll_interval());
     }
 }
 
