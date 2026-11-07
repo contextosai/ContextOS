@@ -15,12 +15,17 @@
 //! | `GET /api/runs/{source}/{run}/evidence` | viewer | a run's evidence, fetched from its runtime (journalled) |
 //! | `GET /api/changes` | viewer | governance changes across the fleet |
 //! | `GET /api/sources` | viewer | runtimes and their verification state |
+//! | `GET /api/sources/health` | viewer (key references: admin) | each source's collector state, lag and errors |
+//! | `POST /api/sources/probe`, `POST /api/sources` | admin | check, then add, a runtime source (keys by reference only) |
+//! | `POST /api/sources/{id}/{pause,resume,retry,reload,remove}` | admin | manage a source, with a reason (journalled) |
 //! | `GET/POST /api/guardrails`, `POST …/{id}/activate`, `…/retire` | risk (activate: not the author) | organisation guardrails |
 //! | `POST /api/guardrails/preview` | risk | a rule's impact on the current inventory |
 //! | `GET/POST /api/waivers`, `POST …/{id}/decide` | owner/risk (decide: risk, not the requester) | time-boxed exceptions |
 //! | `POST /api/fleet/revoke`, `POST /api/fleet/restore` | operator | kill switch on every runtime (restore: only without `two_person_restore`) |
 //! | `GET /api/revocations` | viewer | what is revoked on every runtime, who did it and what it stops |
 //! | `GET/POST /api/revocations/restore-requests`, `POST …/{id}/approve`, `…/{id}/cancel` | operator (approve: not the requester; cancel: the requester) | two-person restore |
+//! | `GET /api/inbox` | viewer | open escalations of every runtime, oldest first ([`crate::ops::inbox`]) |
+//! | `POST /api/inbox/{source}/{escalation_id}/resolve` | risk or operator (not the agent's declarer or owner) | record how a person resolved an escalation, on its runtime |
 //! | `POST /api/ask` | viewer | ask the analyst |
 //! | `POST /api/guardrails/draft` | risk | draft a guardrail from an intent |
 //! | `POST /api/agents/{key}/assess` | risk or owner | draft an intake review |

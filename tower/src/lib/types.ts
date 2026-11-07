@@ -225,3 +225,45 @@ export interface RestoreRequest {
   executed_at?: string;
   results?: { source: string | null; ok: boolean; error?: string }[];
 }
+
+/** One open escalation in the approvals inbox (`GET /api/inbox`). */
+export interface InboxItem {
+  source: string;
+  escalation_id: string;
+  /** `policy` (policy answered escalate) or `outcome_missed` (an effect's outcome never arrived). */
+  kind: "policy" | "outcome_missed";
+  run_id: string;
+  trace_id?: string;
+  operation_id?: string;
+  capability_id?: string;
+  reason_codes?: string[];
+  action_digest?: string;
+  policy_decision_id?: string;
+  due_at?: string;
+  opened_at: string;
+  age_seconds: number | null;
+  reopened: number;
+  /** Null when the run left Tower's recent-run window. */
+  agent: string | null;
+  agent_id: string | null;
+  owner: string | null;
+  team: string | null;
+  declared: boolean;
+  can_resolve: boolean;
+}
+
+export interface InboxSource {
+  source: string;
+  ok: boolean;
+  open?: number;
+  truncated?: boolean;
+  can_resolve: boolean;
+  error?: string;
+}
+
+export interface Inbox {
+  open: number;
+  items: InboxItem[];
+  sources: InboxSource[];
+  at: string;
+}

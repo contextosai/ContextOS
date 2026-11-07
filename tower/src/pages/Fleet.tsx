@@ -3,6 +3,7 @@ import { api, can, useMe } from "../lib/api";
 import { ago, n } from "../lib/format";
 import { openAction } from "../components/actions";
 import { Badge, Card, ErrorNote, Kv, PageHead } from "../components/ui";
+import { SourceHealthCard } from "../components/SourceAdmin";
 
 interface SourceRow {
   id: string;
@@ -11,6 +12,8 @@ interface SourceRow {
   region: string | null;
   environment: string | null;
   can_revoke: boolean;
+  origin: "config" | "console";
+  paused: boolean;
   mode: string | null;
   tenant: string | null;
   packs: string[] | null;
@@ -22,23 +25,29 @@ interface SourceRow {
 export function Fleet() {
   const me = useMe().data;
   const { data, error } = useQuery({ queryKey: ["sources"], queryFn: () => api<{ sources: SourceRow[] }>("/api/sources"), refetchInterval: 10_000 });
+  const twoPerson = me?.two_person_restore ?? true;
   const fleetAction = (revoke: boolean, kind = "capability", target = "") =>
     openAction({
       title: revoke ? "Fleet kill switch" : "Restore across the fleet",
       description: revoke
         ? "Revokes the target on every runtime Tower holds a control key for. Each runtime refuses it at the next admission and dispatch, and records the change in its own audit chain."
-        : "Restores the target on every runtime Tower controls.",
+        : twoPerson
+          ? "Requests a restore on every runtime Tower controls. Another operator approves it on the Revocations page before anything is restored."
+          : "Restores the target on every runtime Tower controls.",
       role: "operator",
       danger: revoke,
       confirm: revoke ? target || undefined : undefined,
-      submit: revoke ? "Revoke everywhere" : "Restore everywhere",
+      submit: revoke ? "Revoke everywhere" : twoPerson ? "Request restore" : "Restore everywhere",
       fields: [
         { name: "kind", label: "Kind", kind: "select", options: [["agent", "Agent"], ["capability", "Capability"], ["adapter", "Adapter"], ["pack", "Context Pack"], ["principal", "Principal"]], initial: kind },
         { name: "target", label: "Target (exact id)", required: true, initial: target },
         { name: "reason", label: "Reason", kind: "textarea", required: true },
       ],
-      run: (v) => api(revoke ? "/api/fleet/revoke" : "/api/fleet/restore", { body: { kind: v.kind, target: v.target, reason: v.reason } }),
-      invalidate: [["sources"], ["posture"]],
+      run: (v) =>
+        revoke || !twoPerson
+          ? api(revoke ? "/api/fleet/revoke" : "/api/fleet/restore", { body: { kind: v.kind, target: v.target, reason: v.reason } })
+          : api("/api/revocations/restore-requests", { body: { kind: v.kind, target: v.target, reason: v.reason, sources: null } }),
+      invalidate: [["sources"], ["posture"], ["revocations"], ["restore-requests"]],
     });
   return (
     <div className="stack">
@@ -48,7 +57,7 @@ export function Fleet() {
         actions={
           <>
             <button disabled={!can(me, "operator")} onClick={() => fleetAction(false)}>
-              Restore…
+              {twoPerson ? "Request restore…" : "Restore…"}
             </button>
             <button className="danger" disabled={!can(me, "operator")} onClick={() => fleetAction(true)}>
               Kill switch…
@@ -57,6 +66,7 @@ export function Fleet() {
         }
       />
       <ErrorNote error={error} />
+      <SourceHealthCard />
       <div className="grid two">
         {(data?.sources ?? []).map((s) => (
           <Card
@@ -64,7 +74,7 @@ export function Fleet() {
             title={
               <span className="row wrap">
                 <h2 className="mono">{s.id}</h2>
-                {s.state?.broken ? <Badge tone="bad">chain broken</Badge> : s.state?.last_error ? <Badge tone="warn">unreachable</Badge> : <Badge tone="ok">verified</Badge>}
+                {s.paused ? <Badge>paused</Badge> : s.state?.broken ? <Badge tone="bad">chain broken</Badge> : s.state?.last_error ? <Badge tone="warn">unreachable</Badge> : <Badge tone="ok">verified</Badge>}
                 {s.mode && <Badge tone={s.mode === "production" ? "primary" : "warn"}>{s.mode}</Badge>}
               </span>
             }

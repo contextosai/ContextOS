@@ -124,6 +124,18 @@ The fleet change feed (newest 200), and each source with its business unit, regi
 environment, `can_revoke`, verification `state`, `mode`, `tenant`, `packs`, `guards`
 and declared `controls`.
 
+### `GET /api/sources/health`
+
+Each source's collector, most useful for on-call: `origin` (`config` for
+`towerd.toml`, `console` when added here), `state` (`current`, `starting`, `stale`,
+`error`, `stopped`, `broken`, `paused`, or `unavailable` when this replica cannot read
+a console source's keys), `verified_to`, `head`, `lag`, `last_sync`,
+`last_sync_age_seconds`, `last_error`, `broken`, `unattributed`, `can_revoke`, who
+added it and the last change with its reason. Admins also see `keys`: the variable
+names and file paths the keys are read from, never the keys. The response also gives
+when this replica last converged (`reconciled_at`, `reconcile_error`) and
+`stale_after_seconds`.
+
 ### `GET /api/journal?from=&limit=`, `GET /api/journal/keys`
 
 Tower's signed journal (newest `limit` when `from` is omitted; at most 500 per page) and
@@ -189,6 +201,41 @@ t -X POST $TOWER/api/waivers/<id>/decide -d '{"approve": true, "reason": "Tracke
 ```
 
 Journal: `waiver_requested`, `waiver_decided`.
+
+### `POST /api/sources/probe`, `POST /api/sources` (admin)
+
+```sh
+t -X POST $TOWER/api/sources/probe -d '{"id": "us-claims", "url": "https://contextos.us.internal",
+  "token_file": "/run/secrets/us-claims-audit", "control_token_env": "TOWER_US_CLAIMS_CONTROL",
+  "business_unit": "Claims"}'
+# → {"tenant_id": "tenant_claims", "scopes": ["audit:read"], "can_revoke": true, "warnings": [], …}
+t -X POST $TOWER/api/sources -d '{"source": {…the same…}, "reason": "CHG-311: claims agents go live"}'
+```
+
+A source names each key by reference: exactly one of `token_env` (a variable on every
+Tower host) or `token_file` (an absolute path to a mounted secret), and at most one of
+`control_token_env` / `control_token_file`. The probe changes nothing: it loads the keys
+on this replica, reads `/v1/deployment` and the audit signing keys with the read key,
+and refuses a read key without `audit:read` (`source_scope_missing`), a control key for
+another tenant (`source_tenant_mismatch`) or without `control`, keys this replica cannot
+read (`source_key_unavailable`), a taken id (`source_exists`) and a tenant another
+source already governs (`tenant_governed`). It warns when the read key holds more than
+`audit:read`. Adding probes again, then stores the definition and the tenant; every
+replica starts collecting within `[collector] reconcile_ms`. Journal: `source_added`
+(id, URL, tenant, key references, who, why).
+
+### `POST /api/sources/{id}/{action}` (admin)
+
+`{"reason": "…"}` is required. Actions:
+
+| Action | Effect | Journal |
+|---|---|---|
+| `pause` / `resume` | Stop or restart reading the chain on every replica; verified history stays | `source_paused` / `source_resumed` |
+| `retry` | Clear a broken mark and verify again from the last verified entry | `source_retried` |
+| `reload` | Read the keys again from their references (a rotated secret file) | `source_keys_reloaded` |
+| `remove` | Console sources only (`409 source_in_config` for `towerd.toml` ones) | `source_removed` |
+
+Pausing an already paused source, or resuming a running one, is `409`.
 
 ### `POST /api/fleet/revoke`, `POST /api/fleet/restore` (operator)
 
@@ -259,6 +306,45 @@ t $TOWER/api/revocations/restore-requests                                # newes
 Journal: `restore_requested`, `restore_approved` (before any runtime is called),
 `restore_executed` (with per-source results), `restore_cancelled`.
 
+### `GET /api/inbox?source=&agent=&team=` (viewer)
+
+Every active runtime's open escalations, oldest first. Each runtime is read
+concurrently (`GET /v1/escalations`, up to 1000, 10 s each); one that cannot be read
+is reported in `sources` with its error, never silently left out.
+
+```sh
+t $TOWER/api/inbox
+# → {"open": 1, "at": "…", "sources": [{"source": "acme-support-eu", "ok": true, "open": 1,
+#     "truncated": false, "can_resolve": true}],
+#    "items": [{"source": "acme-support-eu", "escalation_id": "esc_…", "kind": "policy",
+#      "run_id": "r1", "operation_id": "refund:1", "capability_id": "adp_payments.issue_refund",
+#      "reason_codes": ["fraud_signal_high"], "opened_at": "…", "age_seconds": 5400, "reopened": 0,
+#      "agent": "tenant_acme_prod/agt_support", "owner": "Support AI lead", "team": "support-ai",
+#      "declared": true, "can_resolve": true, …}]}
+```
+
+`kind` is `policy` (policy answered `escalate`) or `outcome_missed` (an applied effect's
+outcome was not confirmed by its deadline). `agent` is null when the run has left
+Tower's recent-run window; the item is still listed. `can_resolve` is false for a
+runtime Tower holds no control key for.
+
+### `POST /api/inbox/{source}/{escalation_id}/resolve` (risk or operator)
+
+```sh
+t -X POST $TOWER/api/inbox/acme-support-eu/esc_…/resolve \
+  -d '{"resolution": "handled", "reason": "Fraud team cleared the customer"}'
+# → {"source": "acme-support-eu", "escalation": {…, "status": "resolved",
+#     "resolution": {"outcome": "handled", "reason": "… (via Tower, risk-a)", "by": "svc_tower_control", …}}}
+```
+
+`resolution`: `handled` or `dismissed`; `reason` up to 900 bytes. The escalation is
+read from the runtime, not from the request; whoever declared or owns its agent is
+refused (`403`). `409 no_control_key` without a control key for the runtime, `404`
+when it is no longer open, `409 conflict` when it was resolved meanwhile. Resolving
+records what a person did; it grants nothing, and a retried call still goes through
+policy and approvals. Journal: `escalation_resolution_requested` before the runtime
+is called, `escalation_resolution_result` (with `ok` and any `error`) after.
+
 ## Intelligence
 
 | Route | Body | Returns |
@@ -284,4 +370,6 @@ These are part of the `contextosd` OpenAPI document (`openapi/contextosd.v1.json
 | `GET /v1/runs/{id}/evidence` | `audit:read` | Explain and evidence on request |
 | `POST /v1/revocations`, `POST /v1/revocations/restore` | `control` | Fleet kill switch |
 | `GET /v1/revocations` | `control` | The live list the Revocations view reconciles with the chain |
+| `GET /v1/escalations?limit=` | `audit:read` | Approvals inbox |
+| `POST /v1/escalations/{id}/resolve` | `control` | Resolving from the inbox |
 | `GET /v1/config`, `POST /v1/config/validate` | `config` | Configuration review in CI (not used by `towerd`) |

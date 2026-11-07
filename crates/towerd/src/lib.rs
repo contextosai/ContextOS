@@ -8,12 +8,14 @@ pub mod config;
 pub mod console;
 pub mod fleet;
 pub mod governance;
+pub mod inbox;
 pub mod intel;
 pub mod ops;
 pub mod records;
 pub mod registry;
 pub mod revocations;
 pub mod source;
+pub mod sources_admin;
 
 use std::sync::Arc;
 
@@ -30,6 +32,8 @@ pub struct Tower<S, L> {
     pub fleet: Arc<RwLock<fleet::Fleet>>,
     /// The runtime sources and their collectors.
     pub sources: registry::Registry,
+    /// This replica's view of the sources managed from the console.
+    pub source_admin: sources_admin::State,
     pub records: records::Records<S, L>,
     pub model: Option<Arc<dyn intel::Model>>,
     pub callers: api::Callers,
@@ -100,6 +104,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
             callers: api::Callers::new(&config.api_keys),
             fleet: Arc::new(RwLock::new(fleet)),
             sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config))),
+            source_admin: sources_admin::State::default(),
             records: records::Records::new(store, journal),
             model,
             console,

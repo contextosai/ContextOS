@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, session, useMe } from "../lib/api";
 import type { AgentRow, Posture } from "../lib/types";
 import { ActionHost, Toasts } from "./actions";
+import { useInbox } from "../pages/Inbox";
 import { Badge, type Plane } from "./ui";
 
 interface NavItem {
@@ -21,6 +22,7 @@ export function Shell() {
   const me = useMe().data;
   const posture = usePosture().data;
   const waivers = useQuery({ queryKey: ["waivers"], queryFn: () => api<{ waivers: { status: string }[] }>("/api/waivers"), refetchInterval: 30_000 }).data;
+  const inbox = useInbox().data;
   const [palette, setPalette] = useState(false);
 
   useEffect(() => {
@@ -55,6 +57,7 @@ export function Shell() {
       "Decide",
       [
         { to: "/guardrails", label: "Guardrails", plane: "context" },
+        { to: "/inbox", label: "Inbox", plane: "decision", count: inbox?.open },
         { to: "/waivers", label: "Waivers", plane: "decision", count: pendingWaivers },
         { to: "/ask", label: "Ask Tower", plane: "intelligence" },
       ],
