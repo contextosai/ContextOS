@@ -28,6 +28,8 @@ step clippy;  cargo clippy --workspace --all-targets -- -D warnings     || fail 
 # The OTLP integration test observes INFO request spans, independently of shell logging preferences.
 step tests;   RUST_LOG=info cargo test -q --workspace                    || fail tests
 step build;   cargo build --release -q -p contextosd -p ctx -p towerd   || fail build
+# Each crate builds on its own, and contextosd without its optional features (as towerd uses it).
+step features; cargo check -q -p towerd && cargo check -q -p contextosd --no-default-features || fail "standalone builds"
 step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/dev/null && npm test -s >/dev/null) || fail "tower console"
 step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"

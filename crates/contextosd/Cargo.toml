@@ -13,6 +13,7 @@ name = "contextosd"
 path = "src/main.rs"
 
 [dependencies]
+bytes.workspace = true
 ed25519-dalek.workspace = true
 base64.workspace = true
 contextos-contract = { workspace = true, features = ["schema"] }
@@ -52,14 +53,13 @@ opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 opentelemetry-http = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
 
 [features]
 default = ["otlp", "mimalloc"]
 # A faster multi-threaded allocator (~17% lower dispatch latency in benchmarks).
 mimalloc = ["dep:mimalloc"]
 # OTLP/HTTP trace export, enabled at runtime by OTEL_EXPORTER_OTLP_ENDPOINT.
-otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:opentelemetry-http", "dep:http", "dep:bytes"]
+otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:opentelemetry-http", "dep:http"]
 
 [dev-dependencies]
 jsonschema.workspace = true
