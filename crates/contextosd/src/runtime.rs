@@ -57,6 +57,8 @@ pub struct DispatchSetup {
     pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
     /// `[guards.approval_step_up]`.
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
+    /// `[guards.information_flow]`.
+    pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
     /// `[providers.result_screening]`.
     pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
     /// `[providers.resource_identity]`.
@@ -105,6 +107,7 @@ where
     }
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
+    gateway.set_information_flow(setup.information_flow);
     if let Some(screening) = setup.result_screening {
         gateway.set_result_screening(screening);
     }
@@ -406,6 +409,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
         guarantees: config.guarantees.clone(),
         approval_step_up: config.guards.approval_step_up.clone(),
+        information_flow: config.guards.information_flow.clone(),
         result_screening: match &providers.result_screening {
             Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
             None => None,
@@ -435,9 +439,11 @@ fn read_manifest(path: &std::path::Path) -> Result<CapabilityManifest, String> {
     Ok(manifest)
 }
 
-/// Effectful capabilities whose actions carry no amount, or name no resource: a task
-/// scope's `amount_ceiling` or `resource_ids`, and a task's `amount_total`, pass them
-/// whatever they move. Declare `amount` and `resource_pointers` for money-moving tools.
+/// Startup notes on capabilities. Effectful capabilities whose actions carry no amount,
+/// or name no resource: a task scope's `amount_ceiling` or `resource_ids`, and a task's
+/// `amount_total`, pass them whatever they move. Declare `amount` and
+/// `resource_pointers` for money-moving tools. With information flow on, capabilities
+/// without `flow` labels get the defaults, which may not be what was reviewed.
 pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
     let mut notes = Vec::new();
     for m in &setup.manifests {
@@ -456,6 +462,14 @@ pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
                 "{} is effectful and declares no {}: task amount and resource limits do not bound it",
                 m.capability_id,
                 missing.join(" or ")
+            ));
+        }
+    }
+    if setup.information_flow.is_some() {
+        for m in setup.manifests.iter().filter(|m| m.flow.is_none()) {
+            notes.push(format!(
+                "{} declares no flow labels: with [guards.information_flow] its output counts as untrusted INTERNAL and it may send out at most INTERNAL data",
+                m.capability_id
             ));
         }
     }

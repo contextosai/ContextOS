@@ -690,6 +690,63 @@ by `task_scope_*` (`task_scope_extent` when the task's limits are reached). Asks
 without one (`task_authorization_required`). The Python and Node clients build the
 shape with `task_authorization(...)`/`task_scope(...)` (`taskAuthorization`/`taskScope`).
 
+### Gate effects on what the agent has read
+
+Text an agent reads can steer it: a support ticket, a web page or an email can carry
+instructions. Nothing screens that reliably, so `[guards.information_flow]` does not
+judge content. It tracks what each run's agent has received and decides what the run
+may do next, before any provider is called.
+
+Each run carries two labels that only rise:
+
+- **integrity**: `trusted` until the agent receives output from a capability whose
+  manifest does not declare `"output_integrity": "trusted"`. Undeclared output is
+  untrusted.
+- **classification**: the most sensitive `output_classification` the agent has
+  received (`PUBLIC` < `INTERNAL` < `CONFIDENTIAL` < `RESTRICTED`; default
+  `INTERNAL`).
+
+Label capabilities in their manifests:
+
+```json
+"flow": {"output_integrity": "trusted", "output_classification": "CONFIDENTIAL", "egress_ceiling": "INTERNAL"}
+```
+
+Declare `trusted` only for output your own systems produce (a ledger balance, an order
+status). Never declare it for free text that customers, the web or email could have
+written. `egress_ceiling` is the most sensitive data the capability may carry out when
+it `sends_data` or names recipients (`destination_pointers`).
+
+```toml
+[guards.information_flow]
+mode = "enforce"             # or "observe": audit only
+untrusted_effects = "ask"    # an effect after untrusted input: allow | ask | deny
+classified_egress = "deny"   # data above a sink's egress_ceiling: allow | ask | deny
+rule_of_two = true           # untrusted + CONFIDENTIAL + egress/external effect: ask at least
+initial_integrity = "trusted"
+initial_classification = "PUBLIC"
+```
+
+The guard composes a guardrail outcome (`rule_id: information_flow`) with the run's
+other policy outcomes, so `ask` is an approval of the exact action digest, and `deny`
+is a denial. Reason codes say which rule matched: `flow_untrusted_effect`,
+`flow_classified_egress`, `flow_rule_of_two`. Every match is audited
+(`information_flow_decision`) with the run's labels, never the content. Use `observe`
+first to see how often each rule would match before enforcing it.
+
+- Read-only calls stay allowed in an untrusted run unless they send data out. A search
+  whose query leaves the deployment counts as egress.
+- A delegated child starts with its parent's labels. When it closes, its labels flow
+  back into the parent, except when the parent rejects the output of an
+  `isolate_until_accepted` child.
+- Each run pins the flow policy it was admitted under, and every decision cites it. A
+  run admitted before the guard was turned on cannot cite it, so a call the guard would
+  not allow is refused (`flow_policy_unpinned`) rather than approved.
+- Labels are per run, not per value. The guard cannot tell which argument came from
+  which output, so it errs towards asking. Labels never fall within a run, so start a
+  new run for work that must not inherit what an earlier step read.
+- At startup, contextosd lists the capabilities that declare no `flow` labels.
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an
