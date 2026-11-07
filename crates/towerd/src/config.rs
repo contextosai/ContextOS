@@ -25,6 +25,8 @@ pub struct Config {
     pub intelligence: IntelligenceConfig,
     #[serde(default)]
     pub collector: CollectorConfig,
+    #[serde(default)]
+    pub governance: GovernanceConfig,
     /// The Tower UI build (`tower/dist`).
     #[serde(default)]
     pub tower: Option<TowerConfig>,
@@ -63,23 +65,125 @@ pub struct JournalConfig {
     pub key_id: String,
 }
 
-/// One runtime tenant: a `contextosd` URL and a tenant-bound `audit:read` key.
-#[derive(Debug, Clone, Deserialize)]
+/// One runtime tenant: a `contextosd` URL and a tenant-bound `audit:read` key. Keys are
+/// referenced, never written here: by environment variable (`*_env`) or by the path of
+/// a mounted secret file (`*_file`, re-read when credentials are reloaded).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceConfig {
     pub id: String,
     pub url: String,
     /// Environment variable holding the `audit:read` key for this tenant.
-    pub token_env: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_env: Option<String>,
+    /// File holding the `audit:read` key (instead of `token_env`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_file: Option<String>,
     /// Environment variable holding a `control` key, for the fleet kill switch.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_token_env: Option<String>,
-    #[serde(default)]
+    /// File holding a `control` key (instead of `control_token_env`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_token_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub business_unit: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+}
+
+fn env_name(v: &str) -> bool {
+    let b = v.as_bytes();
+    !b.is_empty()
+        && b.len() <= 128
+        && (b[0].is_ascii_uppercase() || b[0] == b'_')
+        && b.iter()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b'_')
+}
+
+fn file_path(v: &str) -> bool {
+    v.starts_with('/') && v.len() <= 4096 && !v.contains('\0') && !v.split('/').any(|seg| seg == "..")
+}
+
+impl SourceConfig {
+    /// Checks the definition alone (uniqueness is the caller's): an id, a URL Tower
+    /// may call, exactly one reference for the read key and at most one for the
+    /// control key.
+    pub fn check(&self, development: bool) -> Result<(), String> {
+        let id = self.id.as_bytes();
+        if id.is_empty()
+            || id.len() > 64
+            || !id[0].is_ascii_alphanumeric()
+            || !id.iter().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(c))
+        {
+            return Err(format!(
+                "source id {:?} must be 1-64 letters, digits, '-', '_' or '.', starting with a letter or digit",
+                self.id
+            ));
+        }
+        let url = self
+            .url
+            .parse::<reqwest::Url>()
+            .map_err(|_| format!("source {}: invalid url", self.id))?;
+        if url.scheme() != "https" && !(development && url.scheme() == "http") {
+            return Err(format!("source {}: url must use https", self.id));
+        }
+        if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+            return Err(format!(
+                "source {}: url must not carry credentials, a query or a fragment",
+                self.id
+            ));
+        }
+        match (&self.token_env, &self.token_file) {
+            (Some(v), None) if env_name(v) => {}
+            (None, Some(v)) if file_path(v) => {}
+            (Some(_), Some(_)) | (None, None) => {
+                return Err(format!(
+                    "source {}: name the audit:read key with exactly one of token_env or token_file",
+                    self.id
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "source {}: token_env must be an environment variable name (A-Z, 0-9, _) and token_file an absolute path",
+                    self.id
+                ));
+            }
+        }
+        match (&self.control_token_env, &self.control_token_file) {
+            (None, None) => {}
+            (Some(v), None) if env_name(v) => {}
+            (None, Some(v)) if file_path(v) => {}
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "source {}: name the control key with at most one of control_token_env or control_token_file",
+                    self.id
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "source {}: control_token_env must be an environment variable name and control_token_file an absolute path",
+                    self.id
+                ));
+            }
+        }
+        for (name, v) in [
+            ("business_unit", &self.business_unit),
+            ("region", &self.region),
+            ("environment", &self.environment),
+        ] {
+            if v.as_ref()
+                .is_some_and(|v| v.len() > 128 || v.chars().any(char::is_control))
+            {
+                return Err(format!(
+                    "source {}: {name} must be at most 128 printable characters",
+                    self.id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,6 +259,10 @@ pub struct CollectorConfig {
     /// Hours of per-agent activity kept for trends and anomaly baselines.
     #[serde(default = "default_hours")]
     pub hours: usize,
+    /// How often each replica converges its sources with the ones managed from the
+    /// console (and with their pause, retry and reload requests).
+    #[serde(default = "default_reconcile")]
+    pub reconcile_ms: u64,
 }
 
 impl Default for CollectorConfig {
@@ -163,6 +271,7 @@ impl Default for CollectorConfig {
             poll_ms: default_poll(),
             recent_runs: default_recent(),
             hours: default_hours(),
+            reconcile_ms: default_reconcile(),
         }
     }
 }
@@ -170,11 +279,37 @@ impl Default for CollectorConfig {
 fn default_poll() -> u64 {
     2_000
 }
+fn default_reconcile() -> u64 {
+    10_000
+}
 fn default_recent() -> usize {
     50_000
 }
 fn default_hours() -> usize {
     24 * 30
+}
+
+/// How Tower's own governance actions are approved.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GovernanceConfig {
+    /// Restoring a revoked target needs a second operator: one requests the restore,
+    /// another approves it, and only the approval acts on the runtimes. Revoking stays
+    /// a single operator's action, so containment is never slowed down.
+    #[serde(default = "default_true")]
+    pub two_person_restore: bool,
+}
+
+impl Default for GovernanceConfig {
+    fn default() -> Self {
+        Self {
+            two_person_restore: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -222,22 +357,13 @@ impl Config {
     fn check(&self) -> Result<(), ConfigError> {
         let mut ids = std::collections::BTreeSet::new();
         for source in &self.sources {
-            if source.id.is_empty() || !ids.insert(&source.id) {
+            if !ids.insert(&source.id) {
                 return Err(ConfigError::Invalid(format!(
-                    "source ids must be unique and non-empty: {:?}",
+                    "source ids must be unique: {:?}",
                     source.id
                 )));
             }
-            let url = source
-                .url
-                .parse::<reqwest::Url>()
-                .map_err(|_| ConfigError::Invalid(format!("source {}: invalid url", source.id)))?;
-            if url.scheme() != "https" && !self.server.development {
-                return Err(ConfigError::Invalid(format!(
-                    "source {}: url must use https",
-                    source.id
-                )));
-            }
+            source.check(self.server.development).map_err(ConfigError::Invalid)?;
         }
         for key in &self.api_keys {
             let hex = key.key_sha256.strip_prefix("sha256:").unwrap_or_default();

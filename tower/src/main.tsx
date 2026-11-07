@@ -13,8 +13,10 @@ import { FindingsPage } from "./pages/FindingsPage";
 import { Activity } from "./pages/Activity";
 import { Guardrails } from "./pages/Guardrails";
 import { Waivers } from "./pages/Waivers";
+import { Inbox } from "./pages/Inbox";
 import { Ask } from "./pages/Ask";
 import { Fleet } from "./pages/Fleet";
+import { Revocations } from "./pages/Revocations";
 import { Journal } from "./pages/Journal";
 import { Spend } from "./pages/Spend";
 import { NotFound } from "./pages/NotFound";
@@ -42,8 +44,10 @@ const router = createBrowserRouter(
         { path: "spend", element: <Spend /> },
         { path: "guardrails", element: <Guardrails /> },
         { path: "waivers", element: <Waivers /> },
+        { path: "inbox", element: <Inbox /> },
         { path: "ask", element: <Ask /> },
         { path: "fleet", element: <Fleet /> },
+        { path: "revocations", element: <Revocations /> },
         { path: "journal", element: <Journal /> },
         { path: "*", element: <NotFound /> },
       ],

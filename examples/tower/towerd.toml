@@ -31,8 +31,11 @@ dir = "tower/dist"
 #   dev-ciso-0123456789abcdef0123456789abcde    ciso       viewer
 #   dev-owner-0123456789abcdef0123456789abcd    maya       owner of team support-ai
 #   dev-risk-a-0123456789abcdef0123456789abc    risk-a     risk reviewer
-#   dev-risk-b-0123456789abcdef0123456789abc    risk-b     risk reviewer
+#   dev-risk-b-0123456789abcdef0123456789abc    risk-b     risk reviewer, second operator
 #   dev-oncall-0123456789abcdef0123456789abc    oncall     operator
+#
+# Restoring a revoked target takes two operators ([governance] two_person_restore,
+# on by default): oncall requests it, risk-b approves it.
 [[api_keys]]
 key_sha256 = "sha256:2223e986da99346c989762a8f41411b826d6bd3e300809eb15384da0fa68ddde"
 principal_id = "ciso"
@@ -52,7 +55,7 @@ roles = ["risk"]
 [[api_keys]]
 key_sha256 = "sha256:81fa1857b598d37b421f13c3fea0ee76d9f12d7be000fe752b1d66249f12e795"
 principal_id = "risk-b"
-roles = ["risk"]
+roles = ["risk", "operator"]
 
 [[api_keys]]
 key_sha256 = "sha256:16d0923063f0c1bdfe300ef9e5ffacf253134f8ac6743d0285d1fa2fe3e56282"

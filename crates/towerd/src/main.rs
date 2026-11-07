@@ -52,7 +52,7 @@ async fn main() {
                 Tower::build(config, Arc::new(MemoryStore::new()), MemoryLog::new(), signer, model)
                     .unwrap_or_else(|e| fail(e)),
             );
-            tower.spawn_collectors();
+            towerd::sources_admin::spawn(&tower);
             tower.spawn_journal_recovery();
             api::router(tower)
         }
@@ -69,7 +69,7 @@ async fn main() {
             let tower = Arc::new(
                 Tower::build(config, store.clone(), (*store).clone(), signer, model).unwrap_or_else(|e| fail(e)),
             );
-            tower.spawn_collectors();
+            towerd::sources_admin::spawn(&tower);
             tower.spawn_journal_recovery();
             api::router(tower)
         }

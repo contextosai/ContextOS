@@ -252,3 +252,88 @@ export interface AgentSpendReport {
   refusals: Record<string, number>;
   series: SpendPoint[];
 }
+
+export type Provenance = "verified" | "runtime_only" | "chain_only" | "chain";
+
+export interface Revocation {
+  source: string;
+  kind: string;
+  target: string;
+  reason: string;
+  /** The runtime principal that made the change. */
+  by: string | null;
+  /** The Tower user, when the change came through Tower. */
+  via_tower: string | null;
+  at: string | null;
+  sequence: number | null;
+  provenance: Provenance;
+  mismatch: boolean;
+  affected: string[];
+  refusals: number;
+}
+
+export interface RevocationsView {
+  revocations: Revocation[];
+  mismatches: number;
+  sources: { id: string; live: "read" | "no_control_key" | "paused" | "error"; error?: string }[];
+  pending_requests: number;
+  two_person_restore: boolean;
+}
+
+export interface RestoreRequest {
+  id: string;
+  kind: string;
+  target: string;
+  sources: string[] | null;
+  reason: string;
+  status: "requested" | "approved" | "restored" | "partially_restored" | "failed" | "cancelled" | "expired";
+  requested_by: string;
+  requested_at: string;
+  expires_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  executed_at?: string;
+  results?: { source: string | null; ok: boolean; error?: string }[];
+}
+
+/** One open escalation in the approvals inbox (`GET /api/inbox`). */
+export interface InboxItem {
+  source: string;
+  escalation_id: string;
+  /** `policy` (policy answered escalate) or `outcome_missed` (an effect's outcome never arrived). */
+  kind: "policy" | "outcome_missed";
+  run_id: string;
+  trace_id?: string;
+  operation_id?: string;
+  capability_id?: string;
+  reason_codes?: string[];
+  action_digest?: string;
+  policy_decision_id?: string;
+  due_at?: string;
+  opened_at: string;
+  age_seconds: number | null;
+  reopened: number;
+  /** Null when the run left Tower's recent-run window. */
+  agent: string | null;
+  agent_id: string | null;
+  owner: string | null;
+  team: string | null;
+  declared: boolean;
+  can_resolve: boolean;
+}
+
+export interface InboxSource {
+  source: string;
+  ok: boolean;
+  open?: number;
+  truncated?: boolean;
+  can_resolve: boolean;
+  error?: string;
+}
+
+export interface Inbox {
+  open: number;
+  items: InboxItem[];
+  sources: InboxSource[];
+  at: string;
+}

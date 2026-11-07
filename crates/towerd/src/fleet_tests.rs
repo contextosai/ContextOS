@@ -131,6 +131,16 @@ fn kill_switch_state_and_changes_come_from_the_chain() {
         ),
     );
     assert_eq!(fleet.sources["eu"].revoked["capability:pay.send"], "INC-1");
+    let detail = &fleet.sources["eu"].revocations["capability:pay.send"];
+    assert_eq!(
+        (
+            detail.kind.as_str(),
+            detail.target.as_str(),
+            detail.by.as_deref(),
+            detail.sequence
+        ),
+        ("capability", "pay.send", Some("oncall"), 1)
+    );
     fleet.apply(
         "eu",
         &entry(
@@ -140,6 +150,7 @@ fn kill_switch_state_and_changes_come_from_the_chain() {
         ),
     );
     assert!(fleet.sources["eu"].revoked.is_empty());
+    assert!(fleet.sources["eu"].revocations.is_empty());
     assert_eq!(fleet.changes.len(), 2);
     assert_eq!(fleet.changes[0].by.as_deref(), Some("oncall"));
 }

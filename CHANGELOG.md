@@ -6,7 +6,46 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
-
+- `contextos-litellm` (`integrations/litellm`): a LiteLLM proxy callback that meters
+  every model call against its run's budget. It claims the call's reservation before
+  forwarding it (refusing forged, reused and revoked ones, and failing closed when
+  contextosd is unreachable), caps the call's output tokens to the reservation, and
+  settles the usage the provider reported and LiteLLM's computed cost, with retries,
+  off the response path. Tested against LiteLLM 1.108.2 end to end.
+- `POST /v1/runs/{run_id}/usage/claim` (`meter`): a metering gateway claims a
+  model-call reservation for the one call it is about to forward and learns what the
+  reservation covers. The claim is a store document, so a reservation covers one call
+  across gateway and contextosd replicas; a claimed reservation settles as measured
+  only by the meter that claimed it.
+- `usage/settle` accepts an optional `model`.
+- Audit entries `usage_refused` (a reservation the budget or a revocation refused),
+  `usage_claimed` and `usage_settled` (every settlement: reporter, verified, model,
+  charged and measured usage), for reporting model spend.
+- Tower: an approvals inbox (`GET /api/inbox`, **Inbox** page with an open-count
+  badge) lists every runtime's open escalations in one queue, oldest first, with the
+  agent, its declared owner and team, the capability and how long it has waited. Each
+  runtime is read concurrently with its own deadline, and one that cannot be read is
+  named rather than left out. Risk reviewers and operators resolve an escalation from
+  Tower (`POST /api/inbox/{source}/{escalation_id}/resolve`, `handled` or `dismissed`
+  with a reason) on the runtime through its `control` key; the agent's declarer and
+  owner are refused, and the request and the runtime's answer are both journalled.
+- Tower: runtime sources managed from the console (Runtimes page, `admin`). Probe a
+  runtime before adding it (keys, scopes, tenant, conflicts), then add, pause, resume,
+  retry verification of a broken chain from its last verified entry, reload keys, or
+  remove console sources, each with a reason in Tower's journal. Every replica converges
+  on these changes within `[collector] reconcile_ms` (default 10 s).
+  `GET /api/sources/health` reports each collector's state, lag and sync age.
+- Tower: source keys may be read from mounted secret files (`token_file`,
+  `control_token_file`) as well as environment variables, and re-read on *Reload keys*.
+- Tower **Revocations** view (`GET /api/revocations`): every revocation in force across
+  the fleet, reconciled between each runtime's live list and its verified audit chain
+  (`verified`, `runtime_only`, `chain_only`, `chain`), with who revoked it (the runtime
+  principal and the Tower user), when, at which chain entry, the agents it stops and
+  the refusals it has caused them.
+- Two-person restore in Tower: `POST /api/revocations/restore-requests`, then
+  `…/{id}/approve` by another operator (or `…/{id}/cancel` by the requester), each step
+  in Tower's journal (`restore_requested`, `restore_approved`, `restore_executed`,
+  `restore_cancelled`).
 - Tower: model spend. `towerd` folds the runtimes' `usage_settled`, `usage_overage`,
   `usage_refused` and `usage_claimed` audit events into per-agent spend, keeping
   measured (metering gateway) and self-reported (executor) usage apart. New
@@ -15,6 +54,13 @@ minor versions may break APIs and every break is listed.
   (high) and `unmetered_model_spend` (medium), and anomalies `model_tokens`,
   `model_cost` and `model_budget_refused`
   ([docs/tower §4.10](docs/tower/04-governance-model.md#410-model-spend)).
+
+### Changed
+- Tower `[governance] two_person_restore` defaults to `true`: `POST /api/fleet/restore`
+  answers `409 two_person_required` and restores go through a request and a second
+  operator's approval. Set it to `false` to keep one-operator restores. Revoking is
+  unchanged. `GET /api/me` reports the setting. In `examples/tower`, `risk-b` is also an
+  operator, so the example can approve a restore.
 
 ## 0.1.0-alpha.16 - 2026-11-06
 

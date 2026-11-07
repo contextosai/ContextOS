@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "contextos-litellm"
+description = "ContextOS metering for the LiteLLM proxy: claim each model call's budget reservation and settle it with the usage the provider reported"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: AsyncIO",
+]
+# LiteLLM brings httpx and FastAPI; the plugin uses both through it.
+dependencies = ["litellm[proxy]>=1.70"]
+
+[project.urls]
+Source = "https://github.com/contextosai/ContextOS"
+Documentation = "https://github.com/contextosai/ContextOS/tree/main/integrations/litellm"
+
+[tool.hatch.version]
+path = "src/contextos_litellm/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/contextos_litellm"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

@@ -1,0 +1,4 @@
+# The versions the plugin is tested against (CI and integrations/litellm/tests/e2e).
+litellm[proxy]==1.108.2
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1

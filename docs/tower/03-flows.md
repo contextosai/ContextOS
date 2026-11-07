@@ -166,6 +166,30 @@ While approved and unexpired, the matching finding (same rule, same agent) is re
 with its `waiver` attached and excluded from counts; it is never deleted. Expiry is
 computed at read time, so no job is needed.
 
+## 3.5a An escalation, from the runtime to a person
+
+```mermaid
+sequenceDiagram
+    participant RT as contextosd
+    participant T as towerd
+    participant P as risk reviewer / operator
+    RT->>RT: policy answers escalate: call blocked, escalation opened (audited)
+    P->>T: GET /api/inbox
+    T->>RT: GET /v1/escalations (audit:read), every runtime concurrently
+    T-->>P: queue, oldest first, with agent, owner and age; unreadable runtimes named
+    P->>T: POST /api/inbox/{source}/{id}/resolve {handled|dismissed, reason}
+    T->>RT: GET /v1/escalations (the item is taken from the runtime)
+    T->>T: refuse the agent's declarer or owner; journal escalation_resolution_requested
+    T->>RT: POST /v1/escalations/{id}/resolve (control)
+    RT->>RT: escalation_resolved in the runtime's chain
+    T->>T: journal escalation_resolution_result
+```
+
+Resolving records what a person did with the hand-off; it grants nothing. If the
+agent's orchestrator retries the call, policy and approvals decide it again. Paused
+tool calls that wait for an approval or for input are not listed: the runtime has no
+listing for them yet, and they surface as `awaiting_approval` counts on the agent.
+
 ## 3.6 Ask Tower
 
 ```mermaid
@@ -231,6 +255,32 @@ sequenceDiagram
 The AI suggests options; the operator chooses and types the target to confirm. The
 journal entry is written before any runtime is called, so an interrupted kill switch is
 still on record. Each runtime records the change in its own chain too.
+
+## 3.7a Restore: two operators
+
+```mermaid
+stateDiagram-v2
+    [*] --> requested: operator A POST /api/revocations/restore-requests {kind, target, reason}
+    requested --> approved: operator B (≠ A) approve — journalled before any runtime is called
+    requested --> cancelled: A cancels
+    requested --> expired: a day passes
+    approved --> restored: every source restored
+    approved --> partially_restored: some sources failed
+    approved --> failed: none restored
+    restored --> [*]
+    partially_restored --> [*]
+    failed --> [*]
+    cancelled --> [*]
+    expired --> [*]
+```
+
+Revoking is one operator's action, so containment is never slowed down; restoring
+re-grants authority, so it takes a second operator (`[governance] two_person_restore`,
+on by default). Approval is a compare-and-swap on the request (`restore_approved`), so
+two operators approving at once cannot both act; the per-source results are recorded
+after (`restore_executed`). A source that failed is restored with a new request. The
+code is `crates/towerd/src/ops/revocations.rs`; the reconciled view of what is revoked
+is `crates/towerd/src/revocations.rs`.
 
 ## 3.8 Explain a run
 

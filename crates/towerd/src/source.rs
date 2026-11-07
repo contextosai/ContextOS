@@ -15,6 +15,8 @@ use crate::config::SourceConfig;
 pub enum SourceError {
     #[error("{0} is not set")]
     MissingToken(String),
+    #[error("the key file {0} cannot be read or is empty")]
+    UnreadableKey(String),
     #[error("request failed: {0}")]
     Http(String),
     #[error("{status} {code}: {message}")]
@@ -32,45 +34,117 @@ pub struct Page {
     pub head: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+/// The keys a source holds, as last read from their references.
+struct Keys {
+    token: String,
+    control: Option<String>,
+}
+
 pub struct Source {
     pub config: SourceConfig,
-    token: String,
-    control_token: Option<String>,
+    keys: std::sync::RwLock<Keys>,
     http: reqwest::Client,
 }
 
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the keys.
+        f.debug_struct("Source")
+            .field("id", &self.config.id)
+            .field("url", &self.config.url)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Largest key file read; a key is a short token, not a document.
+const MAX_KEY_FILE: u64 = 16 * 1024;
+
+/// Reads a key from its reference: `Ok(None)` when there is no reference.
+fn read_key(env: Option<&String>, file: Option<&String>) -> Result<Option<String>, SourceError> {
+    if let Some(var) = env {
+        return std::env::var(var)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| Some(v.trim().to_owned()))
+            .ok_or_else(|| SourceError::MissingToken(var.clone()));
+    }
+    let Some(path) = file else { return Ok(None) };
+    let unreadable = || SourceError::UnreadableKey(path.clone());
+    let meta = std::fs::metadata(path).map_err(|_| unreadable())?;
+    if !meta.is_file() || meta.len() > MAX_KEY_FILE {
+        return Err(unreadable());
+    }
+    let text = std::fs::read_to_string(path).map_err(|_| unreadable())?;
+    let key = text.trim();
+    if key.is_empty() || key.contains(char::is_whitespace) {
+        return Err(unreadable());
+    }
+    Ok(Some(key.to_owned()))
+}
+
+fn client() -> Result<reqwest::Client, SourceError> {
+    contextos_adapters::tls::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| SourceError::Http(e.to_string()))
+}
+
 impl Source {
+    /// A source reading its keys from their references. The read key is required; an
+    /// unavailable control key leaves the source without the kill switch.
     pub fn new(config: SourceConfig) -> Result<Self, SourceError> {
-        let token =
-            std::env::var(&config.token_env).map_err(|_| SourceError::MissingToken(config.token_env.clone()))?;
-        let control_token = config.control_token_env.as_ref().and_then(|v| std::env::var(v).ok());
-        let http = contextos_adapters::tls::builder()
-            .timeout(Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| SourceError::Http(e.to_string()))?;
+        let keys = Self::read_keys(&config)?;
         Ok(Self {
             config,
-            token,
-            control_token,
-            http,
+            keys: std::sync::RwLock::new(keys),
+            http: client()?,
         })
+    }
+
+    fn read_keys(config: &SourceConfig) -> Result<Keys, SourceError> {
+        let token = read_key(config.token_env.as_ref(), config.token_file.as_ref())?
+            .ok_or_else(|| SourceError::MissingToken("token_env or token_file".into()))?;
+        let control = read_key(config.control_token_env.as_ref(), config.control_token_file.as_ref())
+            .ok()
+            .flatten();
+        Ok(Keys { token, control })
     }
 
     /// A source with its keys given directly (tests and embedding).
     pub fn with_tokens(config: SourceConfig, token: String, control_token: Option<String>) -> Self {
-        let http = contextos_adapters::tls::builder()
-            .timeout(Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("a default TLS client builds");
         Self {
             config,
-            token,
-            control_token,
-            http,
+            keys: std::sync::RwLock::new(Keys {
+                token,
+                control: control_token,
+            }),
+            http: client().expect("a default TLS client builds"),
         }
+    }
+
+    /// Reads the keys again from their references (for example a rotated secret file).
+    /// On failure the keys held before are kept.
+    pub fn reload_keys(&self) -> Result<(), SourceError> {
+        let keys = Self::read_keys(&self.config)?;
+        *self.keys.write().unwrap_or_else(std::sync::PoisonError::into_inner) = keys;
+        Ok(())
+    }
+
+    fn token(&self) -> String {
+        self.keys
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .token
+            .clone()
+    }
+
+    fn control_token(&self) -> Option<String> {
+        self.keys
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .control
+            .clone()
     }
 
     pub fn id(&self) -> &str {
@@ -78,7 +152,7 @@ impl Source {
     }
 
     pub fn can_control(&self) -> bool {
-        self.control_token.is_some()
+        self.control_token().is_some()
     }
 
     fn url(&self, path: &str) -> String {
@@ -103,11 +177,22 @@ impl Source {
     }
 
     pub async fn get(&self, path: &str) -> Result<Value, SourceError> {
-        self.send(self.http.get(self.url(path)).bearer_auth(&self.token)).await
+        self.send(self.http.get(self.url(path)).bearer_auth(self.token())).await
     }
 
     pub async fn deployment(&self) -> Result<Value, SourceError> {
         self.get("/v1/deployment").await
+    }
+
+    /// The deployment as the `control` key sees it (its tenant and scopes), or `None`
+    /// without a control key. Reads only.
+    pub async fn deployment_as_control(&self) -> Result<Option<Value>, SourceError> {
+        let Some(token) = self.control_token() else {
+            return Ok(None);
+        };
+        self.send(self.http.get(self.url("/v1/deployment")).bearer_auth(token))
+            .await
+            .map(Some)
     }
 
     pub async fn packs(&self) -> Result<Value, SourceError> {
@@ -131,16 +216,50 @@ impl Source {
         key_ring(&body).map_err(SourceError::Shape)
     }
 
-    /// Revokes or restores a target on this runtime with its `control` key.
-    pub async fn revocation(&self, revoke: bool, kind: &str, target: &str, reason: &str) -> Result<Value, SourceError> {
-        let token = self.control_token.as_ref().ok_or_else(|| {
+    /// The runtime's revocations in force (`{"revoked": [{kind, target, reason, by, at}]}`),
+    /// read with its `control` key; `None` when Tower holds none for this source.
+    pub async fn live_revocations(&self) -> Option<Result<Value, SourceError>> {
+        let token = self.control_token()?;
+        Some(
+            self.send(self.http.get(self.url("/v1/revocations")).bearer_auth(token))
+                .await,
+        )
+    }
+
+    /// The `control` key, or which reference to set when there is none.
+    fn require_control(&self) -> Result<String, SourceError> {
+        self.control_token().ok_or_else(|| {
             SourceError::MissingToken(
                 self.config
                     .control_token_env
                     .clone()
+                    .or_else(|| self.config.control_token_file.clone())
                     .unwrap_or_else(|| "control_token_env".into()),
             )
-        })?;
+        })
+    }
+
+    /// The tenant's open escalations, oldest first, at most `limit` (1..=1000).
+    pub async fn escalations(&self, limit: usize) -> Result<Value, SourceError> {
+        self.get(&format!("/v1/escalations?limit={}", limit.clamp(1, 1000)))
+            .await
+    }
+
+    /// Records how a human resolved an escalation, with this runtime's `control` key.
+    pub async fn resolve_escalation(&self, id: &str, resolution: &str, reason: &str) -> Result<Value, SourceError> {
+        let token = self.require_control()?;
+        self.send(
+            self.http
+                .post(self.url(&format!("/v1/escalations/{}/resolve", encode(id))))
+                .bearer_auth(token)
+                .json(&json!({"resolution": resolution, "reason": reason})),
+        )
+        .await
+    }
+
+    /// Revokes or restores a target on this runtime with its `control` key.
+    pub async fn revocation(&self, revoke: bool, kind: &str, target: &str, reason: &str) -> Result<Value, SourceError> {
+        let token = self.require_control()?;
         let path = if revoke {
             "/v1/revocations"
         } else {
