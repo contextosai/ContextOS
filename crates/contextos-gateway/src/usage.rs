@@ -10,6 +10,12 @@
 //! stretch its budget). Usage reported by a metering principal (for example an LLM
 //! gateway that saw the call) is verified and settles to what it measured, releasing
 //! the rest. A reservation never settled stays reserved: unknown usage is never zero.
+//!
+//! A metering gateway claims a model-call reservation before it forwards the call
+//! ([`Gateway::claim_usage`]), so a forged or reused reservation is refused before the
+//! model is called rather than discovered at settlement. Refused reservations, claims
+//! and settlements are audited (`usage_refused`, `usage_claimed`, `usage_settled`); the
+//! governance plane reports model spend from them.
 
 use contextos_kernel::budget_ledger::{reserve_budget, settle_budget, settlement_intent_digest};
 use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, transact};
@@ -36,6 +42,8 @@ pub enum UsageRefusal {
     Invalid,
     #[error("no such usage reservation in this run")]
     UnknownReservation,
+    #[error("the reservation is already claimed")]
+    Claimed,
     #[error(transparent)]
     Gateway(#[from] GatewayError),
 }
@@ -47,15 +55,38 @@ const OVERAGE: &str = ":overage";
 /// Resource keys of a budget allocation.
 const KEYS: [&str; 4] = ["tokens", "tool_calls", "replans", "cost_units"];
 
+impl UsageKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UsageKind::ModelCall => "model_call",
+            UsageKind::Replan => "replan",
+        }
+    }
+}
+
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     fn budget_key(admission: &RunAdmission) -> DocKey {
         DocKey::new(&admission.tenant_id, DocKind::BudgetLedger, &admission.budget_ledger_id)
     }
 
+    /// Refuses usage for a run whose tenant, pack, agent or capability is revoked.
+    pub(crate) async fn usage_revocation(&self, admission: &RunAdmission) -> Result<(), UsageRefusal> {
+        let revocations = self
+            .store
+            .get(&revocations_key(&admission.tenant_id))
+            .await
+            .map_err(GatewayError::from)?;
+        match matching(revocations.as_ref().map(|r| &r.body), &run_targets(admission)) {
+            Some(reason) => Err(UsageRefusal::Revoked(reason)),
+            None => Ok(()),
+        }
+    }
+
     /// Reserves budget for one model call (`tokens`, `cost_cents`) or one replan. A
     /// model call reserves at least the configured floor (see
     /// [`Gateway::set_model_call_floor`]), so a call can never be reserved, and
-    /// self-settled, for nothing.
+    /// self-settled, for nothing. A reservation refused by the budget or a revocation
+    /// is audited as `usage_refused`.
     pub async fn reserve_usage(
         &self,
         admission: &RunAdmission,
@@ -63,14 +94,33 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         tokens: u64,
         cost_cents: u64,
     ) -> Result<String, UsageRefusal> {
-        let revocations = self
-            .store
-            .get(&revocations_key(&admission.tenant_id))
+        let reserved = self.reserve_unaudited(admission, kind, tokens, cost_cents).await;
+        let reason_codes = match &reserved {
+            Err(UsageRefusal::Budget(codes)) => codes.clone(),
+            Err(UsageRefusal::Revoked(_)) => vec!["revoked".to_owned()],
+            _ => return reserved,
+        };
+        self.audit
+            .append(
+                &admission.tenant_id,
+                "usage_refused",
+                json!({"run_id": admission.run_id, "kind": kind.as_str(), "tokens": tokens,
+                    "cost_cents": cost_cents, "reason_codes": reason_codes}),
+                &self.now(),
+            )
             .await
             .map_err(GatewayError::from)?;
-        if let Some(reason) = matching(revocations.as_ref().map(|r| &r.body), &run_targets(admission)) {
-            return Err(UsageRefusal::Revoked(reason));
-        }
+        reserved
+    }
+
+    async fn reserve_unaudited(
+        &self,
+        admission: &RunAdmission,
+        kind: UsageKind,
+        tokens: u64,
+        cost_cents: u64,
+    ) -> Result<String, UsageRefusal> {
+        self.usage_revocation(admission).await?;
         let allocation = match kind {
             UsageKind::ModelCall => {
                 let cost_units = cost_cents.checked_mul(100).ok_or(UsageRefusal::Invalid)?;
@@ -154,32 +204,76 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// metering principal; otherwise the whole reservation is charged. Measured usage
     /// above the reservation is charged too, as overage up to the run's remaining
     /// capacity; anything beyond that is audited as uncovered.
+    ///
+    /// A reservation a metering gateway claimed settles as measured only by that
+    /// gateway. Every settlement is audited as `usage_settled`, with the model the
+    /// reporter named (an unverified name when the usage is self-reported).
     pub async fn settle_usage(
         &self,
         admission: &RunAdmission,
         reservation_id: &str,
         measured: Option<(u64, u64)>,
         reporter: &str,
+        model: Option<&str>,
+    ) -> Result<Value, UsageRefusal> {
+        let allocated = self.open_reservation(admission, reservation_id).await?;
+        if measured.is_some() {
+            self.require_claimant(admission, reservation_id, reporter).await?;
+        }
+        let settled = self
+            .settle_allocated(admission, reservation_id, &allocated, measured, reporter)
+            .await?;
+        let measured = measured
+            .map(|(tokens, cost_cents)| json!({"tokens": tokens, "cost_units": cost_cents.saturating_mul(100)}));
+        self.audit
+            .append(
+                &admission.tenant_id,
+                "usage_settled",
+                json!({"run_id": admission.run_id, "reservation_id": reservation_id, "reporter": reporter,
+                    "verified": settled["verified"], "model": model, "charged": settled["charged"],
+                    "measured": measured}),
+                &self.now(),
+            )
+            .await
+            .map_err(GatewayError::from)?;
+        Ok(settled)
+    }
+
+    /// The allocation of an open usage reservation of this run (not an overage).
+    pub(crate) async fn open_reservation(
+        &self,
+        admission: &RunAdmission,
+        reservation_id: &str,
     ) -> Result<Value, UsageRefusal> {
         if !reservation_id.starts_with(PREFIX) || reservation_id.ends_with(OVERAGE) {
             return Err(UsageRefusal::UnknownReservation);
         }
-        let key = Self::budget_key(admission);
         let ledger = self
             .store
-            .get(&key)
+            .get(&Self::budget_key(admission))
             .await
             .map_err(GatewayError::from)?
             .ok_or(UsageRefusal::UnknownReservation)?;
-        let reservation = ledger.body["reservations"]
+        ledger.body["reservations"]
             .as_array()
             .and_then(|list| {
                 list.iter()
                     .find(|r| r["reservation_id"] == reservation_id && r["status"] == "reserved")
-                    .cloned()
+                    .map(|r| r["allocation"].clone())
             })
-            .ok_or(UsageRefusal::UnknownReservation)?;
-        let allocated = reservation["allocation"].clone();
+            .ok_or(UsageRefusal::UnknownReservation)
+    }
+
+    async fn settle_allocated(
+        &self,
+        admission: &RunAdmission,
+        reservation_id: &str,
+        allocated: &Value,
+        measured: Option<(u64, u64)>,
+        reporter: &str,
+    ) -> Result<Value, UsageRefusal> {
+        let allocated = allocated.clone();
+        let key = Self::budget_key(admission);
         let get = |v: &Value, k: &str| v[k].as_u64().unwrap_or(0);
         let Some((tokens, cost_cents)) = measured else {
             // Self-reported: the whole reservation.

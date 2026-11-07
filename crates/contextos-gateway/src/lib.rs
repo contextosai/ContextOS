@@ -58,6 +58,7 @@ pub mod task_authorization;
 pub mod tool_call_check;
 pub mod upstream_drift;
 mod usage;
+mod usage_claim;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -114,6 +115,7 @@ pub use shared_guarantees::{EXPOSURE_RECEIPT_RETENTION_SECONDS, SharedGuarantee}
 pub use shared_inspection::MAX_INSPECTION_SCAN;
 pub use task_authorization::{Amount, Change, OutOfScope, ReadOnly, TaskAuthorization, TaskLimits};
 pub use usage::{UsageKind, UsageRefusal};
+pub use usage_claim::ClaimedUsage;
 
 /// Receipts at which the run's budget ledger is compacted before the next
 /// reservation (ADR-0003). Keeps the ledger, and its per-effect validation cost, small,
