@@ -166,6 +166,30 @@ While approved and unexpired, the matching finding (same rule, same agent) is re
 with its `waiver` attached and excluded from counts; it is never deleted. Expiry is
 computed at read time, so no job is needed.
 
+## 3.5a An escalation, from the runtime to a person
+
+```mermaid
+sequenceDiagram
+    participant RT as contextosd
+    participant T as towerd
+    participant P as risk reviewer / operator
+    RT->>RT: policy answers escalate: call blocked, escalation opened (audited)
+    P->>T: GET /api/inbox
+    T->>RT: GET /v1/escalations (audit:read), every runtime concurrently
+    T-->>P: queue, oldest first, with agent, owner and age; unreadable runtimes named
+    P->>T: POST /api/inbox/{source}/{id}/resolve {handled|dismissed, reason}
+    T->>RT: GET /v1/escalations (the item is taken from the runtime)
+    T->>T: refuse the agent's declarer or owner; journal escalation_resolution_requested
+    T->>RT: POST /v1/escalations/{id}/resolve (control)
+    RT->>RT: escalation_resolved in the runtime's chain
+    T->>T: journal escalation_resolution_result
+```
+
+Resolving records what a person did with the hand-off; it grants nothing. If the
+agent's orchestrator retries the call, policy and approvals decide it again. Paused
+tool calls that wait for an approval or for input are not listed: the runtime has no
+listing for them yet, and they surface as `awaiting_approval` counts on the agent.
+
 ## 3.6 Ask Tower
 
 ```mermaid
