@@ -6,6 +6,11 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[guards.approval_review]`: a floor on review time. An approval decided less than
+  `min_review_seconds` after the gateway requested it is not used
+  (`approval_review_too_fast`, obligation `review_again`), and the refusal is audited
+  with the measured seconds. It is scoped by capability or amount like step-up, or
+  covers every approval when unscoped.
 - `[providers.action_monitor]` with `[guards.action_monitor]`: a trusted monitor
   scores every effectful or data-sending call before it is sent. It sees the action
   binding and the run's recent calls with their scores. Scores at `ask_at` need an

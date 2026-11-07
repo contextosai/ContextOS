@@ -1072,6 +1072,25 @@ minimal, development-only implementation):
   amr_values = ["mfa", "hwk"]     # or acr_values = ["phr"]
   max_age_seconds = 300
   ```
+  With `[guards.approval_review]`, an approval counts only if it was decided at least
+  `min_review_seconds` after it was requested, so a reflexive click on a
+  consequential action does not release it:
+
+  ```toml
+  [guards.approval_review]
+  min_review_seconds = 30
+  # Unscoped, it covers every approval; scope it like step-up:
+  # capabilities = ["adp_payments.issue_refund"]
+  # amount_at_least = [{ currency = "USD", minor_units = 100000 }]
+  ```
+
+  - The request time is the gateway's own record of when it asked the approval
+    service. For requests it did not make, it is the request's `not_before`.
+  - With several approvers, the fastest decision decides.
+  - A decision under the floor is not used. The call needs an approval again
+    (`approval_review_too_fast`, obligation `review_again`), and the refusal is audited
+    with the measured seconds (`approval_review_too_fast`). Those entries show which
+    approvals were rubber-stamped.
 - **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
   run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
   ceilings, required controls) and a current verified `BoundaryObservation`. With it,

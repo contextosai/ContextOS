@@ -591,6 +591,18 @@
           "default": null,
           "description": "Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise."
         },
+        "approval_review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Approvals count only if decided at least `min_review_seconds` after they were requested (see `contextos_gateway::approval_review`)."
+        },
         "approval_step_up": {
           "anyOf": [
             {
@@ -1295,6 +1307,38 @@
       ],
       "type": "object"
     },
+    "ReviewPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.approval_review]`.",
+      "properties": {
+        "amount_at_least": {
+          "default": [],
+          "description": "Applies to actions whose bound amount reaches the threshold for its currency (and to amounts in a currency without one).",
+          "items": {
+            "$ref": "#/$defs/AmountThreshold"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "description": "Applies to every approval of these capabilities.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "min_review_seconds": {
+          "description": "Seconds between the request and an approved decision, at least.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_review_seconds"
+      ],
+      "type": "object"
+    },
     "ScoreFloors": {
       "additionalProperties": false,
       "description": "Score floors for `GuardsConfig::completion_requires_scores`, each in 0..=1.",
@@ -1792,6 +1836,7 @@
       "default": {
         "action_monitor": null,
         "agent_binding": null,
+        "approval_review": null,
         "approval_step_up": null,
         "circuit_breakers": [],
         "completion_requires_scores": null,

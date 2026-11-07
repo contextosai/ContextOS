@@ -98,6 +98,8 @@ pub enum DocKind {
     CircuitBreaker,
     /// A run's action-monitor trajectory (recent scores and their sum).
     ActionMonitor,
+    /// When the gateway asked for an approval (the review floor's start).
+    ApprovalRequested,
 }
 
 impl DocKind {
@@ -141,6 +143,7 @@ impl DocKind {
             DocKind::FlowLabels => "flow_labels",
             DocKind::CircuitBreaker => "circuit_breaker",
             DocKind::ActionMonitor => "action_monitor",
+            DocKind::ApprovalRequested => "approval_requested",
         }
     }
 }
