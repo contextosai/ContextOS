@@ -18,6 +18,7 @@ import { Ask } from "./pages/Ask";
 import { Fleet } from "./pages/Fleet";
 import { Revocations } from "./pages/Revocations";
 import { Journal } from "./pages/Journal";
+import { Spend } from "./pages/Spend";
 import { NotFound } from "./pages/NotFound";
 
 const client = new QueryClient({
@@ -40,6 +41,7 @@ const router = createBrowserRouter(
         { path: "agents/:key", element: <Agent /> },
         { path: "findings", element: <FindingsPage /> },
         { path: "activity", element: <Activity /> },
+        { path: "spend", element: <Spend /> },
         { path: "guardrails", element: <Guardrails /> },
         { path: "waivers", element: <Waivers /> },
         { path: "inbox", element: <Inbox /> },

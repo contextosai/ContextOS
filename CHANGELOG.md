@@ -46,6 +46,14 @@ minor versions may break APIs and every break is listed.
   `…/{id}/approve` by another operator (or `…/{id}/cancel` by the requester), each step
   in Tower's journal (`restore_requested`, `restore_approved`, `restore_executed`,
   `restore_cancelled`).
+- Tower: model spend. `towerd` folds the runtimes' `usage_settled`, `usage_overage`,
+  `usage_refused` and `usage_claimed` audit events into per-agent spend, keeping
+  measured (metering gateway) and self-reported (executor) usage apart. New
+  `GET /api/spend?hours=&group=agent|team|model` and `GET /api/agents/{key}/spend`, a
+  Spend page and a spend panel on each agent. New findings `uncovered_model_usage`
+  (high) and `unmetered_model_spend` (medium), and anomalies `model_tokens`,
+  `model_cost` and `model_budget_refused`
+  ([docs/tower §4.10](docs/tower/04-governance-model.md#410-model-spend)).
 
 ### Changed
 - Tower `[governance] two_person_restore` defaults to `true`: `POST /api/fleet/restore`

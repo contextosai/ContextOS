@@ -16,6 +16,7 @@ pub mod registry;
 pub mod revocations;
 pub mod source;
 pub mod sources_admin;
+pub mod spend;
 
 use std::sync::Arc;
 

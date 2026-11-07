@@ -310,6 +310,7 @@ pub fn findings(fleet: &Fleet, views: &[AgentView], guardrails: &Value, waivers:
             });
         }
     }
+    out.extend(crate::spend::findings(&fleet.spend, now_hour));
     for f in &mut out {
         f.waiver = waivers
             .as_array()
@@ -390,6 +391,7 @@ pub fn anomalies(fleet: &Fleet) -> Vec<Anomaly> {
             }
         }
     }
+    out.extend(crate::spend::anomalies(&fleet.spend, now));
     out
 }
 

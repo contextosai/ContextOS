@@ -6,6 +6,7 @@ import { ago, n, time } from "../lib/format";
 import type { AgentDetail, Capability, Finding, RunSummary } from "../lib/types";
 import { openAction } from "../components/actions";
 import { Badge, Card, Empty, ErrorNote, HBars, JsonView, Kv, PageHead, ProfileBadge, SeverityBadge, Spark, Tabs } from "../components/ui";
+import { AgentSpend } from "../components/AgentSpend";
 
 type Tab = "authority" | "findings" | "activity" | "review";
 
@@ -378,6 +379,7 @@ function Activity({ d }: { d: AgentDetail }) {
           />
         </Card>
       </div>
+      <AgentSpend agentKey={d.row.key} />
       {d.anomalies.length > 0 && (
         <div className="banner warn">
           {d.anomalies.map((x) => x.title).join(" · ")} — <Link to="/activity">brief</Link>

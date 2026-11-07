@@ -9,6 +9,7 @@ use crate::api::Shared;
 pub mod inbox;
 pub mod revocations;
 mod sources;
+pub mod spend;
 
 /// The routes of every operational console module.
 pub fn routes<S, L>() -> Router<Shared<S, L>>
@@ -20,4 +21,5 @@ where
         .merge(inbox::routes())
         .merge(revocations::routes())
         .merge(sources::routes())
+        .merge(spend::routes())
 }

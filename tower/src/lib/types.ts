@@ -183,6 +183,76 @@ export const PROFILE_LABEL: Record<string, string> = {
   "contextos.high-assurance": "High-assurance",
 };
 
+/** Model usage over a window (`cost_units` are hundredths of a cent). */
+export interface SpendUsage {
+  calls: number;
+  verified_calls: number;
+  tokens: number;
+  cost_units: number;
+  verified_tokens: number;
+  verified_cost_units: number;
+  self_reported_tokens: number;
+  self_reported_cost_units: number;
+  uncovered_tokens: number;
+  uncovered_cost_units: number;
+  refused: number;
+  claimed: number;
+  unsettled_claims: number;
+}
+
+export interface ModelUsage {
+  calls: number;
+  tokens: number;
+  cost_units: number;
+  verified_tokens: number;
+}
+
+export interface SpendPoint {
+  hour: number;
+  tokens: number;
+  cost_units: number;
+  verified_tokens: number;
+  self_reported_tokens: number;
+  uncovered_tokens: number;
+  refused: number;
+}
+
+export type SpendGroup = "agent" | "team" | "model";
+
+export interface SpendRow {
+  key: string;
+  usage: SpendUsage | ModelUsage;
+  agent_id?: string | null;
+  team?: string;
+  owner?: string | null;
+  models?: string[];
+  agents?: number;
+}
+
+export interface SpendReport {
+  from_hour: number;
+  to_hour: number;
+  bucket_hours: number;
+  group: SpendGroup;
+  totals: SpendUsage;
+  rows: SpendRow[];
+  total_rows: number;
+  series: SpendPoint[];
+  refusals: Record<string, number>;
+}
+
+export interface AgentSpendReport {
+  key: string;
+  from_hour: number;
+  to_hour: number;
+  bucket_hours: number;
+  usage: SpendUsage;
+  since_start: SpendUsage;
+  models: { key: string; usage: ModelUsage }[];
+  refusals: Record<string, number>;
+  series: SpendPoint[];
+}
+
 export type Provenance = "verified" | "runtime_only" | "chain_only" | "chain";
 
 export interface Revocation {

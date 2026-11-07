@@ -211,6 +211,8 @@ struct Open {
 pub struct Fleet {
     pub sources: BTreeMap<String, SourceState>,
     pub agents: BTreeMap<AgentKey, AgentActivity>,
+    /// Model spend per agent (see [`crate::spend`]).
+    pub spend: BTreeMap<AgentKey, crate::spend::AgentSpend>,
     runs: HashMap<(String, String), RunSummary>,
     order: VecDeque<(String, String)>,
     traces: HashMap<(String, String), String>,
@@ -283,6 +285,7 @@ impl Fleet {
         Self {
             sources: BTreeMap::new(),
             agents: BTreeMap::new(),
+            spend: BTreeMap::new(),
             runs: HashMap::new(),
             order: VecDeque::new(),
             traces: HashMap::new(),
@@ -363,6 +366,9 @@ impl Fleet {
             while agent.hours.first_key_value().is_some_and(|(h, _)| *h < oldest) {
                 agent.hours.pop_first();
             }
+        }
+        for spend in self.spend.values_mut() {
+            spend.prune(oldest);
         }
     }
 
@@ -687,6 +693,11 @@ impl Fleet {
                 ),
                 s(&p["reporter"]),
             ),
+            kind if crate::spend::is_usage(kind) => {
+                if let Some(k) = &agent {
+                    self.spend.entry(k.clone()).or_default().apply(entry);
+                }
+            }
             _ => {}
         }
         let now = hour_index(at);
@@ -846,4 +857,4 @@ impl Fleet {
 
 #[cfg(test)]
 #[path = "fleet_tests.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -107,6 +107,37 @@ Agent rows: `key`, `agent_id`, `agent_urn`, `owner`, `team`, `business_unit`,
   "title": "…: 30 refused in the last hour (usual 1.0)"}]}
 ```
 
+### `GET /api/spend?hours=&group=`
+
+Model spend over the last `hours` (24, 168 or 720; default 24), grouped by `agent`
+(default), `team` (the declared team, `(undeclared)` otherwise) or `model`. Rows are
+ranked by cost, then tokens; at most 500 are returned (`total_rows` counts all). The
+series is hourly, or daily for 720 hours. Costs are in hundredths of a cent; see
+[§4.10](04-governance-model.md#410-model-spend).
+
+```json
+{"from_hour": 494880, "to_hour": 494904, "bucket_hours": 1, "group": "agent",
+ "totals": {"calls": 2, "verified_calls": 1, "tokens": 43000, "cost_units": 9000,
+   "verified_tokens": 3000, "verified_cost_units": 9000, "self_reported_tokens": 40000,
+   "self_reported_cost_units": 0, "uncovered_tokens": 500, "uncovered_cost_units": 0,
+   "refused": 1, "claimed": 1, "unsettled_claims": 0},
+ "rows": [{"key": "tenant_acme_prod/agt_support", "agent_id": "agt_support", "team": "support-ai",
+   "owner": "maya", "usage": {"…": "as totals"}, "models": ["gpt-5"]}],
+ "total_rows": 2,
+ "series": [{"hour": 494880, "tokens": 0, "cost_units": 0, "verified_tokens": 0,
+   "self_reported_tokens": 0, "uncovered_tokens": 0, "refused": 0}],
+ "refusals": {"budget_tokens_exhausted": 1}}
+```
+
+Team and model rows carry `agents` (how many agents contributed); model rows' `usage`
+has `calls`, `tokens`, `cost_units` and `verified_tokens`.
+
+### `GET /api/agents/{key}/spend?hours=`
+
+One agent's spend over the window: `usage`, `since_start` (since Tower started
+reading), `models` (ranked), `refusals` by reason and `series`. `404` for an agent
+Tower has not seen run.
+
 ### `GET /api/runs?agent=&status=&capability=&refused=&limit=`
 
 Recent run summaries, newest first (`limit` up to 500): `source`, `run_id`, `agent`,
