@@ -21,6 +21,14 @@ minor versions may break APIs and every break is listed.
 - Audit entries `usage_refused` (a reservation the budget or a revocation refused),
   `usage_claimed` and `usage_settled` (every settlement: reporter, verified, model,
   charged and measured usage), for reporting model spend.
+- Tower: an approvals inbox (`GET /api/inbox`, **Inbox** page with an open-count
+  badge) lists every runtime's open escalations in one queue, oldest first, with the
+  agent, its declared owner and team, the capability and how long it has waited. Each
+  runtime is read concurrently with its own deadline, and one that cannot be read is
+  named rather than left out. Risk reviewers and operators resolve an escalation from
+  Tower (`POST /api/inbox/{source}/{escalation_id}/resolve`, `handled` or `dismissed`
+  with a reason) on the runtime through its `control` key; the agent's declarer and
+  owner are refused, and the request and the runtime's answer are both journalled.
 
 ## 0.1.0-alpha.16 - 2026-11-06
 

@@ -38,7 +38,7 @@ under tenant `tower`). A dedicated database is recommended.
 | `id` | required | Unique name, shown everywhere (`eu-support`) |
 | `url` | required | Runtime base URL; `https://` unless development |
 | `token_env` | required | Variable holding that tenant's `audit:read` key. Startup fails if unset |
-| `control_token_env` | none | Variable holding a `control` key; without it the kill switch skips this source |
+| `control_token_env` | none | Variable holding a `control` key; without it the kill switch skips this source and its escalations are read-only in the inbox |
 | `business_unit`, `region`, `environment` | none | Labels for people and the analyst |
 
 ### `[[api_keys]]` (people and services)
