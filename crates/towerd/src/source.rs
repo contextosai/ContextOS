@@ -216,9 +216,9 @@ impl Source {
         key_ring(&body).map_err(SourceError::Shape)
     }
 
-    /// Revokes or restores a target on this runtime with its `control` key.
-    pub async fn revocation(&self, revoke: bool, kind: &str, target: &str, reason: &str) -> Result<Value, SourceError> {
-        let token = self.control_token().ok_or_else(|| {
+    /// The `control` key, or which reference to set when there is none.
+    fn require_control(&self) -> Result<String, SourceError> {
+        self.control_token().ok_or_else(|| {
             SourceError::MissingToken(
                 self.config
                     .control_token_env
@@ -226,7 +226,30 @@ impl Source {
                     .or_else(|| self.config.control_token_file.clone())
                     .unwrap_or_else(|| "control_token_env".into()),
             )
-        })?;
+        })
+    }
+
+    /// The tenant's open escalations, oldest first, at most `limit` (1..=1000).
+    pub async fn escalations(&self, limit: usize) -> Result<Value, SourceError> {
+        self.get(&format!("/v1/escalations?limit={}", limit.clamp(1, 1000)))
+            .await
+    }
+
+    /// Records how a human resolved an escalation, with this runtime's `control` key.
+    pub async fn resolve_escalation(&self, id: &str, resolution: &str, reason: &str) -> Result<Value, SourceError> {
+        let token = self.require_control()?;
+        self.send(
+            self.http
+                .post(self.url(&format!("/v1/escalations/{}/resolve", encode(id))))
+                .bearer_auth(token)
+                .json(&json!({"resolution": resolution, "reason": reason})),
+        )
+        .await
+    }
+
+    /// Revokes or restores a target on this runtime with its `control` key.
+    pub async fn revocation(&self, revoke: bool, kind: &str, target: &str, reason: &str) -> Result<Value, SourceError> {
+        let token = self.require_control()?;
         let path = if revoke {
             "/v1/revocations"
         } else {

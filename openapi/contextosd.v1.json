@@ -2728,11 +2728,112 @@
         "x-contextos-scope": "dispatch"
       }
     },
+    "/v1/runs/{run_id}/usage/claim": {
+      "post": {
+        "operationId": "claim_usage",
+        "summary": "Claim a model-call reservation for one call",
+        "description": "A metering LLM gateway (`meter` scope, without admit or dispatch, not the run's admitter) claims the reservation an agent sent with a model request before it forwards the request. A reservation covers one call: an unknown, settled or replan reservation is refused (404), one already claimed by any meter is refused (409 `reservation_claimed`), and a revoked run is refused (403). The response says what the reservation covers, so the gateway can cap the call's output tokens. Audited as `usage_claimed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reservation_id"
+                ],
+                "properties": {
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What the claimed reservation covers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reservation_id",
+                    "tokens",
+                    "cost_cents"
+                  ],
+                  "properties": {
+                    "reservation_id": {
+                      "type": "string"
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cost_cents": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "meter"
+            ]
+          }
+        ],
+        "x-contextos-scope": "meter"
+      }
+    },
     "/v1/runs/{run_id}/usage/settle": {
       "post": {
         "operationId": "settle_usage",
         "summary": "Settle a usage reservation",
-        "description": "Reported by a metering principal (`meter` scope, without admit or dispatch), the measured usage is charged and the rest released. Reported by the run's executor (`dispatch`, current generation), the whole reservation is charged: self-reported usage is not evidence. Measured usage above the reservation is charged as audited overage up to the run's remaining capacity; the principal that admitted the run cannot meter it.",
+        "description": "Reported by a metering principal (`meter` scope, without admit or dispatch), the measured usage is charged and the rest released. Reported by the run's executor (`dispatch`, current generation), the whole reservation is charged: self-reported usage is not evidence. Measured usage above the reservation is charged as audited overage up to the run's remaining capacity; the principal that admitted the run cannot meter it. A reservation claimed by a metering principal settles as measured only by that principal. `model` names the model that served the call; it is recorded in the `usage_settled` audit entry (unverified when self-reported).",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"
@@ -2759,6 +2860,11 @@
                   "cost_cents": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
                   }
                 }
               }

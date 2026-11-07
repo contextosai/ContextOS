@@ -47,6 +47,7 @@ pub mod telemetry;
 pub mod tls_server;
 pub mod tool_call_check;
 pub mod upstream_check;
+pub mod usage_api;
 pub mod user_binding;
 
 use std::collections::HashMap;

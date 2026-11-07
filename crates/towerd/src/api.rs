@@ -22,6 +22,8 @@
 //! | `POST /api/guardrails/preview` | risk | a rule's impact on the current inventory |
 //! | `GET/POST /api/waivers`, `POST …/{id}/decide` | owner/risk (decide: risk, not the requester) | time-boxed exceptions |
 //! | `POST /api/fleet/revoke`, `POST /api/fleet/restore` | operator | kill switch on every runtime |
+//! | `GET /api/inbox` | viewer | open escalations of every runtime, oldest first ([`crate::ops::inbox`]) |
+//! | `POST /api/inbox/{source}/{escalation_id}/resolve` | risk or operator (not the agent's declarer or owner) | record how a person resolved an escalation, on its runtime |
 //! | `POST /api/ask` | viewer | ask the analyst |
 //! | `POST /api/guardrails/draft` | risk | draft a guardrail from an intent |
 //! | `POST /api/agents/{key}/assess` | risk or owner | draft an intake review |

@@ -8,6 +8,7 @@ pub mod config;
 pub mod console;
 pub mod fleet;
 pub mod governance;
+pub mod inbox;
 pub mod intel;
 pub mod ops;
 pub mod records;

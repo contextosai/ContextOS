@@ -31,4 +31,5 @@ mod ownership;
 mod pack_intents;
 mod startup;
 mod task_authorization;
+mod usage_claims;
 mod user_binding;

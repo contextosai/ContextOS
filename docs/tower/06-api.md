@@ -250,6 +250,45 @@ with a control key (or the listed `sources`), each through its own `POST
 /v1/revocations`. Journal: `fleet_revoked` / `fleet_restored`, written before any runtime
 is called.
 
+### `GET /api/inbox?source=&agent=&team=` (viewer)
+
+Every active runtime's open escalations, oldest first. Each runtime is read
+concurrently (`GET /v1/escalations`, up to 1000, 10 s each); one that cannot be read
+is reported in `sources` with its error, never silently left out.
+
+```sh
+t $TOWER/api/inbox
+# → {"open": 1, "at": "…", "sources": [{"source": "acme-support-eu", "ok": true, "open": 1,
+#     "truncated": false, "can_resolve": true}],
+#    "items": [{"source": "acme-support-eu", "escalation_id": "esc_…", "kind": "policy",
+#      "run_id": "r1", "operation_id": "refund:1", "capability_id": "adp_payments.issue_refund",
+#      "reason_codes": ["fraud_signal_high"], "opened_at": "…", "age_seconds": 5400, "reopened": 0,
+#      "agent": "tenant_acme_prod/agt_support", "owner": "Support AI lead", "team": "support-ai",
+#      "declared": true, "can_resolve": true, …}]}
+```
+
+`kind` is `policy` (policy answered `escalate`) or `outcome_missed` (an applied effect's
+outcome was not confirmed by its deadline). `agent` is null when the run has left
+Tower's recent-run window; the item is still listed. `can_resolve` is false for a
+runtime Tower holds no control key for.
+
+### `POST /api/inbox/{source}/{escalation_id}/resolve` (risk or operator)
+
+```sh
+t -X POST $TOWER/api/inbox/acme-support-eu/esc_…/resolve \
+  -d '{"resolution": "handled", "reason": "Fraud team cleared the customer"}'
+# → {"source": "acme-support-eu", "escalation": {…, "status": "resolved",
+#     "resolution": {"outcome": "handled", "reason": "… (via Tower, risk-a)", "by": "svc_tower_control", …}}}
+```
+
+`resolution`: `handled` or `dismissed`; `reason` up to 900 bytes. The escalation is
+read from the runtime, not from the request; whoever declared or owns its agent is
+refused (`403`). `409 no_control_key` without a control key for the runtime, `404`
+when it is no longer open, `409 conflict` when it was resolved meanwhile. Resolving
+records what a person did; it grants nothing, and a retried call still goes through
+policy and approvals. Journal: `escalation_resolution_requested` before the runtime
+is called, `escalation_resolution_result` (with `ok` and any `error`) after.
+
 ## Intelligence
 
 | Route | Body | Returns |
@@ -274,4 +313,6 @@ These are part of the `contextosd` OpenAPI document (`openapi/contextosd.v1.json
 | `GET /v1/packs` | `audit:read` | `{"packs": [{"pack_ref", "pack"}]}` for the tenant |
 | `GET /v1/runs/{id}/evidence` | `audit:read` | Explain and evidence on request |
 | `POST /v1/revocations`, `POST /v1/revocations/restore` | `control` | Fleet kill switch |
+| `GET /v1/escalations?limit=` | `audit:read` | Approvals inbox |
+| `POST /v1/escalations/{id}/resolve` | `control` | Resolving from the inbox |
 | `GET /v1/config`, `POST /v1/config/validate` | `config` | Configuration review in CI (not used by `towerd`) |

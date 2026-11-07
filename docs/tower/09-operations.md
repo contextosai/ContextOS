@@ -38,7 +38,7 @@ under tenant `tower`). A dedicated database is recommended.
 | `id` | required | Unique name, shown everywhere (`eu-support`) |
 | `url` | required | Runtime base URL; `https://` unless development |
 | `token_env` or `token_file` | one required | Variable, or absolute path of a mounted secret file, holding that tenant's `audit:read` key. Startup fails if it cannot be read |
-| `control_token_env` or `control_token_file` | none | Variable or secret file holding a `control` key; without it the kill switch skips this source |
+| `control_token_env` or `control_token_file` | none | Variable or secret file holding a `control` key; without it the kill switch skips this source and its escalations are read-only in the inbox |
 
 Sources can also be added from the console (Runtimes → Add runtime, `admin`), with the
 same fields. Those are kept in Tower's store, not in this file; every replica converges

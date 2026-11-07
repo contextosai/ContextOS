@@ -90,6 +90,8 @@ pub enum DocKind {
     /// How far an outbound consumer of a tenant's audit chain (an escalation webhook,
     /// an audit sink) has delivered.
     DeliveryCursor,
+    /// Which metering gateway claimed a model-call usage reservation (one call each).
+    UsageClaim,
 }
 
 impl DocKind {
@@ -129,6 +131,7 @@ impl DocKind {
             DocKind::Findings => "findings",
             DocKind::Outcome => "outcome",
             DocKind::DeliveryCursor => "delivery_cursor",
+            DocKind::UsageClaim => "usage_claim",
         }
     }
 }

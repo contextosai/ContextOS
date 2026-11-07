@@ -192,6 +192,26 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: ./examples/frameworks/run.sh ${{ matrix.example }}
       - run: ./examples/frameworks/run.sh ${{ matrix.example }} --approval
+  litellm:
+    # The LiteLLM metering callback: unit tests, then a real LiteLLM proxy against a
+    # live contextosd and a fake provider (integrations/litellm).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Test environment
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/litellm"
+          uv pip install --python "$RUNNER_TEMP/litellm/bin/python" -r integrations/litellm/requirements-test.txt
+          uv pip install --python "$RUNNER_TEMP/litellm/bin/python" --no-deps -e integrations/litellm
+      - name: Unit tests
+        run: "$RUNNER_TEMP/litellm/bin/python -m pytest -q integrations/litellm/tests"
+      - name: End to end
+        env:
+          LITELLM_PYTHON: ${{ runner.temp }}/litellm/bin/python
+        run: ./integrations/litellm/tests/e2e/run.sh
   tower:
     runs-on: ubuntu-24.04
     defaults:
