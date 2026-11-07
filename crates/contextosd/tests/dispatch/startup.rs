@@ -248,3 +248,13 @@ async fn approval_step_up_is_configured_and_checked_at_startup() {
     let refused = with("[guards.approval_step_up]\ncapabilities = [\"adp_payments.issue_refund\"]").unwrap_err();
     assert!(refused.to_string().contains("acr_values or amr_values"), "{refused}");
 }
+
+#[tokio::test]
+async fn approval_review_is_configured_and_checked_at_startup() {
+    let (config, _) = world_setup(&ALL_CONTROLS).await;
+    let with = |table: &str| Config::parse(&format!("{}\n{table}", config.source));
+    let parsed = with("[guards.approval_review]\nmin_review_seconds = 30").unwrap();
+    assert_eq!(parsed.guards.approval_review.unwrap().min_review_seconds, 30);
+    let refused = with("[guards.approval_review]\nmin_review_seconds = 0").unwrap_err();
+    assert!(refused.to_string().contains("min_review_seconds"), "{refused}");
+}

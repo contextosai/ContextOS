@@ -57,6 +57,8 @@ pub struct DispatchSetup {
     pub guarantees: Vec<contextos_gateway::SharedGuarantee>,
     /// `[guards.approval_step_up]`.
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
+    /// `[guards.approval_review]`.
+    pub approval_review: Option<contextos_gateway::approval_review::ReviewPolicy>,
     /// `[guards.information_flow]`.
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
     /// `[[guards.circuit_breakers]]`.
@@ -114,6 +116,7 @@ where
     }
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
+    gateway.set_approval_review(setup.approval_review);
     gateway.set_information_flow(setup.information_flow);
     gateway.set_circuit_breakers(setup.circuit_breakers);
     gateway.set_action_monitor(setup.action_monitor);
@@ -418,6 +421,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         require_result_schemas: config.server.mode == crate::config::Mode::Production,
         guarantees: config.guarantees.clone(),
         approval_step_up: config.guards.approval_step_up.clone(),
+        approval_review: config.guards.approval_review.clone(),
         information_flow: config.guards.information_flow.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),
         action_monitor: match &providers.action_monitor {

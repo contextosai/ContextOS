@@ -87,6 +87,10 @@ pub struct GuardsConfig {
     /// 0.5, deny at 0.9, ask when the monitor is unavailable.
     #[serde(default)]
     pub action_monitor: Option<contextos_gateway::action_monitor::MonitorPolicy>,
+    /// Approvals count only if decided at least `min_review_seconds` after they were
+    /// requested (see [`contextos_gateway::approval_review`]).
+    #[serde(default)]
+    pub approval_review: Option<contextos_gateway::approval_review::ReviewPolicy>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -155,6 +159,7 @@ impl Default for GuardsConfig {
             information_flow: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
+            approval_review: None,
         }
     }
 }

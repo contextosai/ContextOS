@@ -80,11 +80,13 @@ closed (`ask`, configurable to `deny`). Every score above `ask_at` is audited.
 
 ### D. Oversight quality (control 15, EU AI Act Art. 14(4)(b))
 
-`[guards.approval_review]` sets `min_review_seconds`: a decision made faster than that
-after its request is not counted (`approval_review_too_fast`), which stops reflexive
-clicks on high-risk actions. It applies to capabilities or amounts, like step-up.
-Approval latency goes into a histogram, and approvals per approver into a bounded
-counter, so an outlier approver or a falling review time is visible.
+`[guards.approval_review]` sets `min_review_seconds`. A decision made faster than that
+after the gateway requested the approval is not counted (`approval_review_too_fast`),
+which stops reflexive clicks on high-risk actions. It is scoped like step-up, by
+capabilities or amounts. Each refusal is audited with the measured seconds, so the
+audit chain shows who rubber-stamps. Follow-ups: approval-latency metrics, and a cap
+on approvals per approver per hour, once a deployment shows which one its approvers
+need.
 
 ### E. Control map for reviewers
 

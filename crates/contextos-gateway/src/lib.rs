@@ -22,6 +22,7 @@
 
 pub mod action_monitor;
 pub mod admission;
+pub mod approval_review;
 mod attestation;
 mod checkpoints;
 pub mod circuit_breakers;
@@ -278,6 +279,8 @@ pub struct Gateway<S, L> {
         Arc<dyn action_monitor::ActionMonitorProvider>,
         action_monitor::MonitorPolicy,
     )>,
+    /// A floor on how fast an approval may be decided (see [`approval_review`]).
+    approval_review: Option<approval_review::ReviewPolicy>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -515,6 +518,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             information_flow: None,
             breakers: Vec::new(),
             action_monitor: None,
+            approval_review: None,
         }
     }
 
@@ -1217,6 +1221,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
             Some(Value::Object(material))
         });
+        let (approval_material, review_refused) = self
+            .review_approval(admission, &manifest.capability_id, &binding, approval_material)
+            .await?;
         let mut approval_input = Value::Null;
         let mut redemption_key = None;
         if let Some(Value::Object(mut material)) = approval_material {
@@ -1277,6 +1284,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             p.report.reason_codes.push("approval_step_up_required".into());
             p.report.obligations.push("approve_with_step_up".into());
         }
+        if let Some((request_id, seconds)) = review_refused {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "approval_request_id": request_id,
+                "review_seconds": seconds});
+            self.record(&mut p, "approval_review_too_fast", body, &now).await?;
+            p.report.reason_codes.push("approval_review_too_fast".into());
+            p.report.obligations.push("review_again".into());
+        }
         // Policy obligations go back to the orchestrator whatever the verdict; they are
         // discharged independently of it.
         p.report
@@ -1302,6 +1317,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return Ok(
                     match self.ports.approvals.request(admission, &binding, &action_digest).await {
                         Ok(id) => {
+                            self.note_approval_requested(admission, &id, &now).await?;
                             p.report.approval_request_id = Some(id);
                             p.report.obligations.push("await_approval".into());
                             p.finish(

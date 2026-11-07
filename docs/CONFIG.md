@@ -162,6 +162,7 @@ Guards on agent behaviour.
 |---|---|---|---|
 | `action_monitor` | table | unset | Thresholds for `[providers.action_monitor]`'s suspicion scores (see `contextos_gateway::action_monitor`). Unset with a monitor configured: ask at 0.5, deny at 0.9, ask when the monitor is unavailable. |
 | `agent_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise. |
+| `approval_review` | table | unset | Approvals count only if decided at least `min_review_seconds` after they were requested (see `contextos_gateway::approval_review`). |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
 | `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |
 | `completion_requires_scores` | boolean \| table | unset | Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them. |
