@@ -207,6 +207,10 @@ pub struct ProvidersConfig {
     /// agent sees it.
     #[serde(default)]
     pub result_screening: Option<RemoteProvider>,
+    /// Action monitor; scores every effectful or data-sending call before it is sent,
+    /// and `[guards.action_monitor]` sets the response.
+    #[serde(default)]
+    pub action_monitor: Option<RemoteProvider>,
     /// Resource identity service; maps identifiers to canonical ids for guarantees with
     /// `resource_canonicalizer = "provider"`.
     #[serde(default)]

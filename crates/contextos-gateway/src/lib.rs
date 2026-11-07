@@ -20,6 +20,7 @@
 //! chooses a capability and arguments; manifests, admission, providers and the kernel
 //! decide everything else.
 
+pub mod action_monitor;
 pub mod admission;
 mod attestation;
 mod checkpoints;
@@ -33,6 +34,7 @@ mod escalation;
 mod exposure_import;
 mod findings;
 mod findings_api;
+pub mod guard_policy;
 pub mod hold_census;
 pub mod hold_owners;
 pub mod information_flow;
@@ -271,6 +273,11 @@ pub struct Gateway<S, L> {
     information_flow: Option<information_flow::FlowPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
+    /// Scores consequential calls before they are sent (see [`action_monitor`]).
+    action_monitor: Option<(
+        Arc<dyn action_monitor::ActionMonitorProvider>,
+        action_monitor::MonitorPolicy,
+    )>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -507,7 +514,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             approval_step_up: None,
             information_flow: None,
             breakers: Vec::new(),
+            action_monitor: None,
         }
+    }
+
+    /// The runtime guards' policy reference runs admitted now pin (see
+    /// [`guard_policy`]); `None` while no runtime guard is on.
+    pub fn guard_policy_ref(&self) -> Option<Value> {
+        guard_policy::guard_policy_ref(&json!({
+            "information_flow": self.information_flow,
+            "action_monitor": self.action_monitor.as_ref().map(|(_, policy)| policy),
+        }))
     }
 
     /// Counts and refuses calls by `rules` (see [`circuit_breakers`]).
@@ -991,6 +1008,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             loops,
             flow,
             breaker,
+            monitor,
         ) = tokio::join!(
             self.ports.policy.outcomes(admission, &binding),
             self.ports
@@ -1015,6 +1033,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             },
             self.open_breaker(admission, manifest, &now),
+            self.assess_action(admission, manifest, &binding),
         );
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
@@ -1139,7 +1158,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
         // What the run has read decides what it may do next (information flow).
-        match self
+        // Runtime guards: what the run has read (information flow) and what a trusted
+        // monitor makes of this action. A pinned run's decisions always cite its guard
+        // policy, whichever guards add verdicts.
+        policy_outcomes.extend(guard_policy::pinned_outcome(admission));
+        let flow_gate = self
             .flow_guard(
                 &mut p,
                 admission,
@@ -1148,15 +1171,20 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 flow?.as_ref().map(|f| &f.body),
                 &now,
             )
-            .await?
-        {
-            information_flow::FlowGate::Pass => {}
-            information_flow::FlowGate::Outcome(outcome, codes) => {
-                policy_outcomes.push(outcome);
-                outside_task.extend(codes);
-            }
-            information_flow::FlowGate::Refuse(codes) => {
-                return Ok(p.stop("blocked", codes, "What this run has read does not allow this call."));
+            .await?;
+        let monitor_gate = self
+            .monitor_guard(&mut p, admission, manifest, &operation_id, monitor?, &now)
+            .await?;
+        for gate in [flow_gate, monitor_gate] {
+            match gate {
+                guard_policy::FlowGate::Pass => {}
+                guard_policy::FlowGate::Outcome(outcome, codes) => {
+                    policy_outcomes.push(outcome);
+                    outside_task.extend(codes);
+                }
+                guard_policy::FlowGate::Refuse(codes) => {
+                    return Ok(p.stop("blocked", codes, "The run's guards do not allow this call."));
+                }
             }
         }
         let constraint_observations = match constraint_observations {

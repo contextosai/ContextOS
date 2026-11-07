@@ -82,6 +82,11 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::circuit_breakers`]).
     #[serde(default)]
     pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
+    /// Thresholds for `[providers.action_monitor]`'s suspicion scores (see
+    /// [`contextos_gateway::action_monitor`]). Unset with a monitor configured: ask at
+    /// 0.5, deny at 0.9, ask when the monitor is unavailable.
+    #[serde(default)]
+    pub action_monitor: Option<contextos_gateway::action_monitor::MonitorPolicy>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -149,6 +154,7 @@ impl Default for GuardsConfig {
             approval_step_up: None,
             information_flow: None,
             circuit_breakers: Vec::new(),
+            action_monitor: None,
         }
     }
 }

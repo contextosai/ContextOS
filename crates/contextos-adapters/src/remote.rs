@@ -219,6 +219,31 @@ impl contextos_gateway::result_screening::ResultScreeningProvider for RemoteResu
     }
 }
 
+/// Action monitor: scores a proposed action and returns `{"suspicion",
+/// "reason_codes"}` (see [`contextos_gateway::action_monitor`]). It sees the action
+/// binding, arguments included, so run it inside the deployment's trust boundary.
+#[derive(Debug, Clone)]
+pub struct RemoteActionMonitor(pub Arc<RemoteFacts>);
+
+#[async_trait]
+impl contextos_gateway::action_monitor::ActionMonitorProvider for RemoteActionMonitor {
+    async fn assess(
+        &self,
+        admission: &RunAdmission,
+        manifest: &contextos_gateway::CapabilityManifest,
+        binding: &Value,
+        trajectory: &Value,
+    ) -> Result<Value, PortError> {
+        self.0
+            .call(
+                "action_monitor",
+                &json!({"run": run_summary(admission), "capability_id": manifest.capability_id,
+                    "action_risk": manifest.action_risk, "binding": binding, "trajectory": trajectory}),
+            )
+            .await
+    }
+}
+
 /// Resource identity service: answers `{"canonical_id", "evidence_ref"}` for an
 /// identifier a guarded call named (see [`contextos_gateway::resource_identity`]).
 #[derive(Debug, Clone)]

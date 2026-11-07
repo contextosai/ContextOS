@@ -56,7 +56,7 @@ async fn after_untrusted_output_an_effect_is_refused_and_its_decision_cites_the_
     let decisions = kinds("authorization_decision");
     assert_eq!(decisions.len(), 2);
     assert!(
-        decisions.iter().all(|d| d.contains("information_flow_policy")),
+        decisions.iter().all(|d| d.contains("runtime_guard_policy")),
         "{decisions:?}"
     );
     assert_eq!(kinds("information_flow_decision").len(), 1);

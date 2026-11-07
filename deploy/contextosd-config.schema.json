@@ -567,6 +567,18 @@
       "additionalProperties": false,
       "description": "Guards on agent behaviour.",
       "properties": {
+        "action_monitor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MonitorPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Thresholds for `[providers.action_monitor]`'s suspicion scores (see `contextos_gateway::action_monitor`). Unset with a monitor configured: ask at 0.5, deny at 0.9, ask when the monitor is unavailable."
+        },
         "agent_binding": {
           "anyOf": [
             {
@@ -864,6 +876,39 @@
         }
       ]
     },
+    "MonitorPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.action_monitor]`.",
+      "properties": {
+        "ask_at": {
+          "default": 0.5,
+          "description": "Suspicion at which a call needs an approval.",
+          "format": "double",
+          "type": "number"
+        },
+        "deny_at": {
+          "default": 0.9,
+          "description": "Suspicion at which a call is denied.",
+          "format": "double",
+          "type": "number"
+        },
+        "on_unavailable": {
+          "$ref": "#/$defs/FlowVerdict",
+          "default": "ask",
+          "description": "What an unreachable monitor or malformed answer means."
+        },
+        "run_budget": {
+          "default": null,
+          "description": "Summed suspicion of a run's calls past which every further call needs an approval. Unset: no run budget.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "OAuthClientConfig": {
       "additionalProperties": false,
       "description": "OAuth 2.0 client credentials for one adapter's provider.",
@@ -1030,6 +1075,18 @@
     "ProvidersConfig": {
       "additionalProperties": false,
       "properties": {
+        "action_monitor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Action monitor; scores every effectful or data-sending call before it is sent, and `[guards.action_monitor]` sets the response."
+        },
         "approvals": {
           "$ref": "#/$defs/RemoteProvider",
           "description": "Approvals service: human approval requests and decisions."
@@ -1733,6 +1790,7 @@
     "guards": {
       "$ref": "#/$defs/GuardsConfig",
       "default": {
+        "action_monitor": null,
         "agent_binding": null,
         "approval_step_up": null,
         "circuit_breakers": [],

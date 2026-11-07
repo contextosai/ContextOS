@@ -96,6 +96,8 @@ pub enum DocKind {
     FlowLabels,
     /// A circuit breaker's sliding-window count for one agent, principal or tenant.
     CircuitBreaker,
+    /// A run's action-monitor trajectory (recent scores and their sum).
+    ActionMonitor,
 }
 
 impl DocKind {
@@ -138,6 +140,7 @@ impl DocKind {
             DocKind::UsageClaim => "usage_claim",
             DocKind::FlowLabels => "flow_labels",
             DocKind::CircuitBreaker => "circuit_breaker",
+            DocKind::ActionMonitor => "action_monitor",
         }
     }
 }

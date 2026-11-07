@@ -160,6 +160,7 @@ Guards on agent behaviour.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `action_monitor` | table | unset | Thresholds for `[providers.action_monitor]`'s suspicion scores (see `contextos_gateway::action_monitor`). Unset with a monitor configured: ask at 0.5, deny at 0.9, ask when the monitor is unavailable. |
 | `agent_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise. |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
 | `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |

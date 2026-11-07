@@ -6,6 +6,13 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[providers.action_monitor]` with `[guards.action_monitor]`: a trusted monitor
+  scores every effectful or data-sending call before it is sent. It sees the action
+  binding and the run's recent calls with their scores. Scores at `ask_at` need an
+  approval of the exact action, and scores at `deny_at` are denied. A run whose summed
+  suspicion reaches `run_budget` needs approvals from then on. An unavailable monitor
+  gets `on_unavailable` (default `ask`). Non-allowed calls are audited
+  (`action_monitored`).
 - `[[guards.circuit_breakers]]`: automatic stops across runs. A breaker counts
   effects (attempts sent to providers) or refusals per agent, admitting principal or
   tenant in a sliding window. At its threshold it refuses the calls it governs
@@ -21,8 +28,8 @@ minor versions may break APIs and every break is listed.
   (`classified_egress`, default `deny`), and untrusted input with `CONFIDENTIAL` data
   and egress or an external effect (`rule_of_two`) compose a guardrail outcome, so they
   need an approval of the exact action or are denied. Labels pass to delegated
-  children and back. Each run pins the policy it was admitted under
-  (`flow_policy_ref`). Matches are audited (`information_flow_decision`); `mode =
+  children and back. Each run pins the runtime guards' policy it was admitted under
+  (`guard_policy_ref`). Matches are audited (`information_flow_decision`); `mode =
   "observe"` only audits. Off unless configured.
 - `contextos-litellm` (`integrations/litellm`): a LiteLLM proxy callback that meters
   every model call against its run's budget. It claims the call's reservation before

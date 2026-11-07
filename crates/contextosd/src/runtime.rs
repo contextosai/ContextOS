@@ -61,6 +61,11 @@ pub struct DispatchSetup {
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
     /// `[[guards.circuit_breakers]]`.
     pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
+    /// `[providers.action_monitor]` with `[guards.action_monitor]`.
+    pub action_monitor: Option<(
+        Arc<dyn contextos_gateway::action_monitor::ActionMonitorProvider>,
+        contextos_gateway::action_monitor::MonitorPolicy,
+    )>,
     /// `[providers.result_screening]`.
     pub result_screening: Option<Arc<dyn contextos_gateway::result_screening::ResultScreeningProvider>>,
     /// `[providers.resource_identity]`.
@@ -111,6 +116,7 @@ where
     gateway.set_approval_step_up(setup.approval_step_up);
     gateway.set_information_flow(setup.information_flow);
     gateway.set_circuit_breakers(setup.circuit_breakers);
+    gateway.set_action_monitor(setup.action_monitor);
     if let Some(screening) = setup.result_screening {
         gateway.set_result_screening(screening);
     }
@@ -414,6 +420,13 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         approval_step_up: config.guards.approval_step_up.clone(),
         information_flow: config.guards.information_flow.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),
+        action_monitor: match &providers.action_monitor {
+            Some(p) => Some((
+                Arc::new(contextos_adapters::remote::RemoteActionMonitor(remote(p)?)) as _,
+                config.guards.action_monitor.clone().unwrap_or_default(),
+            )),
+            None => None,
+        },
         result_screening: match &providers.result_screening {
             Some(p) => Some(Arc::new(contextos_adapters::remote::RemoteResultScreening(remote(p)?))),
             None => None,

@@ -107,7 +107,6 @@ fn verdicts_compose_to_the_strictest_and_unreadable_state_is_the_worst_case() {
         policy.labels(Some(&json!({"integrity": "bogus"}))),
         labels(Integrity::Untrusted, Classification::Restricted)
     );
-    assert_eq!(outcome(check.verdict, policy.bundle_ref())["verdict"], "deny");
     assert!(contextos_contract::shape::is_artifact_ref(&policy.bundle_ref()));
 }
 

@@ -1,6 +1,7 @@
 //! End-to-end governed dispatch through `contextosd` with remote fact services and an
 //! MCP provider, all over real HTTP.
 
+mod action_monitor;
 mod agent_binding;
 mod api;
 mod audit_sinks;
