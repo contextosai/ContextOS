@@ -7,6 +7,7 @@ use contextos_store::{AppendLog, DocumentStore};
 use crate::api::Shared;
 
 pub mod inbox;
+mod sources;
 
 /// The routes of every operational console module.
 pub fn routes<S, L>() -> Router<Shared<S, L>>
@@ -14,5 +15,5 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    Router::new().merge(inbox::routes())
+    Router::new().merge(inbox::routes()).merge(sources::routes())
 }

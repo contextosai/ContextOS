@@ -65,13 +65,16 @@ the UI. `admin` passes every role check but not the separation checks.
 
 | Secret | Held where | Scope |
 |---|---|---|
-| Runtime `audit:read` key, per source | Environment variable named by `token_env` | Read one tenant's chain, deployment, packs, evidence |
-| Runtime `control` key, per source (optional) | `control_token_env` | Revoke and restore on that tenant |
+| Runtime `audit:read` key, per source | Environment variable named by `token_env`, or secret file at `token_file` | Read one tenant's chain, deployment, packs, evidence |
+| Runtime `control` key, per source (optional) | `control_token_env` or `control_token_file` | Revoke and restore on that tenant |
 | Tower journal seed | `[journal] signing_seed_env` | Sign Tower's journal |
 | People's Tower keys | Configured as SHA-256 hashes in `[[api_keys]]` | Their roles |
 | Anthropic API key (optional) | `[intelligence] api_key_env` | Model calls |
 
-The configuration file holds no secrets: hashes and environment variable names only.
+The configuration file holds no secrets: hashes, environment variable names and file
+paths only. Sources added from the console follow the same rule: an admin names where a
+key lives, Tower reads it on each replica, and no API response, record or journal entry
+contains a key.
 Keys are compared in constant time over every configured key. A runtime key should
 belong to a dedicated principal (for example `svc_tower`) with only `audit:read`, so the
 runtime's own audit shows Tower's reads distinctly.
