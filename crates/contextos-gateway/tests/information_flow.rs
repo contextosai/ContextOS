@@ -29,7 +29,7 @@ async fn labels(h: &Harness) -> Option<Value> {
 async fn after_reading_untrusted_output_an_effect_needs_an_exact_approval() {
     let mut h = harness("allow", Behavior::Confirm).await;
     h.gateway.set_information_flow(Some(FlowPolicy::default()));
-    h.admission.flow_policy_ref = h.gateway.flow_policy_ref();
+    h.admission.guard_policy_ref = h.gateway.guard_policy_ref();
 
     let first = h
         .gateway
@@ -66,7 +66,7 @@ async fn trusted_output_leaves_the_run_trusted_and_observe_mode_only_audits() {
     trusted.flow = serde_json::from_value(json!({"output_integrity": "trusted"})).unwrap();
     h.gateway.pin_capability(trusted).unwrap();
     h.gateway.set_information_flow(Some(FlowPolicy::default()));
-    h.admission.flow_policy_ref = h.gateway.flow_policy_ref();
+    h.admission.guard_policy_ref = h.gateway.guard_policy_ref();
     for (id, order) in [("tc_1", "ord_1"), ("tc_2", "ord_2")] {
         let mut c = call(id, Some(id));
         c["args"]["order_id"] = json!(order);
@@ -80,7 +80,7 @@ async fn trusted_output_leaves_the_run_trusted_and_observe_mode_only_audits() {
         mode: FlowMode::Observe,
         ..FlowPolicy::default()
     }));
-    h.admission.flow_policy_ref = h.gateway.flow_policy_ref();
+    h.admission.guard_policy_ref = h.gateway.guard_policy_ref();
     for (id, order) in [("tc_1", "ord_1"), ("tc_2", "ord_2")] {
         let mut c = call(id, Some(id));
         c["args"]["order_id"] = json!(order);

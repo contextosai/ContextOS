@@ -154,6 +154,14 @@ impl Config {
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         crate::audit_sinks::check(&config).map_err(ConfigError::Invalid)?;
         contextos_gateway::circuit_breakers::validate(&config.guards.circuit_breakers).map_err(ConfigError::Invalid)?;
+        if let Some(monitor) = &config.guards.action_monitor {
+            monitor.validate().map_err(ConfigError::Invalid)?;
+            if config.providers.as_ref().is_none_or(|p| p.action_monitor.is_none()) {
+                return Err(ConfigError::Invalid(
+                    "[guards.action_monitor] needs [providers.action_monitor]".into(),
+                ));
+            }
+        }
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }

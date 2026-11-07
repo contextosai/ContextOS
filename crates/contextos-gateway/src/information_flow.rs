@@ -22,6 +22,7 @@
 //!   untrusted input, `CONFIDENTIAL` or higher data, and egress or an external effect
 //!   needs at least an approval, even where the other two rules allow it.
 //!
+//! Each run pins the guard policy it was admitted under (see [`crate::guard_policy`]).
 //! Labels are per run, not per value: the guard cannot tell which argument came from
 //! which output, so it is coarse and errs towards asking. A delegated child starts
 //! with its parent's labels; its labels flow back into the parent when it closes,
@@ -35,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::admission::RunAdmission;
+use crate::guard_policy::FlowGate;
 use crate::manifest::CapabilityManifest;
 use crate::{Gateway, GatewayError, Pipeline};
 
@@ -261,28 +263,6 @@ impl FlowPolicy {
     }
 }
 
-/// The guardrail policy outcome for `verdict`, citing `bundle_ref`.
-pub fn outcome(verdict: FlowVerdict, bundle_ref: Value) -> Value {
-    let (verdict, obligations) = match verdict {
-        FlowVerdict::Allow => ("allow", json!([])),
-        FlowVerdict::Ask => ("require_approval", json!(["review_information_flow"])),
-        FlowVerdict::Deny => ("deny", json!([])),
-    };
-    json!({"category": "guardrail", "priority": 0, "verdict": verdict,
-        "rule_id": "information_flow", "bundle_ref": bundle_ref, "obligations": obligations})
-}
-
-/// What the guard does to one call.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum FlowGate {
-    /// Nothing to add.
-    Pass,
-    /// A policy outcome to compose, with reason codes for the report.
-    Outcome(Value, Vec<String>),
-    /// Refuse the call with these reason codes.
-    Refuse(Vec<String>),
-}
-
 /// Raises the run's labels by what it just received; returns whether they rose.
 pub(crate) async fn raise<S: DocumentStore>(
     store: &S,
@@ -352,11 +332,6 @@ pub(crate) fn facts(labels: RunLabels) -> Value {
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
-    /// The reference runs admitted now pin, while the guard is on.
-    pub fn flow_policy_ref(&self) -> Option<Value> {
-        self.information_flow.as_ref().map(FlowPolicy::bundle_ref)
-    }
-
     /// The guard's part in this call's decision. Every match is audited
     /// (`information_flow_decision`). `state` is the run's labels document as read
     /// with the other facts.
@@ -383,26 +358,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.record(p, "information_flow_decision", body, now).await?;
         }
         let verdict = if enforced { check.verdict } else { FlowVerdict::Allow };
-        Ok(match &admission.flow_policy_ref {
-            // The run's decisions cite the policy it was admitted under; its binding
-            // names that reference, so the outcome is composed even when it allows.
-            Some(pinned) => FlowGate::Outcome(
-                outcome(verdict, pinned.clone()),
-                if verdict == FlowVerdict::Allow {
-                    Vec::new()
-                } else {
-                    check.reason_codes
-                },
-            ),
-            // A run admitted before the guard was on cannot cite it: a call the guard
-            // would not allow is refused outright rather than approved.
-            None if verdict != FlowVerdict::Allow => {
-                let mut codes = check.reason_codes;
-                codes.push("flow_policy_unpinned".into());
-                FlowGate::Refuse(codes)
-            }
-            None => FlowGate::Pass,
-        })
+        Ok(crate::guard_policy::gate(
+            admission,
+            verdict,
+            "information_flow",
+            "review_information_flow",
+            check.reason_codes,
+            "flow_policy_unpinned",
+        ))
     }
 
     /// Raises the run's labels by `manifest`'s output, which the agent is about to

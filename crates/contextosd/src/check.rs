@@ -19,6 +19,7 @@ fn named_env(config: &Config) -> Vec<(&str, String)> {
             &providers.boundary,
             &providers.memory,
             &providers.result_screening,
+            &providers.action_monitor,
         ];
         let named = [
             ("authority", Some(&providers.authority)),
@@ -27,9 +28,16 @@ fn named_env(config: &Config) -> Vec<(&str, String)> {
         ]
         .into_iter()
         .chain(
-            ["idempotency", "data_flow", "boundary", "memory", "result_screening"]
-                .into_iter()
-                .zip(optional.into_iter().map(Option::as_ref)),
+            [
+                "idempotency",
+                "data_flow",
+                "boundary",
+                "memory",
+                "result_screening",
+                "action_monitor",
+            ]
+            .into_iter()
+            .zip(optional.into_iter().map(Option::as_ref)),
         );
         for (name, provider) in named {
             if let Some(var) = provider.and_then(|p| p.token_env.as_deref()) {

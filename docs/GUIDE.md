@@ -739,9 +739,10 @@ first to see how often each rule would match before enforcing it.
 - A delegated child starts with its parent's labels. When it closes, its labels flow
   back into the parent, except when the parent rejects the output of an
   `isolate_until_accepted` child.
-- Each run pins the flow policy it was admitted under, and every decision cites it. A
-  run admitted before the guard was turned on cannot cite it, so a call the guard would
-  not allow is refused (`flow_policy_unpinned`) rather than approved.
+- Each run pins the runtime guards' policy it was admitted under (`guard_policy_ref`,
+  which also covers the action monitor), and every decision cites it. A run admitted
+  while no runtime guard was on cannot cite it, so a call the guard would not allow is
+  refused (`flow_policy_unpinned`) rather than approved.
 - Labels are per run, not per value. The guard cannot tell which argument came from
   which output, so it errs towards asking. Labels never fall within a run, so start a
   new run for work that must not inherit what an earlier step read.
@@ -1122,6 +1123,30 @@ minimal, development-only implementation):
   - A failing or malformed answer withholds.
   - Every non-`pass` verdict is audited (`result_screened`) with pointers and reasons,
     never content.
+- **Action monitor** (optional, `[providers.action_monitor]`, thresholds in
+  `[guards.action_monitor]`) — before every effectful or data-sending call, receives the
+  run, the capability, the action binding (arguments, resources, recipients, amount) and
+  the run's trajectory (its last 16 monitored calls with their scores, and their sum).
+  It answers `{"suspicion": 0..1, "reason_codes": [...]}`. This is the trusted-monitor
+  pattern from AI-control work: plug in your monitor model or rules. ContextOS ships the
+  port and the response:
+
+  ```toml
+  [guards.action_monitor]
+  ask_at = 0.5            # an approval of the exact action (action_monitor_ask)
+  deny_at = 0.9           # denied (action_monitor_deny)
+  run_budget = 2.0        # summed suspicion past which every call needs an approval
+  on_unavailable = "ask"  # or "deny"; "allow" fails open
+  ```
+
+  - The score composes a guardrail outcome, so approvals bind the exact action.
+  - The call to the monitor runs alongside the other authorization reads.
+  - Every score is added to the run's trajectory, whatever the decision. So many
+    mildly suspicious calls reach `run_budget` (`action_monitor_run_budget`) where
+    no single threshold would catch them.
+  - Calls not allowed outright are audited (`action_monitored`) with the score and
+    reason codes, never the arguments.
+  - The monitor sees arguments, so run it inside your trust boundary.
 
 #### When a dependency fails
 
@@ -1141,6 +1166,7 @@ and never hold up governed work.
 | Memory-governance service | memory operations are refused | `memory_policy_unavailable` |
 | Resource identity service | calls under a guarantee with `resource_canonicalizer = "provider"` are refused | `shared_guarantee_identity_unavailable` |
 | Result-screening service | the effect stands; its output is withheld from the agent | `result_screening_unavailable`, audited `result_screened` |
+| Action monitor | monitored calls need an approval (`on_unavailable = "ask"`), or are denied | `action_monitor_unavailable`, audited `action_monitored` |
 | Provider (adapter) | a request that never left moves to the next `fallback_endpoints` entry, or is `not_dispatched` and safe to retry; once it may have been sent, the outcome is unknown and is reconciled, never retried blindly | `not_dispatched`, or `reconcile_effect_before_retry` |
 | PostgreSQL | requests that need the store answer `503`; nothing is dispatched without its claim | `store_unavailable` |
 | Audit signing (KMS) | requests that must record an entry answer `503` | `audit_unavailable` |
