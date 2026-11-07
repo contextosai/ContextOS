@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.17 - 2026-11-07
+
+Seventeenth alpha: runtime controls for autonomous agents. Information-flow labels,
+circuit breakers that trip the kill switch, a trusted action monitor and a review-time
+floor for approvals, each off until configured. Model calls metered through LiteLLM,
+and an approvals inbox, revocations view and model spend in Tower. See the
+[release notes](docs/releases/v0.1.0-alpha.17.md) before upgrading.
+
 ### Added
 - `docs/COMPLIANCE.md`: a control map from what ContextOS enforces to the OWASP Top 10
   for Agentic Applications (2026), EU AI Act Articles 9, 12, 14, 15 and 26, the
