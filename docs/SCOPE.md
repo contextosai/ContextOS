@@ -27,6 +27,9 @@ where the deployment plugs in.
 
 ## What this means for a review
 
+[COMPLIANCE.md](COMPLIANCE.md) maps what ContextOS does govern to the OWASP agentic Top
+10, the EU AI Act, the Singapore agentic framework, the NIST AI RMF and ISO/IEC 42001.
+
 If a reviewer asks "does ContextOS stop prompt injection?", the accurate answer is no:
 it stops a successful injection from **acting** beyond what was authorized, approved
 and budgeted, and records what happened. Layer content controls in front of it, and

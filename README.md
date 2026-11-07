@@ -206,7 +206,7 @@ Agent skills live in [`skills/`](skills/README.md): [pack authoring](skills/cont
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
 - Govern every agent across runtimes: [Tower](docs/tower/README.md), the organisation's governance plane, with architecture, flows and a step-by-step guide (`./examples/tower/run.sh --serve`)
 - Embed, deploy and integrate: [docs/GUIDE.md](docs/GUIDE.md); every configuration key in [docs/CONFIG.md](docs/CONFIG.md) and metric in [docs/METRICS.md](docs/METRICS.md)
-- Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md), [what ContextOS does not govern](docs/SCOPE.md)
+- Security: [SECURITY.md](SECURITY.md), [threat model](docs/security/THREAT_MODEL.md), [what ContextOS does not govern](docs/SCOPE.md), [control map for compliance reviews](docs/COMPLIANCE.md)
 - Public release checklist: [docs/PUBLIC_RELEASE.md](docs/PUBLIC_RELEASE.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - Contributing and governance: [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [CHANGELOG.md](CHANGELOG.md)

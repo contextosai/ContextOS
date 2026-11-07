@@ -6,6 +6,10 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `docs/COMPLIANCE.md`: a control map from what ContextOS enforces to the OWASP Top 10
+  for Agentic Applications (2026), EU AI Act Articles 9, 12, 14, 15 and 26, the
+  Singapore agentic AI framework, the NIST AI RMF and ISO/IEC 42001, citing the
+  threat-model entries whose tests are the evidence.
 - `[guards.approval_review]`: a floor on review time. An approval decided less than
   `min_review_seconds` after the gateway requested it is not used
   (`approval_review_too_fast`, obligation `review_again`), and the refusal is audited
