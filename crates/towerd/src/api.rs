@@ -47,7 +47,7 @@ use crate::governance::{self, AgentView, Anomaly, Finding};
 use crate::intel::{self, IntelError, jobs};
 use crate::records::{Declaration, RecordError, array, object, push_new};
 
-type Shared<S, L> = Arc<Tower<S, L>>;
+pub(crate) type Shared<S, L> = Arc<Tower<S, L>>;
 
 // ---- callers ----
 
@@ -123,20 +123,20 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
             code,
             message: message.into(),
         }
     }
-    fn bad(message: impl Into<String>) -> Self {
+    pub(crate) fn bad(message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", message)
     }
-    fn forbidden(message: impl Into<String>) -> Self {
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, "forbidden", message)
     }
-    fn not_found(what: &str) -> Self {
+    pub(crate) fn not_found(what: &str) -> Self {
         Self::new(StatusCode::NOT_FOUND, "not_found", format!("No such {what}."))
     }
 }
@@ -192,14 +192,14 @@ impl From<IntelError> for ApiError {
     }
 }
 
-type ApiResult = Result<Response, ApiError>;
+pub(crate) type ApiResult = Result<Response, ApiError>;
 
 #[allow(clippy::unnecessary_wraps)] // handlers return ApiResult throughout
-fn ok(value: Value) -> ApiResult {
+pub(crate) fn ok(value: Value) -> ApiResult {
     Ok(axum::Json(value).into_response())
 }
 
-fn caller<S, L>(t: &Tower<S, L>, headers: &HeaderMap, role: &str) -> Result<Caller, ApiError> {
+pub(crate) fn caller<S, L>(t: &Tower<S, L>, headers: &HeaderMap, role: &str) -> Result<Caller, ApiError> {
     let header = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
     let caller = t
         .callers
@@ -212,7 +212,7 @@ fn caller<S, L>(t: &Tower<S, L>, headers: &HeaderMap, role: &str) -> Result<Call
 }
 
 /// A caller holding any of `roles`.
-fn caller_any<S, L>(t: &Tower<S, L>, headers: &HeaderMap, roles: &[&str]) -> Result<Caller, ApiError> {
+pub(crate) fn caller_any<S, L>(t: &Tower<S, L>, headers: &HeaderMap, roles: &[&str]) -> Result<Caller, ApiError> {
     let c = caller(t, headers, "viewer")?;
     if roles.iter().any(|r| c.has(r)) {
         Ok(c)
@@ -224,7 +224,7 @@ fn caller_any<S, L>(t: &Tower<S, L>, headers: &HeaderMap, roles: &[&str]) -> Res
     }
 }
 
-fn body<T: serde::de::DeserializeOwned>(bytes: &Bytes) -> Result<T, ApiError> {
+pub(crate) fn body<T: serde::de::DeserializeOwned>(bytes: &Bytes) -> Result<T, ApiError> {
     if bytes.len() > 512 * 1024 {
         return Err(ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -239,15 +239,15 @@ fn body<T: serde::de::DeserializeOwned>(bytes: &Bytes) -> Result<T, ApiError> {
 
 // ---- snapshot ----
 
-struct Snapshot {
-    views: Vec<AgentView>,
-    findings: Vec<Finding>,
-    anomalies: Vec<Anomaly>,
-    guardrails: Value,
-    now: String,
+pub(crate) struct Snapshot {
+    pub(crate) views: Vec<AgentView>,
+    pub(crate) findings: Vec<Finding>,
+    pub(crate) anomalies: Vec<Anomaly>,
+    pub(crate) guardrails: Value,
+    pub(crate) now: String,
 }
 
-async fn snapshot<S: DocumentStore, L: AppendLog>(t: &Tower<S, L>) -> Result<Snapshot, ApiError> {
+pub(crate) async fn snapshot<S: DocumentStore, L: AppendLog>(t: &Tower<S, L>) -> Result<Snapshot, ApiError> {
     let declarations = t.records.load("declarations").await?;
     let reviews = t.records.load("reviews").await?;
     let guardrails = t.records.load("guardrails").await?;
@@ -434,7 +434,7 @@ async fn agent<S: DocumentStore, L: AppendLog>(
         "anomalies": snap.anomalies.iter().filter(|a| a.agent == key).collect::<Vec<_>>(),
         "series": series,
         "runs": runs,
-        "can_revoke": t.sources.iter().any(|s| s.can_control()),
+        "can_revoke": t.sources.active().iter().any(|s| s.can_control()),
     }))
 }
 
@@ -514,11 +514,7 @@ async fn fetch_evidence<S: DocumentStore, L: AppendLog>(
     source: &str,
     run: &str,
 ) -> Result<Value, ApiError> {
-    let src = t
-        .sources
-        .iter()
-        .find(|s| s.id() == source)
-        .ok_or_else(|| ApiError::not_found("source"))?;
+    let src = t.sources.get(source).ok_or_else(|| ApiError::not_found("source"))?;
     // Evidence leaves the runtime only on request, and every request is journalled.
     t.records
         .note(
@@ -552,12 +548,15 @@ async fn sources<S, L>(State(t): State<Shared<S, L>>, headers: HeaderMap) -> Api
     let fleet = t.fleet.read().await;
     let list: Vec<Value> = t
         .sources
-        .iter()
-        .map(|s| {
+        .listed()
+        .into_iter()
+        .map(|l| {
+            let s = &l.source;
             let state = fleet.sources.get(s.id());
             let d = state.map(|s| &s.deployment);
             json!({"id": s.id(), "url": s.config.url, "business_unit": s.config.business_unit, "region": s.config.region,
                 "environment": s.config.environment, "can_revoke": s.can_control(),
+                "origin": l.origin, "paused": l.paused, "collecting": l.collecting,
                 "state": state, "mode": d.map(|d| d["mode"].clone()), "tenant": d.map(|d| d["caller"]["tenant_id"].clone()),
                 "packs": d.map(|d| d["packs"].clone()), "guards": d.map(|d| d["guards"].clone()),
                 "controls": d.map(|d| d["support"]["supported_controls"].clone())})
@@ -999,9 +998,10 @@ async fn fleet_revocation<S: DocumentStore, L: AppendLog>(
             "kind (agent|capability|pack|adapter|principal), target and reason are required",
         ));
     }
-    let targets: Vec<&Arc<crate::source::Source>> = t
+    let targets: Vec<Arc<crate::source::Source>> = t
         .sources
-        .iter()
+        .active()
+        .into_iter()
         .filter(|s| s.can_control() && r.sources.as_ref().is_none_or(|ids| ids.iter().any(|i| i == s.id())))
         .collect();
     if targets.is_empty() {
@@ -1361,6 +1361,7 @@ where
     let console = tower.console.clone().map_or_else(Router::new, crate::console::routes);
     Router::new()
         .merge(console)
+        .merge(crate::ops::routes::<S, L>())
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/me", get(me::<S, L>))
         .route("/api/posture", get(posture::<S, L>))

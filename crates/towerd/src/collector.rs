@@ -113,6 +113,7 @@ pub async fn sync(
             state.head = page.head.unwrap_or(state.head);
             state.last_sync = Some(now());
             state.last_error = None;
+            state.anchor = page.entries.last().cloned();
         }
         *anchor = page.entries.last().cloned();
         if !more {
@@ -121,9 +122,16 @@ pub async fn sync(
     }
 }
 
-/// Runs [`sync`] for one source until its chain breaks.
+/// Runs [`sync`] for one source until its chain breaks, continuing from the last entry
+/// Tower verified from it (so a restarted collector never folds an entry twice).
 pub async fn run(source: Arc<Source>, fleet: Arc<RwLock<Fleet>>, every: Duration) {
-    let (mut keys, mut anchor, mut refreshed) = (None, None, None);
+    let mut anchor = fleet
+        .read()
+        .await
+        .sources
+        .get(source.id())
+        .and_then(|s| s.anchor.clone());
+    let (mut keys, mut refreshed) = (None, None);
     loop {
         if !sync(&source, &fleet, &mut keys, &mut anchor, &mut refreshed).await {
             return;

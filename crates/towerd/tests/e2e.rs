@@ -153,7 +153,16 @@ async fn tower(
     );
     // One collector pass, synchronously.
     let (mut keys, mut anchor, mut refreshed) = (None, None, None);
-    assert!(collector::sync(&tower.sources[0], &tower.fleet, &mut keys, &mut anchor, &mut refreshed).await);
+    assert!(
+        collector::sync(
+            &tower.sources.active()[0],
+            &tower.fleet,
+            &mut keys,
+            &mut anchor,
+            &mut refreshed
+        )
+        .await
+    );
     let app = api::router(tower.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -435,4 +444,35 @@ async fn without_intelligence_the_ai_routes_say_so() {
     )
     .await;
     assert_eq!(status, 501, "{out}");
+}
+
+#[tokio::test]
+async fn a_restarted_collector_continues_from_its_anchor() {
+    let rt = runtime().await;
+    let (_, tower) = tower(&rt, None).await;
+    let runs = |f: &towerd::fleet::Fleet| f.agents.values().map(|a| a.runs).sum::<u64>();
+    let before = runs(&*tower.fleet.read().await);
+    assert!(before > 0);
+    let every = std::time::Duration::from_millis(10);
+    assert!(tower.sources.start("eu-support", &tower.fleet, every, true));
+    assert!(tower.sources.start("eu-support", &tower.fleet, every, true));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let fleet = tower.fleet.read().await;
+    assert_eq!(runs(&fleet), before, "no entry is folded twice");
+    assert_eq!(fleet.sources["eu-support"].verified_to, 7);
+    assert!(fleet.sources["eu-support"].broken.is_none());
+    drop(fleet);
+
+    assert!(tower.sources.set_paused("eu-support", true));
+    assert!(tower.sources.active().is_empty());
+    assert!(
+        !tower.sources.start("eu-support", &tower.fleet, every, false),
+        "a paused source does not start"
+    );
+    let listed = tower.sources.listed();
+    assert!(listed[0].paused && !listed[0].collecting);
+    assert!(tower.sources.set_paused("eu-support", false));
+    assert!(tower.sources.start("eu-support", &tower.fleet, every, false));
+    assert!(tower.sources.remove("eu-support"));
+    assert!(tower.sources.get("eu-support").is_none());
 }
