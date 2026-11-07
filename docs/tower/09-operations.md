@@ -66,6 +66,12 @@ and picked up with *Reload keys*.
 | `base_url` | `https://api.anthropic.com` | Messages API base URL |
 | `max_turns` | `8` | Tool-use turns per question |
 
+### `[governance]`
+
+| Key | Default | Meaning |
+|---|---|---|
+| `two_person_restore` | `true` | Restoring a revoked target needs a second operator: one requests it (`POST /api/revocations/restore-requests`), another approves it, and only the approval acts on the runtimes. `POST /api/fleet/restore` then answers `409 two_person_required`. Revoking always stays one operator's action |
+
 ### `[collector]`
 
 | Key | Default | Meaning |

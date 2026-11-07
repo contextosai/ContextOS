@@ -42,6 +42,7 @@ export function Shell() {
   const critical = posture?.findings.by_severity.critical ?? 0;
   const pendingWaivers = waivers?.waivers.filter((w) => w.status === "requested").length ?? 0;
   const broken = posture?.sources.filter((s) => s.broken).length ?? 0;
+  const revoked = posture?.sources.reduce((sum, s) => sum + s.revoked, 0) ?? 0;
   const groups: [string, NavItem[]][] = [
     [
       "Oversee",
@@ -65,6 +66,7 @@ export function Shell() {
       "Fleet",
       [
         { to: "/fleet", label: "Runtimes", plane: "action", count: broken },
+        { to: "/revocations", label: "Revocations", plane: "action", count: revoked },
         { to: "/journal", label: "Journal", plane: "trust" },
       ],
     ],

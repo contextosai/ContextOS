@@ -256,6 +256,32 @@ The AI suggests options; the operator chooses and types the target to confirm. T
 journal entry is written before any runtime is called, so an interrupted kill switch is
 still on record. Each runtime records the change in its own chain too.
 
+## 3.7a Restore: two operators
+
+```mermaid
+stateDiagram-v2
+    [*] --> requested: operator A POST /api/revocations/restore-requests {kind, target, reason}
+    requested --> approved: operator B (≠ A) approve — journalled before any runtime is called
+    requested --> cancelled: A cancels
+    requested --> expired: a day passes
+    approved --> restored: every source restored
+    approved --> partially_restored: some sources failed
+    approved --> failed: none restored
+    restored --> [*]
+    partially_restored --> [*]
+    failed --> [*]
+    cancelled --> [*]
+    expired --> [*]
+```
+
+Revoking is one operator's action, so containment is never slowed down; restoring
+re-grants authority, so it takes a second operator (`[governance] two_person_restore`,
+on by default). Approval is a compare-and-swap on the request (`restore_approved`), so
+two operators approving at once cannot both act; the per-source results are recorded
+after (`restore_executed`). A source that failed is restored with a new request. The
+code is `crates/towerd/src/ops/revocations.rs`; the reconciled view of what is revoked
+is `crates/towerd/src/revocations.rs`.
+
 ## 3.8 Explain a run
 
 ```mermaid

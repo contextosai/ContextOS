@@ -216,6 +216,16 @@ impl Source {
         key_ring(&body).map_err(SourceError::Shape)
     }
 
+    /// The runtime's revocations in force (`{"revoked": [{kind, target, reason, by, at}]}`),
+    /// read with its `control` key; `None` when Tower holds none for this source.
+    pub async fn live_revocations(&self) -> Option<Result<Value, SourceError>> {
+        let token = self.control_token()?;
+        Some(
+            self.send(self.http.get(self.url("/v1/revocations")).bearer_auth(token))
+                .await,
+        )
+    }
+
     /// The `control` key, or which reference to set when there is none.
     fn require_control(&self) -> Result<String, SourceError> {
         self.control_token().ok_or_else(|| {

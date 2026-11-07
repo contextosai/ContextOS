@@ -18,7 +18,7 @@ still made by the runtime it passes through; Tower governs the fleet.
 | Head of AI risk, CISO | **Posture** | Agents, ownership and review coverage, critical findings, the most exposed agents, the controls the fleet's authority requires |
 | Agent owner | **Agents → their agent** | What the agent can do and the risk of each capability, the controls it needs and where they are missing, findings with fixes, declaration, waiver requests |
 | Risk reviewer | **Inbox**, **Agents → Review**, **Guardrails**, **Waivers** | Every runtime's escalations in one queue, oldest first, resolved by someone who neither declared nor owns the agent; intake review (with an AI draft), organisation guardrails written in plain language and checked against the real inventory, waiver decisions |
-| On-call operator | **Activity**, **Inbox**, **Runtimes** | Anomalies against each agent's own baseline with AI briefings, hand-offs waiting on a person, the fleet kill switch |
+| On-call operator | **Activity**, **Inbox**, **Revocations**, **Runtimes** | Anomalies against each agent's own baseline with AI briefings, hand-offs waiting on a person, the fleet kill switch, what is switched off everywhere (who, when, why, which agents it stops) and the two-person restore |
 | Auditor | **Journal** | Every governance decision in a signed chain that verifies offline |
 | Anyone | **Ask Tower** | Questions in plain language, answered from read-only tools with citations Tower checks |
 
