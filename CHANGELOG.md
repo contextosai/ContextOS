@@ -5,6 +5,23 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `contextos-litellm` (`integrations/litellm`): a LiteLLM proxy callback that meters
+  every model call against its run's budget. It claims the call's reservation before
+  forwarding it (refusing forged, reused and revoked ones, and failing closed when
+  contextosd is unreachable), caps the call's output tokens to the reservation, and
+  settles the usage the provider reported and LiteLLM's computed cost, with retries,
+  off the response path. Tested against LiteLLM 1.108.2 end to end.
+- `POST /v1/runs/{run_id}/usage/claim` (`meter`): a metering gateway claims a
+  model-call reservation for the one call it is about to forward and learns what the
+  reservation covers. The claim is a store document, so a reservation covers one call
+  across gateway and contextosd replicas; a claimed reservation settles as measured
+  only by the meter that claimed it.
+- `usage/settle` accepts an optional `model`.
+- Audit entries `usage_refused` (a reservation the budget or a revocation refused),
+  `usage_claimed` and `usage_settled` (every settlement: reporter, verified, model,
+  charged and measured usage), for reporting model spend.
+
 ## 0.1.0-alpha.16 - 2026-11-06
 
 Sixteenth alpha: hardening for production. Provider failover survives an endpoint that

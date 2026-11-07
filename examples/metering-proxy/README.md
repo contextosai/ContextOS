@@ -43,7 +43,11 @@ CONTEXTOS_METER_TOKEN=… python3 examples/metering-proxy/proxy.py \
 ```
 
 Standard library only; a reference for the contract, not a hardened gateway. In
-production, put the same behavior in the LLM gateway you already run.
+production, put the same behavior in the LLM gateway you already run: for the LiteLLM
+proxy, that is the [`contextos-litellm`](../../integrations/litellm) callback, which also
+claims each reservation before forwarding (`POST /v1/runs/{run}/usage/claim`), so a
+reused or forged reservation is refused across replicas rather than by this proxy's
+in-memory set.
 
 `./examples/metering-proxy/run.sh` tests it against a local contextosd and a fake model
 API (both providers, streamed and not, reuse, errors, missing usage):

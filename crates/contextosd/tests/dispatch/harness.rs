@@ -318,6 +318,11 @@ pub(crate) async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>)
         tenant_id = "{TENANT}"
         principal_id = "svc_llm_gateway"
         scopes = ["meter"]
+        [[api_keys]]
+        key_sha256 = "{meter_b}"
+        tenant_id = "{TENANT}"
+        principal_id = "svc_llm_gateway_b"
+        scopes = ["meter"]
         "#,
         manifest = manifest_path.display(),
         key = hash_api_key("acme-key"),
@@ -325,6 +330,7 @@ pub(crate) async fn world_setup(controls: &[&str]) -> (Config, Arc<AtomicUsize>)
         agent_judge = hash_api_key("agent-judge-key"),
         operator = hash_api_key("ops-key"),
         meter = hash_api_key("meter-key"),
+        meter_b = hash_api_key("meter-b-key"),
         app = hash_api_key("app-key")
     ))
     .unwrap();

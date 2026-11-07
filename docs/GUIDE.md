@@ -1623,8 +1623,23 @@ reported, and settles the reservation with it. If the call raises before the gat
 settles, the client settles it in full; if the gateway sees no usage in a successful
 response it leaves the reservation, which stays reserved until the executor settles it
 in full, because unknown usage is never free. One reservation covers one call.
-[`examples/metering-proxy`](../examples/metering-proxy) is a reference gateway for
-OpenAI Chat Completions and Responses and Anthropic Messages, streamed or not.
+
+A gateway claims the reservation before it forwards the call (`POST
+/v1/runs/{run_id}/usage/claim`, `meter` scope): contextosd refuses a forged, settled or
+replan reservation (`404 reservation_not_found`), one already claimed by any meter
+(`409 reservation_claimed`, in the store, so across gateway and contextosd replicas)
+and a revoked run (`403 revoked`), and answers with the tokens and cost the reservation
+covers so the gateway can cap the call's output. A claimed reservation settles as
+measured only by the meter that claimed it. Settlement may name the `model` that
+served the call. Refused reservations, claims and settlements are audited
+(`usage_refused`, `usage_claimed`, `usage_settled`); Tower reports model spend from them.
+
+For the LiteLLM proxy, install [`contextos-litellm`](../integrations/litellm) and add
+`contextos_litellm.metering_handler` to `litellm_settings.callbacks`: it claims, caps,
+settles measured usage and LiteLLM's computed cost with retries off the response path,
+and fails closed. [`examples/metering-proxy`](../examples/metering-proxy) is a
+standard-library reference of the same contract for OpenAI Chat Completions and
+Responses and Anthropic Messages, streamed or not.
 
 ### Checkpoint the orchestrator
 
