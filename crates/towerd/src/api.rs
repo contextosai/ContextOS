@@ -18,7 +18,9 @@
 //! | `GET/POST /api/guardrails`, `POST …/{id}/activate`, `…/retire` | risk (activate: not the author) | organisation guardrails |
 //! | `POST /api/guardrails/preview` | risk | a rule's impact on the current inventory |
 //! | `GET/POST /api/waivers`, `POST …/{id}/decide` | owner/risk (decide: risk, not the requester) | time-boxed exceptions |
-//! | `POST /api/fleet/revoke`, `POST /api/fleet/restore` | operator | kill switch on every runtime |
+//! | `POST /api/fleet/revoke`, `POST /api/fleet/restore` | operator | kill switch on every runtime (restore: only without `two_person_restore`) |
+//! | `GET /api/revocations` | viewer | what is revoked on every runtime, who did it and what it stops |
+//! | `GET/POST /api/revocations/restore-requests`, `POST …/{id}/approve`, `…/{id}/cancel` | operator (approve: not the requester; cancel: the requester) | two-person restore |
 //! | `POST /api/ask` | viewer | ask the analyst |
 //! | `POST /api/guardrails/draft` | risk | draft a guardrail from an intent |
 //! | `POST /api/agents/{key}/assess` | risk or owner | draft an intake review |
@@ -300,7 +302,8 @@ async fn me<S, L>(State(t): State<Shared<S, L>>, headers: HeaderMap) -> ApiResul
     let c = caller(&t, &headers, "viewer")?;
     ok(
         json!({"principal_id": c.principal_id, "roles": c.roles, "teams": c.teams,
-        "intelligence": t.model.as_ref().map(|m| m.name().to_owned())}),
+        "intelligence": t.model.as_ref().map(|m| m.name().to_owned()),
+        "two_person_restore": t.config.governance.two_person_restore}),
     )
 }
 
@@ -671,7 +674,7 @@ async fn review<S: DocumentStore, L: AppendLog>(
     ok(record)
 }
 
-fn add_days(now: &str, days: u32) -> String {
+pub(crate) fn add_days(now: &str, days: u32) -> String {
     let micros = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(0))
@@ -981,19 +984,19 @@ struct FleetRevocation {
     sources: Option<Vec<String>>,
 }
 
-async fn fleet_revocation<S: DocumentStore, L: AppendLog>(
+/// Kinds the fleet kill switch acts on.
+pub(crate) const FLEET_KINDS: [&str; 5] = ["agent", "capability", "pack", "adapter", "principal"];
+
+/// Checks a kill-switch change and picks the sources it acts on: those holding a
+/// control key, narrowed to `only` when given.
+pub(crate) fn revocation_targets<S, L>(
     t: &Tower<S, L>,
-    c: &Caller,
-    bytes: &Bytes,
-    revoke: bool,
-) -> ApiResult {
-    let r: FleetRevocation = body(bytes)?;
-    if !matches!(
-        r.kind.as_str(),
-        "agent" | "capability" | "pack" | "adapter" | "principal"
-    ) || r.target.is_empty()
-        || r.reason.trim().is_empty()
-    {
+    kind: &str,
+    target: &str,
+    reason: &str,
+    only: Option<&[String]>,
+) -> Result<Vec<Arc<crate::source::Source>>, ApiError> {
+    if !FLEET_KINDS.contains(&kind) || target.is_empty() || reason.trim().is_empty() {
         return Err(ApiError::bad(
             "kind (agent|capability|pack|adapter|principal), target and reason are required",
         ));
@@ -1002,11 +1005,41 @@ async fn fleet_revocation<S: DocumentStore, L: AppendLog>(
         .sources
         .active()
         .into_iter()
-        .filter(|s| s.can_control() && r.sources.as_ref().is_none_or(|ids| ids.iter().any(|i| i == s.id())))
+        .filter(|s| s.can_control() && only.is_none_or(|ids| ids.iter().any(|i| i == s.id())))
         .collect();
     if targets.is_empty() {
         return Err(ApiError::bad("No selected source holds a control key."));
     }
+    Ok(targets)
+}
+
+/// Applies a revocation change on each source; one result per source.
+pub(crate) async fn apply_revocation(
+    targets: &[Arc<crate::source::Source>],
+    revoke: bool,
+    kind: &str,
+    target: &str,
+    reason: &str,
+) -> Vec<Value> {
+    let mut results = Vec::new();
+    for s in targets {
+        let outcome = s.revocation(revoke, kind, target, reason).await;
+        results.push(match outcome {
+            Ok(_) => json!({"source": s.id(), "ok": true}),
+            Err(e) => json!({"source": s.id(), "ok": false, "error": e.to_string()}),
+        });
+    }
+    results
+}
+
+async fn fleet_revocation<S: DocumentStore, L: AppendLog>(
+    t: &Tower<S, L>,
+    c: &Caller,
+    bytes: &Bytes,
+    revoke: bool,
+) -> ApiResult {
+    let r: FleetRevocation = body(bytes)?;
+    let targets = revocation_targets(t, &r.kind, &r.target, &r.reason, r.sources.as_deref())?;
     let now = wall_clock();
     let reason = format!("{} (via Tower, {})", r.reason, c.principal_id);
     // Journalled before any runtime is touched, so an interrupted action is still on record.
@@ -1018,14 +1051,7 @@ async fn fleet_revocation<S: DocumentStore, L: AppendLog>(
             &now,
         )
         .await?;
-    let mut results = Vec::new();
-    for s in targets {
-        let outcome = s.revocation(revoke, &r.kind, &r.target, &reason).await;
-        results.push(match outcome {
-            Ok(_) => json!({"source": s.id(), "ok": true}),
-            Err(e) => json!({"source": s.id(), "ok": false, "error": e.to_string()}),
-        });
-    }
+    let results = apply_revocation(&targets, revoke, &r.kind, &r.target, &reason).await;
     ok(json!({"results": results}))
 }
 
@@ -1044,6 +1070,14 @@ async fn restore<S: DocumentStore, L: AppendLog>(
     bytes: Bytes,
 ) -> ApiResult {
     let c = caller(&t, &headers, "operator")?;
+    if t.config.governance.two_person_restore {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "two_person_required",
+            "Restoring needs a second operator: request the restore on the Revocations page \
+             (POST /api/revocations/restore-requests) and have another operator approve it.",
+        ));
+    }
     fleet_revocation(&t, &c, &bytes, false).await
 }
 

@@ -82,6 +82,8 @@ export interface Me {
   roles: string[];
   teams: string[];
   intelligence: string | null;
+  /** Restores need a request and a second operator's approval. */
+  two_person_restore?: boolean;
 }
 
 export function useMe() {

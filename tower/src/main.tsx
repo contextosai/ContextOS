@@ -15,6 +15,7 @@ import { Guardrails } from "./pages/Guardrails";
 import { Waivers } from "./pages/Waivers";
 import { Ask } from "./pages/Ask";
 import { Fleet } from "./pages/Fleet";
+import { Revocations } from "./pages/Revocations";
 import { Journal } from "./pages/Journal";
 import { NotFound } from "./pages/NotFound";
 
@@ -42,6 +43,7 @@ const router = createBrowserRouter(
         { path: "waivers", element: <Waivers /> },
         { path: "ask", element: <Ask /> },
         { path: "fleet", element: <Fleet /> },
+        { path: "revocations", element: <Revocations /> },
         { path: "journal", element: <Journal /> },
         { path: "*", element: <NotFound /> },
       ],

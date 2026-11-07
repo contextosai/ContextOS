@@ -135,13 +135,17 @@ sentence and shows which agents it would flag before anyone can save it.
 ### A7. Operator: stop something everywhere
 
 ```sh
-as $ONCALL -X POST $TOWER/api/fleet/restore -d '{"kind": "capability",
-  "target": "adp_payments.issue_refund", "reason": "INC-7 resolved"}'
+as $ONCALL $TOWER/api/revocations | jq '.revocations[] | {target, via_tower, affected}'
+R=$(as $ONCALL -X POST $TOWER/api/revocations/restore-requests -d '{"kind": "capability",
+  "target": "adp_payments.issue_refund", "reason": "INC-7 resolved: fix deployed"}' | jq -r .id)
+as $RB -X POST $TOWER/api/revocations/restore-requests/$R/approve   # a second operator
 ```
 
-This restores the refund capability the script revoked, on every runtime Tower holds a
-control key for. Runtimes shows the result; the runtime's own chain records it, and
-Tower's change feed picks it up on the next poll.
+Revocations lists the refund capability the script revoked, who revoked it and which
+agents it stops. Restoring it takes two operators: on-call requests, `risk-b` (the
+example's second operator) approves, and only then is it restored on every runtime
+Tower holds a control key for. The runtime's own chain records it, and Tower's change
+feed picks it up on the next poll.
 
 ### A8. Auditor: verify the record
 

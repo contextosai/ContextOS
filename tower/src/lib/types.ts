@@ -182,3 +182,46 @@ export const PROFILE_LABEL: Record<string, string> = {
   "contextos.durable-delegated": "Durable-delegated",
   "contextos.high-assurance": "High-assurance",
 };
+
+export type Provenance = "verified" | "runtime_only" | "chain_only" | "chain";
+
+export interface Revocation {
+  source: string;
+  kind: string;
+  target: string;
+  reason: string;
+  /** The runtime principal that made the change. */
+  by: string | null;
+  /** The Tower user, when the change came through Tower. */
+  via_tower: string | null;
+  at: string | null;
+  sequence: number | null;
+  provenance: Provenance;
+  mismatch: boolean;
+  affected: string[];
+  refusals: number;
+}
+
+export interface RevocationsView {
+  revocations: Revocation[];
+  mismatches: number;
+  sources: { id: string; live: "read" | "no_control_key" | "paused" | "error"; error?: string }[];
+  pending_requests: number;
+  two_person_restore: boolean;
+}
+
+export interface RestoreRequest {
+  id: string;
+  kind: string;
+  target: string;
+  sources: string[] | null;
+  reason: string;
+  status: "requested" | "approved" | "restored" | "partially_restored" | "failed" | "cancelled" | "expired";
+  requested_by: string;
+  requested_at: string;
+  expires_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  executed_at?: string;
+  results?: { source: string | null; ok: boolean; error?: string }[];
+}

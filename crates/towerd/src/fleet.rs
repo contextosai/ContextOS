@@ -162,6 +162,17 @@ pub struct Change {
     pub by: Option<String>,
 }
 
+/// A revocation in force, as the source's audit chain records it.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct Revoked {
+    pub kind: String,
+    pub target: String,
+    pub reason: String,
+    pub by: Option<String>,
+    pub at: String,
+    pub sequence: u64,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SourceState {
     pub id: String,
@@ -175,6 +186,9 @@ pub struct SourceState {
     pub unattributed: u64,
     /// Kill-switch state from the chain: `kind:target` → reason.
     pub revoked: BTreeMap<String, String>,
+    /// The same revocations with who revoked each, when, and at which entry.
+    #[serde(skip)]
+    pub revocations: BTreeMap<String, Revoked>,
     pub conformance: Vec<Value>,
     #[serde(skip)]
     pub deployment: Value,
@@ -589,8 +603,20 @@ impl Fleet {
                     let state = self.source(source);
                     if restored {
                         state.revoked.remove(&target);
+                        state.revocations.remove(&target);
                     } else {
                         state.revoked.insert(target.clone(), reason.clone());
+                        state.revocations.insert(
+                            target.clone(),
+                            Revoked {
+                                kind: s(&p["kind"]).unwrap_or("?").to_owned(),
+                                target: s(&p["target"]).unwrap_or("?").to_owned(),
+                                reason: reason.clone(),
+                                by: s(&p["operator"]).map(str::to_owned),
+                                at: at.to_owned(),
+                                sequence: entry.sequence,
+                            },
+                        );
                     }
                 }
                 let verb = if restored { "Restored" } else { "Revoked" };

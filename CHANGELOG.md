@@ -5,6 +5,24 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- Tower **Revocations** view (`GET /api/revocations`): every revocation in force across
+  the fleet, reconciled between each runtime's live list and its verified audit chain
+  (`verified`, `runtime_only`, `chain_only`, `chain`), with who revoked it (the runtime
+  principal and the Tower user), when, at which chain entry, the agents it stops and
+  the refusals it has caused them.
+- Two-person restore in Tower: `POST /api/revocations/restore-requests`, then
+  `…/{id}/approve` by another operator (or `…/{id}/cancel` by the requester), each step
+  in Tower's journal (`restore_requested`, `restore_approved`, `restore_executed`,
+  `restore_cancelled`).
+
+### Changed
+- Tower `[governance] two_person_restore` defaults to `true`: `POST /api/fleet/restore`
+  answers `409 two_person_required` and restores go through a request and a second
+  operator's approval. Set it to `false` to keep one-operator restores. Revoking is
+  unchanged. `GET /api/me` reports the setting. In `examples/tower`, `risk-b` is also an
+  operator, so the example can approve a restore.
+
 ## 0.1.0-alpha.16 - 2026-11-06
 
 Sixteenth alpha: hardening for production. Provider failover survives an endpoint that

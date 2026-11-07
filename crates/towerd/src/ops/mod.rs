@@ -6,11 +6,13 @@ use contextos_store::{AppendLog, DocumentStore};
 
 use crate::api::Shared;
 
+pub mod revocations;
+
 /// The routes of every operational console module.
 pub fn routes<S, L>() -> Router<Shared<S, L>>
 where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
-    Router::new()
+    Router::new().merge(revocations::routes())
 }

@@ -12,6 +12,7 @@ pub mod intel;
 pub mod ops;
 pub mod records;
 pub mod registry;
+pub mod revocations;
 pub mod source;
 
 use std::sync::Arc;

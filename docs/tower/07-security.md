@@ -44,6 +44,8 @@ flowchart LR
     R2(["risk reviewer 2"]) -- activates --> G
     R2 -- decides --> W
     OP(["operator"]) -- kill switch --> RT["Runtimes"]
+    OP -- requests restore --> RR["Restore request"]
+    OP2(["operator 2"]) -- approves --> RR
     AI["Claude"] -. "drafts and explains only" .-> R1
 ```
 
@@ -55,7 +57,9 @@ flowchart LR
 | Activate a guardrail | risk, admin | the activator drafted it; it is not a draft |
 | Request a waiver | owner, risk, admin | reason under 10 characters; outside 1–180 days |
 | Decide a waiver | risk, admin | the decider requested it; already decided |
-| Fleet kill switch | operator, admin | no selected source has a control key |
+| Fleet kill switch (revoke) | operator, admin | no selected source has a control key |
+| Restore across the fleet | operator, admin | with `two_person_restore` (default): only through a request; the approver requested it; the request expired or was decided; reason under 10 characters |
+| Withdraw a restore request | the requester | it is no longer waiting |
 | AI drafts and briefs | as listed in [Intelligence](05-intelligence.md) | intelligence off |
 
 Separation of duties is checked against principal ids in `towerd`, not only hidden in

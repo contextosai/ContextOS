@@ -131,6 +131,16 @@ impl Source {
         key_ring(&body).map_err(SourceError::Shape)
     }
 
+    /// The runtime's revocations in force (`{"revoked": [{kind, target, reason, by, at}]}`),
+    /// read with its `control` key; `None` when Tower holds none for this source.
+    pub async fn live_revocations(&self) -> Option<Result<Value, SourceError>> {
+        let token = self.control_token.as_ref()?;
+        Some(
+            self.send(self.http.get(self.url("/v1/revocations")).bearer_auth(token))
+                .await,
+        )
+    }
+
     /// Revokes or restores a target on this runtime with its `control` key.
     pub async fn revocation(&self, revoke: bool, kind: &str, target: &str, reason: &str) -> Result<Value, SourceError> {
         let token = self.control_token.as_ref().ok_or_else(|| {

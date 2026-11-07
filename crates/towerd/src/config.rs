@@ -25,6 +25,8 @@ pub struct Config {
     pub intelligence: IntelligenceConfig,
     #[serde(default)]
     pub collector: CollectorConfig,
+    #[serde(default)]
+    pub governance: GovernanceConfig,
     /// The Tower UI build (`tower/dist`).
     #[serde(default)]
     pub tower: Option<TowerConfig>,
@@ -175,6 +177,29 @@ fn default_recent() -> usize {
 }
 fn default_hours() -> usize {
     24 * 30
+}
+
+/// How Tower's own governance actions are approved.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GovernanceConfig {
+    /// Restoring a revoked target needs a second operator: one requests the restore,
+    /// another approves it, and only the approval acts on the runtimes. Revoking stays
+    /// a single operator's action, so containment is never slowed down.
+    #[serde(default = "default_true")]
+    pub two_person_restore: bool,
+}
+
+impl Default for GovernanceConfig {
+    fn default() -> Self {
+        Self {
+            two_person_restore: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

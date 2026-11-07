@@ -17,7 +17,7 @@ t() { curl -s -H "authorization: Bearer $KEY" -H 'content-type: application/json
 | `viewer` | Read everything; ask; explain runs |
 | `owner` | Viewer, plus declare agents of their `teams`, request waivers, draft intake reviews |
 | `risk` | Viewer, plus declare any agent, review agents, create, activate and retire guardrails, decide waivers, draft guardrails and reviews, brief anomalies |
-| `operator` | Viewer, plus the fleet kill switch and anomaly briefs |
+| `operator` | Viewer, plus the fleet kill switch, restore requests and approvals (not their own), and anomaly briefs |
 | `admin` | Everything |
 
 Every authenticated caller is a viewer. Separation of duties is enforced regardless of
@@ -203,6 +203,62 @@ with a control key (or the listed `sources`), each through its own `POST
 /v1/revocations`. Journal: `fleet_revoked` / `fleet_restored`, written before any runtime
 is called.
 
+With `[governance] two_person_restore` (the default), `POST /api/fleet/restore` answers
+`409 two_person_required`: restores go through a request and a second operator's
+approval (below). `GET /api/me` reports the setting as `two_person_restore`.
+
+### `GET /api/revocations` (viewer)
+
+What is switched off right now on every source, who did it, when, and what it stops.
+
+```sh
+t $TOWER/api/revocations
+# → {"revocations": [{"source": "acme-support-eu", "kind": "capability",
+#      "target": "adp_payments.issue_refund", "reason": "INC-7 (via Tower, oncall)",
+#      "by": "svc_tower_control", "via_tower": "oncall", "at": "…", "sequence": 412,
+#      "provenance": "verified", "mismatch": false,
+#      "affected": ["tenant_acme_prod/agt_support"], "refusals": 3}],
+#    "mismatches": 0, "pending_requests": 0, "two_person_restore": true,
+#    "sources": [{"id": "acme-support-eu", "live": "read"}]}
+```
+
+Each source's live list (`GET /v1/revocations`, read with its control key, 5 s timeout)
+is reconciled with the revocations Tower verified in its audit chain:
+
+| `provenance` | Meaning |
+|---|---|
+| `verified` | In force on the runtime and recorded in its verified chain |
+| `runtime_only` | In force, not yet in the chain Tower verified (collector lag, or a chain Tower stopped reading) |
+| `chain_only` | In the verified chain, but the runtime does not list it (its store changed behind its audit) |
+| `chain` | From the chain alone: Tower holds no control key, the source is paused, or the live read failed (`sources[].live` says which) |
+
+`runtime_only` and `chain_only` are counted in `mismatches`. `by` is the runtime
+principal; `via_tower` is the Tower user when the change came through Tower.
+`affected` lists the agents on that source whose runs it stops (agent, principal, pack
+and tenant targets from admissions; capability and adapter targets from the authority
+graph); `refusals` counts `revoked_<kind>` refusals of those agents in the activity
+window.
+
+### Restore requests (operator)
+
+```sh
+R=$(as $ONCALL -X POST $TOWER/api/revocations/restore-requests -d '{"kind": "capability",
+  "target": "adp_payments.issue_refund", "reason": "INC-7 resolved: fix deployed", "sources": null}' | jq -r .id)
+as $ONCALL -X POST $TOWER/api/revocations/restore-requests/$R/approve   # 403: not the requester
+as $RB -X POST $TOWER/api/revocations/restore-requests/$R/approve       # restores, per-source results
+t $TOWER/api/revocations/restore-requests                                # newest first
+```
+
+| Route | Who | Effect |
+|---|---|---|
+| `POST /api/revocations/restore-requests` | operator | `{kind, target, reason (≥ 10 chars), sources?}`; one open request per target (`409`); expires after a day |
+| `POST …/{id}/approve` | operator, not the requester | marks it approved (once: a second approval is `409`), then restores on each source; `status` becomes `restored`, `partially_restored` or `failed`, with `results` |
+| `POST …/{id}/cancel` | the requester | withdraws a waiting request |
+| `GET /api/revocations/restore-requests` | viewer | the last 200 requests, newest first |
+
+Journal: `restore_requested`, `restore_approved` (before any runtime is called),
+`restore_executed` (with per-source results), `restore_cancelled`.
+
 ## Intelligence
 
 | Route | Body | Returns |
@@ -227,4 +283,5 @@ These are part of the `contextosd` OpenAPI document (`openapi/contextosd.v1.json
 | `GET /v1/packs` | `audit:read` | `{"packs": [{"pack_ref", "pack"}]}` for the tenant |
 | `GET /v1/runs/{id}/evidence` | `audit:read` | Explain and evidence on request |
 | `POST /v1/revocations`, `POST /v1/revocations/restore` | `control` | Fleet kill switch |
+| `GET /v1/revocations` | `control` | The live list the Revocations view reconciles with the chain |
 | `GET /v1/config`, `POST /v1/config/validate` | `config` | Configuration review in CI (not used by `towerd`) |
