@@ -2292,6 +2292,52 @@ business_unit = "Customer Operations"
 Roles: `viewer`, `owner` (their teams' agents), `risk`, `operator`, `admin`. Try it:
 `./examples/tower/run.sh --serve`, then open `http://127.0.0.1:8090/tower/`.
 
+### Hold a consequential workflow to the full set of controls
+
+A refund is safe to run unattended only when several separately configured mechanisms
+are all in place. Leave any one out and the runtime still works, so nothing reports
+the gap. The `[readiness]` profile reports it. It is opt-in:
+
+```toml
+[readiness]
+mode = "required"                               # "report": warn, do not refuse
+capabilities = ["adp_payments.issue_refund"]    # unset: every consequential capability
+global_evidence = ["policy.eval"]               # requirements not about one subject
+```
+
+A capability is consequential when its `action_risk.effect` is `external_state` or
+`physical_world`. For each one, the profile checks:
+
+| Area | Must hold | Without it |
+|---|---|---|
+| `finality` | `recovery.completion` and `recovery.reference_pointer` | the call is settled by a status code, and the effect has no provider id to reconcile or witness |
+| `witness` | an `outcome` contract | the run completes without an independent source confirming the effect |
+| `owner` | a `[[guarantees]]` entry covering it, with `owner_route` | concurrent runs can together exceed the business limit; aged holds reach no one |
+| `resource` | `resource_pointers` | effects are not tied to the order or account they change |
+
+For the deployment as a whole, it checks:
+
+| Area | Must hold | Without it |
+|---|---|---|
+| `evidence` | `[guards] evidence = "strict"`, and every pack's gated requirement bound in `[[evidence_subjects]]` or listed in `global_evidence` | callers assert their own evidence, or an attestation about customer A satisfies a refund to customer B |
+| `actor` | `[guards] agent_binding = "required"` | a run may declare an agent its credential was not issued for |
+
+With `required`, both `contextosd --check-config` and startup refuse the configuration
+and list every gap at once:
+
+```text
+workflow readiness (required): 3 gap(s) across adp_payments.issue_refund:
+  adp_payments.issue_refund [witness]: no outcome contract: the run can complete without an independent witness confirming the effect
+  adp_payments.issue_refund [owner]: no covering guarantee names an owner_route: an aged hold reaches no business owner
+  deployment [actor]: agent_binding = "observe": a run may declare an agent its credential was not issued for
+```
+
+With `report`, each gap is a warning. Start with `report` on an existing deployment,
+close the gaps, then switch to `required`. The checks read only the configuration,
+packs and manifests: a ready configuration still depends on the witness and the owner
+actually answering. Packs reloaded later are not re-checked, so run `--check-config`
+in CI before shipping one.
+
 ### Check configuration changes in CI
 
 The configuration file stays the source of truth and is reviewed like code. The

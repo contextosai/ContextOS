@@ -30,6 +30,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `pack_reload_secs` | integer | `0` | Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only. |
 | `packs` | array of string | `[]` | Context Pack JSON files to load at startup. |
 | `providers` | table | unset | Remote fact services; dispatch is disabled without them. |
+| `readiness` | table | unset | Opt-in profile holding consequential workflows to every safety mechanism they rely on (see `workflow_readiness`). Unset: not checked. |
 | `result_schemas` | array of tables | `[]` | Schemas delegated runs' results must meet, by the `output_schema_ref` a delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`. |
 | `retention` | table | see below | Retention of runs' personal content (see `retention`); off by default. |
 | `retired_capabilities` | array of string | `[]` | Manifests of versions `capabilities` replaced, kept while operations claimed under them may still need reconciliation or attestation. Never dispatched. |

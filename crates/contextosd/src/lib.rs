@@ -49,6 +49,7 @@ pub mod tool_call_check;
 pub mod upstream_check;
 pub mod usage_api;
 pub mod user_binding;
+pub mod workflow_readiness;
 
 use std::collections::HashMap;
 use std::sync::Arc;

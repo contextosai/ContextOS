@@ -87,6 +87,10 @@ pub struct Config {
     /// Providers that perform effects: MCP servers or HTTP services.
     #[serde(default)]
     pub adapters: Vec<AdapterConfig>,
+    /// Opt-in profile holding consequential workflows to every safety mechanism they
+    /// rely on (see [`crate::workflow_readiness`]). Unset: not checked.
+    #[serde(default)]
+    pub readiness: Option<crate::workflow_readiness::ReadinessConfig>,
     /// The TOML text this configuration was parsed from (served by `GET /v1/config`).
     #[serde(skip)]
     pub source: String,
@@ -151,6 +155,7 @@ impl Config {
         crate::evidence_admission::check(&config).map_err(ConfigError::Invalid)?;
         crate::evidence_issuers::Issuers::new(&config.evidence_issuers).map_err(ConfigError::Invalid)?;
         crate::evidence_subjects::check(&config.evidence_subjects).map_err(ConfigError::Invalid)?;
+        crate::workflow_readiness::check(&config).map_err(ConfigError::Invalid)?;
         crate::notifications::check(&config).map_err(ConfigError::Invalid)?;
         crate::audit_sinks::check(&config).map_err(ConfigError::Invalid)?;
         contextos_gateway::circuit_breakers::validate(&config.guards.circuit_breakers).map_err(ConfigError::Invalid)?;
