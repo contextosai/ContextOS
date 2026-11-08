@@ -19,6 +19,7 @@ import { Fleet } from "./pages/Fleet";
 import { Revocations } from "./pages/Revocations";
 import { Journal } from "./pages/Journal";
 import { Spend } from "./pages/Spend";
+import { Approvals } from "./pages/Approvals";
 import { NotFound } from "./pages/NotFound";
 
 const client = new QueryClient({
@@ -42,6 +43,7 @@ const router = createBrowserRouter(
         { path: "findings", element: <FindingsPage /> },
         { path: "activity", element: <Activity /> },
         { path: "spend", element: <Spend /> },
+        { path: "approvals", element: <Approvals /> },
         { path: "guardrails", element: <Guardrails /> },
         { path: "waivers", element: <Waivers /> },
         { path: "inbox", element: <Inbox /> },

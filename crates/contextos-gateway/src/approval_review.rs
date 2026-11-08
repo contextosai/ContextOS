@@ -9,16 +9,16 @@
 //! must be made at least `min_review_seconds` after the approval was requested.
 //!
 //! The request time is the gateway's own: it is recorded when the gateway asks the
-//! approval service for an approval. For a request the gateway did not make, the
+//! approval service for an approval (see [`crate::approval_events`]). For a request the gateway did not make, the
 //! request's `not_before` is used. A decision that is too fast is not used: the call
 //! needs an approval again (`approval_review_too_fast`, obligation `review_again`),
 //! and the refusal is audited with the measured seconds. `decided_at` is the approval
 //! service's claim, as everything about a decision is.
 
 use contextos_contract::validation::elapsed_millis;
-use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, StoreError};
+use contextos_store::{AppendLog, DocumentStore};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::admission::RunAdmission;
 use crate::step_up::AmountThreshold;
@@ -83,31 +83,9 @@ impl ReviewPolicy {
     }
 }
 
-fn key(tenant_id: &str, request_id: &str) -> DocKey {
-    DocKey::new(tenant_id, DocKind::ApprovalRequested, request_id)
-}
+use crate::approval_events::requested_key as key;
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
-    /// Records when the gateway asked for approval `request_id` (the first time).
-    pub(crate) async fn note_approval_requested(
-        &self,
-        admission: &RunAdmission,
-        request_id: &str,
-        now: &str,
-    ) -> Result<(), StoreError> {
-        if self.approval_review.is_none() {
-            return Ok(());
-        }
-        match self
-            .store
-            .create(&key(&admission.tenant_id, request_id), &json!({"requested_at": now}))
-            .await
-        {
-            Err(e) if !e.is_conflict() => Err(e),
-            _ => Ok(()),
-        }
-    }
-
     /// `material` unless its approval was decided too fast; then `None`, with the
     /// request id and measured seconds.
     pub(crate) async fn review_approval(
@@ -154,6 +132,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn material(decided: &[&str]) -> Map<String, Value> {
         let decisions: Vec<Value> = decided

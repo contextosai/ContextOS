@@ -15,6 +15,12 @@ minor versions may break APIs and every break is listed.
   Identical calls that are distinct effects need keys of their own.
 
 ### Added
+- Approval events: the gateway audits `approval_requested` the first time it asks for
+  an approval and `approval_redeemed` when one is redeemed, with the approvers,
+  `decided_at` and the decision time from its own request time. Tower folds them,
+  with review-floor and step-up refusals, into an Approvals page and
+  `GET /api/approvals`: decision-time buckets, the share decided within ten seconds,
+  per capability and per approver.
 - Spend caps from shared guarantees: `resource_from = "actor"` or `"tenant"` limits
   what each agent or the whole tenant commits, with no argument naming the cap;
   `amount_table` reserves an estimate looked up by an argument (recorded as

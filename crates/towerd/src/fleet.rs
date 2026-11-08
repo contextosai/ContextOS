@@ -213,6 +213,8 @@ pub struct Fleet {
     pub agents: BTreeMap<AgentKey, AgentActivity>,
     /// Model spend per agent (see [`crate::spend`]).
     pub spend: BTreeMap<AgentKey, crate::spend::AgentSpend>,
+    /// Approval quality per capability and approver (see [`crate::approvals`]).
+    pub approvals: crate::approvals::Approvals,
     runs: HashMap<(String, String), RunSummary>,
     order: VecDeque<(String, String)>,
     traces: HashMap<(String, String), String>,
@@ -286,6 +288,7 @@ impl Fleet {
             sources: BTreeMap::new(),
             agents: BTreeMap::new(),
             spend: BTreeMap::new(),
+            approvals: crate::approvals::Approvals::default(),
             runs: HashMap::new(),
             order: VecDeque::new(),
             traces: HashMap::new(),
@@ -693,6 +696,7 @@ impl Fleet {
                 ),
                 s(&p["reporter"]),
             ),
+            kind if crate::approvals::is_approval(kind) => self.approvals.apply(entry),
             kind if crate::spend::is_usage(kind) => {
                 if let Some(k) = &agent {
                     self.spend.entry(k.clone()).or_default().apply(entry);
