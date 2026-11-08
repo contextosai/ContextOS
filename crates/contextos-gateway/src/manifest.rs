@@ -479,6 +479,54 @@ impl CapabilityManifest {
     }
 }
 
+/// Words in a tool or capability name that usually mean the call destroys or replaces
+/// something. A naming hint for reviewers, never a decision: `ctx init-tool` offers
+/// it, and startup notes a capability so named that is declared reversible or
+/// approved below `destructive`.
+const DESTRUCTIVE_VERBS: &[&str] = &[
+    "delete",
+    "drop",
+    "destroy",
+    "terminate",
+    "purge",
+    "truncate",
+    "wipe",
+    "erase",
+    "remove",
+    "rm",
+    "reset",
+    "replace",
+    "overwrite",
+    "deprovision",
+    "decommission",
+    "kill",
+    "shutdown",
+    "format",
+];
+
+/// The destructive verb `name` contains as a word (split on `_`, `-`, `.`, `/` and
+/// lower-to-upper case changes), if any.
+#[must_use]
+pub fn destructive_verb(name: &str) -> Option<&'static str> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if (!c.is_ascii_alphanumeric() || (c.is_ascii_uppercase() && previous_lower)) && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        if c.is_ascii_alphanumeric() {
+            word.push(c.to_ascii_lowercase());
+        }
+        previous_lower = c.is_ascii_lowercase();
+    }
+    words.push(word);
+    DESTRUCTIVE_VERBS
+        .iter()
+        .copied()
+        .find(|verb| words.iter().any(|w| w == verb))
+}
+
 /// Marks a field of a drafted manifest (`ctx init-tool`) that a person must decide.
 pub const REVIEW_MARKER: &str = "REVIEW:";
 

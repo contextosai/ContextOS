@@ -77,6 +77,10 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::information_flow`]). Unset: off.
     #[serde(default)]
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
+    /// The environment this gateway serves; calls aimed at another are refused (or,
+    /// observing, audited; see [`contextos_gateway::environment_guard`]). Unset: off.
+    #[serde(default)]
+    pub environments: Option<contextos_gateway::environment_guard::EnvironmentPolicy>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -157,6 +161,7 @@ impl Default for GuardsConfig {
             evidence: None,
             approval_step_up: None,
             information_flow: None,
+            environments: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

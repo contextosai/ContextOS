@@ -15,6 +15,16 @@ minor versions may break APIs and every break is listed.
   Identical calls that are distinct effects need keys of their own.
 
 ### Added
+- `[guards.environments]`: a gateway names the environment it serves and, per
+  capability, how to tell a call's target (a fixed `environment`, or an argument
+  `pointer` matched against `prefixes`). Calls aimed at another environment are
+  refused (`environment_mismatch`, or `environment_unresolved` when the target cannot
+  be placed) and audited as `environment_refusal`; `mode = "observe"` audits only.
+- Startup notes capabilities named like destructive calls (`delete`, `drop`,
+  `replace`, ...) that are declared reversible or approved below `destructive`;
+  `ctx init-tool` puts the same hint in the drafted review text.
+- `deploy/profiles/consequential-tools.toml` and `observe-first.toml`: starter
+  configurations for the consequential-tool gate, enforced and observing.
 - `contextos.integrations` (Python client): `langgraph.ContextOSMiddleware` (budgeted
   model calls, refusals as tool errors, approval pauses as resumable LangGraph
   interrupts) and `openai_agents` (`GatewayApprovals`, which raises the gateway's own

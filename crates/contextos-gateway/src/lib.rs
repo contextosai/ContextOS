@@ -30,6 +30,7 @@ mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
+pub mod environment_guard;
 mod erasure;
 mod escalation;
 mod exposure_import;
@@ -104,8 +105,8 @@ pub use findings::{
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{
-    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy, is_path_segment,
-    unreviewed,
+    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy,
+    destructive_verb, is_path_segment, unreviewed,
 };
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
@@ -273,6 +274,9 @@ pub struct Gateway<S, L> {
     approval_step_up: Option<step_up::StepUpPolicy>,
     /// Information-flow labels and the rules on them (see [`information_flow`]).
     information_flow: Option<information_flow::FlowPolicy>,
+    /// The environment this gateway serves and how to tell a call's target (see
+    /// [`environment_guard`]).
+    environments: Option<environment_guard::EnvironmentPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -517,6 +521,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             resource_identity: None,
             approval_step_up: None,
             information_flow: None,
+            environments: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -541,6 +546,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// [`information_flow`]).
     pub fn set_information_flow(&mut self, policy: Option<information_flow::FlowPolicy>) {
         self.information_flow = policy;
+    }
+
+    /// Refuses (or, observing, audits) calls aimed at another environment than the one
+    /// `policy` names (see [`environment_guard`]).
+    pub fn set_environments(&mut self, policy: Option<environment_guard::EnvironmentPolicy>) {
+        self.environments = policy;
     }
 
     /// Requires approvers' step-up for the approvals `policy` covers (see [`step_up`]).
@@ -1072,6 +1083,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "The upstream tool has not been checked against its review yet; retry shortly."
             };
             return Ok(p.stop("blocked", vec![reason.into()], message));
+        }
+        if let Some(policy) = &self.environments
+            && let Some(mismatch) = policy.check(&manifest.capability_id, &envelope["args"])
+        {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "gateway_environment": policy.current,
+                "target_environment": mismatch.target, "enforced": policy.enforced(),
+                "reason_codes": [mismatch.reason]});
+            self.record(&mut p, "environment_refusal", body, &now).await?;
+            if policy.enforced() {
+                return Ok(p.stop(
+                    "blocked",
+                    vec![mismatch.reason.into()],
+                    &format!(
+                        "This gateway serves {}; the call's target is {}.",
+                        policy.current,
+                        mismatch.target.as_deref().unwrap_or("in no known environment")
+                    ),
+                ));
+            }
         }
         if let Some(Err(reasons)) = boundary {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": reasons});

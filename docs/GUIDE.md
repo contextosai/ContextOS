@@ -1839,6 +1839,49 @@ derived from the intent instead of the run's operation, so a provider that dedup
 by key also recognises the request across runs. Repeatable capabilities cannot declare
 an intent.
 
+### Effects aimed at another environment
+
+Agents reach production through credentials they were never meant to use: a staging
+task finds a production token, and one call deletes a production volume and its
+backups. Scope credentials first; at the tool boundary, a gateway can also serve one
+environment and refuse effects aimed at another:
+
+```toml
+[guards.environments]
+current = "staging"                 # the environment this gateway serves
+mode = "required"                   # observe: audit, do not refuse
+[[guards.environments.targets]]
+capabilities = ["adp_infra.delete_volume", "adp_infra.replace_stack"]
+pointer = "/volume_id"              # the argument naming the target
+prefixes = { "prod-" = "production", "stg-" = "staging" }   # longest match wins
+# unmatched = "allow"               # default "refuse": a target it cannot place is refused
+[[guards.environments.targets]]
+capabilities = ["adp_payments_live.issue_refund"]
+environment = "production"          # every call of these targets production
+```
+
+A call whose target is another environment is refused with `environment_mismatch`; one
+whose target cannot be placed, with `environment_unresolved`. Either way an
+`environment_refusal` audit entry names the gateway's environment, the target's and
+whether it was enforced. Capabilities no rule names are not environment-scoped, and a
+rule naming a capability that is not configured refuses startup.
+
+Startup also notes a capability named like a destructive call (`delete`, `drop`,
+`destroy`, `terminate`, `purge`, `replace` and the like, in its tool or capability name)
+that is declared `read_only` or `reversible`, or approved below `destructive`, and
+`ctx init-tool` says so in the drafted review text. The name is a hint for the reviewer,
+never the decision.
+
+### Starter profiles
+
+[`deploy/profiles`](../deploy/profiles) holds two configurations to start from.
+`consequential-tools.toml` enforces the gate: readiness required, repeated effects
+refused, agents bound to their credentials, strict evidence, task authorization
+required, a review floor and step-up on approvals, breakers on refusal storms and effect
+rates, and the environment guard. `observe-first.toml` is the same set reporting
+instead of refusing where it can. Append one to your configuration, replace the example
+capability ids, and run `contextosd --check-config`: it lists what is still missing.
+
 ## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
