@@ -219,6 +219,8 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
             ));
         }
     }
+    let manifests = dispatch.as_ref().map(|d| d.manifests.as_slice()).unwrap_or_default();
+    report.extend(crate::workflow_readiness::report(&config, &packs, manifests)?);
     let unpinned = dispatch
         .as_ref()
         .map(|d| crate::upstream_check::unpinned(&config, d))

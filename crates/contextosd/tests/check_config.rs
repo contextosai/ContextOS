@@ -178,3 +178,36 @@ fn a_private_ca_bundle_is_checked() {
         );
     }
 }
+
+#[test]
+fn readiness_required_refuses_the_quickstart_refund_and_names_each_gap() {
+    let path = config("check-readiness.toml", "127.0.0.1:0");
+    let text = std::fs::read_to_string(&path).unwrap() + "\n[readiness]\n";
+    std::fs::write(&path, text).unwrap();
+    let (ok, text) = check(&path, Some(&"11".repeat(32)));
+    assert!(!ok, "{text}");
+    for expected in [
+        "workflow readiness (required): ",
+        "adp_payments.issue_refund [finality]: no recovery.completion",
+        "adp_payments.issue_refund [witness]: no outcome contract",
+        "adp_payments.issue_refund [owner]: no [[guarantees]] entry covers it",
+        "deployment [evidence]: evidence = \"caller\"",
+        "requirement identity_verified [evidence]",
+    ] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+}
+
+#[test]
+fn readiness_report_warns_and_passes() {
+    let path = config("check-readiness-report.toml", "127.0.0.1:0");
+    let text = std::fs::read_to_string(&path).unwrap() + "\n[readiness]\nmode = \"report\"\n";
+    std::fs::write(&path, text).unwrap();
+    let (ok, text) = check(&path, Some(&"11".repeat(32)));
+    assert!(ok, "{text}");
+    assert!(text.contains("warning: workflow readiness (report): "), "{text}");
+    assert!(
+        text.contains("warning: readiness: adp_payments.issue_refund [witness]"),
+        "{text}"
+    );
+}

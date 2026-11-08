@@ -166,6 +166,10 @@ async fn main() {
     {
         tracing::warn!("{note}");
     }
+    let manifests = dispatch.as_ref().map(|d| d.manifests.as_slice()).unwrap_or_default();
+    for note in contextosd::workflow_readiness::enforce(&config, &packs, manifests).unwrap_or_else(|e| fail(e)) {
+        tracing::warn!("{note}");
+    }
     if config.server.mode == contextosd::config::Mode::Production {
         let guards = &config.guards;
         if config.audit.kms.is_none() {

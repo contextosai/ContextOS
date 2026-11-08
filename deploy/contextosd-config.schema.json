@@ -1191,6 +1191,49 @@
       ],
       "type": "object"
     },
+    "ReadinessConfig": {
+      "additionalProperties": false,
+      "description": "`[readiness]`.",
+      "properties": {
+        "capabilities": {
+          "default": [],
+          "description": "The capabilities held to the profile. Unset: every capability whose `action_risk.effect` is `external_state` or `physical_world`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "global_evidence": {
+          "default": [],
+          "description": "Evidence requirements that are deliberately not about one subject (a program or a deployment state), so they need no `[[evidence_subjects]]` binding.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/ReadinessMode",
+          "default": "required",
+          "description": "`required` (default) refuses a configuration with gaps; `report` warns."
+        }
+      },
+      "type": "object"
+    },
+    "ReadinessMode": {
+      "description": "What a gap does.",
+      "oneOf": [
+        {
+          "const": "required",
+          "description": "Gaps refuse `--check-config` and startup.",
+          "type": "string"
+        },
+        {
+          "const": "report",
+          "description": "Gaps are warnings.",
+          "type": "string"
+        }
+      ]
+    },
     "RemoteProvider": {
       "additionalProperties": false,
       "properties": {
@@ -1930,6 +1973,18 @@
       ],
       "default": null,
       "description": "Remote fact services; dispatch is disabled without them."
+    },
+    "readiness": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReadinessConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Opt-in profile holding consequential workflows to every safety mechanism they rely on (see `workflow_readiness`). Unset: not checked."
     },
     "result_schemas": {
       "default": [],

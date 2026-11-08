@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `[readiness]`: an opt-in, fail-closed profile for consequential workflows. Every
+  capability that changes external state must declare provider finality
+  (`recovery.completion` and `reference_pointer`), an outcome witness, a guarantee
+  with an `owner_route`, and `resource_pointers`. The deployment must use strict
+  evidence with every gated requirement bound to a subject (or declared global) and
+  `agent_binding = "required"`. `mode = "required"` (the default) refuses
+  `--check-config` and startup, listing every gap; `"report"` warns.
+
 ## 0.1.0-alpha.17 - 2026-11-07
 
 Seventeenth alpha: runtime controls for autonomous agents. Information-flow labels,

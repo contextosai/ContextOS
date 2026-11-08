@@ -9,3 +9,4 @@ node_modules/
 __pycache__/
 # Receipts the examples keep for independent verification
 /receipts/
+.claude/
