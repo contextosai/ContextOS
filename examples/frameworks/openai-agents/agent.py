@@ -2,17 +2,16 @@
 
 - The run's governed functions become SDK function tools; their bodies never run
   locally, so every call is authorized, dispatched and audited by ``contextosd``.
-- Every model call reserves budget first: a ``ModelProvider`` wraps each model the
-  runner asks for, so reservation and settlement bracket the call even if it raises.
-- A refusal reaches the model as ``refusal()`` text ("NOT DONE", or "ALREADY
-  REQUESTED" for a repeat) through ``failure_error_function``; the SDK's default would
-  tell the model "Please try again". A pause for approval, input or an unknown outcome
-  is not text: it stops the run.
-- The refund needs a human's approval in the SDK too (``needs_approval``); the approved
-  ``RunState`` is checkpointed in ContextOS before the run resumes.
-- When the gateway pauses any call for an exact approval (``--approval``), the tool
-  call waits for the reviewer (``approve``) and then re-sends the identical call,
-  which redeems that approval (``awaiting_reviewer``).
+- Every model call reserves budget first: ``BudgetedProvider``
+  (``contextos.integrations.openai_agents``) wraps each model the runner asks for, so
+  reservation and settlement bracket the call even if it raises.
+- A refusal reaches the model as text ("NOT DONE", or "ALREADY REQUESTED" for a
+  repeat) through ``failure``; the SDK's default would tell the model "Please try
+  again". A pause for input or an unknown outcome is not text: it stops the run.
+- When the gateway needs an exact approval for a call (``--approval``),
+  ``GatewayApprovals`` opens the gateway's request from ``needs_approval`` and the SDK
+  interrupts the run. A reviewer decides (``approve``), the ``RunState`` is
+  checkpointed in ContextOS, and the resumed tool call redeems that approval once.
 
 Without OPENAI_API_KEY a scripted model (the SDK's ``agents.testing.ScriptedModel``)
 drives the same loop: look up, refund, refund again (refused), answer.
@@ -21,52 +20,19 @@ Run with: ./examples/frameworks/run.sh openai-agents [--approval]
 """
 import ast
 import asyncio
-import functools
 import json
 import os
 import sys
 
-from agents import Agent, Model, ModelProvider, ModelSettings, RunConfig, RunHooks, Runner, UserError, function_tool
+from agents import Agent, ModelProvider, ModelSettings, RunConfig, RunHooks, Runner, UserError, function_tool
 from agents.models.multi_provider import MultiProvider
 from agents.testing import ModelStep, ScriptedModel, assistant_message, function_call
 
 from contextos.aio import AsyncRun
-from demo import (GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolOutcome, ToolPaused, admit, approve, finish, offline,
-                  refusal, tools)
+from contextos.integrations.openai_agents import BudgetedProvider, GatewayApprovals, failure
+from demo import APPROVAL, EVIDENCE, GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, ToolPaused, admit, approve, finish, offline, tools
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-6.1-sol")
-
-
-class BudgetedModel(Model):
-    """Reserves run budget before each model call and settles it after, success or not."""
-
-    def __init__(self, run: AsyncRun, inner: Model):
-        self.run, self.inner = run, inner
-
-    async def get_response(self, *args, **kwargs):
-        async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):
-            return await self.inner.get_response(*args, **kwargs)
-
-    async def stream_response(self, *args, **kwargs):
-        async with self.run.budgeted_model_call(tokens=MODEL_CALL_TOKENS):
-            async for event in self.inner.stream_response(*args, **kwargs):
-                yield event
-
-    def get_retry_advice(self, request):
-        return self.inner.get_retry_advice(request)
-
-    async def close(self):
-        await self.inner.close()
-
-
-class BudgetedProvider(ModelProvider):
-    """Every agent the runner drives (handoffs included) gets a budgeted model."""
-
-    def __init__(self, run: AsyncRun, inner: ModelProvider):
-        self.run, self.inner = run, inner
-
-    def get_model(self, model_name):
-        return BudgetedModel(self.run, self.inner.get_model(model_name))
 
 
 class Script(ModelProvider):
@@ -98,18 +64,6 @@ def refund_args(call) -> dict:
     return {"order_id": "ord_881", "customer_id": "cus_77", "amount_minor": order["amount_minor"]}
 
 
-def governed_failure(ctx, error: Exception) -> str:
-    """What the model sees when a governed call did not complete."""
-    if isinstance(error, ToolOutcome) and not (
-            isinstance(error, ToolPaused) and error.kind in ("approval", "input", "unknown_outcome")):
-        # Refused, or a repeat of an operation that already exists (kind "duplicate"):
-        # it did not happen now, and the model is told so.
-        return refusal(error)
-    # Approval pending, input required, an unknown outcome or a transport error: the
-    # model cannot fix these and must not retry them, so the run stops.
-    raise error
-
-
 class Trace(RunHooks):
     """Prints each governed result and notes whether the refund happened."""
 
@@ -121,45 +75,29 @@ class Trace(RunHooks):
             self.refunded = True
 
 
-def awaiting_reviewer(function):
-    """A gateway pause for approval waits here, in the tool call, while a reviewer
-    decides; then the identical call (same arguments, same operation key) is re-sent and
-    redeems that exact approval. The gateway decides only when the call arrives, after
-    the SDK's own approval point, and a running tool cannot raise an SDK interruption."""
-
-    @functools.wraps(function)
-    def call(*args, **kwargs):
-        try:
-            return function(*args, **kwargs)
-        except ToolPaused as paused:
-            if paused.kind != "approval":
-                raise
-            print(f"paused for approval: {paused.report['approval_request_id']}")
-            approve(paused)  # a reviewer decides in your approval service
-            print(f"resumed: re-sending the same {function.__name__} call")
-            return function(*args, **kwargs)
-
-    return call
-
-
-async def needs_approval(ctx, params: dict, call_id: str) -> bool:
-    return True  # every refund is shown to a human first; the gateway still decides
-
-
 async def main() -> int:
     client, run = admit("openai_agents")
-    lookup_order, issue_refund = map(awaiting_reviewer, tools(run))  # sync: the SDK runs them in a worker thread
+    lookup_order, issue_refund = tools(run)  # sync: the SDK runs them in a worker thread
     arun = AsyncRun(run)  # the same run, as coroutines, for calls made on the event loop
+    # The gateway decides which calls need an exact approval; the SDK's interruption is
+    # how the run waits for it. The keys are the ones the governed tools use.
+    approvals = GatewayApprovals(run)
+    lookup_key = (lambda order_id: f"lookup:{order_id}") if APPROVAL else None
     agent = Agent(
         name="support",
         instructions=INSTRUCTIONS,
         model=MODEL,  # a name, so the run config's provider resolves (and budgets) it
         model_settings=ModelSettings(parallel_tool_calls=False),  # look up before acting
-        tools=[function_tool(lookup_order, failure_error_function=governed_failure),
-               function_tool(issue_refund, failure_error_function=governed_failure, needs_approval=needs_approval)],
+        tools=[function_tool(lookup_order, failure_error_function=failure,
+                             needs_approval=approvals.needs("adp_orders.lookup", "read_only",
+                                                            idempotency_key=lookup_key)),
+               function_tool(issue_refund, failure_error_function=failure,
+                             needs_approval=approvals.needs("adp_payments.issue_refund", "destructive",
+                                                            idempotency_key=lambda order_id, **_: f"refund:{order_id}",
+                                                            evidence_refs=EVIDENCE))],
     )
     scripted = offline("OPENAI_API_KEY")
-    config = RunConfig(model_provider=BudgetedProvider(arun, Script() if scripted else MultiProvider()),
+    config = RunConfig(model_provider=BudgetedProvider(arun, Script() if scripted else MultiProvider(), MODEL_CALL_TOKENS),
                        tracing_disabled=scripted, trace_include_sensitive_data=False)
     hooks = Trace()
     revision = 0
@@ -168,10 +106,12 @@ async def main() -> int:
         while result.interruptions:
             state = result.to_state()
             for item in result.interruptions:
-                print(f"SDK approval requested (local, before ContextOS): {item.tool_name}({item.arguments})")
-                state.approve(item)  # a real reviewer decides here
-            # Save the approved state with the run: another executor, or this one after a
-            # gateway pause, resumes from it and re-sends the same governed call.
+                paused = approvals.pending(item.call_id)
+                print(f"paused for approval: {paused.report['approval_request_id']} ({item.tool_name} {item.arguments})")
+                approve(paused)  # a reviewer decides in your approval service
+                state.approve(item)
+            # Save the state with the run: another executor can resume it, and the
+            # resumed tool call redeems the gateway's approval once.
             revision = (await arun.checkpoint({"sdk_run_state": state.to_json()}, revision))["revision"]
             print(f"approved; checkpoint revision {revision}")
             result = await Runner.run(agent, state, run_config=config, hooks=hooks, max_turns=8)
@@ -180,7 +120,7 @@ async def main() -> int:
             raise
         paused = error.__cause__
         print(f"paused ({paused.kind}): {paused.reason_codes} {paused.obligations}; "
-              "wait for approval, answer input or reconcile, never retry")
+              "answer input or reconcile, never retry")
         return 1
     print(f"agent: {result.final_output}")
     finish(client, run, hooks.refunded, str(result.final_output))

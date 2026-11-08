@@ -16,11 +16,7 @@ and not repeated:
 ```
 admitted run_openai_agents_1792550735238 (executor generation 2)
 tool lookup_order -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
-SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
-approved; checkpoint revision 1
 tool issue_refund -> {'refund_id': 'rf_ord_881'}
-SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
-approved; checkpoint revision 2
 tool issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 agent: Refunded ord_881 in full. The repeat refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
 decision decision_01a15c598dcb7048aa807c818fb7b8d0 (refunded)
@@ -35,33 +31,25 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
 ```
 
 With `--approval` the run is admitted for a refund above the pack's 3,000 threshold, so
-the gateway gates every call of the run, the lookup included, on an exact approval. The
-gateway decides only when a call arrives, after the SDK's own `needs_approval` point,
-and a running tool cannot raise an SDK interruption. So the pause waits inside the tool
-call (`awaiting_reviewer`): `approve(paused)` plays the reviewer in the development
-approval service, then the identical call (same arguments, same operation key) is
-re-sent and redeems that approval. The model never sees the pause; the SDK's
-interruption and checkpoint for the refund are unchanged:
+the gateway gates every call of the run, the lookup included, on an exact approval.
+`GatewayApprovals` (`contextos.integrations.openai_agents`) asks the gateway from each
+tool's `needs_approval`: when a call needs an approval, it opens the gateway's request
+and the SDK interrupts the run. `approve(paused)` plays the reviewer in the development
+approval service, the approved `RunState` is checkpointed, and the resumed tool call
+(same arguments, same operation key) redeems that approval once. There is one approval
+per call, the gateway's:
 
 ```
-admitted run_openai_agents_1792551980932 (executor generation 2)
-paused for approval: dev_approval:d4af686049c9
-reviewer approved dev_approval:d4af686049c9
-resumed: re-sending the same lookup_order call
-tool lookup_order -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
-SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+admitted run_openai_agents_1794147645382 (executor generation 2)
+paused for approval: dev_approval:8422c30b9ca9 (lookup_order {"order_id":"ord_881"})
+reviewer approved dev_approval:8422c30b9ca9
 approved; checkpoint revision 1
-paused for approval: dev_approval:aa6ac12c8b74
-reviewer approved dev_approval:aa6ac12c8b74
-resumed: re-sending the same issue_refund call
-tool issue_refund -> {'refund_id': 'rf_ord_881'}
-SDK approval requested (local, before ContextOS): issue_refund({"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+tool lookup_order -> {'amount_minor': 120000, 'currency': 'INR', 'customer_id': 'cus_77', 'order_id': 'ord_881', 'refundable': True, 'status': 'delivered_damaged'}
+paused for approval: dev_approval:29c99960f06b (issue_refund {"order_id":"ord_881","customer_id":"cus_77","amount_minor":120000})
+reviewer approved dev_approval:29c99960f06b
 approved; checkpoint revision 2
+tool issue_refund -> {'refund_id': 'rf_ord_881'}
 tool issue_refund -> ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
-agent: Refunded ord_881 in full. The repeat refund was refused: ALREADY REQUESTED (retry_unsafe): this exact action was submitted before and was not repeated.
-decision decision_01a15c6c8fcf75c1a6407f77569322f4 (refunded)
-run completed
-evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_calls': 2}, <n> signed audit entries
 ```
 
 ## What is governed
@@ -74,15 +62,15 @@ evidence: budget used {'cost_units': 100, 'replans': 0, 'tokens': 4000, 'tool_ca
   call (and each SDK retry of it) reserves 1,000 tokens first and settles after, even
   when it raises: four calls here, 4,000 tokens. On the event loop the run is an
   `AsyncRun` (`contextos.aio`); the sync tools run in the SDK's worker thread.
-- **Outcomes.** `failure_error_function=governed_failure` turns refusals and a paused
-  repeat (`paused.kind == "duplicate"`) into `refusal()` text, instead of the SDK's
-  default "Please try again". A pause whose `kind` is `approval`, `input` or
-  `unknown_outcome` is re-raised and stops the run (the SDK wraps it in `UserError`);
-  an approval pause first waits in the tool call for the reviewer (see Approval).
-- **Approval and checkpoint.** `needs_approval` interrupts before each refund. The
-  approved `RunState` (`state.to_json()`) is saved as the run's checkpoint, so another
-  executor can `take_over()` and resume it with `RunState.from_json`. The gateway still
-  decides: the second approved refund is refused.
+- **Outcomes.** `failure_error_function=failure` turns refusals and a paused repeat
+  (`paused.kind == "duplicate"`) into text that says the action did not happen, instead
+  of the SDK's default "Please try again". A pause whose `kind` is `approval`, `input`
+  or `unknown_outcome` is re-raised and stops the run (the SDK wraps it in `UserError`).
+- **Approval and checkpoint.** `needs_approval` defers to the gateway
+  (`GatewayApprovals`): without `--approval` nothing needs one and the run is not
+  interrupted. An approved `RunState` (`state.to_json()`) is saved as the run's
+  checkpoint, so another executor can `take_over()` and resume it with
+  `RunState.from_json`. The gateway still decides: the repeat refund is refused.
 - **Decision.** `finish()` records the DecisionRecord (its tool lineage verified by the
   gateway), completes the run and reads its evidence.
 

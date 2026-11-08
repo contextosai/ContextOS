@@ -32,7 +32,7 @@ step build;   cargo build --release -q -p contextosd -p ctx -p towerd   || fail 
 step features; cargo check -q -p towerd && cargo check -q -p contextosd --no-default-features || fail "standalone builds"
 step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/dev/null && npm test -s >/dev/null) || fail "tower console"
 step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null \
-    && PYTHONPATH=bindings/python python3 -m unittest -q bindings/python/tests/test_replay.py 2>/dev/null || fail "python client"
+    && PYTHONPATH=bindings/python python3 -m unittest -q bindings/python/tests/test_replay.py bindings/python/tests/test_envelope.py 2>/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
 step quickstart; bash examples/support-refund/run.sh >/dev/null 2>&1    || fail quickstart
 step packs; check_example examples/support-refund/check_packs.sh "example packs checked" || fail "example packs"

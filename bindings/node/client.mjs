@@ -11,6 +11,8 @@
 // unknown outcome to reconcile — never retry blindly), ToolBlocked, ToolRejected,
 // ToolFailed. Only requests the server did not process (429, 503) are retried.
 
+import { createHash } from "node:crypto";
+
 export const GENERATION_HEADER = "ContextOS-Executor-Generation";
 // On a model request, these tell a metering LLM gateway which reservation to settle with
 // the usage it measures (see examples/metering-proxy).
@@ -297,6 +299,23 @@ export class Client {
   }
 }
 
+/** The operation key of a call that changes something and names no key: a digest of
+ * the capability and its canonical arguments, so the same call re-sent (a retried step,
+ * a call re-sent once its approval is granted) is the same operation and cannot apply
+ * twice. Identical calls that are distinct effects (two equal top-ups) need keys of
+ * their own. */
+export function operationKey(capabilityId, args) {
+  const canonical = (value) => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const digest = createHash("sha256").update(canonical({ capability: capabilityId, arguments: args })).digest("hex");
+  return `call:${digest.slice(0, 32)}`;
+}
+
 export class Run {
   constructor(client, runId, traceId, executorGeneration, principalChain, admitted = {}) {
     Object.assign(this, { client, runId, traceId, executorGeneration, principalChain, admitted });
@@ -310,7 +329,11 @@ export class Run {
     return this.client.request("POST", this.#path(suffix), { body, generation: this.executorGeneration });
   }
 
+  /** The `contextos.tool_call.v1` envelope for a call. A call that is not `read_only`
+   * and names no `idempotencyKey` gets `operationKey(capabilityId, args)`: re-sent
+   * unchanged, it is the same operation. */
   envelope(capabilityId, args, { approvalMode = "read_only", idempotencyKey = null, evidenceRefs = [], toolCallId } = {}) {
+    if (idempotencyKey == null && approvalMode !== "read_only") idempotencyKey = operationKey(capabilityId, args);
     return {
       envelope_version: "contextos.tool_call.v1",
       tool_call_id: toolCallId ?? `tc_${globalThis.crypto.randomUUID().replaceAll("-", "")}`,
