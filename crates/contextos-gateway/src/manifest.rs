@@ -230,6 +230,10 @@ pub struct CapabilityManifest {
     /// [`crate::information_flow`]); absent, its output is untrusted `INTERNAL`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<crate::information_flow::FlowLabels>,
+    /// Which arguments identify the business request, so the same request sent from
+    /// another run is refused while its claim stands (see [`crate::intent_guard`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<crate::intent_guard::IntentKey>,
 }
 
 /// What happens when an outcome's witness has not reported by its deadline.
@@ -312,6 +316,8 @@ pub enum ManifestError {
     DuplicateCapabilityRef(String),
     #[error("capability {0} outcome contract is invalid: {1}")]
     Outcome(String, &'static str),
+    #[error("capability {0} intent key is invalid: {1}")]
+    Intent(String, &'static str),
 }
 
 impl CompletionCheck {
@@ -446,6 +452,23 @@ impl CapabilityManifest {
                     "binds = effect needs recovery.reference_pointer: the provider's reference the witness must name",
                 ));
             }
+        }
+        if let Some(intent) = &self.intent {
+            if self.action_risk.effect == contextos_contract::types::ActionEffect::None {
+                return Err(ManifestError::Intent(
+                    id.clone(),
+                    "only an effectful capability can declare one",
+                ));
+            }
+            if self.repeatable {
+                return Err(ManifestError::Intent(
+                    id.clone(),
+                    "a repeatable capability has no single request to deduplicate",
+                ));
+            }
+            intent
+                .validate()
+                .map_err(|reason| ManifestError::Intent(id.clone(), reason))?;
         }
         Ok(())
     }

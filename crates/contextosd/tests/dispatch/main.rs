@@ -24,6 +24,7 @@ mod findings;
 mod harness;
 mod hold_owners;
 mod information_flow;
+mod intent_keys;
 mod load;
 mod mcp_transport;
 mod memory;

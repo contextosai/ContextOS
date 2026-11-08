@@ -40,6 +40,7 @@ pub mod hold_census;
 pub mod hold_owners;
 pub mod information_flow;
 mod input;
+pub mod intent_guard;
 mod lifecycle;
 mod loop_guard;
 pub mod manifest;
@@ -1129,6 +1130,25 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 ));
             }
         }
+        // Intent key: the business request this call carries, deduplicated across runs.
+        let intent_digest = match (&manifest.intent, existing_ledger.is_none()) {
+            (Some(intent), true) => {
+                let digest =
+                    intent_guard::digest(&admission.tenant_id, &manifest.capability_id, intent, &envelope["args"]);
+                if digest.is_none() {
+                    let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "reason_codes": ["intent_key_missing"]});
+                    self.record(&mut p, "repeated_effect_refusal", body, &now).await?;
+                    return Ok(p.stop(
+                        "rejected",
+                        vec!["intent_key_missing".into()],
+                        "The arguments that identify this request are missing.",
+                    ));
+                }
+                digest
+            }
+            _ => None,
+        };
         let new_operation = existing_ledger.is_none();
         let mut policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
@@ -1602,8 +1622,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         p.stages.enter("claim");
         let idempotency = manifest.recovery.idempotency.as_ref();
         let provider_key = idempotency.map(|_| {
-            persisted_key
-                .unwrap_or_else(|| provider_idempotency_key(&admission.tenant_id, &admission.run_id, &operation_id))
+            persisted_key.unwrap_or_else(|| match (&manifest.intent, &intent_digest) {
+                (Some(intent), Some(digest)) if intent.provider_key => {
+                    intent_guard::provider_key(&admission.tenant_id, digest)
+                }
+                _ => provider_idempotency_key(&admission.tenant_id, &admission.run_id, &operation_id),
+            })
         });
         let proof = match (&self.ports.idempotency, &provider_key) {
             (Some(provider), Some(key)) => match provider.proof(manifest, &operation_id, &action_digest, key).await {
@@ -1780,6 +1804,46 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "The executor lost ownership of this run.",
             ));
         }
+        // The intent is claimed tenant-wide, after the operation claim and before dispatch:
+        // of runs sending one business request, exactly one reaches the provider.
+        let mut intent_claim = None;
+        if let (Some(intent), Some(digest)) = (&manifest.intent, &intent_digest) {
+            let (claimed, refusal) = intent_guard::claim_call(
+                self.store.as_ref(),
+                (&admission.tenant_id, &admission.run_id, &operation_id),
+                intent,
+                digest,
+                &now,
+            )
+            .await;
+            intent_claim = claimed;
+            if let Some(refusal) = refusal {
+                self.withhold_dispatch(
+                    admission,
+                    &operations_key,
+                    &operation_id,
+                    &attempt_id,
+                    &action_digest,
+                    &now,
+                    refusal.reason,
+                )
+                .await?;
+                self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                    .await?;
+                let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                    "capability_id": manifest.capability_id, "intent_digest": digest,
+                    "applied": refusal.holder, "reason_codes": [refusal.reason]});
+                let entry = self
+                    .audit
+                    .append(&admission.tenant_id, "repeated_effect_refusal", body, &now)
+                    .await?;
+                p.report.audit_sequences.push(entry.sequence);
+                if refusal.holder.is_some() {
+                    p.report.obligations.push("reconcile_existing_operation".into());
+                }
+                return Ok(p.stop("blocked", vec![refusal.reason.into()], &refusal.message));
+            }
+        }
         // The effect's signature is claimed after the operation claim and before dispatch:
         // of identical effects racing under different keys, exactly one is sent. The
         // check at authorization only refuses the sequential case early.
@@ -1827,6 +1891,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .await?;
                 self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
                     .await?;
+                intent_guard::release_held(
+                    self.store.as_ref(),
+                    intent_claim.as_ref(),
+                    &admission.run_id,
+                    &operation_id,
+                )
+                .await?;
                 let entry = self
                     .audit
                     .append(
@@ -1872,6 +1943,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             };
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             self.withhold_dispatch(
                 admission,
                 &operations_key,
@@ -1954,6 +2032,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
                 }
                 self.release_task_charges(&task_charges, &operation_id).await?;
+                intent_guard::release_held(
+                    self.store.as_ref(),
+                    intent_claim.as_ref(),
+                    &admission.run_id,
+                    &operation_id,
+                )
+                .await?;
                 let entry = self
                     .audit
                     .append(
@@ -2006,6 +2091,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                             .await?;
                     }
                     self.release_task_charges(&task_charges, &operation_id).await?;
+                    intent_guard::release_held(
+                        self.store.as_ref(),
+                        intent_claim.as_ref(),
+                        &admission.run_id,
+                        &operation_id,
+                    )
+                    .await?;
                     return Ok(p.stop(
                         "blocked",
                         vec!["dispatch_aborted".into()],
@@ -2041,6 +2133,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
             }
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
         }
 
@@ -2067,6 +2166,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
             }
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             p.report
                 .audit_sequences
                 .extend(self.settle_shared_exposure(admission, &operation_id).await?);
@@ -2126,6 +2232,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     &admission.tenant_id,
                     "effect_guard_release_lost",
                     json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
+                    &now,
+                )
+                .await?;
+        }
+        if not_applied
+            && let Err(error) = intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await
+        {
+            // Still claimed: the request is refused from other runs until its window ends.
+            tracing::warn!(%error, "intent claim not released");
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "intent_release_lost",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id}),
                     &now,
                 )
                 .await?;

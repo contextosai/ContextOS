@@ -31,6 +31,7 @@ fn ready_refund() -> CapabilityManifest {
             json!({"state_pointer": "/status", "confirmed": ["succeeded"], "not_applied": ["failed"]});
         m["recovery"]["reference_pointer"] = json!("/refund_id");
         m["outcome"] = json!({"witness": "refund-ledger", "postcondition": "refund_posted", "within_seconds": 900, "binds": "effect"});
+        m["intent"] = json!({"key_pointers": ["/order_id", "/amount_minor"]});
     })
 }
 
@@ -126,6 +127,7 @@ fn the_quickstart_refund_lacks_every_mechanism() {
         (refund, Area::Finality),
         (refund, Area::Witness),
         (refund, Area::Owner),
+        (refund, Area::Intent),
         ("deployment", Area::Evidence),
         ("deployment", Area::Actor),
     ] {
@@ -200,6 +202,7 @@ fn a_capability_without_a_resource_is_a_gap() {
         m["recovery"]["reference_pointer"] = json!("/refund_id");
         m["outcome"] = json!({"witness": "refund-ledger", "postcondition": "refund_posted", "within_seconds": 900, "binds": "effect"});
         m["resource_pointers"] = json!([]);
+        m["intent"] = json!({"key_pointers": ["/order_id", "/amount_minor"]});
     });
     let config = config(STRICT, &format!("{READY}{PROFILE}"));
     let found = evaluate(&config, &packs(), &[unanchored]).unwrap().unwrap();

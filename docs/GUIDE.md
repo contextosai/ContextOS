@@ -1809,6 +1809,36 @@ effects (two equal top-ups) set `"repeatable": true` in their manifest; `[guards
 refuse_repeated_effects = false` turns the guard off. A run records at most 1,024
 distinct effects; past that, new ones are refused (`effect_guard_saturated`).
 
+### The same request from another run
+
+The repeated-effect guard and provider idempotency keys are scoped to a run. A request
+redelivered into a new run (a queue redelivery, a retried webhook, a customer asking a
+second channel) is a new effect to them. A capability names the arguments that identify
+the business request in its manifest:
+
+```json
+"intent": {"key_pointers": ["/order_id", "/amount_minor"], "window_seconds": 86400}
+```
+
+The values at those pointers, with the tenant and capability, form the intent key. The
+first operation to send the request claims the key tenant-wide, after its own claim and
+before dispatch. Another run sending the same request while the claim stands is refused
+with `effect_repeated_across_runs` and the obligation `reconcile_existing_operation`;
+the audit entry names the run and operation that hold the claim. Of runs racing with
+one request, exactly one reaches the provider, across replicas sharing a store.
+
+The claim is released when the provider definitively did not apply the effect, or when
+the call is refused before it is sent. An unknown outcome keeps it. After
+`window_seconds` (default one day, at most 90 days) the same request counts as a new
+one. A call missing an argument the key names is rejected (`intent_key_missing`), and if
+the claim cannot be written the effect is not sent (`intent_guard_unavailable`). Choose
+pointers that identify the request, not the call: an order and an amount, a ticket id,
+a payment reference. Arguments outside the key do not matter, so a reworded note does
+not make a new request. With `"provider_key": true`, the provider idempotency key is
+derived from the intent instead of the run's operation, so a provider that deduplicates
+by key also recognises the request across runs. Repeatable capabilities cannot declare
+an intent.
+
 ## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
@@ -2314,6 +2344,7 @@ A capability is consequential when its `action_risk.effect` is `external_state` 
 | `witness` | an `outcome` contract | the run completes without an independent source confirming the effect |
 | `owner` | a `[[guarantees]]` entry covering it, with `owner_route` | concurrent runs can together exceed the business limit; aged holds reach no one |
 | `resource` | `resource_pointers` | effects are not tied to the order or account they change |
+| `intent` | an `intent` key | the same request redelivered into another run is applied again |
 
 For the deployment as a whole, it checks:
 
