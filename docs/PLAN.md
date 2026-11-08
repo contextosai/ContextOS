@@ -154,6 +154,7 @@ Each slice lands with tests, docs and passing `cargo fmt --check`, `cargo clippy
 | 75 `ctx repl` | done — one-case sessions over an admission body or replay case (`set`/`unset`/`decide`/`plan`/`show`/`reset`), JSON-line answers, scriptable; `pack_test::decide` |
 | 76 `llms.txt` | done — agent-oriented index of docs, API, schemas, clients, skills and examples, links checked by a script test |
 | 77 Deployment recipes | done — `deploy/README.md` (packs from git with pack CI and rollout timing; audit to a SIEM with a signature-checking receiver), Helm `packSync` (git-sync init container + sidecar) rendered and validated in CI |
+| Next (alpha.18) | From the [enterprise problems research](research/2026-11-08-enterprise-agent-problems.md): a design-partner evaluation kit (`ctx replay` over recorded tool-call traffic, interview and data-request kit), then the consequential-tool gate as the default (intent keys across runs, resume-safe framework adapters, environment and destructive-action guard with starter profiles, estimated and windowed cost ceilings, approval-quality metrics and timeouts). Identity, Tower SSO and evidence packs follow; shared limits at payment scale wait for design-partner evidence. |
 
 ## Non-negotiables carried from the spec
 
