@@ -12,6 +12,7 @@ use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, StoreEr
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::guarantee_sources as sources;
 use crate::{Gateway, GatewayError, RunAdmission, operation_ledger_key};
 
 /// How long a settled receipt stays in its resource's ledger after it is first seen
@@ -57,10 +58,25 @@ pub struct SharedGuarantee {
     pub id: String,
     /// Capabilities whose effects draw on this limit.
     pub capability_ids: Vec<String>,
-    /// JSON pointer to the resource identifier in the call's arguments, such as `/order_id`.
+    /// JSON pointer to the resource identifier in the call's arguments, such as
+    /// `/order_id`. Empty with `resource_from`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub resource_pointer: String,
+    /// The limit is per agent or per tenant instead of per resource the call names
+    /// (see [`crate::guarantee_sources`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_from: Option<crate::guarantee_sources::ResourceFrom>,
     /// JSON pointer to the amount in the call's arguments, such as `/amount_minor`.
+    /// Empty with `amount_table`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub amount_pointer: String,
+    /// Estimated amounts looked up by an argument (see [`crate::guarantee_sources`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_table: Option<crate::guarantee_sources::AmountTable>,
+    /// The limit applies per window of this many seconds (60 to 31 days); each
+    /// window's ledger starts empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
     /// Total amount all runs together may commit per resource.
     pub limit: u64,
     /// Unit of `limit` and the amounts, such as `INR_minor`.
@@ -105,9 +121,7 @@ impl SharedGuarantee {
             || self.capability_ids.len() > 64
             || self.capability_ids.iter().any(|s| !identifier(s))
             || self.capability_ids.iter().collect::<HashSet<_>>().len() != self.capability_ids.len()
-            || !pointer(&self.resource_pointer)
-            || !pointer(&self.amount_pointer)
-            || self.resource_pointer == self.amount_pointer
+            || !crate::guarantee_sources::valid(self, pointer)
             || self.limit == 0
             || self.limit > MAX_EXACT_EXPOSURE
             || self.owner_route.as_deref().is_some_and(|r| !identifier(r))
@@ -295,22 +309,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if !pin(self.store.as_ref(), &definition_key, &definition).await? {
             return Ok(Err("shared_guarantee_definition_mismatch"));
         }
-        let Some(resource) = args
-            .pointer(&rule.resource_pointer)
-            .and_then(Value::as_str)
-            .filter(|s| identifier(s))
-        else {
+        let Some(resource) = sources::resource(rule, admission, args).filter(|s| identifier(s)) else {
             return Ok(Err("shared_guarantee_resource_invalid"));
         };
-        let Some(amount) = args
-            .pointer(&rule.amount_pointer)
-            .and_then(Value::as_u64)
-            .filter(|n| *n > 0 && *n <= MAX_EXACT_EXPOSURE)
-        else {
+        let Some((amount, estimated)) = sources::amount(rule, args) else {
             return Ok(Err("shared_guarantee_amount_invalid"));
         };
+        let now = self.now();
+        let window_start = sources::window_start(rule, &now);
         // The ledger is the canonical resource's; an unmapped identifier reserves nothing.
-        let canonical = match self.canonical_resource(admission, rule, resource).await {
+        let canonical = match self.canonical_resource(admission, rule, &resource).await {
             Ok(canonical) => canonical,
             Err(reason) => return Ok(Err(reason)),
         };
@@ -325,7 +333,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             binding: ExposureBinding {
                 guarantee_id: rule.id.clone(),
                 definition_digest,
-                resource_digest: hash(&json!(canonical.id))?,
+                resource_digest: hash(&sources::digest_input(&canonical.id, window_start))?,
                 limit: rule.limit,
                 unit: rule.unit.clone(),
             },
@@ -342,7 +350,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             return Ok(Err("shared_guarantee_binding_mismatch"));
         }
         let claim = link.claim(attempt);
-        let now = self.now();
         // Archive settled receipts past their retention in the same commit, so a
         // resource's lifetime is not bounded by its receipt count.
         let commit = transact(self.store.as_ref(), &key, |state| {
@@ -365,6 +372,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // No provider call is permitted until the reservation is durably audited.
         let mut payload = json!({"run_id":admission.run_id,"operation_id":operation,"attempt_id":attempt,
             "action_digest":digest,"binding":link.binding,"amount":amount});
+        if estimated {
+            payload["estimated"] = json!(true);
+        }
+        if let Some(start) = window_start {
+            payload["window_start"] = json!(start);
+        }
         if let Some(identity) = identity {
             payload["resource_identity"] = identity;
         }

@@ -145,15 +145,18 @@ A trusted principal and the Ed25519 key its attestations are signed with.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `amount_pointer` | string | required | JSON pointer to the amount in the call's arguments, such as `/amount_minor`. |
+| `amount_pointer` | string | unset | JSON pointer to the amount in the call's arguments, such as `/amount_minor`. Empty with `amount_table`. |
+| `amount_table` | table | unset | Estimated amounts looked up by an argument (see `guarantee_sources`). |
 | `capability_ids` | array of string | required | Capabilities whose effects draw on this limit. |
 | `id` | string | required | Guarantee id, recorded on every reservation. |
 | `limit` | integer | required | Total amount all runs together may commit per resource. |
 | `owner_after_seconds` | integer | unset | How old a hold is before its owner is told (default 1,800 seconds). |
 | `owner_route` | string | unset | The notification webhook that tells this guarantee's business owner about a hold older than `owner_after_seconds` (see `hold_owners`). Routing only: not part of the pinned definition. |
 | `resource_canonicalizer` | `"exact"` \| `"ascii_casefold"` \| `"provider"` | unset | How the extracted identifier is made canonical (see `resource_identity`); omitted from the definition when `exact`. |
-| `resource_pointer` | string | required | JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. |
+| `resource_from` | `"actor"` \| `"tenant"` | unset | The limit is per agent or per tenant instead of per resource the call names (see `guarantee_sources`). |
+| `resource_pointer` | string | unset | JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. Empty with `resource_from`. |
 | `unit` | string | required | Unit of `limit` and the amounts, such as `INR_minor`. |
+| `window_seconds` | integer | unset | The limit applies per window of this many seconds (60 to 31 days); each window's ledger starts empty. |
 
 ## `[guards]`
 

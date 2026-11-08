@@ -15,6 +15,11 @@ minor versions may break APIs and every break is listed.
   Identical calls that are distinct effects need keys of their own.
 
 ### Added
+- Spend caps from shared guarantees: `resource_from = "actor"` or `"tenant"` limits
+  what each agent or the whole tenant commits, with no argument naming the cap;
+  `amount_table` reserves an estimate looked up by an argument (recorded as
+  `estimated`); `window_seconds` applies the limit per window, each window its own
+  ledger. Existing guarantee definitions are unchanged.
 - `[guards.environments]`: a gateway names the environment it serves and, per
   capability, how to tell a call's target (a fixed `environment`, or an argument
   `pointer` matched against `prefixes`). Calls aimed at another environment are

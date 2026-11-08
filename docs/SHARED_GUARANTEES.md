@@ -122,6 +122,40 @@ reading a balance and reserving against it is the distributed transaction
 `WHY_NOT_A_TRANSACTION.md` declines. Raising capacity stays a reviewed definition
 change.
 
+### Spend caps: per agent, per window, by estimate
+
+A guarantee can also cap what an agent or the whole tenant spends through effectful
+tools, such as cloud resources an agent creates, without an argument that names the
+cap:
+
+```toml
+[[guarantees]]
+id = "agent-daily-cloud"
+capability_ids = ["adp_cloud.run_instances", "adp_cloud.create_stack"]
+resource_from = "actor"             # per agent; "tenant": one cap for every run
+window_seconds = 86400              # per day; each window's ledger starts empty
+limit = 50000                       # USD cents
+unit = "USD_cents"
+[guarantees.amount_table]           # instead of amount_pointer
+key_pointer = "/instance_type"      # looked up as text, so numbers work too
+prices = { "m7i.large" = 2400, "m7i.4xlarge" = 19400 }   # the estimate per call
+default = 5000                      # without one, an unpriced value is refused
+```
+
+Each call reserves its estimate before the provider is called. Once the window's
+committed and held estimates would pass the limit, the next call is refused with
+`shared_guarantee_exceeded`. A re-applying loop stops there rather than when the bill
+arrives. Reservations of estimates carry `"estimated": true` and the window's start
+(`window_start`, seconds since the epoch) in their `shared_guarantee_reserved` audit
+entries. A windowed ledger's resource digest covers the window,
+`sha256(canonical JSON of {"resource": <id>, "window_start": <start>})`, so inspect a
+window's ledger by that digest. An import counts in the window its `as_of` falls in.
+Holds stay in the window they were reserved in.
+
+The reserved estimate is what settles: the measured cost of a call is not read back,
+so keep prices at or above what a call costs. Model spend across runs is not covered
+here; each run's model calls draw on its own budget.
+
 ## Conservation and execution
 
 For each tenant, guarantee and resource:

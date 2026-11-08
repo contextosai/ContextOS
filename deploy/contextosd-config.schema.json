@@ -78,6 +78,38 @@
       ],
       "type": "string"
     },
+    "AmountTable": {
+      "additionalProperties": false,
+      "description": "Estimated amounts by an argument's value.",
+      "properties": {
+        "default": {
+          "description": "The estimate for a value not in `prices`; without one such a call is refused (`shared_guarantee_amount_invalid`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "key_pointer": {
+          "description": "JSON Pointer to the argument whose value (a string, or a number as text) is looked up in `prices`.",
+          "type": "string"
+        },
+        "prices": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "key_pointer",
+        "prices"
+      ],
+      "type": "object"
+    },
     "AmountThreshold": {
       "additionalProperties": false,
       "description": "An amount at or above which approvals need step-up, in one currency.",
@@ -1316,6 +1348,21 @@
       ],
       "type": "string"
     },
+    "ResourceFrom": {
+      "description": "A limit on something the run is, not something the call names.",
+      "oneOf": [
+        {
+          "const": "actor",
+          "description": "The run's actor (the agent principal it was admitted for).",
+          "type": "string"
+        },
+        {
+          "const": "tenant",
+          "description": "The tenant: one limit across every run.",
+          "type": "string"
+        }
+      ]
+    },
     "ResultProjectionConfig": {
       "enum": [
         "flat",
@@ -1510,8 +1557,19 @@
       "additionalProperties": false,
       "properties": {
         "amount_pointer": {
-          "description": "JSON pointer to the amount in the call's arguments, such as `/amount_minor`.",
+          "description": "JSON pointer to the amount in the call's arguments, such as `/amount_minor`. Empty with `amount_table`.",
           "type": "string"
+        },
+        "amount_table": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AmountTable"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Estimated amounts looked up by an argument (see `guarantee_sources`)."
         },
         "capability_ids": {
           "description": "Capabilities whose effects draw on this limit.",
@@ -1550,20 +1608,38 @@
           "$ref": "#/$defs/ResourceCanonicalizer",
           "description": "How the extracted identifier is made canonical (see `resource_identity`); omitted from the definition when `exact`."
         },
+        "resource_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceFrom"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The limit is per agent or per tenant instead of per resource the call names (see `guarantee_sources`)."
+        },
         "resource_pointer": {
-          "description": "JSON pointer to the resource identifier in the call's arguments, such as `/order_id`.",
+          "description": "JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. Empty with `resource_from`.",
           "type": "string"
         },
         "unit": {
           "description": "Unit of `limit` and the amounts, such as `INR_minor`.",
           "type": "string"
+        },
+        "window_seconds": {
+          "description": "The limit applies per window of this many seconds (60 to 31 days); each window's ledger starts empty.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
         "capability_ids",
-        "resource_pointer",
-        "amount_pointer",
         "limit",
         "unit"
       ],
