@@ -62,6 +62,10 @@ pub enum Command {
         /// The capability's local name (default: the tool name).
         #[arg(long)]
         capability: Option<String>,
+        /// Label the draft's information flow from a preset for its tool set: github,
+        /// database or crm. Preset labels only tighten the defaults.
+        #[arg(long)]
+        preset: Option<String>,
     },
     /// Print the standard profile registry.
     Profiles,

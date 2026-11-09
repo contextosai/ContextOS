@@ -758,6 +758,35 @@ first to see how often each rule would match before enforcing it.
   new run for work that must not inherit what an earlier step read.
 - At startup, contextosd lists the capabilities that declare no `flow` labels.
 
+#### Presets for GitHub, databases and CRMs
+
+The tool sets where the "lethal trifecta" bites (an agent that reads text outsiders
+wrote, holds private data, and can send data out) have presets. `ctx init-tool
+--preset github|database|crm` labels a drafted manifest's `flow` (and `sends_data`) by
+the tool's name, and says in the description's review text which rule matched and
+why. Output is never labelled trusted. A tool no rule matches gets no labels.
+
+| Preset | Rule (first matching word wins) | Output | Egress ceiling | Sends data |
+|---|---|---|---|---|
+| `github` | writes: `create`, `add`, `update`, `push`, `merge`, `fork` | untrusted `INTERNAL` | `PUBLIC` | yes |
+| | repository contents: `file`, `contents`, `code`, `commit`, `diff`, ... | untrusted `CONFIDENTIAL` | `INTERNAL` | no |
+| | issues, pull requests, comments: `issue`, `pull`, `comment`, `search`, `get`, `list`, ... | untrusted `PUBLIC` | `INTERNAL` | no |
+| `database` | `export`, `dump`, `backup`, `copy` | untrusted `CONFIDENTIAL` | `INTERNAL` | yes |
+| | `query`, `select`, `read`, `execute`, `get`, `list`, ... | untrusted `CONFIDENTIAL` | `INTERNAL` | no |
+| | `insert`, `update`, `delete`, `create`, ... | untrusted `CONFIDENTIAL` | `INTERNAL` | no |
+| `crm` | `send`, `notify`, `sms`, `publish` | untrusted `INTERNAL` | `INTERNAL` | yes |
+| | contacts, leads, accounts, cases, notes: `get`, `list`, `search`, `contact`, ... | untrusted `CONFIDENTIAL` | `INTERNAL` | no |
+| | `create`, `update`, `assign`, `close`, `log`, ... | untrusted `CONFIDENTIAL` | `CONFIDENTIAL` | no |
+
+With these labels and the default policy, an agent that reads an issue and comments
+on it is asked first (untrusted text steers an effect). An agent that reads an issue,
+then private code, then opens a pull request is denied (`flow_classified_egress`,
+`flow_rule_of_two`): the injected-issue attack on coding agents. An agent that read a
+CRM contact cannot email it out. The GitHub preset assumes public repositories for
+issue text and treats every write as public; raise `output_classification` to
+`INTERNAL` for issues of private repositories, and the egress ceiling of writes to
+repositories that are never public. Review preset labels like every other field.
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an

@@ -1,0 +1,200 @@
+{
+ "github": {
+  "title": "GitHub (the GitHub MCP server or similar)",
+  "rules": [
+   {
+    "role": "public_write",
+    "words": [
+     "create",
+     "add",
+     "update",
+     "push",
+     "merge",
+     "fork"
+    ],
+    "why": "writes to a repository, issue or pull request others may read: treat it as public",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "INTERNAL",
+     "egress_ceiling": "PUBLIC"
+    },
+    "sends_data": true
+   },
+   {
+    "role": "code_read",
+    "words": [
+     "file",
+     "files",
+     "contents",
+     "content",
+     "code",
+     "blob",
+     "tree",
+     "commit",
+     "commits",
+     "diff"
+    ],
+    "why": "reads repository contents, which may be private code or secrets",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "INTERNAL"
+    }
+   },
+   {
+    "role": "discussion_read",
+    "words": [
+     "issue",
+     "issues",
+     "pull",
+     "pulls",
+     "comment",
+     "comments",
+     "discussion",
+     "review",
+     "reviews",
+     "search",
+     "get",
+     "list"
+    ],
+    "why": "reads issues, pull requests and comments anyone with access can write; PUBLIC assumes public repositories, so raise it to INTERNAL for private ones",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "PUBLIC",
+     "egress_ceiling": "INTERNAL"
+    }
+   }
+  ]
+ },
+ "database": {
+  "title": "Databases (SQL or document stores)",
+  "rules": [
+   {
+    "role": "export",
+    "words": [
+     "export",
+     "dump",
+     "backup",
+     "copy",
+     "unload"
+    ],
+    "why": "moves data out of the database",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "INTERNAL"
+    },
+    "sends_data": true
+   },
+   {
+    "role": "read",
+    "words": [
+     "query",
+     "select",
+     "read",
+     "find",
+     "get",
+     "list",
+     "search",
+     "describe",
+     "execute",
+     "run",
+     "sql"
+    ],
+    "why": "returns rows that hold business data and text users wrote",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "INTERNAL"
+    }
+   },
+   {
+    "role": "write",
+    "words": [
+     "insert",
+     "update",
+     "upsert",
+     "write",
+     "delete",
+     "create",
+     "alter",
+     "drop"
+    ],
+    "why": "changes the database; its output may echo rows",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "INTERNAL"
+    }
+   }
+  ]
+ },
+ "crm": {
+  "title": "CRM (contacts, accounts, cases)",
+  "rules": [
+   {
+    "role": "outbound",
+    "words": [
+     "send",
+     "notify",
+     "sms",
+     "publish"
+    ],
+    "why": "sends a message outside the organization",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "INTERNAL",
+     "egress_ceiling": "INTERNAL"
+    },
+    "sends_data": true
+   },
+   {
+    "role": "record_read",
+    "words": [
+     "get",
+     "list",
+     "search",
+     "find",
+     "query",
+     "read",
+     "contact",
+     "contacts",
+     "lead",
+     "leads",
+     "account",
+     "accounts",
+     "case",
+     "cases",
+     "note",
+     "notes",
+     "activity",
+     "activities"
+    ],
+    "why": "returns personal data and text customers wrote",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "INTERNAL"
+    }
+   },
+   {
+    "role": "record_write",
+    "words": [
+     "create",
+     "update",
+     "upsert",
+     "add",
+     "assign",
+     "close",
+     "log"
+    ],
+    "why": "changes CRM records inside the organization",
+    "flow": {
+     "output_integrity": "untrusted",
+     "output_classification": "CONFIDENTIAL",
+     "egress_ceiling": "CONFIDENTIAL"
+    }
+   }
+  ]
+ }
+}

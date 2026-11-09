@@ -10,6 +10,7 @@ mod args;
 mod attest;
 mod audit_verify;
 mod evidence_pack;
+mod flow_presets;
 mod init_tool;
 mod inspect;
 mod pack_build;
@@ -371,7 +372,15 @@ fn run(command: Command) -> Result<Value, Failure> {
             tool,
             adapter,
             capability,
-        } => init_tool::draft(&read(&mcp)?, &tool, &adapter, capability.as_deref()).map_err(Failure::Usage),
+            preset,
+        } => {
+            let mut draft =
+                init_tool::draft(&read(&mcp)?, &tool, &adapter, capability.as_deref()).map_err(Failure::Usage)?;
+            if let Some(preset) = preset {
+                flow_presets::apply(&mut draft, &preset, &tool).map_err(Failure::Usage)?;
+            }
+            Ok(draft)
+        }
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
         Command::Attest { claims, seed_env, kid } => {
             let seed = std::env::var(&seed_env).map_err(|_| Failure::Usage(format!("{seed_env} is not set")))?;
