@@ -6,6 +6,11 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Tower pins the last audit entry it verified from each source (sequence and record
+  hash) in its store. After a restart, when it reads the chain again from genesis,
+  the chain must pass through that entry: a different hash marks the source broken as
+  `history_rewritten`, a chain that ends before it as `history_truncated`, and the pin
+  does not move. Otherwise the pin advances with every verified page.
 - `ctx init-tool --preset github|database|crm` labels a drafted manifest's information
   flow from a preset for its tool set: untrusted output, private reads (repository
   contents, rows, CRM records) as `CONFIDENTIAL`, and writes and sends as egress with a

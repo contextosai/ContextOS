@@ -6,7 +6,8 @@
 //! entry Tower verified, from genesis on first contact. A page that fails verification
 //! marks the source broken and stops reading it: nothing after an unverifiable entry
 //! is shown as fact. Deployment and packs are refreshed periodically, so the authority
-//! graph follows pack releases.
+//! graph follows pack releases. After a restart, the chain read again must pass through
+//! the entry Tower last pinned for the source (see [`crate::pins`]).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ use serde_json::json;
 use tokio::sync::RwLock;
 
 use crate::fleet::Fleet;
+use crate::pins::{Pin, Pins};
 use crate::source::Source;
 
 const PAGE: usize = 1000;
@@ -41,6 +43,26 @@ pub async fn sync(
     keys: &mut Option<KeyRing>,
     anchor: &mut Option<AuditEntry>,
     refreshed: &mut Option<Instant>,
+) -> bool {
+    sync_pinned(source, fleet, keys, anchor, refreshed, &mut None, None).await
+}
+
+async fn broken(fleet: &RwLock<Fleet>, id: &str, sequence: u64, reason: &str) -> bool {
+    tracing::error!(source = %id, sequence, reason, "audit chain failed verification");
+    fleet.write().await.source(id).broken = Some(json!({"sequence": sequence, "reason": reason, "at": now()}));
+    false
+}
+
+/// As [`sync`], checking the chain against `pin` (the entry Tower pinned before a
+/// restart) until it is passed, and moving the pin in `pins` forward afterwards.
+pub async fn sync_pinned(
+    source: &Source,
+    fleet: &RwLock<Fleet>,
+    keys: &mut Option<KeyRing>,
+    anchor: &mut Option<AuditEntry>,
+    refreshed: &mut Option<Instant>,
+    pin: &mut Option<Pin>,
+    pins: Option<&dyn Pins>,
 ) -> bool {
     let id = source.id().to_owned();
     if refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
@@ -77,6 +99,12 @@ pub async fn sync(
             }
         };
         if page.entries.is_empty() {
+            // Caught up without reaching the pinned entry: the history now ends before it.
+            if let Some(p) = pin.as_ref()
+                && anchor.as_ref().is_none_or(|a| a.sequence < p.sequence)
+            {
+                return broken(fleet, &id, p.sequence, "history_truncated").await;
+            }
             let mut f = fleet.write().await;
             let state = f.source(&id);
             state.head = page.head.unwrap_or(state.head);
@@ -103,6 +131,14 @@ pub async fn sync(
                 return false;
             }
         }
+        if let Some(p) = pin.as_ref()
+            && let Some(entry) = page.entries.iter().find(|e| e.sequence == p.sequence)
+        {
+            if entry.record_hash != p.record_hash {
+                return broken(fleet, &id, p.sequence, "history_rewritten").await;
+            }
+            *pin = None;
+        }
         let more = page.next.is_some();
         {
             let mut f = fleet.write().await;
@@ -116,24 +152,67 @@ pub async fn sync(
             state.anchor = page.entries.last().cloned();
         }
         *anchor = page.entries.last().cloned();
+        if pin.is_none()
+            && let (Some(pins), Some(last)) = (pins, anchor.as_ref())
+        {
+            let next = Pin {
+                sequence: last.sequence,
+                record_hash: last.record_hash.clone(),
+            };
+            if let Err(error) = pins.advance(&id, &next).await {
+                tracing::warn!(source = %id, %error, "could not pin the verified anchor");
+            }
+        }
         if !more {
+            // The last page, and the pinned entry not among what was read: truncated.
+            if let Some(p) = pin.as_ref()
+                && anchor.as_ref().is_none_or(|a| a.sequence < p.sequence)
+            {
+                return broken(fleet, &id, p.sequence, "history_truncated").await;
+            }
             return true;
         }
     }
 }
 
-/// Runs [`sync`] for one source until its chain breaks, continuing from the last entry
-/// Tower verified from it (so a restarted collector never folds an entry twice).
-pub async fn run(source: Arc<Source>, fleet: Arc<RwLock<Fleet>>, every: Duration) {
+/// Runs [`sync_pinned`] for one source until its chain breaks, continuing from the
+/// last entry Tower verified from it (so a restarted collector never folds an entry
+/// twice), and checking the chain against the source's pin.
+pub async fn run(source: Arc<Source>, fleet: Arc<RwLock<Fleet>>, every: Duration, pins: Option<Arc<dyn Pins>>) {
     let mut anchor = fleet
         .read()
         .await
         .sources
         .get(source.id())
         .and_then(|s| s.anchor.clone());
+    // The pin, unless this process has already verified past it.
+    let mut pin = loop {
+        match &pins {
+            None => break None,
+            Some(p) => match p.get(source.id()).await {
+                Ok(pin) => break pin.filter(|p| anchor.as_ref().is_none_or(|a| a.sequence < p.sequence)),
+                Err(error) => {
+                    tracing::warn!(source = %source.id(), %error, "could not read the pinned anchor; retrying");
+                    fleet.write().await.source(source.id()).last_error = Some(format!("pin: {error}"));
+                    tokio::time::sleep(every).await;
+                }
+            },
+        }
+    };
     let (mut keys, mut refreshed) = (None, None);
     loop {
-        if !sync(&source, &fleet, &mut keys, &mut anchor, &mut refreshed).await {
+        let pinned = pins.as_deref();
+        if !sync_pinned(
+            &source,
+            &fleet,
+            &mut keys,
+            &mut anchor,
+            &mut refreshed,
+            &mut pin,
+            pinned,
+        )
+        .await
+        {
             return;
         }
         tokio::time::sleep(every).await;
