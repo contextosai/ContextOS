@@ -290,6 +290,11 @@ export declare class Run {
   evidence(): Promise<any>;
 }
 
+/** The operation key of a call that changes something and names no key: a digest of the
+ * capability and its canonical arguments (`call:` and 32 hex digits). `envelope` uses it
+ * for every call that is not `read_only` and names no `idempotencyKey`. */
+export declare function operationKey(capabilityId: string, args: Json): string;
+
 export declare function governedTool<A extends Record<string, Json>>(
   run: Run,
   capabilityId: string,

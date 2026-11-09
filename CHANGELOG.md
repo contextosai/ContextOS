@@ -5,7 +5,21 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Changed
+- Python and Node clients: a call that is not `read_only` and names no
+  `idempotency_key` gets one from its capability and canonical arguments
+  (`operation_key` / `operationKey`) instead of a fresh random operation. The same
+  call re-sent (a retried step, a LangGraph node re-run on resume, a call re-sent
+  once approved) is the same operation, so it redeems its approval and cannot apply
+  twice; before, it opened a new approval or was refused as `effect_repeated`.
+  Identical calls that are distinct effects need keys of their own.
+
 ### Added
+- `contextos.integrations` (Python client): `langgraph.ContextOSMiddleware` (budgeted
+  model calls, refusals as tool errors, approval pauses as resumable LangGraph
+  interrupts) and `openai_agents` (`GatewayApprovals`, which raises the gateway's own
+  approval as an SDK interruption so the run can be checkpointed while it waits;
+  `failure`; `BudgetedProvider`). The LangGraph and OpenAI Agents examples use them.
 - Intent keys: a capability's manifest may declare `intent.key_pointers`, the
   arguments that identify a business request. The first run to send a request claims
   it tenant-wide before dispatch; the same request from another run is refused with

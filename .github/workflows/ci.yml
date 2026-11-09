@@ -142,7 +142,7 @@ jobs:
         run: |
           cargo build --release -p contextosd
           PYTHONPATH=bindings/python python bindings/python/tests/test_client.py
-          PYTHONPATH=bindings/python python -m unittest bindings/python/tests/test_replay.py
+          PYTHONPATH=bindings/python python -m unittest bindings/python/tests/test_replay.py bindings/python/tests/test_envelope.py
       - name: Examples (quickstart, governed agent loop, Keycloak, metering, Tower)
         run: |
           ./examples/support-refund/run.sh

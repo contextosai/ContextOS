@@ -57,7 +57,10 @@ def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
 
 Derive `idempotency_key` from the arguments that identify the effect, never from
 LangGraph's `tool_call["id"]`: the model mints a new id on every attempt, so a key built
-from it would let a repeated refund through as a new operation.
+from it would let a repeated refund through as a new operation. A call that is not
+`read_only` and names no key gets one from its capability and arguments
+(`contextos.envelope.operation_key`), so a node re-run on resume re-sends the same
+operation; reads gated by an approval need a key of their own.
 
 ## 4. Budget every model call and govern every tool call
 
@@ -69,52 +72,25 @@ typed exceptions arrive.
 
 ```python
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
-from langchain.messages import ToolMessage
-from langgraph.types import interrupt
-from contextos.client import ToolBlocked, ToolFailed, ToolPaused, ToolRejected
+from contextos.integrations.langgraph import ContextOSMiddleware
 
-
-def refusal(outcome) -> str:
-    reasons = ", ".join(outcome.reason_codes) or outcome.status
-    kind = outcome.kind if isinstance(outcome, ToolPaused) else None
-    if kind == "duplicate":
-        return f"ALREADY REQUESTED ({reasons}): this exact action was submitted before and was not repeated."
-    if kind == "unknown_outcome":
-        return f"OUTCOME UNKNOWN ({reasons}): the action may have happened and is being reconciled; do not retry it."
-    return f"NOT DONE ({outcome.status}: {reasons}). The action did not take effect; do not retry it."
-
-
-class ContextOS(AgentMiddleware):
-    def __init__(self, run, tokens: int = 4000):
-        super().__init__()
-        self.run, self.tokens = run, tokens
-
-    def wrap_model_call(self, request, handler):
-        with self.run.budgeted_model_call(tokens=self.tokens):   # BudgetExhausted raises first
-            return handler(request)
-
-    def wrap_tool_call(self, request, handler):
-        call = request.tool_call
-        try:
-            return handler(request)
-        except ToolPaused as paused:
-            if paused.kind != "approval":
-                return self.error(call, refusal(paused))     # duplicate, unknown outcome, ...
-            answer = interrupt({"approval_request_id": paused.report["approval_request_id"],
-                                "tool": call["name"], "args": call["args"]})
-            return self.error(call, f"{refusal(paused)} Reviewer: {answer}")
-        except (ToolBlocked, ToolRejected, ToolFailed) as outcome:
-            return self.error(call, refusal(outcome))
-
-    @staticmethod
-    def error(call, text):
-        return ToolMessage(text, tool_call_id=call["id"], name=call["name"], status="error")
-
-
+contextos = ContextOSMiddleware(run, model_call_tokens=4000)
 agent = create_agent("anthropic:claude-sonnet-5-5", tools=[lookup_order, issue_refund],
-                     system_prompt=INSTRUCTIONS, middleware=[ContextOS(run)], checkpointer=checkpointer)
+                     system_prompt=INSTRUCTIONS, middleware=[contextos], checkpointer=checkpointer)
 ```
+
+What it does with each outcome:
+
+| Gateway result | What the model or the graph sees |
+|---|---|
+| `blocked`, `rejected`, `failed` | A tool error: "NOT DONE (blocked: …). The action did not take effect; do not retry it." |
+| `paused`, `kind == "duplicate"` | A tool error: "ALREADY REQUESTED (…): this exact action was submitted before and was not repeated." |
+| `paused`, `kind == "unknown_outcome"` | A tool error: "OUTCOME UNKNOWN (…)": the effect may have happened and is reconciled, not retried. |
+| `paused`, `kind == "approval"` | A LangGraph `interrupt` carrying `approval_request_id`, `tool` and `args`; `contextos.paused` holds the pause by request id. |
+
+The middleware is about forty lines
+([`contextos/integrations/langgraph.py`](../../bindings/python/contextos/integrations/langgraph.py));
+copy it if you need different text for the model (pass `describe=`) or another interrupt payload.
 
 Executor settlement charges the whole reservation. To charge measured usage, reserve with
 `metered=True` and send `run.metering_headers(reservation)` on the model request, through
