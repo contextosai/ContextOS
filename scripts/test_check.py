@@ -26,7 +26,7 @@ class CheckScriptTests(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
             for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
-                         "compensation", "outcome-witness", "why-not-a-row-lock", "postgres-drill", "replay", "tower"):
+                         "compensation", "outcome-witness", "why-not-a-row-lock", "postgres-drill", "replay", "consequential-tools", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
@@ -40,6 +40,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += "echo 'outcome witnessed'\n"
                 if name == "replay":
                     text += "echo 'replay report written'\n"
+                if name == "consequential-tools":
+                    text += "echo 'consequential-tools report written'\n"
                 if name == "why-not-a-row-lock":
                     text += "echo 'row lock comparison complete'\n"
                 if name == "postgres-drill":

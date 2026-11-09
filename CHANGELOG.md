@@ -6,6 +6,16 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `examples/consequential-tools`: a staging support agent's recorded refunds replayed
+  through a gateway with the starter profile's guards. A refund on a live order is
+  refused (`environment_mismatch`), the same refund from a second run is refused
+  (`effect_repeated_across_runs`), and the agent's daily cap holds
+  (`shared_guarantee_exceeded`). `examples/replay/local_gateway.py` runs the local
+  gateway for both replay examples.
+- `examples/postgres-drill` phase 6: intent keys across processes on PostgreSQL. Runs
+  on three processes race the same refund under fresh runs and keys and exactly one is
+  paid; a sender killed after the provider applied its refund leaves a claim that still
+  refuses the same request from a new run.
 - `ctx manifest` returns `notes` on a manifest that loads: effectful without `amount`
   or `resource_pointers`, named like a destructive call but declared reversible or
   approved below `destructive`, and effectful and not repeatable without an `intent`

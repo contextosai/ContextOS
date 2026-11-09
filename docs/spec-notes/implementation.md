@@ -1,10 +1,10 @@
 # ContextOS implementer's requirements digest (Rust runtime/gateway)
 
-**Sources.** I read all 12 requested files in full, under `/opt/contextosai/src/content/docs/`: `implementation/{api-contracts,execution-contract,context-pack,decision-record,memory-fabric,workflows,high-risk-workflow,decision-catalog,intent-task-catalog}.mdx`, `adapters/{mcp,build}.mdx` and `how-it-works.mdx`.
+**Sources.** I read all 12 requested files in full, under `contextosai/src/content/docs/`: `implementation/{api-contracts,execution-contract,context-pack,decision-record,memory-fabric,workflows,high-risk-workflow,decision-catalog,intent-task-catalog}.mdx`, `adapters/{mcp,build}.mdx` and `how-it-works.mdx`.
 
 I also read three extra things, and they are marked **[schema]** or **[orch]** below:
-- the enums and `required` arrays in `/opt/contextosai/public/schemas/*.json`
-- the RunStatus transition table at `/opt/contextosai/src/content/docs/foundations/orchestration.mdx:153-168`
+- the enums and `required` arrays in `contextosai/public/schemas/*.json`
+- the RunStatus transition table at `contextosai/src/content/docs/foundations/orchestration.mdx:153-168`
 
 **How the docs describe their own status.** All docs say "Implementation Guide" or "Integration Guide", last reviewed 2026-10-16. They say the following plainly:
 - The published JSON Schemas are the normative serialization.
@@ -829,4 +829,4 @@ No other error-code catalog exists in these files. I grepped for `error_code`.
 - the semantics of the `privileged_sink_policy` values beyond `verified_or_user_intent`
 - the full adapter `type` enum
 
-Remaining enum details are in `/opt/contextosai/public/schemas/execution-contract.v1.schema.json` (149 KB). It is the authoritative source for the attachment types (`ExecutionCheckpoint`, `OperationAttempt`, `BudgetReservationRecord`, etc.), and I only extracted its enums and required fields.
+Remaining enum details are in `contextosai/public/schemas/execution-contract.v1.schema.json` (149 KB). It is the authoritative source for the attachment types (`ExecutionCheckpoint`, `OperationAttempt`, `BudgetReservationRecord`, etc.), and I only extracted its enums and required fields.

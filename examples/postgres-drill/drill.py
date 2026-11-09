@@ -242,12 +242,57 @@ class Drill:
         self.phases["outage_retry"] = resent
         print(f"    calls that failed during the outage, resent unchanged: {resent or 'none failed'}")
 
+    def intent_keys(self, workdir):
+        """Every process restarts with the refund manifest naming its intent (order and
+        amount): one refund per request, whichever run sends it, across processes."""
+        manifest = json.loads((cluster.ROOT / "examples/support-refund/capabilities/issue_refund.json").read_text())
+        manifest["intent"] = {"key_pointers": ["/order_id", "/amount_minor"], "window_seconds": 86400}
+        path = workdir / "issue_refund_intent.json"
+        path.write_text(json.dumps(manifest))
+        for replica in self.replicas:
+            replica.use_manifest("issue_refund.json", path)
+        rounds = max(ROUNDS // 2, 1)
+        print(f"6. Intent keys: the refund manifest names its request (order, amount). For each of {rounds}")
+        print(f"   orders, {AGENTS} runs on {len(self.replicas)} processes race the same INR 300 refund.")
+        once = 0
+        for r in range(rounds):
+            order = f"ord_intent_{PREFIX}_{r}"
+            results = self.race("intent_race", [(order, SHARE)] * AGENTS)
+            done = sum(x[2] == "completed" for x in results)
+            repeated = sum(x[2] == "blocked:effect_repeated_across_runs" for x in results)
+            self.check(done == 1 and repeated == AGENTS - 1,
+                       f"{order}: {done} completed, {repeated} refused as repeats: {self.phases['intent_race']['outcomes']}")
+            self.check(self.payments.total(order) == SHARE, f"{order}: provider paid {self.payments.total(order)}")
+            once += done == 1 and self.payments.total(order) == SHARE
+        print(f"    outcomes {self.phases['intent_race']['outcomes']}; {once}/{rounds} orders paid exactly once")
+        # The sender is killed after the provider applied it: the claim outlives the process.
+        order, run = f"ord_intent_kill_{PREFIX}", f"intent_kill_{PREFIX}"
+        victim, peer = self.replicas[0], self.replicas[1 % len(self.replicas)]
+        self.orders.add(order)
+        self.payments.arrived.clear()
+        self.payments.release.clear()
+        self.payments.faults[order] = "hang"
+        generation = admit(victim.base, run, "agent_intent", SHARE)
+        sender = threading.Thread(target=refund, args=(victim.base, run, "agent_intent", order, SHARE, generation))
+        sender.start()
+        self.check(self.payments.arrived.wait(20), "intent: the refund never reached the provider")
+        victim.kill()
+        self.payments.faults.pop(order)
+        self.payments.release.set()
+        sender.join()
+        victim.start()
+        again = self.single(peer.base, f"intent_again_{PREFIX}", order, SHARE)
+        print(f"    sender killed after the provider applied it; the same refund from a new run: {again}")
+        self.check(again == "blocked:effect_repeated_across_runs", f"intent: the repeat after a kill was {again}")
+        self.check(self.payments.total(order) == SHARE, f"{order}: provider paid {self.payments.total(order)}")
+        self.phases["intent_kill_repeat"] = again
+
     def resolve_holds(self):
         """Every hold left anywhere under the guarantee, resolved from the provider ledger
         alone: confirmed when the provider has the refund, not applied only when the
         attempt never started. A started attempt the provider has no record of stays held."""
         left = cluster.holds(self.base(0), GUARANTEE)
-        print(f"6. Holds left under the guarantee: {len(left)}. Resolving each from the provider ledger.")
+        print(f"7. Holds left under the guarantee: {len(left)}. Resolving each from the provider ledger.")
         resolved, kept = {}, []
         for hold in left:
             run, op = hold["run_id"], hold["operation_id"]
@@ -268,7 +313,7 @@ class Drill:
         print(f"    resolved {resolved or 'none'}; kept held (no provider record, dispatch started): {len(kept)}")
 
     def invariants(self):
-        print(f"7. Invariants over {len(self.orders)} orders, against the provider's own ledger.")
+        print(f"8. Invariants over {len(self.orders)} orders, against the provider's own ledger.")
         kept = {h["operation_id"] for h in self.phases.get("holds_kept", [])}
         for order in sorted(self.orders):
             paid, view = self.payments.total(order), balance(self.base(0), GUARANTEE, order)
@@ -295,7 +340,7 @@ class Drill:
                                  "--keys", str(RECEIPT / "keys.json")], capture_output=True, text=True)
         proof = json.loads(verify.stdout or "{}")
         self.check(proof.get("verified") is True, f"audit did not verify: {verify.stdout}{verify.stderr}")
-        print(f"8. Audit chain written by {len(self.replicas)} processes: {proof.get('entries')} entries, "
+        print(f"9. Audit chain written by {len(self.replicas)} processes: {proof.get('entries')} entries, "
               f"verified {proof.get('verified')}")
         return proof
 
@@ -335,6 +380,7 @@ def main():
             drill.kill_after_send()
             drill.lost_reply()
             drill.database_restart()
+            drill.intent_keys(Path(tmp))
             drill.resolve_holds()
             drill.invariants()
             proof = drill.audit()
