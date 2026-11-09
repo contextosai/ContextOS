@@ -52,6 +52,8 @@ pub struct Listed {
 #[derive(Default)]
 pub struct Registry {
     entries: RwLock<BTreeMap<String, Entry>>,
+    /// Where each source's last verified entry is pinned (see [`crate::pins`]).
+    pins: Option<Arc<dyn crate::pins::Pins>>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -78,7 +80,16 @@ impl Registry {
             .collect();
         Self {
             entries: RwLock::new(entries),
+            pins: None,
         }
+    }
+
+    /// Pins each source's last verified entry in `pins`, so a restart checks the
+    /// chain it reads again against it (see [`crate::pins`]).
+    #[must_use]
+    pub fn with_pins(mut self, pins: Arc<dyn crate::pins::Pins>) -> Self {
+        self.pins = Some(pins);
+        self
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, BTreeMap<String, Entry>> {
@@ -201,7 +212,12 @@ impl Registry {
         if let Some(handle) = e.collector.take() {
             handle.abort();
         }
-        let task = tokio::spawn(crate::collector::run(e.source.clone(), fleet.clone(), every));
+        let task = tokio::spawn(crate::collector::run(
+            e.source.clone(),
+            fleet.clone(),
+            every,
+            self.pins.clone(),
+        ));
         e.collector = Some(task.abort_handle());
         true
     }

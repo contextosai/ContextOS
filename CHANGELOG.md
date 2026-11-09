@@ -12,8 +12,47 @@ minor versions may break APIs and every break is listed.
   Okta custom authorization server tokens (`cid`, `scp` arrays) and Okta's token
   exchange for AI agents (`act.sub`, user binding). The Entra guide states that its
   on-behalf-of tokens carry no RFC 8693 actor claim, so they do not bind users.
-
-### Added
+- Tower pins the last audit entry it verified from each source (sequence and record
+  hash) in its store. After a restart, when it reads the chain again from genesis,
+  the chain must pass through that entry: a different hash marks the source broken as
+  `history_rewritten`, a chain that ends before it as `history_truncated`, and the pin
+  does not move. Otherwise the pin advances with every verified page.
+- `ctx init-tool --preset github|database|crm` labels a drafted manifest's information
+  flow from a preset for its tool set: untrusted output, private reads (repository
+  contents, rows, CRM records) as `CONFIDENTIAL`, and writes and sends as egress with a
+  ceiling. With the default policy, reading an issue and then private code and then
+  opening a pull request is denied, and personal data read from a CRM cannot be
+  emailed out. The description's review text names the matching rule.
+- Privilege intersection: a capability's `required_user_roles` lets its effects run
+  only for a run acting for a user who holds one of the roles, as their delegated
+  token says (`[oidc.delegation] user_roles_claim`, kept on the run with its
+  delegation chain). Otherwise the call is refused before anything is sent and audited
+  as `privilege_refusal` (`user_not_delegated`, `user_roles_unknown`,
+  `user_role_missing`).
+- Multi-hop delegation: a delegated token's nested actor claims (RFC 8693 `act` within
+  `act`) are read as a chain, current actor first, and kept on the run; a delegated
+  child run inherits its parent's. `[oidc.delegation] max_chain` (default 4, at most
+  16) bounds it, and a chain naming an actor twice or the user as an actor rejects the
+  token. `run_admitted` records `delegation` with the chain's `depth` and
+  `chain_digest`, never identities.
+- Kill switch: `user` (every run acting for a user, and new runs declaring them) and
+  `delegation` (one exact chain, by its digest) revocation kinds; `principal` now also
+  stops runs whose delegation chain names the principal. Tower's kill switch offers
+  both.
+- Tower single sign-on (`[sso]`): people sign in with the organization's OpenID Connect
+  provider. Tower accepts the provider's ID tokens as bearer tokens (issuer, client
+  audience, expiry and a published asymmetric key checked; keys refreshed in the
+  background) and maps groups to roles and teams through `[[sso.groups]]`; a person
+  in no mapped group is refused. The UI signs in with the authorization-code flow
+  and PKCE; Tower exchanges the code itself (`POST /api/sso/token`, client secret for
+  confidential clients) and returns the token only if it accepts it, with the
+  browser's nonce. API keys keep working.
+- `ctx evidence-pack --framework soc2|iso42001|eu-ai-act|owasp-agentic`: a review
+  folder built only from an audit export that verifies. It holds the export and keys
+  as supplied, `controls.json` (each control's audit event kinds counted over the
+  period, with status `evidenced`, `no_events_in_period` or `outside_audit`),
+  `coverage.md` (what the evidence covers and what it does not), an optional
+  configuration report, and `manifest.json` with every file's digest. Deterministic.
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
@@ -29,6 +68,11 @@ minor versions may break APIs and every break is listed.
   approved below `destructive`, and effectful and not repeatable without an `intent`
   key. The startup notes share the same checks
   (`contextos_gateway::manifest_review`).
+
+### Changed
+- `Gateway::admission_revoked` takes `AdmissionTargets`, and `run_targets` returns a
+  `Vec`. Delegated-token parsing moved from `oidc.rs` to `oidc_delegation.rs`;
+  `VerifiedUser` gains `actors`.
 
 ## 0.1.0-alpha.18 - 2026-11-08
 

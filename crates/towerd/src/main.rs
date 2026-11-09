@@ -54,6 +54,7 @@ async fn main() {
             );
             towerd::sources_admin::spawn(&tower);
             tower.spawn_journal_recovery();
+            tower.spawn_sso();
             api::router(tower)
         }
         StoreConfig::Postgres {
@@ -71,6 +72,7 @@ async fn main() {
             );
             towerd::sources_admin::spawn(&tower);
             tower.spawn_journal_recovery();
+            tower.spawn_sso();
             api::router(tower)
         }
     };

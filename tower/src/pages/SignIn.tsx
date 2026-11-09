@@ -1,11 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, session, type Me } from "../lib/api";
+import { finishSignIn, signInUrl, type SsoSettings } from "../lib/sso";
 import { errorText } from "../components/actions";
 
 export function SignIn() {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<[string, string | undefined] | null>(null);
+  const [sso, setSso] = useState<SsoSettings | null>(null);
+
+  useEffect(() => {
+    // Back from the identity provider: finish the sign-in Tower started.
+    finishSignIn(window.location, window.history)
+      .then(async (idToken) => {
+        if (!idToken) return;
+        setBusy(true);
+        await api<Me>("/api/me", { token: idToken });
+        session.set(idToken);
+      })
+      .catch((err) => setError(errorText(err)))
+      .finally(() => setBusy(false));
+    api<SsoSettings>("/api/sso", { token: "" })
+      .then(setSso)
+      .catch(() => setSso(null));
+  }, []);
 
   return (
     <div className="gate">
@@ -17,6 +35,25 @@ export function SignIn() {
             <p className="muted">Know, control and prove what your organisation's AI agents do.</p>
           </div>
         </div>
+        {sso && (
+          <div className="card-body stack">
+            <button
+              className="primary"
+              disabled={busy || !sso.authorization_endpoint}
+              onClick={async () => {
+                setError(null);
+                try {
+                  window.location.assign(await signInUrl(sso));
+                } catch (err) {
+                  setError(errorText(err));
+                }
+              }}
+            >
+              Sign in with your organization
+            </button>
+            <span className="help">Your identity provider's groups decide your Tower roles. Or use an access key below.</span>
+          </div>
+        )}
         <form
           className="card-body stack"
           onSubmit={async (e) => {

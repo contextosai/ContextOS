@@ -19,6 +19,7 @@ something fails. The runtime's own threat model is in
 | # | Threat | Control | Test |
 |---|---|---|---|
 | 1 | A forged or altered audit history makes an agent look compliant | Every page verified (payload digest, record hash, link, Ed25519) from genesis or a verified anchor; failure stops the source and raises `chain_broken` | `contextos-audit` tamper tests; collector path in `towerd` e2e |
+| 1a | A runtime's history is rewritten or cut short while Tower is down, then re-read from genesis | The last verified entry of each source is pinned in Tower's store (sequence and record hash); after a restart the chain must pass through it, or the source is broken (`history_rewritten`, `history_truncated`) | `towerd` `tests/pins.rs` |
 | 2 | A compromised Tower forges runtime history | Tower never holds a runtime signing key; runtime chains remain the record, verifiable independently | Architecture |
 | 3 | Tower used to act with more authority than intended | Reads with `audit:read` keys only; acting needs an explicit `control` key per source; every action is also audited by the runtime under its own scopes | Source configuration |
 | 4 | One person approves their own risk | Owners and declarers cannot review their agents; guardrail authors cannot activate them; waiver requesters cannot decide them | `governance_actions_need_the_right_role_and_a_second_person` |
@@ -73,12 +74,21 @@ the UI. `admin` passes every role check but not the separation checks.
 | Runtime `control` key, per source (optional) | `control_token_env` or `control_token_file` | Revoke and restore on that tenant |
 | Tower journal seed | `[journal] signing_seed_env` | Sign Tower's journal |
 | People's Tower keys | Configured as SHA-256 hashes in `[[api_keys]]` | Their roles |
+| Identity-provider client secret (optional) | `[sso] client_secret_env` | Exchange sign-in codes for a confidential client |
 | Anthropic API key (optional) | `[intelligence] api_key_env` | Model calls |
 
 The configuration file holds no secrets: hashes, environment variable names and file
 paths only. Sources added from the console follow the same rule: an admin names where a
 key lives, Tower reads it on each replica, and no API response, record or journal entry
 contains a key.
+With `[sso]`, people sign in with ID tokens instead of keys. Tower accepts a token only
+if it is signed by a key the issuer publishes, with an allowed asymmetric algorithm,
+names the issuer and Tower's client, and is in date; roles come only from
+`[[sso.groups]]`, so signing in grants nothing by itself. The browser never calls the
+identity provider's token endpoint: Tower exchanges the code (PKCE, plus the client
+secret for a confidential client) and returns the token only with the nonce the
+browser chose. The token lives in the tab's session storage, like a key.
+
 Keys are compared in constant time over every configured key. A runtime key should
 belong to a dedicated principal (for example `svc_tower`) with only `audit:read`, so the
 runtime's own audit shows Tower's reads distinctly.
@@ -90,6 +100,8 @@ runtime's own audit shows Tower's reads distinctly.
 | Runtime unreachable | Keeps the last state; `last_error` on the source; retries every poll |
 | Audit page fails verification | Marks the source broken, stops reading it, raises a critical finding and a banner |
 | Unknown signing key | Reloads the published keys once (rotation); if still unknown, treats as a broken chain |
+| Chain read after a restart differs at, or ends before, the pinned entry | Marks the source broken (`history_rewritten` or `history_truncated`); the pin does not move |
+| Pinned entry cannot be read from the store | The collector retries and reports `last_error` until it can; it does not read the source unchecked |
 | Store or journal unavailable | Refuses the change (`503`); nothing is half-applied, because the journal is written first and records change by compare-and-swap |
 | Kill switch fails on some runtimes | Returns per-source results; the journal records the attempt before any call |
 | Model service down, refuses or truncates | The AI route returns an error; nothing else is affected |

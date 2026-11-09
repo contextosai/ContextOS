@@ -34,10 +34,12 @@ hex.workspace = true
 sha2.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
+jsonwebtoken.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
 contextosd = { path = "../contextosd", default-features = false }
+ring.workspace = true
 
 [lints]
 workspace = true

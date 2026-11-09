@@ -63,6 +63,10 @@ pub struct RunAdmission {
     /// admitted under; every decision of the run cites it (see [`crate::guard_policy`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard_policy_ref: Option<Value>,
+    /// The user and actors a delegated credential named, or the parent's for a
+    /// delegated run (see [`crate::delegation_chain`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_chain: Option<crate::DelegationChain>,
     /// What the principal authorized for this task; every effect must fall inside each
     /// one. A delegated run carries its parent's and may add narrower ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -319,6 +323,7 @@ pub async fn admit_run<S: DocumentStore>(
         admitted_by: request.admitted_by,
         pack_ref: request.compiled.context_ledger.pack_ref.clone(),
         guard_policy_ref: None,
+        delegation_chain: None,
         task_authorizations: Vec::new(),
         inherited_task_authorizations: 0,
         task_authorization_origins: Vec::new(),

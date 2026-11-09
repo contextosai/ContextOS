@@ -18,7 +18,8 @@
 //! With `[oidc.delegation]`, a token carrying an RFC 8693 actor claim (`act`) is a
 //! delegated token: the caller is the actor (`act.sub`), acting for the user the token
 //! is about (`sub`). Keycloak issues these from token exchange delegation; see
-//! [`crate::user_binding`] for how admission uses the user.
+//! [`crate::oidc_delegation`] for chains of actors and [`crate::user_binding`] for how
+//! admission uses the user.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -30,8 +31,9 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::auth::{Caller, VerifiedUser};
+use crate::auth::Caller;
 use crate::oidc_claims::{resolve, strings, valid_path};
+pub use crate::oidc_delegation::DelegationConfig;
 
 /// Scopes a token may grant; anything else in the scope claim is ignored.
 pub const KNOWN_SCOPES: [&str; 13] = [
@@ -100,27 +102,6 @@ pub struct OidcConfig {
     pub delegation: Option<DelegationConfig>,
 }
 
-/// `[oidc.delegation]`: how a delegated token names its actor and user.
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DelegationConfig {
-    /// Claim path of the actor object (its `sub` is the caller).
-    #[serde(default = "default_actor_claim")]
-    pub actor_claim: String,
-    /// Field of the actor object naming the agent, mapped through the issuer's
-    /// `agents` table (Keycloak: `client_id`). Unset: the issuer's `agent_claim`.
-    #[serde(default)]
-    pub actor_agent_claim: Option<String>,
-    /// Claim path listing the user's roles (Keycloak: `realm_access.roles`). Set, a
-    /// run may declare only a role the user holds.
-    #[serde(default)]
-    pub user_roles_claim: Option<String>,
-}
-
-fn default_actor_claim() -> String {
-    "act".into()
-}
-
 fn default_tenant_claim() -> String {
     "tenant_id".into()
 }
@@ -162,6 +143,7 @@ impl OidcConfig {
             paths.push(&delegation.actor_claim);
             paths.extend(&delegation.actor_agent_claim);
             paths.extend(&delegation.user_roles_claim);
+            delegation.validate().map_err(|e| format!("oidc issuer {who}: {e}"))?;
             if delegation.actor_agent_claim.is_some() && self.agent_claim.is_none() {
                 return Err(format!(
                     "oidc issuer {who}: delegation.actor_agent_claim needs agent_claim"
@@ -410,7 +392,10 @@ impl OidcIssuer {
             .filter(|s| granted.contains(s))
             .map(|s| (*s).to_owned())
             .collect();
-        let delegation = self.delegation(&claims, subject)?;
+        let delegation = match &self.config.delegation {
+            Some(config) => crate::oidc_delegation::delegated(&self.config.issuer, config, &claims, subject)?,
+            None => None,
+        };
         let principal_id = delegation.as_ref().map_or(subject, |d| d.actor).to_owned();
         let (agent_value, agent_source) = match (&delegation, &self.config.agent_claim) {
             (Some(d), Some(_)) if d.agent_claim.is_some() => (d.agent_value, d.agent_claim.clone()),
@@ -454,49 +439,6 @@ impl OidcIssuer {
             _ => Err(()),
         }
     }
-
-    /// The actor and user of a delegated token; `None` for an ordinary token. A
-    /// malformed actor claim rejects the token rather than reading it as ordinary.
-    fn delegation<'a>(&self, claims: &'a Value, subject: &str) -> Result<Option<Delegated<'a>>, ()> {
-        let Some(config) = &self.config.delegation else {
-            return Ok(None);
-        };
-        let Some(actor) = resolve(claims, &config.actor_claim) else {
-            return Ok(None);
-        };
-        let actor_id = actor["sub"].as_str().filter(|s| !s.is_empty()).ok_or(())?;
-        if actor_id == subject {
-            return Err(());
-        }
-        let roles = config
-            .user_roles_claim
-            .as_ref()
-            .map(|path| strings(resolve(claims, path)).into_iter().map(str::to_owned).collect());
-        let source = format!("oidc:{}#{}", self.config.issuer, config.actor_claim);
-        Ok(Some(Delegated {
-            actor: actor_id,
-            agent_value: config
-                .actor_agent_claim
-                .as_ref()
-                .and_then(|field| actor[field].as_str()),
-            agent_claim: config
-                .actor_agent_claim
-                .as_ref()
-                .map(|field| format!("{}.{field}", config.actor_claim)),
-            user: VerifiedUser {
-                user_id: subject.to_owned(),
-                roles,
-                source,
-            },
-        }))
-    }
-}
-
-struct Delegated<'a> {
-    actor: &'a str,
-    agent_value: Option<&'a str>,
-    agent_claim: Option<String>,
-    user: VerifiedUser,
 }
 
 /// Verifies a compact JWS against the configured issuers.
