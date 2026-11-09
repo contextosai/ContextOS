@@ -1881,6 +1881,24 @@ derived from the intent instead of the run's operation, so a provider that dedup
 by key also recognises the request across runs. Repeatable capabilities cannot declare
 an intent.
 
+### The user's privilege, not only the agent's
+
+An agent's credential usually reaches far more than any one user may do: the refund
+agent's service account can refund any order, whoever asked. A capability can require
+that the user the run acts for holds one of a set of roles:
+
+```json
+"required_user_roles": ["refund_approver", "support_lead"]
+```
+
+The roles are the ones the identity provider puts in the user's delegated token
+(`[oidc.delegation] user_roles_claim`), read at admission and kept on the run with its
+delegation chain; a delegated child run inherits its parent's. A call is refused before
+anything is reserved or sent, and audited as `privilege_refusal`, when the run's
+credential named no user (`user_not_delegated`), the issuer does not read roles
+(`user_roles_unknown`), or the user holds none of them (`user_role_missing`). The audit
+holds the reason, never the user. At most 32 roles of up to 128 bytes.
+
 ### Effects aimed at another environment
 
 Agents reach production through credentials they were never meant to use: a staging
