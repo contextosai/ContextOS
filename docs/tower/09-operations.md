@@ -170,6 +170,7 @@ the number of agents and active guardrails, not with traffic.
 | `towerd: source X: TOWER_… is not set` at start | A source's key variable is missing | Set it; Tower refuses to start rather than silently skip a business unit |
 | Source shows *unreachable* with `401` | The key is wrong or lacks `audit:read` for that tenant | Check the runtime's `[[api_keys]]` entry and the hash |
 | Source shows *unreachable* with `describe: …` | `/v1/deployment` or `/v1/packs` failed | Runtime too old (needs the governance reads), or network |
+| *Chain broken at #n*, `history_rewritten` or `history_truncated` | After a restart, the runtime's chain no longer passes through the entry Tower pinned: its history was changed or cut while Tower was down | Treat as an incident. A runtime that legitimately started a new store (a new chain) is a new source: add it under a new id |
 | *Chain broken at #n* | An entry failed verification | Treat as an incident; export and run `ctx audit-verify` against the runtime's keys to confirm; after investigation, *Retry verification* (admin, with the reason) continues from the last verified entry |
 | Source shows *keys unavailable* | This replica cannot read a console source's key variable or file | Mount the secret (or set the variable) on every replica, then *Reload keys* |
 | Source shows *stale* | No successful sync for `stale_after_seconds` | Check `last_error`, the runtime's health and network; *Pause* it during planned maintenance |

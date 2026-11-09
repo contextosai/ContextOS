@@ -6,6 +6,13 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Tower pins the last audit entry it verified from each source (sequence and record
+  hash) in its store. After a restart, when it reads the chain again from genesis,
+  the chain must pass through that entry: a different hash marks the source broken as
+  `history_rewritten`, a chain that ends before it as `history_truncated`, and the pin
+  does not move. Otherwise the pin advances with every verified page.
+
+### Added
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused

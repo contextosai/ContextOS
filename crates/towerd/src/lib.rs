@@ -12,6 +12,7 @@ pub mod governance;
 pub mod inbox;
 pub mod intel;
 pub mod ops;
+pub mod pins;
 pub mod records;
 pub mod registry;
 pub mod revocations;
@@ -97,6 +98,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         };
         let public = base64_key(&signer);
         let journal_keys = json!({"keys": [{"kid": signer.kid(), "alg": "ed25519", "public_key": public}]});
+        let pins: Arc<dyn pins::Pins> = Arc::new(pins::StorePins::new(store.clone()));
         let journal = Arc::new(AuditWriter::new(log, signer));
         let mut fleet = fleet::Fleet::new(config.collector.recent_runs, config.collector.hours);
         for s in &config.sources {
@@ -105,7 +107,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         Ok(Self {
             callers: api::Callers::new(&config.api_keys),
             fleet: Arc::new(RwLock::new(fleet)),
-            sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config))),
+            sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config)))
+                .with_pins(pins),
             source_admin: sources_admin::State::default(),
             records: records::Records::new(store, journal),
             model,
