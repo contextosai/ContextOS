@@ -1,6 +1,6 @@
 # ContextOS implementer's requirements digest (for a Rust runtime, gateway and control plane)
 
-I read all the requested docs in full (about 43k words) and listed the 9 schemas. I also pulled the exact enums and field lists noted below straight out of `/opt/contextosai/public/schemas/*.json`.
+I read all the requested docs in full (about 43k words) and listed the 9 schemas. I also pulled the exact enums and field lists noted below straight out of `contextosai/public/schemas/*.json`.
 
 **Status labels**
 - Reference: `control-profiles`, `conformance`, `reviewer-agents`.
@@ -11,7 +11,7 @@ I read all the requested docs in full (about 43k words) and listed the 9 schemas
 
 ---
 
-## 0. Published schemas (`/opt/contextosai/public/schemas/`)
+## 0. Published schemas (`contextosai/public/schemas/`)
 
 The docs say there are exactly 9 files: 8 base schemas plus 1 additive one.
 
