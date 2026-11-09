@@ -62,6 +62,10 @@ pub enum Command {
         /// The capability's local name (default: the tool name).
         #[arg(long)]
         capability: Option<String>,
+        /// Label the draft's information flow from a preset for its tool set: github,
+        /// database or crm. Preset labels only tighten the defaults.
+        #[arg(long)]
+        preset: Option<String>,
     },
     /// Print the standard profile registry.
     Profiles,
@@ -94,6 +98,30 @@ pub enum Command {
         /// exactly (next sequence, linked hash), so only new entries need checking.
         #[arg(long)]
         continues: Option<PathBuf>,
+    },
+    /// Build an evidence pack for a security or compliance review: the verified audit
+    /// export and keys, a control map for each framework with the events that evidence
+    /// each control counted over the period, a coverage statement, and a manifest of
+    /// file digests. Refused unless the export verifies.
+    EvidencePack {
+        /// The audit export, as for `ctx audit-verify`.
+        #[arg(long)]
+        entries: PathBuf,
+        /// The published audit keys (`GET /v1/audit/keys`).
+        #[arg(long)]
+        keys: PathBuf,
+        /// The last entry of an earlier verified export this one continues.
+        #[arg(long)]
+        continues: Option<PathBuf>,
+        /// soc2, iso42001, eu-ai-act or owasp-agentic; repeat for several.
+        #[arg(long = "framework", required = true)]
+        frameworks: Vec<String>,
+        /// Output of `contextosd --check-config` for the deployment, included as supplied.
+        #[arg(long)]
+        config_report: Option<PathBuf>,
+        /// The folder to write; it must not exist or be empty.
+        #[arg(long)]
+        out: PathBuf,
     },
     /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
     /// into `ctx scorecard-gate` input, one case per run.

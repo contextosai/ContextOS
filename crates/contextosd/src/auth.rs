@@ -38,6 +38,9 @@ pub struct VerifiedUser {
     pub roles: Option<Vec<String>>,
     /// `oidc:<issuer>#<actor claim>`.
     pub source: String,
+    /// The actors the token names, current (the caller) first, then each earlier one
+    /// (see [`crate::oidc_delegation`]).
+    pub actors: Vec<String>,
 }
 
 impl Caller {

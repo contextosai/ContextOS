@@ -74,12 +74,21 @@ the UI. `admin` passes every role check but not the separation checks.
 | Runtime `control` key, per source (optional) | `control_token_env` or `control_token_file` | Revoke and restore on that tenant |
 | Tower journal seed | `[journal] signing_seed_env` | Sign Tower's journal |
 | People's Tower keys | Configured as SHA-256 hashes in `[[api_keys]]` | Their roles |
+| Identity-provider client secret (optional) | `[sso] client_secret_env` | Exchange sign-in codes for a confidential client |
 | Anthropic API key (optional) | `[intelligence] api_key_env` | Model calls |
 
 The configuration file holds no secrets: hashes, environment variable names and file
 paths only. Sources added from the console follow the same rule: an admin names where a
 key lives, Tower reads it on each replica, and no API response, record or journal entry
 contains a key.
+With `[sso]`, people sign in with ID tokens instead of keys. Tower accepts a token only
+if it is signed by a key the issuer publishes, with an allowed asymmetric algorithm,
+names the issuer and Tower's client, and is in date; roles come only from
+`[[sso.groups]]`, so signing in grants nothing by itself. The browser never calls the
+identity provider's token endpoint: Tower exchanges the code (PKCE, plus the client
+secret for a confidential client) and returns the token only with the nonce the
+browser chose. The token lives in the tab's session storage, like a key.
+
 Keys are compared in constant time over every configured key. A runtime key should
 belong to a dedicated principal (for example `svc_tower`) with only `audit:read`, so the
 runtime's own audit shows Tower's reads distinctly.

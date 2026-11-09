@@ -442,6 +442,13 @@
           "description": "Claim path of the actor object (its `sub` is the caller).",
           "type": "string"
         },
+        "max_chain": {
+          "default": 4,
+          "description": "Actors a token may chain, current one included (1 to 16). A token with a longer chain is rejected.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "user_roles_claim": {
           "default": null,
           "description": "Claim path listing the user's roles (Keycloak: `realm_access.roles`). Set, a run may declare only a role the user holds.",
