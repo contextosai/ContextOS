@@ -6,6 +6,14 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Tower single sign-on (`[sso]`): people sign in with the organization's OpenID Connect
+  provider. Tower accepts the provider's ID tokens as bearer tokens (issuer, client
+  audience, expiry and a published asymmetric key checked; keys refreshed in the
+  background) and maps groups to roles and teams through `[[sso.groups]]`; a person
+  in no mapped group is refused. The UI signs in with the authorization-code flow
+  and PKCE; Tower exchanges the code itself (`POST /api/sso/token`, client secret for
+  confidential clients) and returns the token only if it accepts it, with the
+  browser's nonce. API keys keep working.
 - `ctx evidence-pack --framework soc2|iso42001|eu-ai-act|owasp-agentic`: a review
   folder built only from an audit export that verifies. It holds the export and keys
   as supplied, `controls.json` (each control's audit event kinds counted over the
