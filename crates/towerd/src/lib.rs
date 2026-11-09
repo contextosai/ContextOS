@@ -4,6 +4,7 @@
 pub mod api;
 pub mod approvals;
 pub mod authority;
+pub mod callers;
 pub mod collector;
 pub mod config;
 pub mod console;
@@ -18,6 +19,7 @@ pub mod revocations;
 pub mod source;
 pub mod sources_admin;
 pub mod spend;
+pub mod sso;
 
 use std::sync::Arc;
 
@@ -39,6 +41,8 @@ pub struct Tower<S, L> {
     pub records: records::Records<S, L>,
     pub model: Option<Arc<dyn intel::Model>>,
     pub callers: api::Callers,
+    /// Single sign-on with the organization's identity provider (`[sso]`).
+    pub sso: Option<Arc<sso::Sso>>,
     pub console: Option<Arc<console::Console>>,
     /// Tower's journal signing key, published for independent verification.
     pub journal_keys: Value,
@@ -102,8 +106,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         for s in &config.sources {
             fleet.source(&s.id);
         }
+        let sso = config.sso.clone().map(sso::Sso::new);
         Ok(Self {
-            callers: api::Callers::new(&config.api_keys),
+            callers: api::Callers::new(&config.api_keys, sso.clone()),
+            sso,
             fleet: Arc::new(RwLock::new(fleet)),
             sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config))),
             source_admin: sources_admin::State::default(),
@@ -131,6 +137,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
                 }
             }
         });
+    }
+
+    /// Keeps the identity provider's keys and endpoints fresh, with `[sso]`.
+    pub fn spawn_sso(&self) {
+        if let Some(sso) = &self.sso {
+            tokio::spawn(sso.clone().run());
+        }
     }
 
     /// How often each collector polls its source.

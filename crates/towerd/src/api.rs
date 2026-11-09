@@ -46,80 +46,16 @@ use axum::routing::{get, post, put};
 use contextos_store::{AppendLog, DocumentStore};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::Tower;
 use crate::collector::wall_clock;
-use crate::config::ApiKey;
 use crate::governance::{self, AgentView, Anomaly, Finding};
 use crate::intel::{self, IntelError, jobs};
 use crate::records::{Declaration, RecordError, array, object, push_new};
 
 pub(crate) type Shared<S, L> = Arc<Tower<S, L>>;
 
-// ---- callers ----
-
-#[derive(Debug, Clone)]
-pub struct Caller {
-    pub principal_id: String,
-    pub roles: Vec<String>,
-    pub teams: Vec<String>,
-}
-
-impl Caller {
-    pub fn has(&self, role: &str) -> bool {
-        self.roles.iter().any(|r| r == role || r == "admin") || (role == "viewer" && !self.roles.is_empty())
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Callers {
-    keys: Vec<([u8; 32], Caller)>,
-}
-
-impl Callers {
-    pub fn new(keys: &[ApiKey]) -> Self {
-        let keys = keys
-            .iter()
-            .filter_map(|k| {
-                let digest: [u8; 32] = hex::decode(k.key_sha256.strip_prefix("sha256:")?)
-                    .ok()?
-                    .try_into()
-                    .ok()?;
-                Some((
-                    digest,
-                    Caller {
-                        principal_id: k.principal_id.clone(),
-                        roles: k.roles.clone(),
-                        teams: k.teams.clone(),
-                    },
-                ))
-            })
-            .collect();
-        Self { keys }
-    }
-
-    fn authenticate(&self, header: Option<&str>) -> Option<Caller> {
-        let token = header?.strip_prefix("Bearer ")?.trim();
-        if token.is_empty() || token.len() > 512 {
-            return None;
-        }
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        let mut found = None;
-        for (candidate, caller) in &self.keys {
-            // Every key is compared, so timing does not reveal which matched.
-            if candidate
-                .iter()
-                .zip(digest.iter())
-                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                == 0
-            {
-                found = Some(caller.clone());
-            }
-        }
-        found
-    }
-}
+pub use crate::callers::{Caller, Callers};
 
 // ---- errors ----
 

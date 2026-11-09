@@ -289,7 +289,7 @@ jobs:
           version: v3.16.2
       - name: Create a kind cluster and load the image
         run: |
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o kind https://github.com/kubernetes-sigs/kind/releases/download/v0.29.0/kind-linux-amd64
+          curl -fsSL --retry 8 --retry-delay 10 --retry-all-errors -o kind https://github.com/kubernetes-sigs/kind/releases/download/v0.29.0/kind-linux-amd64
           chmod +x kind
           ./kind create cluster --wait 120s
           ./kind load docker-image contextosd:e2e
@@ -304,7 +304,8 @@ jobs:
           version: v3.16.2
       - name: Lint and validate the chart
         run: |
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          curl -fsSL --retry 8 --retry-delay 10 --retry-all-errors -o kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz kubeconform
           helm lint deploy/helm/contextosd
           helm template t deploy/helm/contextosd | ./kubeconform -strict -summary -skip ServiceMonitor
           helm template t deploy/helm/contextosd --set autoscaling.enabled=true \
@@ -340,7 +341,7 @@ jobs:
           ! helm template t deploy/helm/contextosd --set agentEgress.enabled=true 2>/dev/null
       - name: Check and unit-test the alerting rules
         run: |
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
-            | tar xz --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          curl -fsSL --retry 8 --retry-delay 10 --retry-all-errors -o prometheus.tar.gz https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+          tar xzf prometheus.tar.gz --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
           ./promtool check rules deploy/helm/contextosd/files/contextos-rules.yaml
           ./promtool test rules deploy/alerts/contextos-rules.test.yaml

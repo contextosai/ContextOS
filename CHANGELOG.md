@@ -22,13 +22,20 @@ minor versions may break APIs and every break is listed.
   `delegation` (one exact chain, by its digest) revocation kinds; `principal` now also
   stops runs whose delegation chain names the principal. Tower's kill switch offers
   both.
-
-### Changed
-- `Gateway::admission_revoked` takes `AdmissionTargets`, and `run_targets` returns a
-  `Vec`. Delegated-token parsing moved from `oidc.rs` to `oidc_delegation.rs`;
-  `VerifiedUser` gains `actors`.
-
-### Added
+- Tower single sign-on (`[sso]`): people sign in with the organization's OpenID Connect
+  provider. Tower accepts the provider's ID tokens as bearer tokens (issuer, client
+  audience, expiry and a published asymmetric key checked; keys refreshed in the
+  background) and maps groups to roles and teams through `[[sso.groups]]`; a person
+  in no mapped group is refused. The UI signs in with the authorization-code flow
+  and PKCE; Tower exchanges the code itself (`POST /api/sso/token`, client secret for
+  confidential clients) and returns the token only if it accepts it, with the
+  browser's nonce. API keys keep working.
+- `ctx evidence-pack --framework soc2|iso42001|eu-ai-act|owasp-agentic`: a review
+  folder built only from an audit export that verifies. It holds the export and keys
+  as supplied, `controls.json` (each control's audit event kinds counted over the
+  period, with status `evidenced`, `no_events_in_period` or `outside_audit`),
+  `coverage.md` (what the evidence covers and what it does not), an optional
+  configuration report, and `manifest.json` with every file's digest. Deterministic.
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
@@ -44,6 +51,11 @@ minor versions may break APIs and every break is listed.
   approved below `destructive`, and effectful and not repeatable without an `intent`
   key. The startup notes share the same checks
   (`contextos_gateway::manifest_review`).
+
+### Changed
+- `Gateway::admission_revoked` takes `AdmissionTargets`, and `run_targets` returns a
+  `Vec`. Delegated-token parsing moved from `oidc.rs` to `oidc_delegation.rs`;
+  `VerifiedUser` gains `actors`.
 
 ## 0.1.0-alpha.18 - 2026-11-08
 
