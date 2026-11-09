@@ -1,6 +1,6 @@
 # ContextOS Foundations: Implementer's Requirements Digest (for a Rust runtime harness)
 
-I read all 13 files in full under /opt/contextosai/src/content/docs/: foundations.mdx and foundations/{cognitive-core, orchestration, memory, governance, adapter-mesh, harness-engineering, evaluation-observability, improvement-loop, identity-layer, agentic-context-engineering, ontology, knowledge-graph}.mdx.
+I read all 13 files in full under contextosai/src/content/docs/: foundations.mdx and foundations/{cognitive-core, orchestration, memory, governance, adapter-mesh, harness-engineering, evaluation-observability, improvement-loop, identity-layer, agentic-context-engineering, ontology, knowledge-graph}.mdx.
 
 **How normative language works in these docs.** I grepped the 13 files for uppercase RFC 2119 keywords (MUST/SHALL/SHOULD) and found none. The docs state obligations in lowercase prose ("must", "never", "cannot", "fail closed", "is rejected"). Below, **MUST** marks those prose obligations and is my interpretation. Several concrete schemas are owned by implementation docs that I was not asked to read: execution-contract, context-pack, api-contracts, decision-record, control-profiles and conformance. The foundations docs repeatedly say the repo ships only deterministic reference checks, and that production enforcement (stores, brokers, sandbox, fencing) needs runtime evidence.
 
