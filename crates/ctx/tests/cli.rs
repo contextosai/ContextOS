@@ -632,6 +632,42 @@ fn init_tool_drafts_a_manifest_that_cannot_be_pinned_unreviewed() {
 }
 
 #[test]
+fn manifest_review_notes_what_a_reviewer_should_look_at_again() {
+    let path = format!(
+        "{}/../../examples/support-refund/capabilities/issue_refund.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let (code, report) = ctx(&["manifest", &path]);
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["valid"], true);
+    let notes = report["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].as_str().unwrap().contains("declares no intent key"),
+        "{notes:?}"
+    );
+
+    // Named like a delete, declared reversible and approved as a network call: noted; with an
+    // intent key, that note goes.
+    let mut manifest: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["protocol_tool"] = json!("delete_volume");
+    manifest["action_risk"]["reversibility"] = json!("reversible");
+    manifest["approval_mode"] = json!("network");
+    manifest["intent"] = json!({"key_pointers": ["/order_id"]});
+    let (code, report) = ctx(&["manifest", &write("delete.json", &manifest)]);
+    assert_eq!(code, 0, "{report}");
+    let notes = report["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0]
+            .as_str()
+            .unwrap()
+            .contains("named like a destructive call (\"delete\")"),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn pack_tests_exit_by_result_and_write_junit() {
     let example = format!("{}/../../examples/support-refund", env!("CARGO_MANIFEST_DIR"));
     let pack = format!("{example}/pack.json");

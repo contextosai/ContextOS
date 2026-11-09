@@ -48,6 +48,7 @@ pub mod intent_guard;
 mod lifecycle;
 mod loop_guard;
 pub mod manifest;
+pub mod manifest_review;
 mod memory;
 mod observe;
 pub mod outcome_fence;

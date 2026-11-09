@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `ctx manifest` returns `notes` on a manifest that loads: effectful without `amount`
+  or `resource_pointers`, named like a destructive call but declared reversible or
+  approved below `destructive`, and effectful and not repeatable without an `intent`
+  key. The startup notes share the same checks
+  (`contextos_gateway::manifest_review`).
+
 ## 0.1.0-alpha.18 - 2026-11-08
 
 Eighteenth alpha: the gate in front of consequential tools. Replay recorded traffic
