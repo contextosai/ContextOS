@@ -16,12 +16,13 @@
     {
      "id": "CC6.3",
      "title": "Authorization and least privilege",
-     "runtime": "Grants narrow at every delegation; task authorization bounds what the principal asked for; amendments and revocations are recorded.",
+     "runtime": "Grants narrow at every delegation; task authorization bounds what the principal asked for; a capability that requires user roles refuses a delegated run whose user lacks them; amendments and revocations are recorded.",
      "events": [
       "delegation_admitted",
       "task_authorization_amended",
       "revocation",
-      "revocation_restored"
+      "revocation_restored",
+      "privilege_refusal"
      ]
     },
     {
@@ -212,10 +213,11 @@
     {
      "id": "A.9",
      "title": "Use of AI systems",
-     "runtime": "Each use is tied to its principal, purpose and task authorization; consequential actions need approval.",
+     "runtime": "Each use is tied to its principal, purpose and task authorization; a capability can require the delegating user to hold given roles; consequential actions need approval.",
      "events": [
       "run_admitted",
       "authorization_decision",
+      "privilege_refusal",
       "task_authorization_amended",
       "approval_redeemed"
      ]
@@ -261,11 +263,12 @@
     {
      "id": "ASI03",
      "title": "Identity and privilege abuse",
-     "runtime": "Runs bound to principal, agent and delegated user; grants verified and unrevoked.",
+     "runtime": "Runs bound to principal, agent and delegated user, with the full delegation chain recorded; grants verified and unrevoked; a capability can require the delegating user to hold given roles.",
      "events": [
       "run_admitted",
       "delegation_admitted",
-      "revocation_refusal"
+      "revocation_refusal",
+      "privilege_refusal"
      ]
     },
     {
