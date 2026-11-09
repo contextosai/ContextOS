@@ -24,6 +24,7 @@ mod exposure_import;
 mod findings;
 mod harness;
 mod hold_owners;
+mod idp_shapes;
 mod information_flow;
 mod intent_keys;
 mod load;

@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Identity provider guides for Microsoft Entra ID (`docs/integrations/entra-id.md`)
+  and Okta (`docs/integrations/okta.md`), with conformance tests that admit runs from
+  tokens shaped like each provider's: Entra v2 app-only tokens (`tid`, `azp`, `roles`),
+  Okta custom authorization server tokens (`cid`, `scp` arrays) and Okta's token
+  exchange for AI agents (`act.sub`, user binding). The Entra guide states that its
+  on-behalf-of tokens carry no RFC 8693 actor claim, so they do not bind users.
 - Tower pins the last audit entry it verified from each source (sequence and record
   hash) in its store. After a restart, when it reads the chain again from genesis,
   the chain must pass through that entry: a different hash marks the source broken as
