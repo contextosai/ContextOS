@@ -2145,6 +2145,32 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
 
+### Evidence packs for a review
+
+For a security or compliance review, build a folder the reviewer can check on their
+own from the same export:
+
+```sh
+contextosd --check-config contextosd.toml > check.txt
+ctx evidence-pack --entries entries.json --keys keys.json \
+    --framework soc2 --framework eu-ai-act --config-report check.txt --out pack/
+```
+
+Frameworks are `soc2`, `iso42001`, `eu-ai-act` and `owasp-agentic`. The pack is
+built only from a chain that verifies, and it is deterministic: the same export and
+options give the same files.
+
+| File | What it holds |
+|---|---|
+| `entries.json`, `keys.json` (and `anchor.json` with `--continues`) | The export and keys exactly as supplied, so `ctx audit-verify` re-checks them |
+| `controls.json` | Per framework and control: what ContextOS enforces, the audit event kinds that evidence it, their counts over the period, and a status: `evidenced`, `no_events_in_period` or `outside_audit` (organizational or deployment duties, with a note) |
+| `coverage.md` | The period, the verification, what the evidence covers and what it does not (calls that bypass the gateway, content beyond the entries, organizational controls, configuration unless a report is attached), and the control tables |
+| `config-report.txt` (or the supplied extension) | The `--config-report` file, included as supplied |
+| `manifest.json` | The period, verification result, event counts, control status tally and every file's SHA-256 |
+
+A count shows that a control acted in the period, not that it was configured
+everywhere it should be. The configuration report covers that part.
+
 ## 12. Operate
 
 For incidents (containment with the kill switch, evidence, recovery, postmortems), see
