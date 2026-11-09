@@ -5,7 +5,7 @@ Date: 2026-10-25.
 
 ## Context
 
-[The Agensh study](../research/2026-10-25-agensh.md) identifies peer work discovery
+A gap analysis identified peer work discovery
 and persistent claims as a gap alongside ContextOS's existing governance. The user
 prioritized decentralized task coordination. Advisory claims alone cannot prevent
 two peers owning the same task; an expired claim also establishes nothing about
@@ -34,7 +34,7 @@ propagate failed CAS retries, so partial erasure is recoverable.
 
 ## Alternatives
 
-- Transplant Gitea, Mattermost and the full Agensh harness: adds deployment and
+- Adopt an external code forge, chat server and agent harness: adds deployment and
   identity systems outside the selected task-coordination scope.
 - Advisory text-only claims: less code, but cannot arbitrate ownership atomically.
 - Per-task documents: reduce contention, but consistent discovery, dependencies

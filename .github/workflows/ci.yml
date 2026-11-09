@@ -155,6 +155,7 @@ jobs:
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh
           ./examples/replay/run.sh
+          ./examples/consequential-tools/run.sh
       - name: Node HTTP client against contextosd
         run: |
           node bindings/node/test_client.mjs
