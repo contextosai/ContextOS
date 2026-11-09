@@ -547,16 +547,27 @@ where
             "The run's intent is not one its Context Pack's rules govern.",
         ));
     }
-    // Kill switch: no new runs of a revoked tenant, pack, principal or agent, and no
-    // delegation from a run that is itself revoked.
+    // Who the run acts for and through whom: the parent's chain for a delegated run,
+    // else the one the caller's delegated credential names.
+    let delegation_chain = match &parent {
+        Some(p) => p.delegation_chain.clone(),
+        None => caller
+            .user
+            .as_ref()
+            .map(|u| contextos_gateway::DelegationChain::new(&u.user_id, &u.actors).with_roles(u.roles.clone())),
+    };
+    // Kill switch: no new runs of a revoked tenant, pack, principal, agent, user or
+    // delegation, and no delegation from a run that is itself revoked.
     match gateway
-        .admission_revoked(
-            &caller.tenant_id,
-            &compiled.context_ledger.pack_ref,
-            &caller.principal_id,
-            &run_context.agent.agent_id,
-            parent.as_ref(),
-        )
+        .admission_revoked(&contextos_gateway::AdmissionTargets {
+            tenant_id: &caller.tenant_id,
+            pack_ref: &compiled.context_ledger.pack_ref,
+            principal: &caller.principal_id,
+            agent_id: &run_context.agent.agent_id,
+            declared_user: Some(run_context.user.user_id.as_str()).filter(|u| !u.is_empty()),
+            chain: delegation_chain.as_ref(),
+            parent: parent.as_ref(),
+        })
         .await
     {
         Ok(None) => {}
@@ -687,6 +698,7 @@ where
     admission.inherited_task_authorizations = inherited_task_authorizations;
     admission.task_authorization_origins = task_authorization_origins;
     admission.guard_policy_ref = gateway.guard_policy_ref();
+    admission.delegation_chain = delegation_chain;
     let stored = serde_json::to_value(&admission).unwrap_or(Value::Null);
     state
         .store
@@ -742,6 +754,7 @@ where
                 "parent_run_id": parent.as_ref().map(|p| p.run_id.clone()), "admitted_by": caller.principal_id,
                 "compiled_context_hash": admission.compiled_context_hash,
                 "agent_binding": binding.record, "user_binding": user_binding, "pack_intent": intent.record,
+                "delegation": admission.delegation_chain.as_ref().map(contextos_gateway::DelegationChain::audit_record),
                 "task_authorization_refs": admission.task_authorizations.iter()
                     .map(|t| t.bundle_ref(&admission.run_id)).collect::<Vec<_>>()}),
             &admission.admitted_at,

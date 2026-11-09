@@ -304,6 +304,7 @@ agent_claim = "azp"
 actor_claim = "act"                         # default
 actor_agent_claim = "client_id"             # the agent: act.client_id, mapped through [oidc.agents]
 user_roles_claim = "realm_access.roles"     # optional: the roles the user holds
+max_chain = 4                               # default: actors one token may chain (1 to 16)
 
 [guards]
 user_binding = "required"    # or "observe" (default), "off"
@@ -322,6 +323,15 @@ and an API key with `admit`. `observe` admits, counts
 user id. Delegated runs inherit their parent's binding. No profile turns `required`
 on: agents that act for no user are legitimate, so turn it on for deployments whose
 agents always act for a signed-in user.
+
+When work passes through several agents, each token exchange nests the previous actor
+(`act: {sub: "agent-b", act: {sub: "assistant-a"}}`: agent-b acts now, for
+assistant-a, which acted for the user). The whole chain is read, current actor first,
+and kept on the run; a delegated child run inherits its parent's. A chain longer than
+`max_chain`, naming an actor twice, or naming the user as an actor rejects the token.
+`run_admitted` records `delegation` with the chain's `depth` and `chain_digest`
+(SHA-256 over the user and actors in order), never the identities. The kill switch
+(section 8) can then stop the user, one exact chain, or any actor on it.
 
 #### Hold runs to the intents their pack governs
 
@@ -1900,6 +1910,24 @@ derived from the intent instead of the run's operation, so a provider that dedup
 by key also recognises the request across runs. Repeatable capabilities cannot declare
 an intent.
 
+### The user's privilege, not only the agent's
+
+An agent's credential usually reaches far more than any one user may do: the refund
+agent's service account can refund any order, whoever asked. A capability can require
+that the user the run acts for holds one of a set of roles:
+
+```json
+"required_user_roles": ["refund_approver", "support_lead"]
+```
+
+The roles are the ones the identity provider puts in the user's delegated token
+(`[oidc.delegation] user_roles_claim`), read at admission and kept on the run with its
+delegation chain; a delegated child run inherits its parent's. A call is refused before
+anything is reserved or sent, and audited as `privilege_refusal`, when the run's
+credential named no user (`user_not_delegated`), the issuer does not read roles
+(`user_roles_unknown`), or the user holds none of them (`user_role_missing`). The audit
+holds the reason, never the user. At most 32 roles of up to 128 bytes.
+
 ### Effects aimed at another environment
 
 Agents reach production through credentials they were never meant to use: a staging
@@ -2032,8 +2060,11 @@ or cancelled instead. Production turns this on by default (policy 1.0, safety 0.
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
 a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), a `principal` (an
-authenticated caller: its new runs and the runs it admitted), an `agent` (the agent id
-a run declares; to stop whoever runs it, revoke the principal), an `adapter` or a
+authenticated caller: its new runs and the runs it admitted, and any run whose
+delegation chain names it), an `agent` (the agent id a run declares; to stop whoever
+runs it, revoke the principal), a `user` (every run a delegated credential says acts
+for them, and new runs declaring them), a `delegation` (one exact chain of actors for
+one user, by the `chain_digest` in `run_admitted`), an `adapter` or a
 `capability`. A delegated run must use its parent's pack and cannot be admitted while
 its parent is revoked:
 
@@ -2042,10 +2073,11 @@ curl -X POST "$CONTEXTOS/v1/revocations" -H "Authorization: Bearer $OPS_TOKEN" \
   -d '{"kind": "capability", "target": "adp_payments.issue_refund", "reason": "incident 4711"}'
 ```
 
-From the next call, effects of runs bound to a revoked tenant, pack or agent, and calls
-to a revoked adapter or capability, are blocked before anything is reserved, claimed
-or sent (`revoked_<kind>`), and new runs of a revoked tenant, pack or agent are
-refused. A call already past authorization completes. `POST /v1/revocations/restore`
+From the next call, effects of runs bound to a revoked tenant, pack, agent, user,
+delegation or principal on their chain, and calls to a revoked adapter or capability,
+are blocked before anything is reserved, claimed
+or sent (`revoked_<kind>`), and new runs of a revoked tenant, pack, agent, user or
+delegation are refused. A call already past authorization completes. `POST /v1/revocations/restore`
 with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
@@ -2159,6 +2191,32 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
+
+### Evidence packs for a review
+
+For a security or compliance review, build a folder the reviewer can check on their
+own from the same export:
+
+```sh
+contextosd --check-config contextosd.toml > check.txt
+ctx evidence-pack --entries entries.json --keys keys.json \
+    --framework soc2 --framework eu-ai-act --config-report check.txt --out pack/
+```
+
+Frameworks are `soc2`, `iso42001`, `eu-ai-act` and `owasp-agentic`. The pack is
+built only from a chain that verifies, and it is deterministic: the same export and
+options give the same files.
+
+| File | What it holds |
+|---|---|
+| `entries.json`, `keys.json` (and `anchor.json` with `--continues`) | The export and keys exactly as supplied, so `ctx audit-verify` re-checks them |
+| `controls.json` | Per framework and control: what ContextOS enforces, the audit event kinds that evidence it, their counts over the period, and a status: `evidenced`, `no_events_in_period` or `outside_audit` (organizational or deployment duties, with a note) |
+| `coverage.md` | The period, the verification, what the evidence covers and what it does not (calls that bypass the gateway, content beyond the entries, organizational controls, configuration unless a report is attached), and the control tables |
+| `config-report.txt` (or the supplied extension) | The `--config-report` file, included as supplied |
+| `manifest.json` | The period, verification result, event counts, control status tally and every file's SHA-256 |
+
+A count shows that a control acted in the period, not that it was configured
+everywhere it should be. The configuration report covers that part.
 
 ## 12. Operate
 

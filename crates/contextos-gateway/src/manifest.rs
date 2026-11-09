@@ -234,6 +234,10 @@ pub struct CapabilityManifest {
     /// another run is refused while its claim stands (see [`crate::intent_guard`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<crate::intent_guard::IntentKey>,
+    /// Roles, one of which the user a run acts for must hold, verified from their
+    /// delegated credential, for this capability's effects (see [`crate::privilege`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_user_roles: Vec<String>,
 }
 
 /// What happens when an outcome's witness has not reported by its deadline.
@@ -316,6 +320,8 @@ pub enum ManifestError {
     DuplicateCapabilityRef(String),
     #[error("capability {0} outcome contract is invalid: {1}")]
     Outcome(String, &'static str),
+    #[error("capability {0} required_user_roles must list at most 32 roles of 1 to 128 bytes")]
+    UserRoles(String),
     #[error("capability {0} intent key is invalid: {1}")]
     Intent(String, &'static str),
 }
@@ -453,6 +459,9 @@ impl CapabilityManifest {
                 ));
             }
         }
+        if !crate::privilege::valid(&self.required_user_roles) {
+            return Err(ManifestError::UserRoles(id.clone()));
+        }
         if let Some(intent) = &self.intent {
             if self.action_risk.effect == contextos_contract::types::ActionEffect::None {
                 return Err(ManifestError::Intent(
@@ -476,125 +485,5 @@ impl CapabilityManifest {
     /// The adapter-local capability name.
     pub fn capability_name(&self) -> &str {
         &self.capability_id[self.adapter_id.len() + 1..]
-    }
-}
-
-/// Words in a tool or capability name that usually mean the call destroys or replaces
-/// something. A naming hint for reviewers, never a decision: `ctx init-tool` offers
-/// it, and startup notes a capability so named that is declared reversible or
-/// approved below `destructive`.
-const DESTRUCTIVE_VERBS: &[&str] = &[
-    "delete",
-    "drop",
-    "destroy",
-    "terminate",
-    "purge",
-    "truncate",
-    "wipe",
-    "erase",
-    "remove",
-    "rm",
-    "reset",
-    "replace",
-    "overwrite",
-    "deprovision",
-    "decommission",
-    "kill",
-    "shutdown",
-    "format",
-];
-
-/// The destructive verb `name` contains as a word (split on `_`, `-`, `.`, `/` and
-/// lower-to-upper case changes), if any.
-#[must_use]
-pub fn destructive_verb(name: &str) -> Option<&'static str> {
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut previous_lower = false;
-    for c in name.chars() {
-        if (!c.is_ascii_alphanumeric() || (c.is_ascii_uppercase() && previous_lower)) && !word.is_empty() {
-            words.push(std::mem::take(&mut word));
-        }
-        if c.is_ascii_alphanumeric() {
-            word.push(c.to_ascii_lowercase());
-        }
-        previous_lower = c.is_ascii_lowercase();
-    }
-    words.push(word);
-    DESTRUCTIVE_VERBS
-        .iter()
-        .copied()
-        .find(|verb| words.iter().any(|w| w == verb))
-}
-
-/// Marks a field of a drafted manifest (`ctx init-tool`) that a person must decide.
-pub const REVIEW_MARKER: &str = "REVIEW:";
-
-/// JSON pointers of every string in a manifest document that still starts with
-/// [`REVIEW_MARKER`]. Loaders refuse a manifest while any remain, so a draft cannot
-/// be pinned before review even where its placeholder would otherwise parse (a
-/// description, a pointer).
-#[must_use]
-pub fn unreviewed(document: &Value) -> Vec<String> {
-    fn walk(value: &Value, pointer: &mut String, found: &mut Vec<String>) {
-        match value {
-            Value::String(s) if s.trim_start().starts_with(REVIEW_MARKER) => found.push(pointer.clone()),
-            Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    let len = pointer.len();
-                    pointer.push('/');
-                    pointer.push_str(&index.to_string());
-                    walk(item, pointer, found);
-                    pointer.truncate(len);
-                }
-            }
-            Value::Object(fields) => {
-                for (key, item) in fields {
-                    let len = pointer.len();
-                    pointer.push('/');
-                    pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
-                    walk(item, pointer, found);
-                    pointer.truncate(len);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut found = Vec::new();
-    walk(document, &mut String::new(), &mut found);
-    found
-}
-
-#[cfg(test)]
-mod review_tests {
-    use super::unreviewed;
-    use serde_json::json;
-
-    #[test]
-    fn finds_every_marked_string_by_pointer() {
-        let draft = json!({
-            "purpose_id": "REVIEW: a purpose",
-            "description": "  REVIEW: upstream says hi",
-            "resource_pointers": ["/order_id", "REVIEW: more?"],
-            "action_risk": {"effect": "REVIEW: none|external_state", "authority": "service"},
-            "a/b": "REVIEW: escaped",
-            "note": "not a REVIEW: marker",
-        });
-        let mut found = unreviewed(&draft);
-        found.sort();
-        assert_eq!(
-            found,
-            [
-                "/action_risk/effect",
-                "/a~1b",
-                "/description",
-                "/purpose_id",
-                "/resource_pointers/1"
-            ]
-        );
-        assert_eq!(
-            unreviewed(&json!({"purpose_id": "support.refund"})),
-            Vec::<String>::new()
-        );
     }
 }

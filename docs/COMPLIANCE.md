@@ -6,6 +6,11 @@ autonomous agents. Each row names the threat-model entry
 control on. The tests named in each threat-model entry are the evidence. For what
 ContextOS does not cover, see [SCOPE.md](SCOPE.md).
 
+`ctx evidence-pack` turns this map into a reviewer's folder for SOC 2, ISO/IEC 42001,
+the EU AI Act or the OWASP agentic list: a verified audit export, the events behind
+each control counted over the period, and a statement of what the evidence does not
+cover (GUIDE §11).
+
 This is an evidence map, not legal advice. Which obligations apply depends on your
 role (provider or deployer), your use case and your jurisdiction. ContextOS covers the
 runtime part of a control. The organizational part (policies, risk assessments,
@@ -17,7 +22,7 @@ training, incident processes) is yours.
 |---|---|---|---|
 | **ASI01 Agent goal hijack** | Tool output and retrieved content are `data_only` and cannot grant authority. Approvals bind the exact action digest. Information-flow labels put effects after untrusted input behind approval, and refuse classified egress; presets label GitHub, database and CRM tools (`ctx init-tool --preset`). Task authorization bounds what the principal asked for. | T1, T2, T28, T41 | `[guards.information_flow]`, `[guards] require_task_authorization` |
 | **ASI02 Tool misuse and exploitation** | Default-deny dispatch of pinned, surfaced capabilities only. Reviewed `input_schema`. Pack rules on arguments, amounts and recipients. Loop guard and repeated-effect guard. An action monitor for contextual misuse. | T22, T28, T43 | `[guards] require_tool_schemas`, `[providers.action_monitor]` |
-| **ASI03 Identity and privilege abuse** | Runs bound to the admitting principal, the agent its credential names, and the user its delegated token acts for. Grants must be verified, current and unrevoked. Credentials are brokered and never model-visible. | T4, T14, T18, T29, T30, T36 | `[guards] agent_binding = "required"`, `user_binding` |
+| **ASI03 Identity and privilege abuse** | Runs bound to the admitting principal, the agent its credential names, and the user its delegated token acts for, with the whole chain of agents between them recorded and revocable link by link; capabilities can require a role the user holds (`required_user_roles`), not only the agent's access. Grants must be verified, current and unrevoked. Credentials are brokered and never model-visible. | T4, T14, T18, T29, T30, T36 | `[guards] agent_binding = "required"`, `user_binding` |
 | **ASI04 Agentic supply chain** | Reviewed manifests with digest-pinned adapters and capabilities. Upstream MCP tool pins with drift refusal. Pack versions are immutable once published. Locked dependencies checked by cargo-deny. | T16, T22, T32, T39 | `upstream_tool_digest` (required under the enterprise profile) |
 | **ASI05 Unexpected code execution** | A boundary port that refuses effects outside an active isolation boundary. Pinned HTTPS endpoints with no redirects. The sandbox itself is the deployment's. | T13, T24 | `[providers.boundary]` |
 | **ASI06 Memory and context poisoning** | Memory changes are governed lifecycle records: decided by the kernel, bound to the run, audited, and refused at recall once superseded or deleted. Context is compiled from pinned packs and admitted evidence. | T25, T37 | `[providers.memory]`, `[guards] evidence = "strict"` |

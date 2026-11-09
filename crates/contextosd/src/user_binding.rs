@@ -171,6 +171,7 @@ mod tests {
                 user_id: id.into(),
                 roles: roles.map(|r| r.into_iter().map(str::to_owned).collect()),
                 source: "oidc:https://kc.example/realms/acme#act".into(),
+                actors: vec!["sa-support".into()],
             }),
         }
     }
