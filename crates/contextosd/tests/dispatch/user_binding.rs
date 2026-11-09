@@ -69,6 +69,7 @@ impl Realm {
             actor_claim: "act".into(),
             actor_agent_claim: Some("client_id".into()),
             user_roles_claim: Some("realm_access.roles".into()),
+            max_chain: 4,
         });
         config
     }
@@ -81,6 +82,28 @@ impl Realm {
             "organization": {"acme": {"id": "7d1c"}}, "realm_access": {"roles": roles},
             "scope": "openid admit dispatch", "act": {"sub": "sa-support-agent", "client_id": "support-agent"},
             "iat": now, "exp": now + 300}),
+        )
+    }
+
+    /// A token passed through several actors: `actors[0]` acts now, each later one
+    /// before it (RFC 8693 nested `act`).
+    fn chained(&self, user: &str, roles: &[&str], actors: &[&str]) -> String {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let mut act = Value::Null;
+        for (i, actor) in actors.iter().enumerate().rev() {
+            let mut hop = json!({"sub": actor});
+            if i == 0 {
+                hop["client_id"] = json!("support-agent");
+            }
+            if !act.is_null() {
+                hop["act"] = act;
+            }
+            act = hop;
+        }
+        self.sign(
+            &json!({"iss": self.issuer, "aud": "contextosd", "sub": user, "azp": "support-agent",
+            "organization": {"acme": {"id": "7d1c"}}, "realm_access": {"roles": roles},
+            "scope": "openid admit dispatch", "act": act, "iat": now, "exp": now + 300}),
         )
     }
 
@@ -247,4 +270,77 @@ async fn required_binding_needs_every_admitting_credential_to_name_a_user() {
             .unwrap_err()
             .contains("needs [oidc.delegation]")
     );
+}
+
+async fn revoke(w: &World, path: &str, kind: &str, target: &str) {
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/revocations{path}", w.base))
+        .bearer_auth("ops-key")
+        .json(&json!({"kind": kind, "target": target, "reason": "incident 4712"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "{kind} {target}");
+}
+
+#[tokio::test]
+async fn a_delegation_chain_is_recorded_and_any_link_of_it_can_be_revoked() {
+    let realm = Realm::start().await;
+    let w = world_for(&realm).await;
+    let (user, role) = declared();
+    let chain = ["sa-support-agent", "assistant-a"];
+    let token = realm.chained(&user, &[&role], &chain);
+
+    let (status, body) = admit(&w, &token, "run_chain").await;
+    assert_eq!(status, 201, "{body}");
+    let entry = admitted(&w, "run_chain").await;
+    assert_eq!(
+        entry["admitted_by"], "sa-support-agent",
+        "the current actor is the caller"
+    );
+    assert_eq!(entry["delegation"]["depth"], 2);
+    let digest = entry["delegation"]["chain_digest"].as_str().unwrap().to_owned();
+    assert!(digest.starts_with("sha256:"));
+    for secret in [user.as_str(), "assistant-a"] {
+        assert!(!entry.to_string().contains(secret), "the audit holds no identities");
+    }
+
+    // Revoking the earlier actor stops the run's effects, though it never called.
+    revoke(&w, "", "principal", "assistant-a").await;
+    let http = executor_client(body["executor_generation"].as_u64().unwrap());
+    let blocked: Value = http
+        .post(format!("{}/v1/runs/run_chain/tool-calls", w.base))
+        .bearer_auth(&token)
+        .json(&tool_call("run_chain", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        blocked["report"]["reason_codes"],
+        json!(["revoked_principal"]),
+        "{blocked}"
+    );
+    revoke(&w, "/restore", "principal", "assistant-a").await;
+
+    // Revoking the user stops new runs acting for them, through any path.
+    revoke(&w, "", "user", &user).await;
+    let direct = realm.delegated(&user, &[&role]);
+    let (status, refused) = admit(&w, &direct, "run_after_user").await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"]["detail"], json!(["revoked_user"]));
+    revoke(&w, "/restore", "user", &user).await;
+
+    // Revoking one exact path leaves the others.
+    revoke(&w, "", "delegation", &digest).await;
+    let (status, refused) = admit(&w, &token, "run_same_path").await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"]["detail"], json!(["revoked_delegation"]));
+    assert_eq!(admit(&w, &direct, "run_other_path").await.0, 201);
+
+    // A chain longer than max_chain (4) is not a credential.
+    let long = realm.chained(&user, &[&role], &["sa-support-agent", "a2", "a3", "a4", "a5"]);
+    assert_eq!(admit(&w, &long, "run_long").await.0, 401);
 }

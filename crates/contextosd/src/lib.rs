@@ -33,6 +33,7 @@ pub mod metrics_reference;
 pub mod notifications;
 pub mod oidc;
 pub mod oidc_claims;
+pub mod oidc_delegation;
 pub mod outcome_witness;
 pub mod pack_binding;
 pub mod pack_intents;

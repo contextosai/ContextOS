@@ -6,6 +6,16 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Multi-hop delegation: a delegated token's nested actor claims (RFC 8693 `act` within
+  `act`) are read as a chain, current actor first, and kept on the run; a delegated
+  child run inherits its parent's. `[oidc.delegation] max_chain` (default 4, at most
+  16) bounds it, and a chain naming an actor twice or the user as an actor rejects the
+  token. `run_admitted` records `delegation` with the chain's `depth` and
+  `chain_digest`, never identities.
+- Kill switch: `user` (every run acting for a user, and new runs declaring them) and
+  `delegation` (one exact chain, by its digest) revocation kinds; `principal` now also
+  stops runs whose delegation chain names the principal. Tower's kill switch offers
+  both.
 - Tower single sign-on (`[sso]`): people sign in with the organization's OpenID Connect
   provider. Tower accepts the provider's ID tokens as bearer tokens (issuer, client
   audience, expiry and a published asymmetric key checked; keys refreshed in the
@@ -35,6 +45,11 @@ minor versions may break APIs and every break is listed.
   approved below `destructive`, and effectful and not repeatable without an `intent`
   key. The startup notes share the same checks
   (`contextos_gateway::manifest_review`).
+
+### Changed
+- `Gateway::admission_revoked` takes `AdmissionTargets`, and `run_targets` returns a
+  `Vec`. Delegated-token parsing moved from `oidc.rs` to `oidc_delegation.rs`;
+  `VerifiedUser` gains `actors`.
 
 ## 0.1.0-alpha.18 - 2026-11-08
 

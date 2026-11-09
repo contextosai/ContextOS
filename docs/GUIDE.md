@@ -304,6 +304,7 @@ agent_claim = "azp"
 actor_claim = "act"                         # default
 actor_agent_claim = "client_id"             # the agent: act.client_id, mapped through [oidc.agents]
 user_roles_claim = "realm_access.roles"     # optional: the roles the user holds
+max_chain = 4                               # default: actors one token may chain (1 to 16)
 
 [guards]
 user_binding = "required"    # or "observe" (default), "off"
@@ -322,6 +323,15 @@ and an API key with `admit`. `observe` admits, counts
 user id. Delegated runs inherit their parent's binding. No profile turns `required`
 on: agents that act for no user are legitimate, so turn it on for deployments whose
 agents always act for a signed-in user.
+
+When work passes through several agents, each token exchange nests the previous actor
+(`act: {sub: "agent-b", act: {sub: "assistant-a"}}`: agent-b acts now, for
+assistant-a, which acted for the user). The whole chain is read, current actor first,
+and kept on the run; a delegated child run inherits its parent's. A chain longer than
+`max_chain`, naming an actor twice, or naming the user as an actor rejects the token.
+`run_admitted` records `delegation` with the chain's `depth` and `chain_digest`
+(SHA-256 over the user and actors in order), never the identities. The kill switch
+(section 8) can then stop the user, one exact chain, or any actor on it.
 
 #### Hold runs to the intents their pack governs
 
@@ -2003,8 +2013,11 @@ or cancelled instead. Production turns this on by default (policy 1.0, safety 0.
 
 Operators (the `control` scope) revoke a target for their tenant: the whole `tenant`,
 a `pack` (release tuple, e.g. `ctxpack.support@5.2.0`), a `principal` (an
-authenticated caller: its new runs and the runs it admitted), an `agent` (the agent id
-a run declares; to stop whoever runs it, revoke the principal), an `adapter` or a
+authenticated caller: its new runs and the runs it admitted, and any run whose
+delegation chain names it), an `agent` (the agent id a run declares; to stop whoever
+runs it, revoke the principal), a `user` (every run a delegated credential says acts
+for them, and new runs declaring them), a `delegation` (one exact chain of actors for
+one user, by the `chain_digest` in `run_admitted`), an `adapter` or a
 `capability`. A delegated run must use its parent's pack and cannot be admitted while
 its parent is revoked:
 
@@ -2013,10 +2026,11 @@ curl -X POST "$CONTEXTOS/v1/revocations" -H "Authorization: Bearer $OPS_TOKEN" \
   -d '{"kind": "capability", "target": "adp_payments.issue_refund", "reason": "incident 4711"}'
 ```
 
-From the next call, effects of runs bound to a revoked tenant, pack or agent, and calls
-to a revoked adapter or capability, are blocked before anything is reserved, claimed
-or sent (`revoked_<kind>`), and new runs of a revoked tenant, pack or agent are
-refused. A call already past authorization completes. `POST /v1/revocations/restore`
+From the next call, effects of runs bound to a revoked tenant, pack, agent, user,
+delegation or principal on their chain, and calls to a revoked adapter or capability,
+are blocked before anything is reserved, claimed
+or sent (`revoked_<kind>`), and new runs of a revoked tenant, pack, agent, user or
+delegation are refused. A call already past authorization completes. `POST /v1/revocations/restore`
 with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
