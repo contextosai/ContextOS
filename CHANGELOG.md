@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.19 - 2026-11-09
+
+Nineteenth alpha: who an agent acts for, and evidence a reviewer can use. Delegation
+chains with user and delegation kill switches; capabilities that can require a role
+the delegating user holds; Entra ID and Okta guides; Tower sign-in through the
+organization's identity provider and pinned audit history; information-flow presets;
+evidence packs for SOC 2, ISO/IEC 42001, the EU AI Act and the OWASP agentic list. See
+the [release notes](docs/releases/v0.1.0-alpha.19.md) before upgrading.
+
 ### Added
 - Identity provider guides for Microsoft Entra ID (`docs/integrations/entra-id.md`)
   and Okta (`docs/integrations/okta.md`), with conformance tests that admit runs from
