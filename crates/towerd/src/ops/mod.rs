@@ -6,6 +6,7 @@ use contextos_store::{AppendLog, DocumentStore};
 
 use crate::api::Shared;
 
+pub mod approvals;
 pub mod inbox;
 pub mod revocations;
 mod sources;
@@ -18,6 +19,7 @@ where
     L: AppendLog + 'static,
 {
     Router::new()
+        .merge(approvals::routes())
         .merge(inbox::routes())
         .merge(revocations::routes())
         .merge(sources::routes())

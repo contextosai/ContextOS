@@ -66,4 +66,23 @@ async fn a_rubber_stamped_approval_is_refused_and_a_reviewed_one_counts() {
     requested_at(&h, &request_id, "2026-10-20T09:00:00Z").await;
     let reviewed = h.gateway.dispatch(&h.admission, &call).await.unwrap();
     assert_eq!(reviewed.report.status, "completed", "{:?}", reviewed.report);
+
+    // The chain carries what approval quality is measured from: one request, one
+    // redemption with its decision time (30 minutes), never the refused fast one.
+    let requested = audited(&h, "approval_requested").await;
+    assert_eq!(requested.len(), 1, "{requested:?}");
+    assert_eq!(requested[0]["approval_request_id"], request_id.as_str());
+    assert_eq!(requested[0]["capability_id"], "adp_payments.issue_refund");
+    let redeemed = audited(&h, "approval_redeemed").await;
+    assert_eq!(redeemed.len(), 1, "{redeemed:?}");
+    assert_eq!(redeemed[0]["decision_seconds"], 1800);
+    assert_eq!(redeemed[0]["approval_request_id"], request_id.as_str());
+    assert!(
+        redeemed[0]["approvers"].as_array().is_some_and(|a| !a.is_empty()),
+        "{redeemed:?}"
+    );
+
+    // Re-sending the completed call redeems nothing again.
+    h.gateway.dispatch(&h.admission, &call).await.unwrap();
+    assert_eq!(audited(&h, "approval_redeemed").await.len(), 1);
 }

@@ -22,6 +22,7 @@
 
 pub mod action_monitor;
 pub mod admission;
+mod approval_events;
 pub mod approval_review;
 mod attestation;
 mod checkpoints;
@@ -1369,7 +1370,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 return Ok(
                     match self.ports.approvals.request(admission, &binding, &action_digest).await {
                         Ok(id) => {
-                            self.note_approval_requested(admission, &id, &now).await?;
+                            let requested = self
+                                .approval_requested(admission, &id, (&operation_id, &manifest.capability_id), &now)
+                                .await?;
+                            p.report.audit_sequences.extend(requested);
                             p.report.approval_request_id = Some(id);
                             p.report.obligations.push("await_approval".into());
                             p.finish(
@@ -1456,12 +1460,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let approved = redemption_key.is_some();
         if let Some(key) = redemption_key {
             let approval = approval_input.clone();
+            let mut redeemed_now = false;
             let commit = transact(self.store.as_ref(), &key, |state| {
                 let mut approval = approval.clone();
                 approval["redemption_state"] = state.clone();
                 let result = transition_approval_redemption(
                     &json!({"approval": approval, "expected_revision": state["revision"]}),
                 );
+                redeemed_now = result.status == "redeem";
                 match result.status.as_str() {
                     "redeem" => TransitionResult::accepted(result.state.unwrap_or(Value::Null), vec![]),
                     "existing" => TransitionResult::accepted(state.clone(), vec![]),
@@ -1480,6 +1486,17 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     reason_codes,
                     "Approval could not be redeemed for this operation.",
                 ));
+            }
+            if redeemed_now {
+                let entry = self
+                    .approval_redeemed(
+                        admission,
+                        &approval_input,
+                        (&operation_id, &manifest.capability_id),
+                        &now,
+                    )
+                    .await?;
+                p.report.audit_sequences.push(entry);
             }
             p.risk_tags.push("human_approved".into());
         }

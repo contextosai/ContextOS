@@ -1091,6 +1091,11 @@ minimal, development-only implementation):
     (`approval_review_too_fast`, obligation `review_again`), and the refusal is audited
     with the measured seconds (`approval_review_too_fast`). Those entries show which
     approvals were rubber-stamped.
+  - With or without a floor, the gateway audits `approval_requested` the first time it
+    asks for an approval and `approval_redeemed` when one is redeemed, with the
+    approvers, `decided_at` and `decision_seconds`. Tower's Approvals page
+    (`GET /api/approvals`) folds them into decision-time distributions per capability
+    and per approver.
 - **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
   run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
   ceilings, required controls) and a current verified `BoundaryObservation`. With it,
