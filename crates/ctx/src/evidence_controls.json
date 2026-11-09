@@ -1,0 +1,339 @@
+{
+ "frameworks": {
+  "soc2": {
+   "title": "SOC 2 Trust Services Criteria (AICPA, 2017 with 2022 points of focus)",
+   "controls": [
+    {
+     "id": "CC6.1",
+     "title": "Logical access to protected assets",
+     "runtime": "Every tool call is admitted to a run bound to its principal and agent, authorized against pinned packs and grants, and refused once revoked.",
+     "events": [
+      "run_admitted",
+      "authorization_decision",
+      "revocation_refusal"
+     ]
+    },
+    {
+     "id": "CC6.3",
+     "title": "Authorization and least privilege",
+     "runtime": "Grants narrow at every delegation; task authorization bounds what the principal asked for; amendments and revocations are recorded.",
+     "events": [
+      "delegation_admitted",
+      "task_authorization_amended",
+      "revocation",
+      "revocation_restored"
+     ]
+    },
+    {
+     "id": "CC6.6",
+     "title": "Boundaries against external threats",
+     "runtime": "Effects outside the isolation boundary or the gateway's environment are refused; data flows are labelled and classified egress refused.",
+     "events": [
+      "boundary_refusal",
+      "environment_refusal",
+      "data_flow_decision",
+      "information_flow_decision"
+     ]
+    },
+    {
+     "id": "CC6.8",
+     "title": "Unauthorized or malicious software",
+     "runtime": "Only pinned packs and reviewed, digest-pinned capabilities run; pack loads and rollouts are recorded.",
+     "events": [
+      "pack_loaded",
+      "rollout_set",
+      "rollout_cleared"
+     ]
+    },
+    {
+     "id": "CC7.2",
+     "title": "Monitoring for anomalies",
+     "runtime": "Trusted monitoring scores actions; circuit breakers trip on bursts; repeated effects and shared-limit breaches are refused.",
+     "events": [
+      "action_monitored",
+      "circuit_breaker_tripped",
+      "repeated_effect_refusal",
+      "shared_guarantee_refused"
+     ]
+    },
+    {
+     "id": "CC7.3",
+     "title": "Evaluation of security events",
+     "runtime": "Escalations hand blocked or unusual calls to a human with the audited decision.",
+     "events": [
+      "escalation_opened",
+      "escalation_resolved"
+     ]
+    },
+    {
+     "id": "CC7.4",
+     "title": "Incident response",
+     "runtime": "Revocations stop an agent, pack or tenant on the next call; unknown outcomes are reconciled and applied effects compensated.",
+     "events": [
+      "revocation",
+      "effect_reconciliation",
+      "compensation_requested"
+     ]
+    },
+    {
+     "id": "CC8.1",
+     "title": "Change management",
+     "runtime": "Pack versions are immutable and released through gates; rollouts, conformance assessments and task amendments are recorded.",
+     "events": [
+      "pack_loaded",
+      "rollout_set",
+      "conformance_assessed",
+      "task_authorization_amended"
+     ]
+    },
+    {
+     "id": "PI1.3",
+     "title": "Processing integrity: complete and accurate processing",
+     "runtime": "Each effect is claimed once, its outcome observed or reconciled, and shared limits settled from the outcome.",
+     "events": [
+      "operation_claim",
+      "effect_observation",
+      "effect_reconciliation",
+      "shared_guarantee_settled",
+      "usage_settled"
+     ]
+    },
+    {
+     "id": "CC1-CC5",
+     "title": "Control environment, communication, risk assessment and monitoring of controls",
+     "runtime": "Outside the runtime.",
+     "events": [],
+     "note": "Organizational: policies, training, risk assessment and oversight are the deployer's."
+    }
+   ]
+  },
+  "eu-ai-act": {
+   "title": "EU AI Act (Regulation (EU) 2024/1689)",
+   "controls": [
+    {
+     "id": "Art. 12",
+     "title": "Record-keeping",
+     "runtime": "A signed, hash-chained record of each admission, decision, approval, effect and refusal, verified offline in this pack.",
+     "events": [
+      "run_admitted",
+      "authorization_decision",
+      "effect_observation",
+      "run_lifecycle"
+     ]
+    },
+    {
+     "id": "Art. 14(4)(a),(c)",
+     "title": "Monitor operation and interpret output",
+     "runtime": "Decisions carry reason codes and evidence references; escalations carry the audited decision to a human.",
+     "events": [
+      "authorization_decision",
+      "escalation_opened",
+      "escalation_resolved"
+     ]
+    },
+    {
+     "id": "Art. 14(4)(b)",
+     "title": "Awareness of automation bias",
+     "runtime": "Approval decision times are recorded; approvals faster than the review floor, without step-up, or never decided are recorded as such.",
+     "events": [
+      "approval_requested",
+      "approval_redeemed",
+      "approval_review_too_fast",
+      "approval_step_up_refused",
+      "approval_timed_out"
+     ]
+    },
+    {
+     "id": "Art. 14(4)(d)",
+     "title": "Override or reverse",
+     "runtime": "Approvals and denials bind the exact action; applied effects are compensated and unknown outcomes reconciled.",
+     "events": [
+      "approval_redeemed",
+      "compensation_requested",
+      "effect_reconciliation"
+     ]
+    },
+    {
+     "id": "Art. 14(4)(e)",
+     "title": "Stop the system",
+     "runtime": "Revocations apply on the next call; circuit breakers trip them automatically.",
+     "events": [
+      "revocation",
+      "revocation_refusal",
+      "circuit_breaker_tripped"
+     ]
+    },
+    {
+     "id": "Art. 15",
+     "title": "Accuracy, robustness and cybersecurity",
+     "runtime": "Untrusted content is contained by flow labels, results are screened and schema-checked, and actions are monitored.",
+     "events": [
+      "information_flow_decision",
+      "result_screened",
+      "output_schema_violation",
+      "action_monitored",
+      "boundary_refusal"
+     ]
+    },
+    {
+     "id": "Art. 26",
+     "title": "Deployer obligations",
+     "runtime": "Logs kept, oversight assigned, operation monitored.",
+     "events": [],
+     "note": "Deployment: log retention, assigned overseers and instructions for use are the deployer's; this pack is one of their logs."
+    }
+   ]
+  },
+  "iso42001": {
+   "title": "ISO/IEC 42001:2023 Annex A",
+   "controls": [
+    {
+     "id": "A.6",
+     "title": "AI system life cycle",
+     "runtime": "Packs are released through gates, rolled out in stages and pinned; conformance is assessed.",
+     "events": [
+      "pack_loaded",
+      "rollout_set",
+      "rollout_cleared",
+      "conformance_assessed"
+     ]
+    },
+    {
+     "id": "A.7",
+     "title": "Data for AI systems",
+     "runtime": "Data flows are labelled and classified egress refused; run data is erased on request; memory changes are governed.",
+     "events": [
+      "data_flow_decision",
+      "information_flow_decision",
+      "run_data_erased",
+      "memory_lifecycle"
+     ]
+    },
+    {
+     "id": "A.9",
+     "title": "Use of AI systems",
+     "runtime": "Each use is tied to its principal, purpose and task authorization; consequential actions need approval.",
+     "events": [
+      "run_admitted",
+      "authorization_decision",
+      "task_authorization_amended",
+      "approval_redeemed"
+     ]
+    },
+    {
+     "id": "A.10",
+     "title": "Third-party relationships",
+     "runtime": "Upstream tools are pinned by digest and drift is refused before dispatch.",
+     "events": [],
+     "note": "Configuration: upstream pins are checked at startup and on each call; attach the configuration report."
+    },
+    {
+     "id": "A.2-A.5, A.8",
+     "title": "Policies, organization, resources, impact assessment, information for interested parties",
+     "runtime": "Outside the runtime.",
+     "events": [],
+     "note": "Organizational: the deployer's management system."
+    }
+   ]
+  },
+  "owasp-agentic": {
+   "title": "OWASP Top 10 for Agentic Applications (2026)",
+   "controls": [
+    {
+     "id": "ASI01",
+     "title": "Agent goal hijack",
+     "runtime": "Untrusted content cannot grant authority; effects after untrusted input need approval.",
+     "events": [
+      "information_flow_decision",
+      "authorization_decision"
+     ]
+    },
+    {
+     "id": "ASI02",
+     "title": "Tool misuse and exploitation",
+     "runtime": "Default-deny dispatch of pinned capabilities; loop and repeated-effect guards; action monitor.",
+     "events": [
+      "repeated_effect_refusal",
+      "action_monitored",
+      "authorization_decision"
+     ]
+    },
+    {
+     "id": "ASI03",
+     "title": "Identity and privilege abuse",
+     "runtime": "Runs bound to principal, agent and delegated user; grants verified and unrevoked.",
+     "events": [
+      "run_admitted",
+      "delegation_admitted",
+      "revocation_refusal"
+     ]
+    },
+    {
+     "id": "ASI04",
+     "title": "Agentic supply chain",
+     "runtime": "Digest-pinned capabilities and packs; upstream drift refused.",
+     "events": [
+      "pack_loaded"
+     ]
+    },
+    {
+     "id": "ASI05",
+     "title": "Unexpected code execution",
+     "runtime": "Effects outside an active isolation boundary are refused.",
+     "events": [
+      "boundary_refusal"
+     ]
+    },
+    {
+     "id": "ASI06",
+     "title": "Memory and context poisoning",
+     "runtime": "Memory changes are governed lifecycle records.",
+     "events": [
+      "memory_lifecycle",
+      "memory_lifecycle_not_applied"
+     ]
+    },
+    {
+     "id": "ASI07",
+     "title": "Insecure inter-agent communication",
+     "runtime": "Delegation narrows authority; children's outputs need acceptance.",
+     "events": [
+      "delegation_admitted",
+      "delegation_closed"
+     ]
+    },
+    {
+     "id": "ASI08",
+     "title": "Cascading failures",
+     "runtime": "Conserved budgets and shared limits; unknown outcomes hold; breakers stop bursts.",
+     "events": [
+      "shared_guarantee_refused",
+      "circuit_breaker_tripped",
+      "usage_refused"
+     ]
+    },
+    {
+     "id": "ASI09",
+     "title": "Human-agent trust exploitation",
+     "runtime": "Approvals bind the exact action, with step-up, a review floor and timeouts.",
+     "events": [
+      "approval_redeemed",
+      "approval_review_too_fast",
+      "approval_step_up_refused",
+      "approval_timed_out"
+     ]
+    },
+    {
+     "id": "ASI10",
+     "title": "Rogue agents",
+     "runtime": "Kill switch, breakers and trusted monitoring.",
+     "events": [
+      "revocation",
+      "circuit_breaker_tripped",
+      "action_monitored"
+     ]
+    }
+   ]
+  }
+ }
+}
