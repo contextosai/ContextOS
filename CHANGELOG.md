@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+
+- Erasure (on request and by retention) now removes a run's delegation chain (the
+  user's id, the actors and the user's roles) from its admission record, audited in
+  `run_data_erased` as `delegation_chain`. Before, it outlived the erasure.
+
 ## 0.1.0-alpha.19 - 2026-11-09
 
 Nineteenth alpha: who an agent acts for, and evidence a reviewer can use. Delegation
