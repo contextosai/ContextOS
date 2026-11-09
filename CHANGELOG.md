@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `python -m contextos.replay` (Python client): replays recorded tool-call traffic
+  through a gateway against a tool server that answers with the recorded outcomes,
+  and reports calls allowed, duplicates refused, limits held, approvals required,
+  outcomes left in doubt and possible false blocks. `examples/replay` runs it
+  locally; `docs/research/design-partner-kit.md` is the interview, data request and
+  scorecard it feeds.
 - `[readiness]`: an opt-in, fail-closed profile for consequential workflows. Every
   capability that changes external state must declare provider finality
   (`recovery.completion` and `reference_pointer`), an outcome witness, a guarantee
