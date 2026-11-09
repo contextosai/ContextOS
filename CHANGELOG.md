@@ -6,6 +6,14 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `ctx init-tool --preset github|database|crm` labels a drafted manifest's information
+  flow from a preset for its tool set: untrusted output, private reads (repository
+  contents, rows, CRM records) as `CONFIDENTIAL`, and writes and sends as egress with a
+  ceiling. With the default policy, reading an issue and then private code and then
+  opening a pull request is denied, and personal data read from a CRM cannot be
+  emailed out. The description's review text names the matching rule.
+
+### Added
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
