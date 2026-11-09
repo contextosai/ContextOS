@@ -14,8 +14,12 @@ minor versions may break APIs and every break is listed.
   and PKCE; Tower exchanges the code itself (`POST /api/sso/token`, client secret for
   confidential clients) and returns the token only if it accepts it, with the
   browser's nonce. API keys keep working.
-
-### Added
+- `ctx evidence-pack --framework soc2|iso42001|eu-ai-act|owasp-agentic`: a review
+  folder built only from an audit export that verifies. It holds the export and keys
+  as supplied, `controls.json` (each control's audit event kinds counted over the
+  period, with status `evidenced`, `no_events_in_period` or `outside_audit`),
+  `coverage.md` (what the evidence covers and what it does not), an optional
+  configuration report, and `manifest.json` with every file's digest. Deterministic.
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
