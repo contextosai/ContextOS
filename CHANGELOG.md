@@ -6,6 +6,23 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Multi-hop delegation: a delegated token's nested actor claims (RFC 8693 `act` within
+  `act`) are read as a chain, current actor first, and kept on the run; a delegated
+  child run inherits its parent's. `[oidc.delegation] max_chain` (default 4, at most
+  16) bounds it, and a chain naming an actor twice or the user as an actor rejects the
+  token. `run_admitted` records `delegation` with the chain's `depth` and
+  `chain_digest`, never identities.
+- Kill switch: `user` (every run acting for a user, and new runs declaring them) and
+  `delegation` (one exact chain, by its digest) revocation kinds; `principal` now also
+  stops runs whose delegation chain names the principal. Tower's kill switch offers
+  both.
+
+### Changed
+- `Gateway::admission_revoked` takes `AdmissionTargets`, and `run_targets` returns a
+  `Vec`. Delegated-token parsing moved from `oidc.rs` to `oidc_delegation.rs`;
+  `VerifiedUser` gains `actors`.
+
+### Added
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused

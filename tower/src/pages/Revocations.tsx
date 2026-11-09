@@ -12,7 +12,9 @@ const KINDS: [string, string][] = [
   ["capability", "Capability"],
   ["adapter", "Adapter"],
   ["pack", "Context Pack"],
-  ["principal", "Principal"],
+  ["principal", "Principal (or any agent on a delegation chain)"],
+  ["user", "User (every run acting for them)"],
+  ["delegation", "Delegation (one chain, by its digest)"],
 ];
 
 const INVALIDATE = [["revocations"], ["restore-requests"], ["sources"], ["posture"]];

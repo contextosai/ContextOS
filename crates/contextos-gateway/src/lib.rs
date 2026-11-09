@@ -32,6 +32,7 @@ mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
+pub mod delegation_chain;
 pub mod environment_guard;
 mod erasure;
 mod escalation;
@@ -100,6 +101,7 @@ pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, c
 pub use coordination::{MAX_WORK_BOARD_BYTES, MAX_WORK_TASKS, WorkCommand, WorkError, WorkEvidence, WorkTaskInput};
 pub use decisions::{DecisionRefusal, DecisionReport, MAX_DECISIONS_PER_RUN, RecordedDecision, ReportedToolCall};
 pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_reservation_id};
+pub use delegation_chain::DelegationChain;
 pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
 pub use exposure_import::ImportRow;
@@ -121,7 +123,7 @@ pub use ports::{
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
 pub use resource_identity::{ResourceCanonicalizer, ResourceIdentityProvider};
-pub use revocations::{MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
+pub use revocations::{AdmissionTargets, MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::{EXPOSURE_RECEIPT_RETENTION_SECONDS, SharedGuarantee};
 pub use shared_inspection::MAX_INSPECTION_SCAN;
@@ -1075,7 +1077,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
         let revoked = revoked?;
-        let mut targets = revocations::run_targets(admission).to_vec();
+        let mut targets = revocations::run_targets(admission);
         targets.extend([
             ("adapter", manifest.adapter_id.as_str()),
             ("capability", manifest.capability_id.as_str()),

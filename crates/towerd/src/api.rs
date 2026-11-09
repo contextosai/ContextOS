@@ -991,7 +991,15 @@ struct FleetRevocation {
 }
 
 /// Kinds the fleet kill switch acts on.
-pub(crate) const FLEET_KINDS: [&str; 5] = ["agent", "capability", "pack", "adapter", "principal"];
+pub(crate) const FLEET_KINDS: [&str; 7] = [
+    "agent",
+    "capability",
+    "pack",
+    "adapter",
+    "principal",
+    "user",
+    "delegation",
+];
 
 /// Checks a kill-switch change and picks the sources it acts on: those holding a
 /// control key, narrowed to `only` when given.

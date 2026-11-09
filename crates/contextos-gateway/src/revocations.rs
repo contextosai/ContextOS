@@ -2,8 +2,11 @@
 //!
 //! An operator revokes a target for a tenant: the whole `tenant`, a `pack` (release
 //! tuple, by pack ref), an authenticated `principal` (the caller that admits runs, and
-//! every run it admitted), an `agent` (the agent id a run declares; to stop whoever
-//! runs it, revoke the principal), an `adapter` or a `capability`. While revoked:
+//! every run it admitted, or any actor on a run's delegation chain), an `agent` (the
+//! agent id a run declares; to stop whoever runs it, revoke the principal), a `user`
+//! (every run a delegated credential says acts for them, and new runs declaring them),
+//! a `delegation` (one exact chain of actors for one user, by its digest; see
+//! [`crate::delegation_chain`]), an `adapter` or a `capability`. While revoked:
 //!
 //! - admission refuses new runs of a revoked tenant, pack or agent;
 //! - dispatch refuses every effect of a run whose tenant, pack or agent is revoked,
@@ -23,7 +26,16 @@ use crate::{Gateway, GatewayError};
 /// Targets revoked per tenant at most.
 pub const MAX_REVOCATIONS: usize = 1024;
 
-pub const REVOCATION_KINDS: [&str; 6] = ["tenant", "pack", "principal", "agent", "adapter", "capability"];
+pub const REVOCATION_KINDS: [&str; 8] = [
+    "tenant",
+    "pack",
+    "principal",
+    "agent",
+    "user",
+    "delegation",
+    "adapter",
+    "capability",
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum RevocationError {
@@ -49,14 +61,34 @@ pub(crate) fn matching(revocations: Option<&Value>, targets: &[(&str, &str)]) ->
     })
 }
 
-/// What a run is bound to, for revocation: tenant, pack, admitting principal and agent.
-pub fn run_targets(admission: &RunAdmission) -> [(&str, &str); 4] {
-    [
+/// What a run is bound to, for revocation: tenant, pack, admitting principal and agent,
+/// and with a delegation chain its user, the chain and every actor on it.
+pub fn run_targets(admission: &RunAdmission) -> Vec<(&str, &str)> {
+    let mut targets = vec![
         ("tenant", admission.tenant_id.as_str()),
         ("pack", admission.pack_ref.as_str()),
         ("principal", admission.admitted_by.as_str()),
         ("agent", admission.actor["principal_id"].as_str().unwrap_or_default()),
-    ]
+    ];
+    if let Some(chain) = &admission.delegation_chain {
+        targets.push(("user", chain.user_id.as_str()));
+        targets.push(("delegation", chain.digest.as_str()));
+        targets.extend(chain.actors.iter().map(|a| ("principal", a.as_str())));
+    }
+    targets
+}
+
+/// What a new run would be bound to, for revocation at admission.
+#[derive(Debug, Clone, Copy)]
+pub struct AdmissionTargets<'a> {
+    pub tenant_id: &'a str,
+    pub pack_ref: &'a str,
+    pub principal: &'a str,
+    pub agent_id: &'a str,
+    /// The user the run declares, verified or not.
+    pub declared_user: Option<&'a str>,
+    pub chain: Option<&'a crate::DelegationChain>,
+    pub parent: Option<&'a RunAdmission>,
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
@@ -69,24 +101,24 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .map_or_else(|| json!({"revoked": []}), |r| r.body))
     }
 
-    /// The reason code if a new run of this tenant, pack, admitting principal and agent
-    /// is revoked, or if the parent of a delegated run is.
-    pub async fn admission_revoked(
-        &self,
-        tenant_id: &str,
-        pack_ref: &str,
-        principal: &str,
-        agent_id: &str,
-        parent: Option<&RunAdmission>,
-    ) -> Result<Option<String>, GatewayError> {
-        let current = self.store.get(&revocations_key(tenant_id)).await?;
+    /// The reason code if a new run of this tenant, pack, admitting principal, agent,
+    /// declared user or delegation chain is revoked, or if the parent of a delegated run
+    /// is.
+    pub async fn admission_revoked(&self, new: &AdmissionTargets<'_>) -> Result<Option<String>, GatewayError> {
+        let current = self.store.get(&revocations_key(new.tenant_id)).await?;
         let mut targets = vec![
-            ("tenant", tenant_id),
-            ("pack", pack_ref),
-            ("principal", principal),
-            ("agent", agent_id),
+            ("tenant", new.tenant_id),
+            ("pack", new.pack_ref),
+            ("principal", new.principal),
+            ("agent", new.agent_id),
         ];
-        if let Some(parent) = parent {
+        targets.extend(new.declared_user.map(|u| ("user", u)));
+        if let Some(chain) = new.chain {
+            targets.push(("user", chain.user_id.as_str()));
+            targets.push(("delegation", chain.digest.as_str()));
+            targets.extend(chain.actors.iter().map(|a| ("principal", a.as_str())));
+        }
+        if let Some(parent) = new.parent {
             targets.extend(run_targets(parent));
         }
         Ok(matching(current.as_ref().map(|r| &r.body), &targets))
