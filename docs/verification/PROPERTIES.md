@@ -59,6 +59,7 @@ to fail when the code it guards was deliberately broken.
 | RECONCILE-4 | A stranded effect recorded not applied through a crashed reconciliation is then sent exactly once | Durable effects | L3 | `every_crash_point_of_a_reconciliation_is_safe_to_retry` in `crates/contextos-gateway/tests/pipeline.rs` | Holds |
 | TASK-1 | An amendment classified `narrowed` permits nothing the current task authorization did not, for every action, effect and usage so far | Proposal spec-0003, replacement rule | L2 | `a_narrowed_task_permits_nothing_new` in `crates/contextos-gateway/tests/task_properties.rs` | Holds; mutation-tested (found SPEC-1 within 0.2 s when the narrowing fix was removed) |
 | TASK-2 | Of effects racing for a task's limits, no more are charged than fit; a returned charge frees exactly its share | Proposal spec-0003, limits | L2 | `charges_are_conserved_under_concurrency` in `crates/contextos-gateway/src/task_authorization.rs` | Holds (8 concurrent charges) |
+| APPROVAL-1 | Under `on_timeout = "deny"`, a decision on a request that timed out never releases an effect, and the sweep times a request out once | Approval timeouts | L1 | `under_deny_a_decision_after_the_timeout_is_refused` and `an_undecided_request_is_escalated_once_and_a_late_decision_still_counts` in `crates/contextos-gateway/tests/approval_timeout.rs` | Holds |
 
 ## Not yet covered
 

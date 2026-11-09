@@ -59,6 +59,8 @@ pub struct DispatchSetup {
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// `[guards.approval_review]`.
     pub approval_review: Option<contextos_gateway::approval_review::ReviewPolicy>,
+    /// `[guards.approval_timeout]`.
+    pub approval_timeout: Option<contextos_gateway::approval_timeout::TimeoutPolicy>,
     /// `[guards.information_flow]`.
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
     /// `[guards.environments]`.
@@ -119,6 +121,7 @@ where
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
     gateway.set_approval_review(setup.approval_review);
+    gateway.set_approval_timeout(setup.approval_timeout);
     gateway.set_information_flow(setup.information_flow);
     gateway.set_environments(setup.environments);
     gateway.set_circuit_breakers(setup.circuit_breakers);
@@ -434,6 +437,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         guarantees: config.guarantees.clone(),
         approval_step_up: config.guards.approval_step_up.clone(),
         approval_review: config.guards.approval_review.clone(),
+        approval_timeout: config.guards.approval_timeout.clone(),
         information_flow: config.guards.information_flow.clone(),
         environments: config.guards.environments.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),

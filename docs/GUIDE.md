@@ -1096,6 +1096,28 @@ minimal, development-only implementation):
     approvers, `decided_at` and `decision_seconds`. Tower's Approvals page
     (`GET /api/approvals`) folds them into decision-time distributions per capability
     and per approver.
+
+  With `[guards.approval_timeout]`, an approval request nobody decides does not leave
+  its run waiting unnoticed:
+
+  ```toml
+  [guards.approval_timeout]
+  timeout_seconds = 1800        # 60 to 604800
+  on_timeout = "escalate"       # or "deny"
+  # capabilities = ["adp_payments.issue_refund"]   # every approval when empty
+  ```
+
+  - The governance sweep (on the leader) finds requests with no redemption
+    `timeout_seconds` after the gateway asked and audits `approval_timed_out` with how
+    long each waited.
+  - `escalate` opens an escalation for the run, so the request shows in the escalation
+    inbox and the `contextos_escalations_open` gauge. A decision that arrives later still
+    counts.
+  - `deny` refuses any later decision on that request (`approval_timed_out`); the run
+    must start a new operation if it still needs the effect.
+  - `/metrics` exports `contextos_approvals_requested_total`,
+    `contextos_approvals_redeemed_total` (by capability),
+    `contextos_approval_decision_seconds` and `contextos_approvals_timed_out_total`.
 - **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
   run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
   ceilings, required controls) and a current verified `BoundaryObservation`. With it,

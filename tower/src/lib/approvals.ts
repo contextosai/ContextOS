@@ -7,6 +7,8 @@ export interface ApprovalStats {
   untimed: number;
   refused_too_fast: number;
   refused_step_up: number;
+  /** Requests nobody decided before the approval timeout. */
+  timed_out: number;
   within_ten_seconds: number;
 }
 

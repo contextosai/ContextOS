@@ -95,6 +95,10 @@ pub struct GuardsConfig {
     /// requested (see [`contextos_gateway::approval_review`]).
     #[serde(default)]
     pub approval_review: Option<contextos_gateway::approval_review::ReviewPolicy>,
+    /// Approval requests with no decision after `timeout_seconds` are escalated to a
+    /// human, or refused (see [`contextos_gateway::approval_timeout`]).
+    #[serde(default)]
+    pub approval_timeout: Option<contextos_gateway::approval_timeout::TimeoutPolicy>,
     /// Refuse runs that can apply effects unless they state what their principal
     /// authorized (`task_authorization`), so no effect relies on the agent's own reading
     /// of the request.
@@ -165,6 +169,7 @@ impl Default for GuardsConfig {
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
+            approval_timeout: None,
         }
     }
 }

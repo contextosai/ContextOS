@@ -29,6 +29,11 @@ require_task_authorization = true
 min_review_seconds = 20
 capabilities = ["adp_payments.issue_refund"]
 
+# An approval nobody decides within half an hour goes to the escalation inbox.
+[guards.approval_timeout]
+timeout_seconds = 1800
+on_timeout = "escalate"
+
 # Approvals of these capabilities count only after the approver's recent strong sign-in.
 [guards.approval_step_up]
 capabilities = ["adp_payments.issue_refund"]

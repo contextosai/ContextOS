@@ -162,6 +162,9 @@ impl Config {
         if let Some(review) = &config.guards.approval_review {
             review.validate().map_err(ConfigError::Invalid)?;
         }
+        if let Some(timeout) = &config.guards.approval_timeout {
+            timeout.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(monitor) = &config.guards.action_monitor {
             monitor.validate().map_err(ConfigError::Invalid)?;
             if config.providers.as_ref().is_none_or(|p| p.action_monitor.is_none()) {

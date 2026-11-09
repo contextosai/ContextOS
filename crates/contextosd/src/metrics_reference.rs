@@ -14,6 +14,13 @@ pub fn full_exposition() -> String {
     let metrics = Metrics::default();
     metrics.observe("/v1/runs/{run_id}/dispatch", 200, Duration::from_millis(3));
     metrics.dispatch_outcome("x.y", "blocked", &["shared_guarantee_saturated".into()]);
+    metrics.approval("x.y", Some(&contextos_gateway::ApprovalNote::Requested));
+    metrics.approval(
+        "x.y",
+        Some(&contextos_gateway::ApprovalNote::Redeemed {
+            decision_seconds: Some(42),
+        }),
+    );
     metrics.admission("pack");
     metrics.decision("allowed");
     metrics.task_amendment("narrowed");
@@ -93,7 +100,8 @@ pub fn reference() -> String {
          label; per-tenant evidence is in the audit chain. The governance sweep's gauges\n\
          (`contextos_shared_holds`, `contextos_shared_hold_oldest_seconds`,\n\
          `contextos_shared_receipts_fill_ratio`, `contextos_shared_ledgers_unreadable`,\n\
-         `contextos_escalations_open` and `contextos_governance_sweep_completed_timestamp_seconds`)\n\
+         `contextos_escalations_open`, `contextos_approvals_timed_out_total` and\n\
+         `contextos_governance_sweep_completed_timestamp_seconds`)\n\
          come only from the replica leading the sweep.\n\n\
          | Metric | Type | Labels | Description |\n|---|---|---|---|\n",
     );
