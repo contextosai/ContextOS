@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `examples/consequential-tools`: a staging support agent's recorded refunds replayed
+  through a gateway with the starter profile's guards. A refund on a live order is
+  refused (`environment_mismatch`), the same refund from a second run is refused
+  (`effect_repeated_across_runs`), and the agent's daily cap holds
+  (`shared_guarantee_exceeded`). `examples/replay/local_gateway.py` runs the local
+  gateway for both replay examples.
+
 ## 0.1.0-alpha.18 - 2026-11-08
 
 Eighteenth alpha: the gate in front of consequential tools. Replay recorded traffic

@@ -22,6 +22,8 @@ it can, and `consequential-tools.toml` enforces them. Append one to your
 `contextosd.toml`, replace the example capability ids, and run
 `contextosd --check-config` to list what is still missing. See the GUIDE's
 "Starter profiles".
+[examples/consequential-tools](../examples/consequential-tools) shows the
+environment guard, an intent key and a daily spend cap refusing replayed traffic.
 
 ## Publish packs from git
 
