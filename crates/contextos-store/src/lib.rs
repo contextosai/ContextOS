@@ -100,6 +100,8 @@ pub enum DocKind {
     ActionMonitor,
     /// When the gateway asked for an approval (the review floor's start).
     ApprovalRequested,
+    /// Which run's operation holds a business request's intent key, tenant-wide.
+    IntentClaim,
 }
 
 impl DocKind {
@@ -144,6 +146,7 @@ impl DocKind {
             DocKind::CircuitBreaker => "circuit_breaker",
             DocKind::ActionMonitor => "action_monitor",
             DocKind::ApprovalRequested => "approval_requested",
+            DocKind::IntentClaim => "intent_claim",
         }
     }
 }

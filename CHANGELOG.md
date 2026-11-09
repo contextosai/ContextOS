@@ -6,6 +6,13 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Intent keys: a capability's manifest may declare `intent.key_pointers`, the
+  arguments that identify a business request. The first run to send a request claims
+  it tenant-wide before dispatch; the same request from another run is refused with
+  `effect_repeated_across_runs` and pointed at the holding operation until the claim
+  is released (the effect definitively not applied) or its `window_seconds` lapse.
+  `provider_key = true` derives the provider idempotency key from the intent. The
+  readiness profile reports consequential capabilities without one (`intent`).
 - `python -m contextos.replay` (Python client): replays recorded tool-call traffic
   through a gateway against a tool server that answers with the recorded outcomes,
   and reports calls allowed, duplicates refused, limits held, approvals required,
