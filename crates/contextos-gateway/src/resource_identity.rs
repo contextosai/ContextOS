@@ -148,6 +148,9 @@ mod tests {
             resource_canonicalizer: canonicalizer,
             owner_route: None,
             owner_after_seconds: None,
+            resource_from: None,
+            amount_table: None,
+            window_seconds: None,
         };
         let exact = serde_json::to_value(rule(ResourceCanonicalizer::Exact)).unwrap();
         assert!(exact.get("resource_canonicalizer").is_none());

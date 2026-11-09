@@ -36,6 +36,7 @@ mod escalation;
 mod exposure_import;
 mod findings;
 mod findings_api;
+pub mod guarantee_sources;
 pub mod guard_policy;
 pub mod hold_census;
 pub mod hold_owners;
