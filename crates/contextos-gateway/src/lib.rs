@@ -24,6 +24,7 @@ pub mod action_monitor;
 pub mod admission;
 mod approval_events;
 pub mod approval_review;
+pub mod approval_timeout;
 mod attestation;
 mod checkpoints;
 pub mod circuit_breakers;
@@ -91,6 +92,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use approval_timeout::{OnTimeout, TimeoutPolicy};
 pub use attestation::{ATTESTATION_MARGIN_SECONDS, DISPATCH_STALL_SECONDS};
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, compensation_operation_id};
@@ -230,6 +232,18 @@ pub struct DispatchReport {
     pub obligations: Vec<String>,
     pub approval_request_id: Option<String>,
     pub audit_sequences: Vec<u64>,
+    /// An approval this dispatch asked for or redeemed, for metrics; not serialized.
+    #[serde(skip)]
+    pub approval: Option<ApprovalNote>,
+}
+
+/// An approval event of one dispatch (the audit chain has the full record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalNote {
+    /// The gateway asked for an approval it had not asked for before.
+    Requested,
+    /// An approval was redeemed, decided this many seconds after the request.
+    Redeemed { decision_seconds: Option<u64> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -288,6 +302,8 @@ pub struct Gateway<S, L> {
     )>,
     /// A floor on how fast an approval may be decided (see [`approval_review`]).
     approval_review: Option<approval_review::ReviewPolicy>,
+    /// Approval requests nobody decides in time (see [`approval_timeout`]).
+    approval_timeout: Option<approval_timeout::TimeoutPolicy>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -332,6 +348,7 @@ impl<'a> Pipeline<'a> {
                 obligations: vec![],
                 approval_request_id: None,
                 audit_sequences: vec![],
+                approval: None,
             },
             started: std::time::Instant::now(),
             risk_tags: Vec::new(),
@@ -527,6 +544,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
+            approval_timeout: None,
         }
     }
 
@@ -1277,6 +1295,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let (approval_material, review_refused) = self
             .review_approval(admission, &manifest.capability_id, &binding, approval_material)
             .await?;
+        if self.approval_too_late(admission, approval_material.as_ref()).await? {
+            return Ok(p.stop(
+                "blocked",
+                vec!["approval_timed_out".into()],
+                "The approval request timed out before it was decided.",
+            ));
+        }
         let mut approval_input = Value::Null;
         let mut redemption_key = None;
         if let Some(Value::Object(mut material)) = approval_material {
@@ -1369,10 +1394,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "require_approval" => {
                 return Ok(
                     match self.ports.approvals.request(admission, &binding, &action_digest).await {
+                        Ok(id) if self.request_timed_out(admission, &id).await? => p.stop(
+                            "blocked",
+                            vec!["approval_timed_out".into()],
+                            "The approval request timed out before it was decided.",
+                        ),
                         Ok(id) => {
                             let requested = self
                                 .approval_requested(admission, &id, (&operation_id, &manifest.capability_id), &now)
                                 .await?;
+                            if requested.is_some() {
+                                p.report.approval = Some(ApprovalNote::Requested);
+                            }
                             p.report.audit_sequences.extend(requested);
                             p.report.approval_request_id = Some(id);
                             p.report.obligations.push("await_approval".into());
@@ -1488,7 +1521,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 ));
             }
             if redeemed_now {
-                let entry = self
+                let (entry, decision_seconds) = self
                     .approval_redeemed(
                         admission,
                         &approval_input,
@@ -1497,6 +1530,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     )
                     .await?;
                 p.report.audit_sequences.push(entry);
+                p.report.approval = Some(ApprovalNote::Redeemed { decision_seconds });
             }
             p.risk_tags.push("human_approved".into());
         }

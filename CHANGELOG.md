@@ -23,6 +23,17 @@ approval events and Tower's approval quality. See the
   Identical calls that are distinct effects need keys of their own.
 
 ### Added
+- `[guards.approval_timeout]`: the governance sweep finds approval requests with no
+  redemption `timeout_seconds` (60 to 604800) after the gateway asked, audits
+  `approval_timed_out` with the wait, and opens an escalation (`on_timeout =
+  "escalate"`, the default; a later decision still counts) or refuses any later
+  decision on the request (`"deny"`, reason `approval_timed_out`). Optional
+  `capabilities` scope it.
+- Approval metrics: `contextos_approvals_requested_total` and
+  `contextos_approvals_redeemed_total` by capability,
+  `contextos_approval_decision_seconds` (histogram) and
+  `contextos_approvals_timed_out_total` (leader). Tower's Approvals page counts
+  timeouts.
 - Approval events: the gateway audits `approval_requested` the first time it asks for
   an approval and `approval_redeemed` when one is redeemed, with the approvers,
   `decided_at` and the decision time from its own request time. Tower folds them,

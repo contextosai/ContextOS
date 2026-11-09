@@ -102,6 +102,8 @@ pub enum DocKind {
     ApprovalRequested,
     /// Which run's operation holds a business request's intent key, tenant-wide.
     IntentClaim,
+    /// The approval requests a tenant's approval timeout still watches.
+    ApprovalTimeouts,
 }
 
 impl DocKind {
@@ -147,6 +149,7 @@ impl DocKind {
             DocKind::ActionMonitor => "action_monitor",
             DocKind::ApprovalRequested => "approval_requested",
             DocKind::IntentClaim => "intent_claim",
+            DocKind::ApprovalTimeouts => "approval_timeouts",
         }
     }
 }

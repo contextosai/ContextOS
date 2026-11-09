@@ -844,6 +844,7 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
 
@@ -989,6 +990,7 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
 

@@ -15,6 +15,7 @@
 //! | `approval_redeemed` | `capability_id`, `approvers`, `decision_seconds` |
 //! | `approval_review_too_fast` | `capability_id` |
 //! | `approval_step_up_refused` | `capability_id` |
+//! | `approval_timed_out` | `capability_id` |
 //!
 //! Memory is bounded: at most [`MAX_KEYS`] capabilities and approvers are tracked;
 //! the rest are counted under [`OTHER`].
@@ -43,6 +44,8 @@ pub struct Stats {
     pub untimed: u64,
     pub refused_too_fast: u64,
     pub refused_step_up: u64,
+    /// Requests nobody decided before the approval timeout.
+    pub timed_out: u64,
 }
 
 impl Stats {
@@ -72,7 +75,11 @@ pub struct Approvals {
 pub fn is_approval(kind: &str) -> bool {
     matches!(
         kind,
-        "approval_requested" | "approval_redeemed" | "approval_review_too_fast" | "approval_step_up_refused"
+        "approval_requested"
+            | "approval_redeemed"
+            | "approval_review_too_fast"
+            | "approval_step_up_refused"
+            | "approval_timed_out"
     )
 }
 
@@ -109,6 +116,7 @@ impl Approvals {
             }
             "approval_review_too_fast" => stats.refused_too_fast += 1,
             "approval_step_up_refused" => stats.refused_step_up += 1,
+            "approval_timed_out" => stats.timed_out += 1,
             _ => {}
         }
     }
@@ -130,6 +138,7 @@ mod tests {
         a.apply(&entry("approval_requested", refund.clone()));
         a.apply(&entry("approval_requested", refund.clone()));
         a.apply(&entry("approval_review_too_fast", refund.clone()));
+        a.apply(&entry("approval_timed_out", refund.clone()));
         a.apply(&entry(
             "approval_redeemed",
             json!({"capability_id": "pay.refund",
@@ -141,7 +150,7 @@ mod tests {
             "approvers": ["fin_lead", "ops_lead"], "decision_seconds": 900}),
         ));
         let s = &a.capabilities["pay.refund"];
-        assert_eq!((s.requested, s.redeemed, s.refused_too_fast), (2, 2, 1));
+        assert_eq!((s.requested, s.redeemed, s.refused_too_fast, s.timed_out), (2, 2, 1, 1));
         assert_eq!(s.decision_seconds, [1, 0, 0, 0, 1, 0, 0]);
         assert_eq!(s.within_first_bucket(), 1);
         assert_eq!(a.approvers["fin_lead"].redeemed, 2);

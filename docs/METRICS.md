@@ -7,13 +7,18 @@ startup, and statuses and reason codes are the runtime's own. Tenants are not a
 label; per-tenant evidence is in the audit chain. The governance sweep's gauges
 (`contextos_shared_holds`, `contextos_shared_hold_oldest_seconds`,
 `contextos_shared_receipts_fill_ratio`, `contextos_shared_ledgers_unreadable`,
-`contextos_escalations_open` and `contextos_governance_sweep_completed_timestamp_seconds`)
+`contextos_escalations_open`, `contextos_approvals_timed_out_total` and
+`contextos_governance_sweep_completed_timestamp_seconds`)
 come only from the replica leading the sweep.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `contextos_admissions_total` | counter | `pack` | Admitted runs by Context Pack release. |
 | `contextos_agent_binding_mismatches_total` | counter | `mode` | Runs whose declared agent their credential does not name, by binding mode. |
+| `contextos_approval_decision_seconds` | histogram | none | Seconds from the gateway's approval request to the fastest approving decision, for redeemed approvals. |
+| `contextos_approvals_redeemed_total` | counter | `capability` | Approvals redeemed for an operation, by capability. |
+| `contextos_approvals_requested_total` | counter | `capability` | Approvals the gateway asked for, by capability. |
+| `contextos_approvals_timed_out_total` | counter | none | Approval requests timed out by this leader's sweeps. |
 | `contextos_audit_sink_batches_total` | counter | `sink`, `outcome` | Audit sink batches by sink and outcome. |
 | `contextos_decisions_total` | counter | `status` | Recorded decisions by status. |
 | `contextos_dispatch_outcomes_total` | counter | `capability`, `status` | Governed tool dispatches by capability and status. |

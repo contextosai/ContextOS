@@ -33,7 +33,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         now: &str,
     ) -> Result<Option<u64>, GatewayError> {
         let key = requested_key(&admission.tenant_id, request_id);
-        match self.store.create(&key, &json!({"requested_at": now})).await {
+        let record = json!({"requested_at": now, "run_id": admission.run_id,
+            "operation_id": operation_id, "capability_id": capability_id});
+        match self.store.create(&key, &record).await {
             Ok(_) => {}
             Err(e) if e.is_conflict() => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -48,18 +50,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 now,
             )
             .await?;
+        self.track_approval(&admission.tenant_id, request_id, capability_id)
+            .await?;
         Ok(Some(entry.sequence))
     }
 
     /// Audits an approval just redeemed for an operation (`approval_redeemed`): its
-    /// approvers, when they decided, and the fastest decision time in seconds.
+    /// approvers, when they decided, and the fastest decision time in seconds. Returns
+    /// the entry's sequence and the decision time.
     pub(crate) async fn approval_redeemed(
         &self,
         admission: &RunAdmission,
         material: &Value,
         (operation_id, capability_id): (&str, &str),
         now: &str,
-    ) -> Result<u64, GatewayError> {
+    ) -> Result<(u64, Option<u64>), GatewayError> {
         let request_id = material["request"]["approval_request_id"].as_str().unwrap_or_default();
         let recorded = if request_id.is_empty() {
             None
@@ -96,6 +101,6 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 now,
             )
             .await?;
-        Ok(entry.sequence)
+        Ok((entry.sequence, seconds))
     }
 }

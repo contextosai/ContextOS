@@ -110,11 +110,12 @@ Agent rows: `key`, `agent_id`, `agent_urn`, `owner`, `team`, `business_unit`,
 ### `GET /api/approvals`
 
 Approval quality (viewer), folded from the runtimes' `approval_requested`,
-`approval_redeemed`, `approval_review_too_fast` and `approval_step_up_refused` events:
+`approval_redeemed`, `approval_review_too_fast`, `approval_step_up_refused` and
+`approval_timed_out` events:
 `buckets_seconds` (upper bounds of the decision-time buckets), then `capabilities` and
 `approvers`, each row with `requested`, `redeemed`, `decision_seconds` (one count per
-bucket, then slower), `untimed`, `within_ten_seconds`, `refused_too_fast` and
-`refused_step_up`. Decision time is from the gateway's own request time to the fastest
+bucket, then slower), `untimed`, `within_ten_seconds`, `refused_too_fast`,
+`refused_step_up` and `timed_out`. Decision time is from the gateway's own request time to the fastest
 approver's `decided_at`, as the approval service reports it.
 
 ### `GET /api/spend?hours=&group=`
