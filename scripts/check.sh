@@ -44,6 +44,7 @@ step outcome-witness; check_example examples/outcome-witness/run.sh "outcome wit
 step row-lock; check_example examples/why-not-a-row-lock/run.sh "row lock comparison complete" || fail "row lock comparison"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
 step replay; check_example examples/replay/run.sh "replay report written" || fail "replay"
+step consequential-tools; check_example examples/consequential-tools/run.sh "consequential-tools report written" || fail "consequential tools"
 step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || fail "tower example"
 if [ -n "${CONTEXTOS_DRILL_DATABASE_URL:-}" ]; then
     step postgres-drill; check_example examples/postgres-drill/run.sh "No violations:" || fail "postgres drill"

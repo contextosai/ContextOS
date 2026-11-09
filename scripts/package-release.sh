@@ -25,7 +25,7 @@ git ls-files -z --cached --others --exclude-standard -- \
   examples/binaries.sh examples/dev-env.sh examples/dev-server.sh examples/doctor.sh examples/support-refund examples/shared-guarantees \
   examples/agent-loop examples/peer-coordination examples/compensation examples/outcome-witness examples/why-not-a-row-lock examples/postgres-drill examples/metering-proxy examples/tower examples/ops examples/keycloak \
   bindings/python/README.md bindings/python/contextos/__init__.py bindings/python/contextos/client.py bindings/python/contextos/errors.py bindings/python/contextos/aio.py \
-  bindings/python/contextos/envelope.py bindings/python/contextos/replay.py bindings/python/contextos/integrations examples/replay \
+  bindings/python/contextos/envelope.py bindings/python/contextos/replay.py bindings/python/contextos/integrations examples/replay examples/consequential-tools \
   | tar --null -T - -cf - | tar -xf - -C "$NAME"
 
 # Members and the checksum line name only the archive's own directory.
