@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.18 - 2026-11-08
+
+Eighteenth alpha: the gate in front of consequential tools. Replay recorded traffic
+before deploying; intent keys across runs; resume-safe client keys and framework
+adapters; an environment guard and starter profiles; spend caps per agent and window;
+approval events and Tower's approval quality. See the
+[release notes](docs/releases/v0.1.0-alpha.18.md) before upgrading.
+
 ### Changed
 - Python and Node clients: a call that is not `read_only` and names no
   `idempotency_key` gets one from its capability and canonical arguments
