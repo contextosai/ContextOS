@@ -30,6 +30,9 @@ pub struct Config {
     /// The Tower UI build (`tower/dist`).
     #[serde(default)]
     pub tower: Option<TowerConfig>,
+    /// Sign-in with the organization's identity provider (see [`crate::sso`]).
+    #[serde(default)]
+    pub sso: Option<crate::sso::SsoConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -396,6 +399,9 @@ impl Config {
                     )));
                 }
             }
+        }
+        if let Some(sso) = &self.sso {
+            sso.validate(self.server.development).map_err(ConfigError::Invalid)?;
         }
         if !matches!(self.intelligence.provider.as_str(), "anthropic" | "off") {
             return Err(ConfigError::Invalid(

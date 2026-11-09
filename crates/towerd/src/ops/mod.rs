@@ -11,6 +11,7 @@ pub mod inbox;
 pub mod revocations;
 mod sources;
 pub mod spend;
+pub mod sso;
 
 /// The routes of every operational console module.
 pub fn routes<S, L>() -> Router<Shared<S, L>>
@@ -24,4 +25,5 @@ where
         .merge(revocations::routes())
         .merge(sources::routes())
         .merge(spend::routes())
+        .merge(sso::routes())
 }

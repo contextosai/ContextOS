@@ -55,6 +55,47 @@ and picked up with *Reload keys*.
 | `roles` | Any of `viewer`, `owner`, `risk`, `operator`, `admin` |
 | `teams` | Teams whose agents an `owner` may declare |
 
+### `[sso]` (people sign in with the identity provider)
+
+People sign in with the organization's OpenID Connect provider (Okta, Microsoft Entra
+ID, Keycloak, Google) instead of holding keys; keys keep working for services. Tower
+accepts the provider's ID token as a bearer token and maps the person's groups to
+roles. Someone in no mapped group gets nothing.
+
+```toml
+[sso]
+issuer = "https://login.example.com/realms/acme"   # exact `iss`; its metadata is read
+client_id = "contextos-tower"                       # the ID token's `aud`
+redirect_uri = "https://tower.example.com/tower/"   # registered with the client
+# client_secret_env = "TOWER_SSO_SECRET"            # confidential clients only
+[[sso.groups]]
+group = "grc-ai-risk"
+roles = ["risk"]
+teams = ["grc"]
+[[sso.groups]]
+group = "ai-platform-oncall"
+roles = ["operator"]
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `issuer` | required | Exact `iss`; `<issuer>/.well-known/openid-configuration` gives the keys and endpoints, and must name the same issuer |
+| `client_id` | required | The OAuth client the UI signs in as; tokens must name it in `aud` |
+| `redirect_uri` | required | Tower's UI root, registered as the client's redirect URI |
+| `client_secret_env` | none | Variable holding the client secret. Unset: a public client, protected by PKCE |
+| `jwks_url` | from metadata | The issuer's keys |
+| `principal_claim` | `email` | The person's name in the journal (`sub` when missing) |
+| `groups_claim` | `groups` | Dotted path to the person's groups (for example `realm_access.roles`) |
+| `algorithms` | `["RS256", "ES256"]` | Asymmetric only |
+| `leeway_seconds` | `60` | Clock skew on `exp` and `nbf` |
+| `refresh_seconds` | `600` | How often keys are fetched again; an unknown `kid` refreshes sooner (at most every 30 s) |
+| `scopes` | `["openid", "profile", "email"]` | What the UI asks for; add the scope that puts groups in the ID token if your provider needs one |
+| `[[sso.groups]]` | at least one | `group`, its `roles` and `teams` |
+
+The provider must put the person's groups in the ID token. Okta: a `groups` claim on
+the ID token. Entra ID: `groupMembershipClaims` in the app manifest (group object ids,
+so map those). Keycloak: a group or realm-role mapper on the client.
+
 ### `[intelligence]`
 
 | Key | Default | Meaning |

@@ -1,7 +1,8 @@
 # 6. API reference
 
 All `towerd` routes are under `/api`, take and return JSON, and authenticate with
-`Authorization: Bearer <key>`. Bodies are parsed strictly (duplicate keys rejected,
+`Authorization: Bearer <key>`, or, with `[sso]`, `Authorization: Bearer <ID token>`
+from the organization's identity provider (see [Single sign-on](#single-sign-on)). Bodies are parsed strictly (duplicate keys rejected,
 unknown fields rejected, 512 KiB at most).
 
 ```sh
@@ -41,6 +42,26 @@ role: see [Security](07-security.md#73-roles-and-separation-of-duties).
 | 501 | `intelligence` | Intelligence is off |
 | 502 | `runtime`, `intelligence` | A runtime or the model service failed |
 | 503 | `unavailable` | Store or journal unavailable |
+
+## Single sign-on
+
+Both routes are unauthenticated and answer `404` without `[sso]`.
+
+### `GET /api/sso`
+
+What the UI needs to start the authorization-code flow with PKCE: `issuer`,
+`client_id`, `scopes`, `redirect_uri` and `authorization_endpoint` (from the issuer's
+metadata; `null` until it has loaded).
+
+### `POST /api/sso/token`
+
+`{"code", "code_verifier", "nonce"}`: Tower exchanges the code at the issuer's token
+endpoint (the UI may connect only to Tower), adding the client secret for a
+confidential client, and returns `{"id_token", "principal_id", "roles", "teams"}` only
+if it accepts the ID token itself and the token carries `nonce`. `401
+sign_in_refused` when the identity provider refuses the code, `403` when the token is
+not accepted or the person's groups grant no role, `429` when four exchanges are
+already in flight, `503` before the issuer's metadata has loaded.
 
 ## Read
 

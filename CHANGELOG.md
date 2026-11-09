@@ -6,6 +6,16 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Tower single sign-on (`[sso]`): people sign in with the organization's OpenID Connect
+  provider. Tower accepts the provider's ID tokens as bearer tokens (issuer, client
+  audience, expiry and a published asymmetric key checked; keys refreshed in the
+  background) and maps groups to roles and teams through `[[sso.groups]]`; a person
+  in no mapped group is refused. The UI signs in with the authorization-code flow
+  and PKCE; Tower exchanges the code itself (`POST /api/sso/token`, client secret for
+  confidential clients) and returns the token only if it accepts it, with the
+  browser's nonce. API keys keep working.
+
+### Added
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
