@@ -101,6 +101,12 @@ pub fn draft(listed: &Value, tool_name: &str, adapter_id: &str, capability: Opti
     let ids = properties(&input, |name, spec| spec["type"] == "string" && name.ends_with("id"));
     let integers = properties(&input, |_, spec| spec["type"] == "integer");
     let hints = hints(tool);
+    // A naming hint only: the reviewer decides.
+    let verb = contextos_gateway::destructive_verb(tool_name).or_else(|| contextos_gateway::destructive_verb(local));
+    let named = |advice: &str| {
+        verb.map(|v| format!("the name says \"{v}\", so likely {advice}; "))
+            .unwrap_or_default()
+    };
     let upstream = tool["description"].as_str().unwrap_or("(no description)");
 
     let mut manifest = json!({
@@ -121,10 +127,10 @@ pub fn draft(listed: &Value, tool_name: &str, adapter_id: &str, capability: Opti
                 ActionAuthority::Agent, ActionAuthority::Service, ActionAuthority::UserDelegated,
                 ActionAuthority::HumanApproved,
             ])),
-            "reversibility": review(&names(&[
+            "reversibility": review(&format!("{}{}", named("irreversible"), names(&[
                 ActionReversibility::ReadOnly, ActionReversibility::Reversible, ActionReversibility::Compensatable,
                 ActionReversibility::Irreversible,
-            ])),
+            ]))),
             "interaction": review(&names(&[
                 ActionInteraction::Api, ActionInteraction::Browser, ActionInteraction::Computer,
                 ActionInteraction::AgentToAgent, ActionInteraction::HumanHandoff,
@@ -135,7 +141,8 @@ pub fn draft(listed: &Value, tool_name: &str, adapter_id: &str, capability: Opti
             ]))),
         },
         "approval_mode": review(&format!(
-            "{}; at least what action_risk requires (ctx manifest checks)",
+            "{}{}; at least what action_risk requires (ctx manifest checks)",
+            named("destructive"),
             names(&[
                 ApprovalMode::ReadOnly, ApprovalMode::LocalWrite, ApprovalMode::Network, ApprovalMode::Delegated,
                 ApprovalMode::Destructive,
@@ -190,6 +197,26 @@ mod tests {
             }},
             "annotations": {"destructiveHint": true, "readOnlyHint": false}
         }, {"name": "lookup", "inputSchema": {"type": "object"}}]})
+    }
+
+    #[test]
+    fn destructive_names_are_hinted_never_decided() {
+        use contextos_gateway::destructive_verb;
+        assert_eq!(destructive_verb("deleteVolume"), Some("delete"));
+        assert_eq!(destructive_verb("replace-stack"), Some("replace"));
+        assert_eq!(destructive_verb("db.DROP_table"), Some("drop"));
+        assert_eq!(destructive_verb("issue_refund"), None);
+        assert_eq!(destructive_verb("undelete_file"), None, "whole words only");
+        assert_eq!(destructive_verb("firmware"), None);
+
+        let volumes = json!({"tools": [{"name": "deleteVolume", "inputSchema": {"type": "object"}}]});
+        let manifest = draft(&volumes, "deleteVolume", "adp_infra", None).unwrap();
+        for field in ["/action_risk/reversibility", "/approval_mode"] {
+            let text = manifest.pointer(field).unwrap().as_str().unwrap();
+            assert!(text.starts_with("REVIEW: the name says \"delete\""), "{text}");
+        }
+        let plain = draft(&listed(), "issue_refund", "adp_payments", None).unwrap();
+        assert!(!plain["approval_mode"].as_str().unwrap().contains("the name says"));
     }
 
     #[test]

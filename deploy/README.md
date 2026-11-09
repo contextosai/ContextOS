@@ -14,6 +14,15 @@ names, write a values file, validate the config with `contextosd --check-config`
 `helm install`. The default config serves nobody until you add credentials, packs and
 providers.
 
+## Start from a profile
+
+[profiles/](profiles) holds two starter configurations for agents that call
+consequential tools: `observe-first.toml` measures the controls without refusing where
+it can, and `consequential-tools.toml` enforces them. Append one to your
+`contextosd.toml`, replace the example capability ids, and run
+`contextosd --check-config` to list what is still missing. See the GUIDE's
+"Starter profiles".
+
 ## Publish packs from git
 
 Keep packs in a repository that has its own review, and let every replica pick up new

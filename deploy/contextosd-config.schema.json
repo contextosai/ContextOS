@@ -421,6 +421,39 @@
       },
       "type": "object"
     },
+    "EnvironmentMode": {
+      "description": "Whether a mismatch refuses the call or is only audited.",
+      "enum": [
+        "required",
+        "observe"
+      ],
+      "type": "string"
+    },
+    "EnvironmentPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.environments]`.",
+      "properties": {
+        "current": {
+          "description": "The environment this gateway serves.",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/EnvironmentMode",
+          "default": "required"
+        },
+        "targets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TargetRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "current"
+      ],
+      "type": "object"
+    },
     "EvidenceIssuerConfig": {
       "additionalProperties": false,
       "description": "`[[evidence_issuers]]`: one service trusted to vouch for named facts.",
@@ -634,6 +667,18 @@
           ],
           "default": null,
           "description": "Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them."
+        },
+        "environments": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The environment this gateway serves; calls aimed at another are refused (or, observing, audited; see `contextos_gateway::environment_guard`). Unset: off."
         },
         "evidence": {
           "anyOf": [
@@ -1653,6 +1698,47 @@
       ],
       "type": "object"
     },
+    "TargetRule": {
+      "additionalProperties": false,
+      "description": "How to tell the target environment of some capabilities' calls.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "environment": {
+          "description": "Every call of these capabilities targets this environment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pointer": {
+          "description": "A JSON Pointer into the arguments whose string value names the target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prefixes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Value prefix to environment; the longest matching prefix wins.",
+          "type": "object"
+        },
+        "unmatched": {
+          "$ref": "#/$defs/Unmatched",
+          "default": "refuse"
+        }
+      },
+      "required": [
+        "capabilities"
+      ],
+      "type": "object"
+    },
     "TenantLimits": {
       "additionalProperties": false,
       "properties": {
@@ -1756,6 +1842,21 @@
         "public_key"
       ],
       "type": "object"
+    },
+    "Unmatched": {
+      "description": "What a pointer value that matches no prefix means.",
+      "oneOf": [
+        {
+          "const": "refuse",
+          "description": "Refused: the target environment cannot be told (fails closed).",
+          "type": "string"
+        },
+        {
+          "const": "allow",
+          "description": "Allowed: values outside the prefixes are not environment-scoped.",
+          "type": "string"
+        }
+      ]
     },
     "UserBinding": {
       "enum": [
@@ -1883,6 +1984,7 @@
         "approval_step_up": null,
         "circuit_breakers": [],
         "completion_requires_scores": null,
+        "environments": null,
         "evidence": null,
         "identical_tool_calls": 5,
         "information_flow": null,

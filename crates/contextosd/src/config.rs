@@ -173,6 +173,9 @@ impl Config {
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
+        if let Some(environments) = &config.guards.environments {
+            environments.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(url) = &config.server.public_url {
             crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)
                 .map_err(ConfigError::Invalid)?;

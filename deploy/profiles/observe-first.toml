@@ -1,0 +1,64 @@
+# Starter profile: measure the consequential-tool gate before enforcing it.
+#
+# The same controls as consequential-tools.toml, reporting instead of refusing where
+# they can: readiness gaps are warnings, agent mismatches and environment mismatches
+# are counted and audited, and breakers refuse without revoking. Watch the audit and
+# metrics for a week, then move to consequential-tools.toml.
+
+# Every consequential capability must declare provider finality, an outcome witness,
+# a guarantee with an owner, its resources and an intent key (docs/GUIDE.md,
+# "Hold a consequential workflow to the full set of controls").
+[readiness]
+mode = "report"
+
+[guards]
+# The same effect is not applied twice in a run, whatever key the agent sends.
+refuse_repeated_effects = true
+# A run may declare only the agent its credential was issued for.
+agent_binding = "observe"
+# Evidence is checked against the subject it is about, not asserted by the caller.
+evidence = "strict"
+# No effect relies on the agent's own reading of the request.
+require_task_authorization = false
+# With OIDC delegation ([oidc.delegation]) and no API key holding `admit`, also bind
+# runs to the user they act for:
+# user_binding = "required"
+
+# An approval decided faster than a person can read the action does not count.
+[guards.approval_review]
+min_review_seconds = 20
+capabilities = ["adp_payments.issue_refund"]
+
+# Approvals of these capabilities count only after the approver's recent strong sign-in.
+[guards.approval_step_up]
+capabilities = ["adp_payments.issue_refund"]
+amr_values = ["mfa", "hwk"]
+max_age_seconds = 300
+
+# An agent whose calls keep being refused is probing or confused: stop it until an
+# operator restores it.
+[[guards.circuit_breakers]]
+id = "refusal_storm"
+scope = "agent"
+count = "refusals"
+threshold = 20
+window_seconds = 60
+trip = "refuse"
+
+# A runaway loop of effects is refused while the rate stays high.
+[[guards.circuit_breakers]]
+id = "effect_rate"
+scope = "agent"
+count = "effects"
+threshold = 30
+window_seconds = 60
+
+# This gateway serves one environment; effects aimed at another are refused. Name the
+# capabilities that can reach more than one, and how their arguments say which.
+[guards.environments]
+current = "production"
+mode = "observe"
+[[guards.environments.targets]]
+capabilities = ["adp_payments.issue_refund"]
+pointer = "/order_id"
+prefixes = { "ord_" = "production", "test_ord_" = "staging" }
