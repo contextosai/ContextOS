@@ -53,6 +53,8 @@ minor versions may break APIs and every break is listed.
   period, with status `evidenced`, `no_events_in_period` or `outside_audit`),
   `coverage.md` (what the evidence covers and what it does not), an optional
   configuration report, and `manifest.json` with every file's digest. Deterministic.
+  Privilege refusals (`required_user_roles`) count toward SOC 2 CC6.3, ISO/IEC 42001
+  A.9 and OWASP ASI03.
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused
