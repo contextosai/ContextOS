@@ -5,6 +5,12 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+- `examples/postgres-drill` phase 6: intent keys across processes on PostgreSQL. Runs
+  on three processes race the same refund under fresh runs and keys and exactly one is
+  paid; a sender killed after the provider applied its refund leaves a claim that still
+  refuses the same request from a new run.
+
 ## 0.1.0-alpha.18 - 2026-11-08
 
 Eighteenth alpha: the gate in front of consequential tools. Replay recorded traffic

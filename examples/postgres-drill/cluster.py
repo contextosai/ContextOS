@@ -109,6 +109,15 @@ class Replica:
             time.sleep(0.1)
         raise RuntimeError(f"replica {self.index} did not become ready")
 
+    def use_manifest(self, name, path):
+        """Restarts the process with the support example's manifest `name` replaced by `path`."""
+        old = f'"examples/support-refund/capabilities/{name}"'
+        text = self.config.read_text()
+        assert old in text, "the example configuration changed; update the drill"
+        self.config.write_text(text.replace(old, f'"{path}"'))
+        self.stop()
+        self.start()
+
     def kill(self):
         """SIGKILL: no shutdown hooks, no flushing, as in a node or OOM kill."""
         self.process.send_signal(signal.SIGKILL)
