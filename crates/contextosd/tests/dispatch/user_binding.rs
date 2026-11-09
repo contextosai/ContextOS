@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use contextos_store::DocumentStore as _;
 use contextosd::oidc::{DelegationConfig, OidcConfig};
 use contextosd::user_binding::{self, UserBinding};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
@@ -304,6 +305,22 @@ async fn a_delegation_chain_is_recorded_and_any_link_of_it_can_be_revoked() {
     for secret in [user.as_str(), "assistant-a"] {
         assert!(!entry.to_string().contains(secret), "the audit holds no identities");
     }
+    // The run keeps the chain and the user's roles, for revocation and privilege checks.
+    let stored = w
+        .state
+        .store
+        .get(&contextos_store::DocKey::new(
+            TENANT,
+            contextos_store::DocKind::RunAdmission,
+            "run_chain",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert_eq!(stored["delegation_chain"]["actors"], json!(chain));
+    assert_eq!(stored["delegation_chain"]["user_roles"], json!([role]));
+    assert_eq!(stored["delegation_chain"]["digest"], digest.as_str());
 
     // Revoking the earlier actor stops the run's effects, though it never called.
     revoke(&w, "", "principal", "assistant-a").await;

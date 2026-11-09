@@ -554,7 +554,7 @@ where
         None => caller
             .user
             .as_ref()
-            .map(|u| contextos_gateway::DelegationChain::new(&u.user_id, &u.actors)),
+            .map(|u| contextos_gateway::DelegationChain::new(&u.user_id, &u.actors).with_roles(u.roles.clone())),
     };
     // Kill switch: no new runs of a revoked tenant, pack, principal, agent, user or
     // delegation, and no delegation from a run that is itself revoked.

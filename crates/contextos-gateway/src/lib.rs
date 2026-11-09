@@ -57,6 +57,7 @@ mod outcome_sweep;
 pub mod outcomes;
 mod ownership;
 pub mod ports;
+pub mod privilege;
 mod reconcile;
 pub mod resource_identity;
 pub mod result_screening;
@@ -112,9 +113,9 @@ pub use findings::{
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{
-    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy,
-    destructive_verb, is_path_segment, unreviewed,
+    CapabilityManifest, Compensation, CompletionCheck, ManifestError, RecoveryStrategy, is_path_segment,
 };
+pub use manifest_review::{REVIEW_MARKER, destructive_verb, unreviewed};
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
 pub use ports::{
@@ -1126,6 +1127,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     ),
                 ));
             }
+        }
+        if let Some(reason) = privilege::refusal(manifest, admission) {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "reason_codes": [reason]});
+            self.record(&mut p, "privilege_refusal", body, &now).await?;
+            return Ok(p.stop(
+                "blocked",
+                vec![reason.into()],
+                "The user this run acts for does not hold a role this action requires.",
+            ));
         }
         if let Some(Err(reasons)) = boundary {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": reasons});

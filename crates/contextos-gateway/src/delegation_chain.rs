@@ -22,6 +22,10 @@ pub struct DelegationChain {
     pub actors: Vec<String>,
     /// `sha256:` over the user and the actors in order: the `delegation` revocation target.
     pub digest: String,
+    /// The user's roles, when the issuer reads them (see [`crate::privilege`]). Not part
+    /// of the digest: the path is the same whatever the user holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_roles: Option<Vec<String>>,
 }
 
 impl DelegationChain {
@@ -32,7 +36,15 @@ impl DelegationChain {
             user_id: user_id.to_owned(),
             actors: actors.to_vec(),
             digest,
+            user_roles: None,
         }
+    }
+
+    /// The chain with the user's verified roles.
+    #[must_use]
+    pub fn with_roles(mut self, roles: Option<Vec<String>>) -> Self {
+        self.user_roles = roles;
+        self
     }
 
     /// What the audit records: the depth and digest, no identities.

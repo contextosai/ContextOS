@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Privilege intersection: a capability's `required_user_roles` lets its effects run
+  only for a run acting for a user who holds one of the roles, as their delegated
+  token says (`[oidc.delegation] user_roles_claim`, kept on the run with its
+  delegation chain). Otherwise the call is refused before anything is sent and audited
+  as `privilege_refusal` (`user_not_delegated`, `user_roles_unknown`,
+  `user_role_missing`).
 - Multi-hop delegation: a delegated token's nested actor claims (RFC 8693 `act` within
   `act`) are read as a chain, current actor first, and kept on the run; a delegated
   child run inherits its parent's. `[oidc.delegation] max_chain` (default 4, at most
