@@ -1237,7 +1237,12 @@ effect, each risk dimension, approval mode, resource, destination and amount poi
 recovery strategy, artifact refs, and the description agents will read (the server's
 own text is quoted for you, since agents should not read it unreviewed). The tool's
 annotations appear only as untrusted hints. `ctx manifest` and contextosd refuse the
-file while any `REVIEW:` string remains, and `ctx manifest` lists where. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
+file while any `REVIEW:` string remains, and `ctx manifest` lists where. A manifest
+that loads still gets `notes` for what a reviewer should look at again: an effectful
+tool with no `amount` or `resource_pointers`, a tool named like a destructive call
+(`delete`, `drop`, `replace`, ...) declared reversible or approved below
+`destructive`, and an effectful, non-repeatable tool with no `intent` key. contextosd
+logs the first two at startup. Adapters: MCP `2026-07-28` (stateless Streamable HTTP) or
 HTTP/JSON, HTTPS only, no redirects, credentials from your broker.
 
 Under `idempotent_retry`, the provider key (`Idempotency-Key`, MCP

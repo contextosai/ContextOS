@@ -45,14 +45,21 @@ Synthetic, loopback services only: no model key, cloud account or payment accoun
 5. **Database restart** (with `CONTEXTOS_DRILL_PG_RESTART`). PostgreSQL is restarted
    while 24 slow refunds are in flight and 12 more arrive. Every failed call is then
    resent unchanged, as an agent that treats `503` as retryable would.
-6. **Resolve every hold** found through `GET /v1/guarantees/{id}/holds`, from the
+6. **Intent keys.** Every process restarts with the refund manifest naming its request
+   (`intent.key_pointers = ["/order_id", "/amount_minor"]`). For each of five orders,
+   twelve runs on different processes race the same INR 300 refund under fresh run ids
+   and keys: exactly one is paid, the rest are refused `effect_repeated_across_runs`.
+   Then the sender of one refund is killed after the provider applied it and
+   restarted; the same refund from a new run is still refused, because the claim is in
+   the store, not the process.
+7. **Resolve every hold** found through `GET /v1/guarantees/{id}/holds`, from the
    provider ledger alone: confirmed when the provider has the refund, not applied only
    when the attempt never started. A started attempt with no provider record stays
    held.
-7. **Invariants** for every order: the provider never paid more than the limit, the
+8. **Invariants** for every order: the provider never paid more than the limit, the
    ledger never committed plus held more than the limit, every applied refund is
    committed (or still held), and no operation reached the provider twice.
-8. **Audit:** the chain written by all processes exports and verifies offline.
+9. **Audit:** the chain written by all processes exports and verifies offline.
 
 The run ends with `No violations:` and writes `receipts/postgres-drill/report.json`
 (outcome counts, p50/p95/p99 latency per phase, holds resolved and kept, the audit

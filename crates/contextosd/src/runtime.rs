@@ -483,46 +483,10 @@ fn read_manifest(path: &std::path::Path) -> Result<CapabilityManifest, String> {
 /// `resource_pointers` for money-moving tools. With information flow on, capabilities
 /// without `flow` labels get the defaults, which may not be what was reviewed.
 pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
+    use contextos_gateway::manifest_review::{destructive_name_note, unbounded_note};
     let mut notes = Vec::new();
-    for m in &setup.manifests {
-        if m.action_risk.effect == contextos_contract::types::ActionEffect::None {
-            continue;
-        }
-        let missing: Vec<&str> = [
-            ("amount", m.amount.is_none()),
-            ("resource_pointers", m.resource_pointers.is_empty()),
-        ]
-        .into_iter()
-        .filter_map(|(name, absent)| absent.then_some(name))
-        .collect();
-        if !missing.is_empty() {
-            notes.push(format!(
-                "{} is effectful and declares no {}: task amount and resource limits do not bound it",
-                m.capability_id,
-                missing.join(" or ")
-            ));
-        }
-    }
-    for m in &setup.manifests {
-        use contextos_contract::types::{ActionReversibility, ApprovalMode};
-        let Some(verb) = contextos_gateway::destructive_verb(&m.protocol_tool)
-            .or_else(|| contextos_gateway::destructive_verb(m.capability_name()))
-        else {
-            continue;
-        };
-        let reversible = matches!(
-            m.action_risk.reversibility,
-            ActionReversibility::ReadOnly | ActionReversibility::Reversible
-        );
-        if reversible || m.approval_mode < ApprovalMode::Destructive {
-            notes.push(format!(
-                "{} is named like a destructive call (\"{verb}\") but is declared {} with approval_mode {}: check the review",
-                m.capability_id,
-                serde_json::to_value(m.action_risk.reversibility).unwrap_or_default().as_str().unwrap_or("?"),
-                serde_json::to_value(m.approval_mode).unwrap_or_default().as_str().unwrap_or("?"),
-            ));
-        }
-    }
+    notes.extend(setup.manifests.iter().filter_map(unbounded_note));
+    notes.extend(setup.manifests.iter().filter_map(destructive_name_note));
     if setup.information_flow.is_some() {
         for m in setup.manifests.iter().filter(|m| m.flow.is_none()) {
             notes.push(format!(
