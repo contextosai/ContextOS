@@ -229,19 +229,30 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if waited < policy.timeout_seconds {
             return Ok(Examined::Waiting);
         }
-        let body = &requested.body;
+        let body = requested.body.clone();
         let on_timeout = serde_json::to_value(policy.on_timeout).unwrap_or(Value::Null);
         let facts = json!({"run_id": body["run_id"], "operation_id": body["operation_id"],
             "capability_id": body["capability_id"], "approval_request_id": id,
             "waited_seconds": waited, "on_timeout": on_timeout});
-        // Audited before it is marked: a crash in between audits it again, never not at all.
+        // Audited before it is marked: a crash in between audits it again, never not at
+        // all. A write racing the mark is re-read and the mark retried, not re-audited.
         self.audit.append(tenant, "approval_timed_out", facts, now).await?;
-        let mut marked = body.clone();
-        marked["timed_out_at"] = json!(now);
-        match self.store.compare_and_swap(&key, requested.revision, &marked).await {
-            Ok(_) => {}
-            Err(e) if e.is_conflict() => return Ok(Examined::Waiting),
-            Err(e) => return Err(e.into()),
+        let mut current = requested;
+        let mut attempts = 0;
+        loop {
+            let mut marked = current.body.clone();
+            marked["timed_out_at"] = json!(now);
+            match self.store.compare_and_swap(&key, current.revision, &marked).await {
+                Ok(_) => break,
+                Err(e) if e.is_conflict() && attempts < ATTEMPTS => attempts += 1,
+                Err(e) if e.is_conflict() => return Ok(Examined::Waiting),
+                Err(e) => return Err(e.into()),
+            }
+            match self.store.get(&key).await? {
+                Some(read) if !read.body["timed_out_at"].is_string() => current = read,
+                // Marked by another sweep, or gone: nothing left to do here.
+                _ => return Ok(Examined::Settled),
+            }
         }
         if policy.on_timeout == OnTimeout::Escalate {
             let run_id = body["run_id"].as_str().unwrap_or_default();

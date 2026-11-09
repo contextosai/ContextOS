@@ -309,7 +309,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if self.breakers.is_empty() {
             return Ok(());
         }
-        let effect = report.attempt_id.is_some() && manifest.action_risk.effect != ActionEffect::None;
+        let effect = report.sent && manifest.action_risk.effect != ActionEffect::None;
         let refusal = matches!(report.status.as_str(), "blocked" | "rejected")
             && !report.reason_codes.iter().any(|c| c == "circuit_open");
         let now_ms = epoch_millis(&self.now());

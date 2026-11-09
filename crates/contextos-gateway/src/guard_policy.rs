@@ -6,8 +6,13 @@
 //! binding's `policy_refs`, and constraint services bind their observations to the
 //! same set. So a run pins one reference to the runtime guards' configuration when it
 //! is admitted (`guard_policy_ref`). Every decision of the run cites it, even after the
-//! guards' configuration changes, and audit entries name the configuration that
-//! actually decided.
+//! guards' configuration changes.
+//!
+//! The pin binds only the reference. Guards always decide under the live
+//! configuration: after a mid-run change, a call is decided by the new configuration
+//! while its composed outcome still cites the admission-time reference. The
+//! information-flow guard's audit entry (`information_flow_decision`) carries the
+//! `policy_ref` that decided.
 //!
 //! A run admitted while no guard was on has no reference to cite. A call a guard would
 //! not allow is then refused outright (`<guard>_policy_unpinned`) rather than approved.

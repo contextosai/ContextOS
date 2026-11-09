@@ -239,6 +239,10 @@ pub struct DispatchReport {
     /// An approval this dispatch asked for or redeemed, for metrics; not serialized.
     #[serde(skip)]
     pub approval: Option<ApprovalNote>,
+    /// The call was handed to its provider's adapter (an attempt id is assigned
+    /// earlier, before the refusals that keep a call from being sent); not serialized.
+    #[serde(skip)]
+    pub sent: bool,
 }
 
 /// An approval event of one dispatch (the audit chain has the full record).
@@ -353,6 +357,7 @@ impl<'a> Pipeline<'a> {
                 approval_request_id: None,
                 audit_sequences: vec![],
                 approval: None,
+                sent: false,
             },
             started: std::time::Instant::now(),
             risk_tags: Vec::new(),
@@ -2293,6 +2298,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             input: adapter_input.map(|(input, _)| input),
             executor_generation: fence,
         };
+        p.report.sent = true;
         // The loop guard's count is recorded while the provider works.
         let (response, counted) = tokio::join!(
             tokio::time::timeout(

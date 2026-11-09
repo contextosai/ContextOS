@@ -27,7 +27,8 @@ use serde_json::{Value, json};
 use crate::api::Caller;
 use crate::config::ROLES;
 
-const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
+/// Largest document read from the identity provider (metadata, key set, token response).
+pub(crate) const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
 const MIN_REFRESH: Duration = Duration::from_secs(30);
 
 /// `[sso]`.
@@ -163,6 +164,19 @@ fn path<'a>(claims: &'a Value, dotted: &str) -> &'a Value {
     dotted.split('.').fold(claims, |v, k| &v[k])
 }
 
+/// Holds the endpoints an issuer's metadata names to the issuer's own transport:
+/// HTTPS, unless the issuer itself is plain HTTP (allowed only in development).
+fn discovered_endpoints_secure(issuer: &str, metadata: &Value) -> Result<(), String> {
+    let secure =
+        |url: &str| url.starts_with("https://") || (issuer.starts_with("http://") && url.starts_with("http://"));
+    for field in ["authorization_endpoint", "token_endpoint", "jwks_uri"] {
+        if metadata[field].as_str().is_some_and(|u| !secure(u)) {
+            return Err(format!("{issuer}: metadata {field} is not HTTPS"));
+        }
+    }
+    Ok(())
+}
+
 impl Sso {
     #[must_use]
     pub fn new(config: SsoConfig) -> Arc<Self> {
@@ -289,6 +303,7 @@ impl Sso {
                 if m["issuer"].as_str() != Some(self.config.issuer.as_str()) {
                     return Err(format!("{issuer}: metadata names another issuer"));
                 }
+                discovered_endpoints_secure(&self.config.issuer, m)?;
                 if let Ok(mut s) = self.state.write() {
                     s.authorization_endpoint = m["authorization_endpoint"].as_str().map(str::to_owned);
                     s.token_endpoint = m["token_endpoint"].as_str().map(str::to_owned);
@@ -332,5 +347,25 @@ impl Sso {
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovered_endpoints_are_held_to_the_issuers_transport() {
+        let https = "https://login.example.com";
+        let good = json!({"jwks_uri": "https://login.example.com/keys",
+            "token_endpoint": "https://login.example.com/token"});
+        assert!(discovered_endpoints_secure(https, &good).is_ok());
+        for field in ["authorization_endpoint", "token_endpoint", "jwks_uri"] {
+            let mut bad = good.clone();
+            bad[field] = json!("http://login.example.com/x");
+            assert!(discovered_endpoints_secure(https, &bad).is_err(), "{field}");
+        }
+        let development = json!({"jwks_uri": "http://127.0.0.1:9/keys"});
+        assert!(discovered_endpoints_secure("http://127.0.0.1:9", &development).is_ok());
     }
 }
