@@ -26,6 +26,9 @@ the systems it acts on: no provider credentials, and no network route to them
 
 Identity providers: [keycloak.md](keycloak.md) configures Keycloak as the issuer of
 agent and delegated user tokens, and binds each run to the user its agent acts for.
+[entra-id.md](entra-id.md) and [okta.md](okta.md) configure Microsoft Entra ID (agent
+tokens; its on-behalf-of tokens carry no actor claim, so users are not bound) and Okta
+(agent tokens, and delegated user tokens from its token exchange for AI agents).
 
 ## Run the examples
 

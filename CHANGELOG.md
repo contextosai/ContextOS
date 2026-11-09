@@ -6,6 +6,14 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- Identity provider guides for Microsoft Entra ID (`docs/integrations/entra-id.md`)
+  and Okta (`docs/integrations/okta.md`), with conformance tests that admit runs from
+  tokens shaped like each provider's: Entra v2 app-only tokens (`tid`, `azp`, `roles`),
+  Okta custom authorization server tokens (`cid`, `scp` arrays) and Okta's token
+  exchange for AI agents (`act.sub`, user binding). The Entra guide states that its
+  on-behalf-of tokens carry no RFC 8693 actor claim, so they do not bind users.
+
+### Added
 - `examples/consequential-tools`: a staging support agent's recorded refunds replayed
   through a gateway with the starter profile's guards. A refund on a live order is
   refused (`environment_mismatch`), the same refund from a second run is refused

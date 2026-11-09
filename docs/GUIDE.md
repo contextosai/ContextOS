@@ -294,7 +294,9 @@ A run's `run_context.user` (who the agent acts for, and in which role) is also n
 the caller, and pack rules are keyed by `user.role`. An identity provider that issues
 delegated tokens (RFC 8693) can vouch for it: Keycloak's token exchange delegation
 gives the agent a token whose `sub` is the user and whose `act` names the agent
-([Keycloak guide](integrations/keycloak.md)).
+([Keycloak guide](integrations/keycloak.md); for Okta's token exchange for AI agents, the
+[Okta guide](integrations/okta.md); Entra ID's on-behalf-of tokens carry no actor
+claim, see the [Entra ID guide](integrations/entra-id.md)).
 
 ```toml
 [[oidc]]
