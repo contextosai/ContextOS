@@ -12,6 +12,10 @@ minor versions may break APIs and every break is listed.
   (`effect_repeated_across_runs`), and the agent's daily cap holds
   (`shared_guarantee_exceeded`). `examples/replay/local_gateway.py` runs the local
   gateway for both replay examples.
+- `examples/postgres-drill` phase 6: intent keys across processes on PostgreSQL. Runs
+  on three processes race the same refund under fresh runs and keys and exactly one is
+  paid; a sender killed after the provider applied its refund leaves a claim that still
+  refuses the same request from a new run.
 
 ## 0.1.0-alpha.18 - 2026-11-08
 
