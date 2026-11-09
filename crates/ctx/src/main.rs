@@ -132,7 +132,8 @@ fn run(command: Command) -> Result<Value, Failure> {
             manifest
                 .validate()
                 .map_err(|e| Failure::Rejected(json!({"error": e.to_string()})))?;
-            Ok(json!({"valid": true, "capability_id": manifest.capability_id}))
+            Ok(json!({"valid": true, "capability_id": manifest.capability_id,
+                "notes": contextos_gateway::manifest_review::review_notes(&manifest)}))
         }
         Command::Test { pack, suites, junit } => pack_tests::run(&pack, &suites, junit.as_ref()),
         Command::Plan { pack, run, intent } => plan::run(&pack, &run, intent.as_deref()),
