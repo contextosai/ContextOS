@@ -1091,6 +1091,33 @@ minimal, development-only implementation):
     (`approval_review_too_fast`, obligation `review_again`), and the refusal is audited
     with the measured seconds (`approval_review_too_fast`). Those entries show which
     approvals were rubber-stamped.
+  - With or without a floor, the gateway audits `approval_requested` the first time it
+    asks for an approval and `approval_redeemed` when one is redeemed, with the
+    approvers, `decided_at` and `decision_seconds`. Tower's Approvals page
+    (`GET /api/approvals`) folds them into decision-time distributions per capability
+    and per approver.
+
+  With `[guards.approval_timeout]`, an approval request nobody decides does not leave
+  its run waiting unnoticed:
+
+  ```toml
+  [guards.approval_timeout]
+  timeout_seconds = 1800        # 60 to 604800
+  on_timeout = "escalate"       # or "deny"
+  # capabilities = ["adp_payments.issue_refund"]   # every approval when empty
+  ```
+
+  - The governance sweep (on the leader) finds requests with no redemption
+    `timeout_seconds` after the gateway asked and audits `approval_timed_out` with how
+    long each waited.
+  - `escalate` opens an escalation for the run, so the request shows in the escalation
+    inbox and the `contextos_escalations_open` gauge. A decision that arrives later still
+    counts.
+  - `deny` refuses any later decision on that request (`approval_timed_out`); the run
+    must start a new operation if it still needs the effect.
+  - `/metrics` exports `contextos_approvals_requested_total`,
+    `contextos_approvals_redeemed_total` (by capability),
+    `contextos_approval_decision_seconds` and `contextos_approvals_timed_out_total`.
 - **Execution-boundary controller** (optional, `[providers.boundary]`) — returns the
   run's `BoundaryRequirement` (isolation mode, grants, process restrictions, resource
   ceilings, required controls) and a current verified `BoundaryObservation`. With it,
@@ -1809,6 +1836,79 @@ effects (two equal top-ups) set `"repeatable": true` in their manifest; `[guards
 refuse_repeated_effects = false` turns the guard off. A run records at most 1,024
 distinct effects; past that, new ones are refused (`effect_guard_saturated`).
 
+### The same request from another run
+
+The repeated-effect guard and provider idempotency keys are scoped to a run. A request
+redelivered into a new run (a queue redelivery, a retried webhook, a customer asking a
+second channel) is a new effect to them. A capability names the arguments that identify
+the business request in its manifest:
+
+```json
+"intent": {"key_pointers": ["/order_id", "/amount_minor"], "window_seconds": 86400}
+```
+
+The values at those pointers, with the tenant and capability, form the intent key. The
+first operation to send the request claims the key tenant-wide, after its own claim and
+before dispatch. Another run sending the same request while the claim stands is refused
+with `effect_repeated_across_runs` and the obligation `reconcile_existing_operation`;
+the audit entry names the run and operation that hold the claim. Of runs racing with
+one request, exactly one reaches the provider, across replicas sharing a store.
+
+The claim is released when the provider definitively did not apply the effect, or when
+the call is refused before it is sent. An unknown outcome keeps it. After
+`window_seconds` (default one day, at most 90 days) the same request counts as a new
+one. A call missing an argument the key names is rejected (`intent_key_missing`), and if
+the claim cannot be written the effect is not sent (`intent_guard_unavailable`). Choose
+pointers that identify the request, not the call: an order and an amount, a ticket id,
+a payment reference. Arguments outside the key do not matter, so a reworded note does
+not make a new request. With `"provider_key": true`, the provider idempotency key is
+derived from the intent instead of the run's operation, so a provider that deduplicates
+by key also recognises the request across runs. Repeatable capabilities cannot declare
+an intent.
+
+### Effects aimed at another environment
+
+Agents reach production through credentials they were never meant to use: a staging
+task finds a production token, and one call deletes a production volume and its
+backups. Scope credentials first; at the tool boundary, a gateway can also serve one
+environment and refuse effects aimed at another:
+
+```toml
+[guards.environments]
+current = "staging"                 # the environment this gateway serves
+mode = "required"                   # observe: audit, do not refuse
+[[guards.environments.targets]]
+capabilities = ["adp_infra.delete_volume", "adp_infra.replace_stack"]
+pointer = "/volume_id"              # the argument naming the target
+prefixes = { "prod-" = "production", "stg-" = "staging" }   # longest match wins
+# unmatched = "allow"               # default "refuse": a target it cannot place is refused
+[[guards.environments.targets]]
+capabilities = ["adp_payments_live.issue_refund"]
+environment = "production"          # every call of these targets production
+```
+
+A call whose target is another environment is refused with `environment_mismatch`; one
+whose target cannot be placed, with `environment_unresolved`. Either way an
+`environment_refusal` audit entry names the gateway's environment, the target's and
+whether it was enforced. Capabilities no rule names are not environment-scoped, and a
+rule naming a capability that is not configured refuses startup.
+
+Startup also notes a capability named like a destructive call (`delete`, `drop`,
+`destroy`, `terminate`, `purge`, `replace` and the like, in its tool or capability name)
+that is declared `read_only` or `reversible`, or approved below `destructive`, and
+`ctx init-tool` says so in the drafted review text. The name is a hint for the reviewer,
+never the decision.
+
+### Starter profiles
+
+[`deploy/profiles`](../deploy/profiles) holds two configurations to start from.
+`consequential-tools.toml` enforces the gate: readiness required, repeated effects
+refused, agents bound to their credentials, strict evidence, task authorization
+required, a review floor and step-up on approvals, breakers on refusal storms and effect
+rates, and the environment guard. `observe-first.toml` is the same set reporting
+instead of refusing where it can. Append one to your configuration, replace the example
+capability ids, and run `contextosd --check-config`: it lists what is still missing.
+
 ## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
@@ -2314,6 +2414,7 @@ A capability is consequential when its `action_risk.effect` is `external_state` 
 | `witness` | an `outcome` contract | the run completes without an independent source confirming the effect |
 | `owner` | a `[[guarantees]]` entry covering it, with `owner_route` | concurrent runs can together exceed the business limit; aged holds reach no one |
 | `resource` | `resource_pointers` | effects are not tied to the order or account they change |
+| `intent` | an `intent` key | the same request redelivered into another run is applied again |
 
 For the deployment as a whole, it checks:
 

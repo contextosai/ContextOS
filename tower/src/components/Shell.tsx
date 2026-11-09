@@ -59,6 +59,7 @@ export function Shell() {
       [
         { to: "/guardrails", label: "Guardrails", plane: "context" },
         { to: "/inbox", label: "Inbox", plane: "decision", count: inbox?.open },
+        { to: "/approvals", label: "Approvals", plane: "decision" },
         { to: "/waivers", label: "Waivers", plane: "decision", count: pendingWaivers },
         { to: "/ask", label: "Ask Tower", plane: "intelligence" },
       ],

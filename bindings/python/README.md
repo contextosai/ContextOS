@@ -7,6 +7,10 @@ Two modules, one package:
 - `contextos` itself is the kernel, in-process, through a compiled extension
   (`contextos._native`). You need it only to embed the kernel without a server.
 
+`python -m contextos.replay` replays recorded tool calls through a gateway and reports
+what it would have refused, held or sent for approval
+([example](https://github.com/contextosai/ContextOS/tree/main/examples/replay)).
+
 ## Install
 
 ```sh

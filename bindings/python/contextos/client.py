@@ -47,6 +47,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from .errors import (_HTTP_ERRORS, _OUTCOMES, BudgetExhausted, ContextOSHTTPError, IncompatibleServer, ToolBlocked,
                      ToolFailed, ToolOutcome, ToolPaused, ToolRejected, VersionMismatchWarning, _pause_kind)
+from .envelope import operation_key, task_authorization, task_scope  # noqa: F401 (re-exported)
 
 GENERATION_HEADER = "ContextOS-Executor-Generation"
 # On a model request, these tell a metering LLM gateway which reservation to settle
@@ -57,7 +58,7 @@ RESERVATION_HEADER = "ContextOS-Usage-Reservation"
 # ``GET /v1/deployment``.
 API_VERSION = "v1"
 # This client's release (scripts/package_clients.py checks it against Cargo.toml).
-CLIENT_VERSION = "0.1.0-alpha.17"
+CLIENT_VERSION = "0.1.0-alpha.18"
 
 
 def _check_versions(deployment: Any, client_version: str) -> dict:
@@ -73,42 +74,6 @@ def _check_versions(deployment: Any, client_version: str) -> dict:
         warnings.warn(f"contextosd is release {runtime}; this client is {client_version}. "
                       "Use the same release on both sides", VersionMismatchWarning, stacklevel=4)
     return {"api_version": api, "runtime_version": runtime, "client_version": client_version}
-
-
-def task_scope(root_run_id: str, purpose_id: str, capability_id: str, *, resources: List[str] = (),
-               destinations: List[str] = (), classification: str = "CONFIDENTIAL",
-               amount: Optional[tuple] = None, argument_constraints: List[dict] = ()) -> dict:
-    """One `AuthorityGrant` scope for a task authorization: this capability, on these
-    resources, to these destinations, up to ``amount`` = ``(minor_units, currency)``."""
-    scope: Dict[str, Any] = {
-        "root_run_id": root_run_id, "purpose_ids": [purpose_id], "capability_ids": [capability_id],
-        "resource_ids": list(resources), "destination_ids": list(destinations),
-        "classification_labels": [classification], "argument_constraints": list(argument_constraints)}
-    if amount is not None:
-        scope["amount_ceiling"] = {"minor_units": amount[0], "currency": amount[1]}
-    return scope
-
-
-def task_authorization(issued_by: dict, scopes: List[dict], *, out_of_scope: str = "deny",
-                       read_only: str = "allow", confirmation_ref: Optional[dict] = None,
-                       max_effects: Optional[int] = None, amount_total: Optional[Tuple[int, str]] = None) -> dict:
-    """What the principal authorized for a run, for ``admit(body)`` as
-    ``body["task_authorization"]``. Effects outside every scope are refused
-    (``out_of_scope="deny"``) or wait for an exact approval (``"ask"``, raised as
-    ``ToolPaused`` with ``kind == "approval"``). ``max_effects`` and ``amount_total``
-    (``(minor_units, currency)``) bound the task as a whole, across all its effects."""
-    task: Dict[str, Any] = {"issued_by": issued_by, "scopes": scopes, "out_of_scope": out_of_scope,
-                            "read_only": read_only}
-    if confirmation_ref is not None:
-        task["confirmation_ref"] = confirmation_ref
-    limits: Dict[str, Any] = {}
-    if max_effects is not None:
-        limits["max_effects"] = max_effects
-    if amount_total is not None:
-        limits["amount_total"] = {"minor_units": amount_total[0], "currency": amount_total[1]}
-    if limits:
-        task["limits"] = limits
-    return task
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -335,7 +300,11 @@ class Run:
 
     def envelope(self, capability_id: str, args: dict, *, approval_mode: str, idempotency_key: Optional[str] = None,
                  evidence_refs: Optional[List[str]] = None, tool_call_id: Optional[str] = None) -> dict:
-        """The ``contextos.tool_call.v1`` envelope for a call."""
+        """The ``contextos.tool_call.v1`` envelope for a call. A call that is not
+        ``read_only`` and names no ``idempotency_key`` gets ``operation_key``: re-sent
+        unchanged, it is the same operation (see ``contextos.envelope.operation_key``)."""
+        if idempotency_key is None and approval_mode != "read_only":
+            idempotency_key = operation_key(capability_id, args)
         return {
             "envelope_version": "contextos.tool_call.v1",
             "tool_call_id": tool_call_id or f"tc_{uuid.uuid4().hex}",

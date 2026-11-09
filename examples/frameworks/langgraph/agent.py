@@ -1,6 +1,7 @@
 """A LangGraph agent (LangChain ``create_agent``) under ContextOS.
 
-The agent loop is LangGraph's own; ContextOS enters through one middleware:
+The agent loop is LangGraph's own; ContextOS enters through one middleware,
+``contextos.integrations.langgraph.ContextOSMiddleware``:
 
 - ``wrap_model_call`` reserves the run's budget around every model call, so the loop
   cannot call the model past the budget;
@@ -23,51 +24,16 @@ import sys
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
 from langchain.messages import AIMessage, ToolMessage
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
-from demo import (GOAL, INSTRUCTIONS, ToolBlocked, ToolFailed, ToolPaused, ToolRejected, admit, approve,
-                  budgeted, finish, offline, refusal, tools)
+from contextos.integrations.langgraph import ContextOSMiddleware
+from demo import GOAL, INSTRUCTIONS, MODEL_CALL_TOKENS, admit, approve, finish, offline, tools
 
 MODEL = os.environ.get("LANGGRAPH_MODEL", "anthropic:claude-sonnet-5-5")
-
-
-class ContextOS(AgentMiddleware):
-    def __init__(self, run):
-        super().__init__()
-        self.run = run
-        self.paused = {}  # approval_request_id -> the pause, for the reviewer
-
-    def wrap_model_call(self, request, handler):
-        with budgeted(self.run):
-            return handler(request)
-
-    def wrap_tool_call(self, request, handler):
-        call = request.tool_call
-        try:
-            return handler(request)
-        except ToolPaused as paused:
-            if paused.kind != "approval":
-                # A duplicate, an unknown outcome or another pause: retrying cannot change
-                # it, so the model is told what happened and to stop.
-                return self._error(call, refusal(paused))
-            # On resume LangGraph re-runs this node, which re-sends the same governed call
-            # (same operation key): approved, it runs once; still pending, we get here again.
-            request_id = paused.report["approval_request_id"]
-            self.paused[request_id] = paused
-            answer = interrupt({"approval_request_id": request_id, "tool": call["name"], "args": call["args"],
-                                "reason_codes": paused.reason_codes})
-            return self._error(call, f"{refusal(paused)} Reviewer: {answer}")
-        except (ToolBlocked, ToolRejected, ToolFailed) as outcome:
-            return self._error(call, refusal(outcome))
-
-    @staticmethod
-    def _error(call, text: str) -> ToolMessage:
-        return ToolMessage(text, tool_call_id=call["id"], name=call["name"], status="error")
 
 
 class ScriptedModel(GenericFakeChatModel):
@@ -107,7 +73,7 @@ def parse(content: str) -> dict:
 def main() -> int:
     client, run = admit("langgraph")
     model = ScriptedModel() if offline("ANTHROPIC_API_KEY") else MODEL
-    contextos = ContextOS(run)
+    contextos = ContextOSMiddleware(run, model_call_tokens=MODEL_CALL_TOKENS)
     agent = create_agent(model, tools=list(tools(run)), system_prompt=INSTRUCTIONS, middleware=[contextos],
                          checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": run.run_id}}

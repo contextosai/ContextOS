@@ -4,6 +4,7 @@
 //! refund is safe to run unattended only when all of them are present: the provider's
 //! reported state settles the call, an independent witness confirms the effect, a
 //! business owner hears about stuck holds, the effect is tied to a business resource,
+//! a request redelivered into another run is recognised by its intent key,
 //! evidence is about the subject it vouches for, and the agent is the one its
 //! credential was issued for. Missing any one of them, the runtime still works, so
 //! nothing reports it. This profile does:
@@ -77,6 +78,7 @@ pub enum Area {
     Witness,
     Owner,
     Resource,
+    Intent,
     Evidence,
     Actor,
 }
@@ -89,6 +91,7 @@ impl Area {
             Self::Witness => "witness",
             Self::Owner => "owner",
             Self::Resource => "resource",
+            Self::Intent => "intent",
             Self::Evidence => "evidence",
             Self::Actor => "actor",
         }
@@ -251,6 +254,12 @@ fn capability_gaps(config: &Config, manifest: &CapabilityManifest, gaps: &mut Ve
         gap(
             Area::Resource,
             "no resource_pointers: its effects are not tied to the business resource they change",
+        );
+    }
+    if manifest.intent.is_none() {
+        gap(
+            Area::Intent,
+            "no intent key: the same request redelivered into another run is applied again",
         );
     }
 }

@@ -5,7 +5,74 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.18 - 2026-11-08
+
+Eighteenth alpha: the gate in front of consequential tools. Replay recorded traffic
+before deploying; intent keys across runs; resume-safe client keys and framework
+adapters; an environment guard and starter profiles; spend caps per agent and window;
+approval events and Tower's approval quality. See the
+[release notes](docs/releases/v0.1.0-alpha.18.md) before upgrading.
+
+### Changed
+- Python and Node clients: a call that is not `read_only` and names no
+  `idempotency_key` gets one from its capability and canonical arguments
+  (`operation_key` / `operationKey`) instead of a fresh random operation. The same
+  call re-sent (a retried step, a LangGraph node re-run on resume, a call re-sent
+  once approved) is the same operation, so it redeems its approval and cannot apply
+  twice; before, it opened a new approval or was refused as `effect_repeated`.
+  Identical calls that are distinct effects need keys of their own.
+
 ### Added
+- `[guards.approval_timeout]`: the governance sweep finds approval requests with no
+  redemption `timeout_seconds` (60 to 604800) after the gateway asked, audits
+  `approval_timed_out` with the wait, and opens an escalation (`on_timeout =
+  "escalate"`, the default; a later decision still counts) or refuses any later
+  decision on the request (`"deny"`, reason `approval_timed_out`). Optional
+  `capabilities` scope it.
+- Approval metrics: `contextos_approvals_requested_total` and
+  `contextos_approvals_redeemed_total` by capability,
+  `contextos_approval_decision_seconds` (histogram) and
+  `contextos_approvals_timed_out_total` (leader). Tower's Approvals page counts
+  timeouts.
+- Approval events: the gateway audits `approval_requested` the first time it asks for
+  an approval and `approval_redeemed` when one is redeemed, with the approvers,
+  `decided_at` and the decision time from its own request time. Tower folds them,
+  with review-floor and step-up refusals, into an Approvals page and
+  `GET /api/approvals`: decision-time buckets, the share decided within ten seconds,
+  per capability and per approver.
+- Spend caps from shared guarantees: `resource_from = "actor"` or `"tenant"` limits
+  what each agent or the whole tenant commits, with no argument naming the cap;
+  `amount_table` reserves an estimate looked up by an argument (recorded as
+  `estimated`); `window_seconds` applies the limit per window, each window its own
+  ledger. Existing guarantee definitions are unchanged.
+- `[guards.environments]`: a gateway names the environment it serves and, per
+  capability, how to tell a call's target (a fixed `environment`, or an argument
+  `pointer` matched against `prefixes`). Calls aimed at another environment are
+  refused (`environment_mismatch`, or `environment_unresolved` when the target cannot
+  be placed) and audited as `environment_refusal`; `mode = "observe"` audits only.
+- Startup notes capabilities named like destructive calls (`delete`, `drop`,
+  `replace`, ...) that are declared reversible or approved below `destructive`;
+  `ctx init-tool` puts the same hint in the drafted review text.
+- `deploy/profiles/consequential-tools.toml` and `observe-first.toml`: starter
+  configurations for the consequential-tool gate, enforced and observing.
+- `contextos.integrations` (Python client): `langgraph.ContextOSMiddleware` (budgeted
+  model calls, refusals as tool errors, approval pauses as resumable LangGraph
+  interrupts) and `openai_agents` (`GatewayApprovals`, which raises the gateway's own
+  approval as an SDK interruption so the run can be checkpointed while it waits;
+  `failure`; `BudgetedProvider`). The LangGraph and OpenAI Agents examples use them.
+- Intent keys: a capability's manifest may declare `intent.key_pointers`, the
+  arguments that identify a business request. The first run to send a request claims
+  it tenant-wide before dispatch; the same request from another run is refused with
+  `effect_repeated_across_runs` and pointed at the holding operation until the claim
+  is released (the effect definitively not applied) or its `window_seconds` lapse.
+  `provider_key = true` derives the provider idempotency key from the intent. The
+  readiness profile reports consequential capabilities without one (`intent`).
+- `python -m contextos.replay` (Python client): replays recorded tool-call traffic
+  through a gateway against a tool server that answers with the recorded outcomes,
+  and reports calls allowed, duplicates refused, limits held, approvals required,
+  outcomes left in doubt and possible false blocks. `examples/replay` runs it
+  locally; `docs/research/design-partner-kit.md` is the interview, data request and
+  scorecard it feeds.
 - `[readiness]`: an opt-in, fail-closed profile for consequential workflows. Every
   capability that changes external state must declare provider finality
   (`recovery.completion` and `reference_pointer`), an outcome witness, a guarantee

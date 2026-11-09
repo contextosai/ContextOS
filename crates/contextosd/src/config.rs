@@ -162,6 +162,9 @@ impl Config {
         if let Some(review) = &config.guards.approval_review {
             review.validate().map_err(ConfigError::Invalid)?;
         }
+        if let Some(timeout) = &config.guards.approval_timeout {
+            timeout.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(monitor) = &config.guards.action_monitor {
             monitor.validate().map_err(ConfigError::Invalid)?;
             if config.providers.as_ref().is_none_or(|p| p.action_monitor.is_none()) {
@@ -172,6 +175,9 @@ impl Config {
         }
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
+        }
+        if let Some(environments) = &config.guards.environments {
+            environments.validate().map_err(ConfigError::Invalid)?;
         }
         if let Some(url) = &config.server.public_url {
             crate::protected_resource::check_public_url(url, config.server.mode == Mode::Development)

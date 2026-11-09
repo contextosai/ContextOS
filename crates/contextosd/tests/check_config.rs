@@ -211,3 +211,53 @@ fn readiness_report_warns_and_passes() {
         "{text}"
     );
 }
+
+/// The quickstart with a starter profile from deploy/profiles appended.
+fn with_profile(name: &str, profile: &str) -> PathBuf {
+    let path = config(name, "127.0.0.1:0");
+    let text = std::fs::read_to_string(&path).unwrap()
+        + "\n"
+        + &std::fs::read_to_string(root().join("deploy/profiles").join(profile)).unwrap();
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[test]
+fn the_observe_first_profile_starts_the_quickstart_and_reports_its_gaps() {
+    let (ok, text) = check(
+        &with_profile("check-observe-first.toml", "observe-first.toml"),
+        Some(&"11".repeat(32)),
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("warning: workflow readiness (report): "), "{text}");
+    assert!(
+        text.contains("warning: readiness: adp_payments.issue_refund [intent]"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_enforced_profile_refuses_the_quickstart_until_its_gaps_are_closed() {
+    let seed = "11".repeat(32);
+    let path = with_profile("check-consequential.toml", "consequential-tools.toml");
+    let (ok, text) = check(&path, Some(&seed));
+    assert!(!ok, "{text}");
+    assert!(text.contains("agent binding is required"), "{text}");
+
+    // With the admitting key bound to its agent, readiness lists what is left.
+    let bound = std::fs::read_to_string(&path).unwrap().replacen(
+        "principal_id = \"svc_quickstart\"",
+        "principal_id = \"svc_quickstart\"\nagent_ids = [\"agt_support\"]",
+        1,
+    );
+    std::fs::write(&path, bound).unwrap();
+    let (ok, text) = check(&path, Some(&seed));
+    assert!(!ok, "{text}");
+    for expected in [
+        "workflow readiness (required): ",
+        "adp_payments.issue_refund [intent]: no intent key",
+        "adp_payments.issue_refund [witness]: no outcome contract",
+    ] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+}

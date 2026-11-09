@@ -31,7 +31,8 @@ step build;   cargo build --release -q -p contextosd -p ctx -p towerd   || fail 
 # Each crate builds on its own, and contextosd without its optional features (as towerd uses it).
 step features; cargo check -q -p towerd && cargo check -q -p contextosd --no-default-features || fail "standalone builds"
 step tower;   (cd tower && npm ci --no-audit --no-fund -s && npm run -s build >/dev/null && npm test -s >/dev/null) || fail "tower console"
-step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null || fail "python client"
+step python;  PYTHONPATH=bindings/python python3 bindings/python/tests/test_client.py >/dev/null \
+    && PYTHONPATH=bindings/python python3 -m unittest -q bindings/python/tests/test_replay.py bindings/python/tests/test_envelope.py 2>/dev/null || fail "python client"
 step node;    node bindings/node/test_client.mjs >/dev/null             || fail "node client"
 step quickstart; bash examples/support-refund/run.sh >/dev/null 2>&1    || fail quickstart
 step packs; check_example examples/support-refund/check_packs.sh "example packs checked" || fail "example packs"
@@ -42,6 +43,7 @@ step compensation; check_example examples/compensation/run.sh "saga compensated"
 step outcome-witness; check_example examples/outcome-witness/run.sh "outcome witnessed" || fail "outcome witness"
 step row-lock; check_example examples/why-not-a-row-lock/run.sh "row lock comparison complete" || fail "row lock comparison"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
+step replay; check_example examples/replay/run.sh "replay report written" || fail "replay"
 step tower-e2e;  check_example examples/tower/run.sh "tower sees the fleet" || fail "tower example"
 if [ -n "${CONTEXTOS_DRILL_DATABASE_URL:-}" ]; then
     step postgres-drill; check_example examples/postgres-drill/run.sh "No violations:" || fail "postgres drill"

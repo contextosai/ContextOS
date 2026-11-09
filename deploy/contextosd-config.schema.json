@@ -78,6 +78,38 @@
       ],
       "type": "string"
     },
+    "AmountTable": {
+      "additionalProperties": false,
+      "description": "Estimated amounts by an argument's value.",
+      "properties": {
+        "default": {
+          "description": "The estimate for a value not in `prices`; without one such a call is refused (`shared_guarantee_amount_invalid`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "key_pointer": {
+          "description": "JSON Pointer to the argument whose value (a string, or a number as text) is looked up in `prices`.",
+          "type": "string"
+        },
+        "prices": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "key_pointer",
+        "prices"
+      ],
+      "type": "object"
+    },
     "AmountThreshold": {
       "additionalProperties": false,
       "description": "An amount at or above which approvals need step-up, in one currency.",
@@ -421,6 +453,39 @@
       },
       "type": "object"
     },
+    "EnvironmentMode": {
+      "description": "Whether a mismatch refuses the call or is only audited.",
+      "enum": [
+        "required",
+        "observe"
+      ],
+      "type": "string"
+    },
+    "EnvironmentPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.environments]`.",
+      "properties": {
+        "current": {
+          "description": "The environment this gateway serves.",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/EnvironmentMode",
+          "default": "required"
+        },
+        "targets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TargetRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "current"
+      ],
+      "type": "object"
+    },
     "EvidenceIssuerConfig": {
       "additionalProperties": false,
       "description": "`[[evidence_issuers]]`: one service trusted to vouch for named facts.",
@@ -615,6 +680,18 @@
           "default": null,
           "description": "Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`)."
         },
+        "approval_timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeoutPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`)."
+        },
         "circuit_breakers": {
           "default": [],
           "description": "Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`).",
@@ -634,6 +711,18 @@
           ],
           "default": null,
           "description": "Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them."
+        },
+        "environments": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The environment this gateway serves; calls aimed at another are refused (or, observing, audited; see `contextos_gateway::environment_guard`). Unset: off."
         },
         "evidence": {
           "anyOf": [
@@ -1076,6 +1165,21 @@
       ],
       "type": "object"
     },
+    "OnTimeout": {
+      "description": "What a timed-out request becomes.",
+      "oneOf": [
+        {
+          "const": "escalate",
+          "description": "Open an escalation; a later decision still counts.",
+          "type": "string"
+        },
+        {
+          "const": "deny",
+          "description": "Refuse any later decision on the request.",
+          "type": "string"
+        }
+      ]
+    },
     "PackIntents": {
       "enum": [
         "required",
@@ -1271,6 +1375,21 @@
       ],
       "type": "string"
     },
+    "ResourceFrom": {
+      "description": "A limit on something the run is, not something the call names.",
+      "oneOf": [
+        {
+          "const": "actor",
+          "description": "The run's actor (the agent principal it was admitted for).",
+          "type": "string"
+        },
+        {
+          "const": "tenant",
+          "description": "The tenant: one limit across every run.",
+          "type": "string"
+        }
+      ]
+    },
     "ResultProjectionConfig": {
       "enum": [
         "flat",
@@ -1465,8 +1584,19 @@
       "additionalProperties": false,
       "properties": {
         "amount_pointer": {
-          "description": "JSON pointer to the amount in the call's arguments, such as `/amount_minor`.",
+          "description": "JSON pointer to the amount in the call's arguments, such as `/amount_minor`. Empty with `amount_table`.",
           "type": "string"
+        },
+        "amount_table": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AmountTable"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Estimated amounts looked up by an argument (see `guarantee_sources`)."
         },
         "capability_ids": {
           "description": "Capabilities whose effects draw on this limit.",
@@ -1505,20 +1635,38 @@
           "$ref": "#/$defs/ResourceCanonicalizer",
           "description": "How the extracted identifier is made canonical (see `resource_identity`); omitted from the definition when `exact`."
         },
+        "resource_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceFrom"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The limit is per agent or per tenant instead of per resource the call names (see `guarantee_sources`)."
+        },
         "resource_pointer": {
-          "description": "JSON pointer to the resource identifier in the call's arguments, such as `/order_id`.",
+          "description": "JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. Empty with `resource_from`.",
           "type": "string"
         },
         "unit": {
           "description": "Unit of `limit` and the amounts, such as `INR_minor`.",
           "type": "string"
+        },
+        "window_seconds": {
+          "description": "The limit applies per window of this many seconds (60 to 31 days); each window's ledger starts empty.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
         "capability_ids",
-        "resource_pointer",
-        "amount_pointer",
         "limit",
         "unit"
       ],
@@ -1653,6 +1801,47 @@
       ],
       "type": "object"
     },
+    "TargetRule": {
+      "additionalProperties": false,
+      "description": "How to tell the target environment of some capabilities' calls.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "environment": {
+          "description": "Every call of these capabilities targets this environment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pointer": {
+          "description": "A JSON Pointer into the arguments whose string value names the target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prefixes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Value prefix to environment; the longest matching prefix wins.",
+          "type": "object"
+        },
+        "unmatched": {
+          "$ref": "#/$defs/Unmatched",
+          "default": "refuse"
+        }
+      },
+      "required": [
+        "capabilities"
+      ],
+      "type": "object"
+    },
     "TenantLimits": {
       "additionalProperties": false,
       "properties": {
@@ -1688,6 +1877,34 @@
       },
       "required": [
         "tenant_id"
+      ],
+      "type": "object"
+    },
+    "TimeoutPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.approval_timeout]`.",
+      "properties": {
+        "capabilities": {
+          "default": [],
+          "description": "Applies to approvals of these capabilities; every approval when empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "on_timeout": {
+          "$ref": "#/$defs/OnTimeout",
+          "default": "escalate"
+        },
+        "timeout_seconds": {
+          "description": "Seconds after the gateway asked for an approval with no redemption, 60 to 604800 (seven days).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "timeout_seconds"
       ],
       "type": "object"
     },
@@ -1756,6 +1973,21 @@
         "public_key"
       ],
       "type": "object"
+    },
+    "Unmatched": {
+      "description": "What a pointer value that matches no prefix means.",
+      "oneOf": [
+        {
+          "const": "refuse",
+          "description": "Refused: the target environment cannot be told (fails closed).",
+          "type": "string"
+        },
+        {
+          "const": "allow",
+          "description": "Allowed: values outside the prefixes are not environment-scoped.",
+          "type": "string"
+        }
+      ]
     },
     "UserBinding": {
       "enum": [
@@ -1881,8 +2113,10 @@
         "agent_binding": null,
         "approval_review": null,
         "approval_step_up": null,
+        "approval_timeout": null,
         "circuit_breakers": [],
         "completion_requires_scores": null,
+        "environments": null,
         "evidence": null,
         "identical_tool_calls": 5,
         "information_flow": null,

@@ -79,6 +79,8 @@ pub struct Census {
     pass: u64,
     known: HashMap<(String, String), Known>,
     totals: Totals,
+    /// Approval requests this leader timed out (see `contextos_gateway::approval_timeout`).
+    approvals_timed_out: u64,
 }
 
 fn unix_seconds() -> f64 {
@@ -100,6 +102,7 @@ impl Census {
             pass: 0,
             known: HashMap::new(),
             totals: Totals::default(),
+            approvals_timed_out: 0,
         }
     }
 
@@ -212,6 +215,8 @@ impl Census {
             gateway
                 .escalate_missed_outcomes(tenant, MISSED_OUTCOMES_PER_PASS)
                 .await?;
+            // So do approval requests nobody decided in time.
+            self.approvals_timed_out += gateway.expire_approvals(tenant, MISSED_OUTCOMES_PER_PASS).await? as u64;
             escalations += gateway.open_escalation_count(tenant).await?;
         }
         let text = self.render(&gateway.now(), escalations, unix_seconds());
@@ -268,8 +273,9 @@ impl Census {
             out,
             "# HELP contextos_shared_ledgers_unreadable Exposure ledgers the last sweep could not read.\n# TYPE contextos_shared_ledgers_unreadable gauge\ncontextos_shared_ledgers_unreadable {}\n\
              # HELP contextos_escalations_open Policy escalations awaiting a human, across tenants.\n# TYPE contextos_escalations_open gauge\ncontextos_escalations_open {escalations}\n\
+             # HELP contextos_approvals_timed_out_total Approval requests timed out by this leader's sweeps.\n# TYPE contextos_approvals_timed_out_total counter\ncontextos_approvals_timed_out_total {}\n\
              # HELP contextos_governance_sweep_completed_timestamp_seconds When the last full governance sweep completed.\n# TYPE contextos_governance_sweep_completed_timestamp_seconds gauge\ncontextos_governance_sweep_completed_timestamp_seconds {completed_at}\n",
-            self.totals.unreadable
+            self.totals.unreadable, self.approvals_timed_out
         );
         out
     }

@@ -27,6 +27,7 @@ from typing import Tuple, Union
 from contextos.client import (BudgetExhausted, Client, Run, ToolBlocked, ToolFailed, ToolOutcome, ToolPaused,
                               ToolRejected, governed_tool)
 from contextos.aio import AsyncRun
+from contextos.integrations import describe
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 REQUESTS = ROOT / "examples/support-refund/requests"
@@ -100,13 +101,7 @@ def refusal(outcome: ToolOutcome) -> str:
     """What the model is told when the gateway did not complete a call: whether anything
     happened, why, and that retrying will not change it. Approval and input pauses are
     for the framework's human-in-the-loop path; this text is for everything else."""
-    reasons = ", ".join(outcome.reason_codes) or outcome.status
-    kind = outcome.kind if isinstance(outcome, ToolPaused) else None
-    if kind == "duplicate":
-        return f"ALREADY REQUESTED ({reasons}): this exact action was submitted before and was not repeated."
-    if kind == "unknown_outcome":
-        return f"OUTCOME UNKNOWN ({reasons}): the action may have happened and is being reconciled; do not retry it."
-    return f"NOT DONE ({outcome.status}: {reasons}). The action did not take effect; do not retry it."
+    return describe(outcome)
 
 
 def approve(paused: ToolPaused) -> None:

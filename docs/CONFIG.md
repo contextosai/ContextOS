@@ -145,15 +145,18 @@ A trusted principal and the Ed25519 key its attestations are signed with.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `amount_pointer` | string | required | JSON pointer to the amount in the call's arguments, such as `/amount_minor`. |
+| `amount_pointer` | string | unset | JSON pointer to the amount in the call's arguments, such as `/amount_minor`. Empty with `amount_table`. |
+| `amount_table` | table | unset | Estimated amounts looked up by an argument (see `guarantee_sources`). |
 | `capability_ids` | array of string | required | Capabilities whose effects draw on this limit. |
 | `id` | string | required | Guarantee id, recorded on every reservation. |
 | `limit` | integer | required | Total amount all runs together may commit per resource. |
 | `owner_after_seconds` | integer | unset | How old a hold is before its owner is told (default 1,800 seconds). |
 | `owner_route` | string | unset | The notification webhook that tells this guarantee's business owner about a hold older than `owner_after_seconds` (see `hold_owners`). Routing only: not part of the pinned definition. |
 | `resource_canonicalizer` | `"exact"` \| `"ascii_casefold"` \| `"provider"` | unset | How the extracted identifier is made canonical (see `resource_identity`); omitted from the definition when `exact`. |
-| `resource_pointer` | string | required | JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. |
+| `resource_from` | `"actor"` \| `"tenant"` | unset | The limit is per agent or per tenant instead of per resource the call names (see `guarantee_sources`). |
+| `resource_pointer` | string | unset | JSON pointer to the resource identifier in the call's arguments, such as `/order_id`. Empty with `resource_from`. |
 | `unit` | string | required | Unit of `limit` and the amounts, such as `INR_minor`. |
+| `window_seconds` | integer | unset | The limit applies per window of this many seconds (60 to 31 days); each window's ledger starts empty. |
 
 ## `[guards]`
 
@@ -165,8 +168,10 @@ Guards on agent behaviour.
 | `agent_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared agent must be one its caller's credential is issued for (`required`, `observe`, `off`; see `agent_binding`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise. |
 | `approval_review` | table | unset | Approvals count only if decided at least `min_review_seconds` after they were requested (see `contextos_gateway::approval_review`). |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
+| `approval_timeout` | table | unset | Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`). |
 | `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |
 | `completion_requires_scores` | boolean \| table | unset | Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them. |
+| `environments` | table | unset | The environment this gateway serves; calls aimed at another are refused (or, observing, audited; see `contextos_gateway::environment_guard`). Unset: off. |
 | `evidence` | `"strict"` \| `"caller"` | unset | What may satisfy a decision's evidence gate (`strict`, `caller`; see `evidence_admission`). Unset: `strict` with the `contextos.enterprise` profile, which requires it, `caller` otherwise. |
 | `identical_tool_calls` | integer | `5` | Identical tool calls (same capability and arguments, new operation) a run may make before the next is refused with `loop_detected`; 0 disables the guard. |
 | `information_flow` | table | unset | Track what each run's agent has read (integrity and classification labels from capabilities' `flow`) and gate its later effects and egress on it (see `contextos_gateway::information_flow`). Unset: off. |

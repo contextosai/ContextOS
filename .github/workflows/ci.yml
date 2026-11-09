@@ -142,6 +142,7 @@ jobs:
         run: |
           cargo build --release -p contextosd
           PYTHONPATH=bindings/python python bindings/python/tests/test_client.py
+          PYTHONPATH=bindings/python python -m unittest bindings/python/tests/test_replay.py bindings/python/tests/test_envelope.py
       - name: Examples (quickstart, governed agent loop, Keycloak, metering, Tower)
         run: |
           ./examples/support-refund/run.sh
@@ -153,6 +154,7 @@ jobs:
           ./examples/keycloak/run.sh
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh
+          ./examples/replay/run.sh
       - name: Node HTTP client against contextosd
         run: |
           node bindings/node/test_client.mjs

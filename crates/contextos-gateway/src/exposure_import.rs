@@ -81,7 +81,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let binding = ExposureBinding {
             guarantee_id: rule.id.clone(),
             definition_digest: hash(&definition)?,
-            resource_digest: hash(&json!(resource))?,
+            // A windowed guarantee's import counts in the window its reading is as of.
+            resource_digest: hash(&crate::guarantee_sources::digest_input(
+                &resource,
+                crate::guarantee_sources::window_start(rule, &row.as_of),
+            ))?,
             limit: rule.limit,
             unit: rule.unit.clone(),
         };

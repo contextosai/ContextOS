@@ -22,7 +22,9 @@
 
 pub mod action_monitor;
 pub mod admission;
+mod approval_events;
 pub mod approval_review;
+pub mod approval_timeout;
 mod attestation;
 mod checkpoints;
 pub mod circuit_breakers;
@@ -30,16 +32,19 @@ mod compensation;
 mod coordination;
 mod decisions;
 mod delegation;
+pub mod environment_guard;
 mod erasure;
 mod escalation;
 mod exposure_import;
 mod findings;
 mod findings_api;
+pub mod guarantee_sources;
 pub mod guard_policy;
 pub mod hold_census;
 pub mod hold_owners;
 pub mod information_flow;
 mod input;
+pub mod intent_guard;
 mod lifecycle;
 mod loop_guard;
 pub mod manifest;
@@ -87,6 +92,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 pub use admission::{AdmissionError, AdmissionRequest, BudgetLimits, RunAdmission, admit_run};
+pub use approval_timeout::{OnTimeout, TimeoutPolicy};
 pub use attestation::{ATTESTATION_MARGIN_SECONDS, DISPATCH_STALL_SECONDS};
 pub use checkpoints::{CheckpointRefusal, MAX_CHECKPOINT_BYTES};
 pub use compensation::{COMPENSATION_OPERATION_PREFIX, MAX_COMPENSABLE_EFFECTS, compensation_operation_id};
@@ -103,8 +109,8 @@ pub use findings::{
 pub use input::{Continuation, MAX_INPUT_RESPONSE_BYTES};
 pub use lifecycle::{LifecycleOutcome, MAX_UNRESOLVED_EFFECTS};
 pub use manifest::{
-    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy, is_path_segment,
-    unreviewed,
+    CapabilityManifest, Compensation, CompletionCheck, ManifestError, REVIEW_MARKER, RecoveryStrategy,
+    destructive_verb, is_path_segment, unreviewed,
 };
 pub use memory::MemoryPolicyProvider;
 pub use ownership::Ownership;
@@ -226,6 +232,18 @@ pub struct DispatchReport {
     pub obligations: Vec<String>,
     pub approval_request_id: Option<String>,
     pub audit_sequences: Vec<u64>,
+    /// An approval this dispatch asked for or redeemed, for metrics; not serialized.
+    #[serde(skip)]
+    pub approval: Option<ApprovalNote>,
+}
+
+/// An approval event of one dispatch (the audit chain has the full record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalNote {
+    /// The gateway asked for an approval it had not asked for before.
+    Requested,
+    /// An approval was redeemed, decided this many seconds after the request.
+    Redeemed { decision_seconds: Option<u64> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +290,9 @@ pub struct Gateway<S, L> {
     approval_step_up: Option<step_up::StepUpPolicy>,
     /// Information-flow labels and the rules on them (see [`information_flow`]).
     information_flow: Option<information_flow::FlowPolicy>,
+    /// The environment this gateway serves and how to tell a call's target (see
+    /// [`environment_guard`]).
+    environments: Option<environment_guard::EnvironmentPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -281,6 +302,8 @@ pub struct Gateway<S, L> {
     )>,
     /// A floor on how fast an approval may be decided (see [`approval_review`]).
     approval_review: Option<approval_review::ReviewPolicy>,
+    /// Approval requests nobody decides in time (see [`approval_timeout`]).
+    approval_timeout: Option<approval_timeout::TimeoutPolicy>,
 }
 
 impl<S, L> std::fmt::Debug for Gateway<S, L> {
@@ -325,6 +348,7 @@ impl<'a> Pipeline<'a> {
                 obligations: vec![],
                 approval_request_id: None,
                 audit_sequences: vec![],
+                approval: None,
             },
             started: std::time::Instant::now(),
             risk_tags: Vec::new(),
@@ -516,9 +540,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             resource_identity: None,
             approval_step_up: None,
             information_flow: None,
+            environments: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
+            approval_timeout: None,
         }
     }
 
@@ -540,6 +566,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// [`information_flow`]).
     pub fn set_information_flow(&mut self, policy: Option<information_flow::FlowPolicy>) {
         self.information_flow = policy;
+    }
+
+    /// Refuses (or, observing, audits) calls aimed at another environment than the one
+    /// `policy` names (see [`environment_guard`]).
+    pub fn set_environments(&mut self, policy: Option<environment_guard::EnvironmentPolicy>) {
+        self.environments = policy;
     }
 
     /// Requires approvers' step-up for the approvals `policy` covers (see [`step_up`]).
@@ -1072,6 +1104,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             };
             return Ok(p.stop("blocked", vec![reason.into()], message));
         }
+        if let Some(policy) = &self.environments
+            && let Some(mismatch) = policy.check(&manifest.capability_id, &envelope["args"])
+        {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "gateway_environment": policy.current,
+                "target_environment": mismatch.target, "enforced": policy.enforced(),
+                "reason_codes": [mismatch.reason]});
+            self.record(&mut p, "environment_refusal", body, &now).await?;
+            if policy.enforced() {
+                return Ok(p.stop(
+                    "blocked",
+                    vec![mismatch.reason.into()],
+                    &format!(
+                        "This gateway serves {}; the call's target is {}.",
+                        policy.current,
+                        mismatch.target.as_deref().unwrap_or("in no known environment")
+                    ),
+                ));
+            }
+        }
         if let Some(Err(reasons)) = boundary {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": reasons});
             self.record(&mut p, "boundary_refusal", body, &now).await?;
@@ -1129,6 +1181,25 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 ));
             }
         }
+        // Intent key: the business request this call carries, deduplicated across runs.
+        let intent_digest = match (&manifest.intent, existing_ledger.is_none()) {
+            (Some(intent), true) => {
+                let digest =
+                    intent_guard::digest(&admission.tenant_id, &manifest.capability_id, intent, &envelope["args"]);
+                if digest.is_none() {
+                    let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                        "capability_id": manifest.capability_id, "reason_codes": ["intent_key_missing"]});
+                    self.record(&mut p, "repeated_effect_refusal", body, &now).await?;
+                    return Ok(p.stop(
+                        "rejected",
+                        vec!["intent_key_missing".into()],
+                        "The arguments that identify this request are missing.",
+                    ));
+                }
+                digest
+            }
+            _ => None,
+        };
         let new_operation = existing_ledger.is_none();
         let mut policy_outcomes = match policy_outcomes {
             Ok(outcomes) => outcomes,
@@ -1224,6 +1295,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let (approval_material, review_refused) = self
             .review_approval(admission, &manifest.capability_id, &binding, approval_material)
             .await?;
+        if self.approval_too_late(admission, approval_material.as_ref()).await? {
+            return Ok(p.stop(
+                "blocked",
+                vec!["approval_timed_out".into()],
+                "The approval request timed out before it was decided.",
+            ));
+        }
         let mut approval_input = Value::Null;
         let mut redemption_key = None;
         if let Some(Value::Object(mut material)) = approval_material {
@@ -1316,8 +1394,19 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "require_approval" => {
                 return Ok(
                     match self.ports.approvals.request(admission, &binding, &action_digest).await {
+                        Ok(id) if self.request_timed_out(admission, &id).await? => p.stop(
+                            "blocked",
+                            vec!["approval_timed_out".into()],
+                            "The approval request timed out before it was decided.",
+                        ),
                         Ok(id) => {
-                            self.note_approval_requested(admission, &id, &now).await?;
+                            let requested = self
+                                .approval_requested(admission, &id, (&operation_id, &manifest.capability_id), &now)
+                                .await?;
+                            if requested.is_some() {
+                                p.report.approval = Some(ApprovalNote::Requested);
+                            }
+                            p.report.audit_sequences.extend(requested);
                             p.report.approval_request_id = Some(id);
                             p.report.obligations.push("await_approval".into());
                             p.finish(
@@ -1404,12 +1493,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let approved = redemption_key.is_some();
         if let Some(key) = redemption_key {
             let approval = approval_input.clone();
+            let mut redeemed_now = false;
             let commit = transact(self.store.as_ref(), &key, |state| {
                 let mut approval = approval.clone();
                 approval["redemption_state"] = state.clone();
                 let result = transition_approval_redemption(
                     &json!({"approval": approval, "expected_revision": state["revision"]}),
                 );
+                redeemed_now = result.status == "redeem";
                 match result.status.as_str() {
                     "redeem" => TransitionResult::accepted(result.state.unwrap_or(Value::Null), vec![]),
                     "existing" => TransitionResult::accepted(state.clone(), vec![]),
@@ -1428,6 +1519,18 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     reason_codes,
                     "Approval could not be redeemed for this operation.",
                 ));
+            }
+            if redeemed_now {
+                let (entry, decision_seconds) = self
+                    .approval_redeemed(
+                        admission,
+                        &approval_input,
+                        (&operation_id, &manifest.capability_id),
+                        &now,
+                    )
+                    .await?;
+                p.report.audit_sequences.push(entry);
+                p.report.approval = Some(ApprovalNote::Redeemed { decision_seconds });
             }
             p.risk_tags.push("human_approved".into());
         }
@@ -1602,8 +1705,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         p.stages.enter("claim");
         let idempotency = manifest.recovery.idempotency.as_ref();
         let provider_key = idempotency.map(|_| {
-            persisted_key
-                .unwrap_or_else(|| provider_idempotency_key(&admission.tenant_id, &admission.run_id, &operation_id))
+            persisted_key.unwrap_or_else(|| match (&manifest.intent, &intent_digest) {
+                (Some(intent), Some(digest)) if intent.provider_key => {
+                    intent_guard::provider_key(&admission.tenant_id, digest)
+                }
+                _ => provider_idempotency_key(&admission.tenant_id, &admission.run_id, &operation_id),
+            })
         });
         let proof = match (&self.ports.idempotency, &provider_key) {
             (Some(provider), Some(key)) => match provider.proof(manifest, &operation_id, &action_digest, key).await {
@@ -1780,6 +1887,46 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "The executor lost ownership of this run.",
             ));
         }
+        // The intent is claimed tenant-wide, after the operation claim and before dispatch:
+        // of runs sending one business request, exactly one reaches the provider.
+        let mut intent_claim = None;
+        if let (Some(intent), Some(digest)) = (&manifest.intent, &intent_digest) {
+            let (claimed, refusal) = intent_guard::claim_call(
+                self.store.as_ref(),
+                (&admission.tenant_id, &admission.run_id, &operation_id),
+                intent,
+                digest,
+                &now,
+            )
+            .await;
+            intent_claim = claimed;
+            if let Some(refusal) = refusal {
+                self.withhold_dispatch(
+                    admission,
+                    &operations_key,
+                    &operation_id,
+                    &attempt_id,
+                    &action_digest,
+                    &now,
+                    refusal.reason,
+                )
+                .await?;
+                self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
+                    .await?;
+                let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                    "capability_id": manifest.capability_id, "intent_digest": digest,
+                    "applied": refusal.holder, "reason_codes": [refusal.reason]});
+                let entry = self
+                    .audit
+                    .append(&admission.tenant_id, "repeated_effect_refusal", body, &now)
+                    .await?;
+                p.report.audit_sequences.push(entry.sequence);
+                if refusal.holder.is_some() {
+                    p.report.obligations.push("reconcile_existing_operation".into());
+                }
+                return Ok(p.stop("blocked", vec![refusal.reason.into()], &refusal.message));
+            }
+        }
         // The effect's signature is claimed after the operation claim and before dispatch:
         // of identical effects racing under different keys, exactly one is sent. The
         // check at authorization only refuses the sequential case early.
@@ -1827,6 +1974,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 .await?;
                 self.release_reservation(admission, &budget_key, &reservation_id, &attempt_id, &now)
                     .await?;
+                intent_guard::release_held(
+                    self.store.as_ref(),
+                    intent_claim.as_ref(),
+                    &admission.run_id,
+                    &operation_id,
+                )
+                .await?;
                 let entry = self
                     .audit
                     .append(
@@ -1872,6 +2026,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             };
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             self.withhold_dispatch(
                 admission,
                 &operations_key,
@@ -1954,6 +2115,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
                 }
                 self.release_task_charges(&task_charges, &operation_id).await?;
+                intent_guard::release_held(
+                    self.store.as_ref(),
+                    intent_claim.as_ref(),
+                    &admission.run_id,
+                    &operation_id,
+                )
+                .await?;
                 let entry = self
                     .audit
                     .append(
@@ -2006,6 +2174,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                             .await?;
                     }
                     self.release_task_charges(&task_charges, &operation_id).await?;
+                    intent_guard::release_held(
+                        self.store.as_ref(),
+                        intent_claim.as_ref(),
+                        &admission.run_id,
+                        &operation_id,
+                    )
+                    .await?;
                     return Ok(p.stop(
                         "blocked",
                         vec!["dispatch_aborted".into()],
@@ -2041,6 +2216,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
             }
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             return Ok(p.stop("blocked", reasons, "The shared reservation was closed before dispatch."));
         }
 
@@ -2067,6 +2249,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 loop_guard::release_effect(self.store.as_ref(), &loop_key, &call_signature, &operation_id).await?;
             }
             self.release_task_charges(&task_charges, &operation_id).await?;
+            intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await?;
             p.report
                 .audit_sequences
                 .extend(self.settle_shared_exposure(admission, &operation_id).await?);
@@ -2126,6 +2315,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     &admission.tenant_id,
                     "effect_guard_release_lost",
                     json!({"run_id": admission.run_id, "operation_id": operation_id, "call_signature": call_signature}),
+                    &now,
+                )
+                .await?;
+        }
+        if not_applied
+            && let Err(error) = intent_guard::release_held(
+                self.store.as_ref(),
+                intent_claim.as_ref(),
+                &admission.run_id,
+                &operation_id,
+            )
+            .await
+        {
+            // Still claimed: the request is refused from other runs until its window ends.
+            tracing::warn!(%error, "intent claim not released");
+            self.audit
+                .append(
+                    &admission.tenant_id,
+                    "intent_release_lost",
+                    json!({"run_id": admission.run_id, "operation_id": operation_id}),
                     &now,
                 )
                 .await?;

@@ -3,12 +3,16 @@
 [![CI](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml/badge.svg)](https://github.com/contextosai/ContextOS/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Shared business limits for AI agents.**
+**A gate in front of the tools your AI agents cannot take back.**
 
-ContextOS coordinates the limits your agents share, enforces them before tools act,
-and records signed evidence of confirmed and unresolved effects. Keep your agent
-framework, identity provider and observability stack; place consequential tools
-behind the ContextOS gateway.
+ContextOS decides every consequential tool call before it acts: the same request is
+not applied twice, even from another run; effects aimed at another environment are
+refused; spend and shared business limits hold across agents and runs; approvals bind
+the exact action and their timing is on the record. It records signed evidence of
+confirmed and unresolved effects. Keep your agent framework, identity provider and
+observability stack; place consequential tools behind the ContextOS gateway, or
+[replay your recorded tool calls](examples/replay) through it first to see what it
+would have done.
 
 Two agents can each be authorized to refund INR 800 while the order's shared ceiling
 is INR 1,000. ContextOS reserves capacity atomically across their independent runs,
@@ -26,7 +30,7 @@ fencing, adapters and shared business guarantees as an opt-in runtime extension.
 The [research and strategy](docs/research/2026-10-22-value-proposition.md) explain the
 chosen opportunity, competing approaches and unvalidated assumptions.
 
-> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.17](docs/releases/v0.1.0-alpha.17.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
+> Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.18](docs/releases/v0.1.0-alpha.18.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
 ## Quickstart
 

@@ -2,6 +2,7 @@
 //! runtimes. See docs/design/tower-governance-plane.md.
 
 pub mod api;
+pub mod approvals;
 pub mod authority;
 pub mod collector;
 pub mod config;

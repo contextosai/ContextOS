@@ -57,17 +57,26 @@ def lookup_order(order_id: str) -> dict:
 def issue_refund(order_id: str, customer_id: str, amount_minor: int) -> dict:
     """Issue a refund for an order to its customer, in minor units of the order's currency."""
 
+from contextos.integrations.openai_agents import GatewayApprovals, failure
+
+approvals = GatewayApprovals(run)
 agent = Agent(
     name="support", instructions=INSTRUCTIONS, model="gpt-6.1-sol",
     model_settings=ModelSettings(parallel_tool_calls=False),
-    tools=[function_tool(lookup_order, failure_error_function=governed_failure),
-           function_tool(issue_refund, failure_error_function=governed_failure, needs_approval=True)],
+    tools=[function_tool(lookup_order, failure_error_function=failure),
+           function_tool(issue_refund, failure_error_function=failure,
+                         needs_approval=approvals.needs("adp_payments.issue_refund", "destructive",
+                                                        idempotency_key=lambda order_id, **_: f"refund:{order_id}",
+                                                        evidence_refs=EVIDENCE))],
 )
 ```
 
 Derive the idempotency key and tool-call id from the arguments, never from the SDK's
 `call_id`: the model mints a new `call_id` each time it repeats itself, and deriving the
-key from it would let a repeated refund through as a new operation. Sync tools run in a
+key from it would let a repeated refund through as a new operation. A call that is not
+`read_only` and names no key gets one from its capability and arguments
+(`contextos.envelope.operation_key`), so leaving the key out is safe; reads gated by an
+approval need a key of their own. Sync tools run in a
 worker thread, so the blocking client does not stall the loop; in async code of your own,
 use `contextos.aio` (section 4).
 
@@ -187,11 +196,12 @@ its default (Python `failure_error_function`, TypeScript `errorFunction`) answer
 governed outcome. Replace it:
 
 ```python
-def governed_failure(ctx, error: Exception) -> str:
-    stops = isinstance(error, ToolPaused) and error.kind in ("approval", "input", "unknown_outcome")
-    if isinstance(error, ToolOutcome) and not stops:
-        return refusal(error)        # "NOT DONE (blocked: …). The action did not take effect; do not retry it."
-    raise error                      # stops the run
+from contextos.integrations.openai_agents import failure   # failure_error_function=failure
+
+def failure(ctx, error: Exception) -> str:   # what it does
+    if stops_the_run(error):                 # approval, input, unknown outcome, transport fault
+        raise error
+    return describe(error)                   # "NOT DONE (blocked: …). The action did not take effect; do not retry it."
 ```
 
 `ToolPaused.kind` says what a pause waits on, so the failure function does not match
@@ -227,36 +237,35 @@ on `state = result.to_state()` (TypeScript: `result.state`), and `Runner.run(age
 resumes. Approving there grants nothing at the gateway: the call is still authorized,
 and the approval service bound to the action digest still has the final say.
 
-When the gateway itself pauses for approval (`kind == "approval"`), it has decided only
-now, as the call arrived: after the SDK's approval point, and a running tool cannot raise
-an SDK interruption. For an approval a reviewer gives promptly, wait inside the tool
-call, then re-send the identical call (same arguments, same operation key), which
-redeems that exact approval. The model never sees the pause. Wrap each governed
-function before `function_tool` (TypeScript: around `execute`); this is what the
-examples do, exercised end to end by `./examples/frameworks/run.sh openai-agents
---approval` (and `openai-agents-js`), where the lookup and the refund both pause:
+`GatewayApprovals` joins the two into one approval, the gateway's. Its `needs`
+callable asks the gateway whether the call needs an exact approval
+(`check_tool_call`). If it does, it sends the call once, which opens the gateway's
+approval request and applies nothing, and returns `True`, so the SDK interrupts the
+run. The approval request is `approvals.pending(item.call_id)`. Once a reviewer has
+decided in your approval service, `state.approve(item)` and resume. The tool sends the
+identical call (same operation key), which redeems that exact approval once. Because
+the run waits as an SDK interruption, the `RunState` can be checkpointed (section 6)
+and resumed by another process:
 
 ```python
-def awaiting_reviewer(function):
-    @functools.wraps(function)                      # keeps the signature for the tool schema
-    def call(*args, **kwargs):
-        try:
-            return function(*args, **kwargs)
-        except ToolPaused as paused:
-            if paused.kind != "approval":
-                raise                               # mapped by governed_failure
-            wait_for_reviewer(paused.report["approval_request_id"])
-            return function(*args, **kwargs)        # the same call, redeemed
-    return call
-
-lookup_order, issue_refund = map(awaiting_reviewer, tools(run))
+result = await Runner.run(agent, goal, run_config=config)
+while result.interruptions:
+    state = result.to_state()
+    for item in result.interruptions:
+        paused = approvals.pending(item.call_id)        # its report names approval_request_id
+        wait_for_reviewer(paused.report["approval_request_id"])
+        state.approve(item)
+    await arun.checkpoint({"sdk_run_state": state.to_json()}, revision)
+    result = await Runner.run(agent, state, run_config=config)
 ```
 
-If the wait can outlast the process, let the pause raise instead (the run stops as
-above) and resume, once approved, from a `RunState` checkpointed before the call
-(section 6): the runner re-sends the same call, which redeems the approval. That needs
-an SDK interruption, and so a checkpoint, before every call the gateway can pause; the
-examples do not exercise that route.
+`./examples/frameworks/run.sh openai-agents --approval` runs this end to end, with the
+lookup and the refund both gated. A gateway pause the bridge did not foresee (an
+approval required only at dispatch) still raises and stops the run, as above.
+
+In TypeScript (`openai-agents-js`), the example waits inside the tool call while a
+reviewer decides, then re-sends the identical call, which redeems the approval; that
+wait cannot outlast the process.
 
 ## 6. Checkpoint and resume
 
@@ -306,11 +315,11 @@ in a delegated lane, with its own budgeted provider:
 lane = run.delegate(child_admission, envelope)      # effect_policy "read_only", sub_budget, capabilities
 lookup_in_lane, _ = tools(lane)                     # governed on the child run
 researcher = Agent(name="research", instructions="Research only.", model="gpt-6-luna",
-                   tools=[function_tool(lookup_in_lane, failure_error_function=governed_failure)])
+                   tools=[function_tool(lookup_in_lane, failure_error_function=failure)])
 research_order = researcher.as_tool(
     tool_name="research_order", tool_description="Look an order up (read-only).",
     run_config=RunConfig(model_provider=BudgetedProvider(lane, MultiProvider())),
-    failure_error_function=governed_failure)
+    failure_error_function=failure)
 orchestrator = Agent(name="support", instructions=INSTRUCTIONS, tools=[research_order, refund_tool])
 result = await Runner.run(orchestrator, goal, run_config=config)
 run.close_child(lane, "accept")                     # settles its spend into the parent
@@ -397,7 +406,7 @@ watches `RunHooks.on_tool_end`), not from the model's final answer.
   everything, including refusals the model should hear about.
 - **`tool_error_formatter`.** `RunConfig.tool_error_formatter` rewrites only the
   default failure function's message; it does not see a custom one, and it cannot tell a
-  pause from a refusal. Leave governed tools to `governed_failure`.
+  pause from a refusal. Leave governed tools to `failure`.
 - **Parallel tool calls.** The runner executes a turn's function calls concurrently.
   Set `parallel_tool_calls=False` (`parallelToolCalls: false`) on agents that must look
   before they act. Two identical refunds in one turn share an operation key either way:

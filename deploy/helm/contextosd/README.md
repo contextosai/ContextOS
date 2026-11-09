@@ -35,7 +35,7 @@ config: |
   public_key = "<base64url Ed25519 public key of that version>"
   [support]
   implementation_id = "contextos-rs"
-  implementation_version = "0.1.0-alpha.17"
+  implementation_version = "0.1.0-alpha.18"
   profiles = ["contextos.core"]
   controls = ["identity.authenticated", "authority.scoped", "policy.fail_visible", "context.integrity", "audit.correlated"]
   [[api_keys]]                    # your executor service

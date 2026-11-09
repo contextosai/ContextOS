@@ -13,11 +13,24 @@ const BUCKETS_MS: [f64; 12] = [
     0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 5000.0,
 ];
 
-#[derive(Debug, Default)]
-struct Histogram {
-    counts: [u64; BUCKETS_MS.len()],
+/// Upper bounds (seconds) of approval decision times.
+const DECISION_BUCKETS: [f64; 6] = [10.0, 30.0, 60.0, 300.0, 1800.0, 3600.0];
+
+#[derive(Debug)]
+struct Histogram<const N: usize = { BUCKETS_MS.len() }> {
+    counts: [u64; N],
     sum_ms: f64,
     count: u64,
+}
+
+impl<const N: usize> Default for Histogram<N> {
+    fn default() -> Self {
+        Self {
+            counts: [0; N],
+            sum_ms: 0.0,
+            count: 0,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -33,6 +46,10 @@ pub struct Metrics {
     user_binding_mismatches: Mutex<BTreeMap<String, u64>>,
     pack_intent_mismatches: Mutex<BTreeMap<String, u64>>,
     over_limit_imports: Mutex<BTreeMap<String, u64>>,
+    approvals_requested: Counter,
+    approvals_redeemed: Counter,
+    /// Decision seconds of redeemed approvals, by [`DECISION_BUCKETS`].
+    approval_decisions: Mutex<Histogram<{ DECISION_BUCKETS.len() }>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     audit_sinks: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
@@ -83,6 +100,30 @@ impl Metrics {
         if !matches!(status, "completed" | "ok") {
             for reason in reasons {
                 bump(&self.refusals, reason.clone());
+            }
+        }
+    }
+
+    /// Counts an approval a dispatch of `capability` asked for or redeemed, and the
+    /// decision time of a redeemed one.
+    #[allow(clippy::cast_precision_loss)]
+    pub fn approval(&self, capability: &str, note: Option<&contextos_gateway::ApprovalNote>) {
+        use contextos_gateway::ApprovalNote;
+        match note {
+            None => {}
+            Some(ApprovalNote::Requested) => bump(&self.approvals_requested, capability.to_owned()),
+            Some(ApprovalNote::Redeemed { decision_seconds }) => {
+                bump(&self.approvals_redeemed, capability.to_owned());
+                if let (Some(seconds), Ok(mut h)) = (decision_seconds, self.approval_decisions.lock()) {
+                    let s = *seconds as f64;
+                    for (i, bound) in DECISION_BUCKETS.iter().enumerate() {
+                        if s <= *bound {
+                            h.counts[i] += 1;
+                        }
+                    }
+                    h.sum_ms += s;
+                    h.count += 1;
+                }
             }
         }
     }
@@ -220,7 +261,25 @@ impl Metrics {
                 );
             }
         }
-        let counters: [(&str, &str, &str, &Counter); 8] = [
+        out.push_str("# HELP contextos_approval_decision_seconds Seconds from the gateway's approval request to the fastest approving decision, for redeemed approvals.\n");
+        out.push_str("# TYPE contextos_approval_decision_seconds histogram\n");
+        if let Ok(h) = self.approval_decisions.lock() {
+            for (i, bound) in DECISION_BUCKETS.iter().enumerate() {
+                let _ = writeln!(
+                    out,
+                    "contextos_approval_decision_seconds_bucket{{le=\"{bound}\"}} {}",
+                    h.counts[i]
+                );
+            }
+            let _ = writeln!(
+                out,
+                "contextos_approval_decision_seconds_bucket{{le=\"+Inf\"}} {}",
+                h.count
+            );
+            let _ = writeln!(out, "contextos_approval_decision_seconds_sum {}", h.sum_ms);
+            let _ = writeln!(out, "contextos_approval_decision_seconds_count {}", h.count);
+        }
+        let counters: [(&str, &str, &str, &Counter); 10] = [
             (
                 "contextos_dispatch_refusals_total",
                 "Reason codes of dispatches that did not complete.",
@@ -268,6 +327,18 @@ impl Metrics {
                 "Imported rows that left a resource over its guarantee's limit, by guarantee.",
                 "guarantee",
                 &self.over_limit_imports,
+            ),
+            (
+                "contextos_approvals_requested_total",
+                "Approvals the gateway asked for, by capability.",
+                "capability",
+                &self.approvals_requested,
+            ),
+            (
+                "contextos_approvals_redeemed_total",
+                "Approvals redeemed for an operation, by capability.",
+                "capability",
+                &self.approvals_redeemed,
             ),
         ];
         for (name, help, label, map) in counters {

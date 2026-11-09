@@ -59,8 +59,12 @@ pub struct DispatchSetup {
     pub approval_step_up: Option<contextos_gateway::step_up::StepUpPolicy>,
     /// `[guards.approval_review]`.
     pub approval_review: Option<contextos_gateway::approval_review::ReviewPolicy>,
+    /// `[guards.approval_timeout]`.
+    pub approval_timeout: Option<contextos_gateway::approval_timeout::TimeoutPolicy>,
     /// `[guards.information_flow]`.
     pub information_flow: Option<contextos_gateway::information_flow::FlowPolicy>,
+    /// `[guards.environments]`.
+    pub environments: Option<contextos_gateway::environment_guard::EnvironmentPolicy>,
     /// `[[guards.circuit_breakers]]`.
     pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
     /// `[providers.action_monitor]` with `[guards.action_monitor]`.
@@ -117,7 +121,9 @@ where
     gateway.set_shared_guarantees(setup.guarantees)?;
     gateway.set_approval_step_up(setup.approval_step_up);
     gateway.set_approval_review(setup.approval_review);
+    gateway.set_approval_timeout(setup.approval_timeout);
     gateway.set_information_flow(setup.information_flow);
+    gateway.set_environments(setup.environments);
     gateway.set_circuit_breakers(setup.circuit_breakers);
     gateway.set_action_monitor(setup.action_monitor);
     if let Some(screening) = setup.result_screening {
@@ -398,6 +404,15 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         }
         manifests.push(manifest);
     }
+    if let Some(environments) = &config.guards.environments {
+        for id in environments.targets.iter().flat_map(|t| &t.capabilities) {
+            if !manifests.iter().any(|m| &m.capability_id == id) {
+                return Err(format!(
+                    "[guards.environments] names {id}, which is not a configured capability"
+                ));
+            }
+        }
+    }
     // Startup guards are for what is dispatched; a retired version only recovers.
     let retired = config
         .retired_capabilities
@@ -422,7 +437,9 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         guarantees: config.guarantees.clone(),
         approval_step_up: config.guards.approval_step_up.clone(),
         approval_review: config.guards.approval_review.clone(),
+        approval_timeout: config.guards.approval_timeout.clone(),
         information_flow: config.guards.information_flow.clone(),
+        environments: config.guards.environments.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),
         action_monitor: match &providers.action_monitor {
             Some(p) => Some((
@@ -483,6 +500,26 @@ pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
                 "{} is effectful and declares no {}: task amount and resource limits do not bound it",
                 m.capability_id,
                 missing.join(" or ")
+            ));
+        }
+    }
+    for m in &setup.manifests {
+        use contextos_contract::types::{ActionReversibility, ApprovalMode};
+        let Some(verb) = contextos_gateway::destructive_verb(&m.protocol_tool)
+            .or_else(|| contextos_gateway::destructive_verb(m.capability_name()))
+        else {
+            continue;
+        };
+        let reversible = matches!(
+            m.action_risk.reversibility,
+            ActionReversibility::ReadOnly | ActionReversibility::Reversible
+        );
+        if reversible || m.approval_mode < ApprovalMode::Destructive {
+            notes.push(format!(
+                "{} is named like a destructive call (\"{verb}\") but is declared {} with approval_mode {}: check the review",
+                m.capability_id,
+                serde_json::to_value(m.action_risk.reversibility).unwrap_or_default().as_str().unwrap_or("?"),
+                serde_json::to_value(m.approval_mode).unwrap_or_default().as_str().unwrap_or("?"),
             ));
         }
     }
