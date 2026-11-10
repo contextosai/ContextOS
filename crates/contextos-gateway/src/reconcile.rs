@@ -572,6 +572,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             for key in task_limit_keys(admission) {
                 crate::task_authorization::release(self.store.as_ref(), &key, operation_id).await?;
             }
+            // Nor does it hold its business request: another run may send it.
+            crate::intent_guard::release_operation(
+                self.store.as_ref(),
+                (&admission.tenant_id, &admission.run_id, operation_id),
+            )
+            .await?;
         }
         if !outcome.is_empty() {
             self.note_effect(admission, operation_id, outcome).await?;
