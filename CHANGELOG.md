@@ -13,6 +13,9 @@ minor versions may break APIs and every break is listed.
 - Intent keys: reconciliation and attestations that record an effect not applied now
   release the operation's intent claim, so the request can be redelivered into a new
   run instead of being refused until `window_seconds` lapse.
+- Erasure (on request and by retention) now removes a run's delegation chain (the
+  user's id, the actors and the user's roles) from its admission record, audited in
+  `run_data_erased` as `delegation_chain`. Before, it outlived the erasure.
 
 ## 0.1.0-alpha.19 - 2026-11-09
 

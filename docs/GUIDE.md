@@ -2132,7 +2132,9 @@ curl -X POST "$CONTEXTOS/v1/runs/$RUN/erase" -H "Authorization: Bearer $OPS_TOKE
 
 Each document becomes a tombstone recording the operator, time, reason and the digest
 of what was removed, audited before the content goes; the replay case then answers
-`410`, so erased runs drop out of release-gate corpora. Signed DecisionRecords and
+`410`, so erased runs drop out of release-gate corpora. The run's admission record
+keeps everything but its delegation chain (the user's id, the actors and the user's
+roles), which is removed and marked `delegation_chain_erased`. Signed DecisionRecords and
 audit entries are not rewritten: keep personal data out of decision outputs and
 rationales and cite evidence by reference instead.
 
