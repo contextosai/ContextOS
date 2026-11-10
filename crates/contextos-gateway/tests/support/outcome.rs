@@ -365,3 +365,30 @@ pub async fn fresh_schema(url: &str, n: u64) -> contextos_store::postgres::Postg
     store.migrate().await.unwrap();
     store
 }
+
+/// Another process of the harness's runtime (same audit, adapter, approvals and
+/// authority) over `store`, at `clock`: a replica, or the process that restarts.
+pub fn harness_process<S: DocumentStore + 'static>(
+    h: &Harness,
+    store: Arc<S>,
+    ids: u64,
+    clock: &'static str,
+    capability: CapabilityManifest,
+) -> Gateway<S, MemoryLog> {
+    let ports = Ports {
+        clock: Arc::new(Clocked(clock)),
+        ids: Arc::new(SeqIds(AtomicU64::new(ids))),
+        authority: h.authority.clone(),
+        policy: Arc::new(Policy("allow")),
+        constraints: Arc::new(Constraints),
+        approvals: h.approvals.clone(),
+        idempotency: None,
+        data_flow: None,
+        boundary: None,
+        memory: None,
+    };
+    let mut g = Gateway::new(store, h.audit.clone(), ports);
+    g.register_adapter("adp_payments", h.adapter.clone());
+    g.pin_capability(capability).unwrap();
+    g
+}

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use contextos_store::{DocKey, DocKind, DocumentStore};
 use serde_json::{Value, json};
 
 use crate::harness::*;
@@ -125,6 +126,19 @@ async fn retention_erases_finished_runs_and_waits_for_live_ones() {
     assert_eq!(finished.status(), 200);
 
     let (store, gateway) = (w.state.store.as_ref(), w.state.gateway.as_ref().unwrap());
+    // The finished run acted for a user: retention removes who it was.
+    let admission_key = DocKey::new(TENANT, DocKind::RunAdmission, "run_old_done");
+    let stored = store.get(&admission_key).await.unwrap().unwrap();
+    let mut delegated = stored.body.clone();
+    delegated["delegation_chain"] = serde_json::to_value(contextos_gateway::DelegationChain::new(
+        "u-alice",
+        &["sa-support".into()],
+    ))
+    .unwrap();
+    store
+        .compare_and_swap(&admission_key, stored.revision, &delegated)
+        .await
+        .unwrap();
     let future = u64::MAX / 2;
     // Nothing is old enough yet.
     let (swept, _) = sweep_once(store, gateway, 30, 1, None, 100).await.unwrap();
@@ -139,6 +153,13 @@ async fn retention_erases_finished_runs_and_waits_for_live_ones() {
         }
     );
     assert!(next.is_none(), "one page covered everything");
+    let swept_admission = store.get(&admission_key).await.unwrap().unwrap().body;
+    assert!(swept_admission.get("delegation_chain").is_none(), "{swept_admission}");
+    assert_eq!(
+        swept_admission["delegation_chain_erased"]["erased_by"],
+        "contextos.retention"
+    );
+    assert!(!swept_admission.to_string().contains("u-alice"), "{swept_admission}");
     let case = plain
         .get(format!("{}/v1/runs/run_old_done/replay-case", w.base))
         .bearer_auth("acme-key")
