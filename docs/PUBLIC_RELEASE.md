@@ -93,6 +93,11 @@ New GHCR packages start private even when their repository is public. Set the im
 package to public and verify an anonymous pull before advertising it in a public
 release. Keep the package linked to this repository for Actions access.
 
+Before the notes reach main, and again before publishing, confirm every artifact
+they link (archives, checksums, image tag, registry versions) resolves for the
+release being cut. A tag left without a published release must say so in its
+notes rather than link artifacts that do not exist.
+
 Publish the completed draft only after these checks pass. Record the exact source
 commit, image digest and verification results with the release. Do not move published
 tags or replace their assets; ship a new alpha for corrections. A failed candidate
