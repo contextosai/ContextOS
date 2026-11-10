@@ -17,7 +17,7 @@ from .client import Claim, ContextOSRefused, ContextOSUnavailable, Settlement
 from .config import ConfigError, Settings
 from .handler import METADATA_KEY, RESERVATION_HEADER, RUN_HEADER, ContextOSMetering
 
-__version__ = "0.1.0a19"
+__version__ = "0.1.0a20"
 
 __all__ = [
     "Claim", "ConfigError", "ContextOSMetering", "ContextOSRefused", "ContextOSUnavailable", "METADATA_KEY",

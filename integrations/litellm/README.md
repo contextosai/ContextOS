@@ -33,7 +33,7 @@ await run.budgetedModelCall((reservation) =>
 
 ```sh
 # into the proxy's environment; the package is not on PyPI yet
-pip install "contextos-litellm @ git+https://github.com/contextosai/ContextOS@v0.1.0-alpha.19#subdirectory=integrations/litellm"
+pip install "contextos-litellm @ git+https://github.com/contextosai/ContextOS@v0.1.0-alpha.20#subdirectory=integrations/litellm"
 ```
 
 ```yaml

@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.20 - 2026-11-10
+
+Twentieth alpha: fixes from the fourteenth review. Intent keys hold across retries
+and are released by recovery, erasure removes the delegation chain, effects breakers
+count only calls sent, and Tower sign-in is hardened. See the
+[release notes](docs/releases/v0.1.0-alpha.20.md) before upgrading.
+
 ### Fixed
 
 - Intent keys: a retried operation claims its intent again before it is sent. Before,
