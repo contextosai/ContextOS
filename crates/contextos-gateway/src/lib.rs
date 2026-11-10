@@ -1196,8 +1196,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
         // Intent key: the business request this call carries, deduplicated across runs.
-        let intent_digest = match (&manifest.intent, existing_ledger.is_none()) {
-            (Some(intent), true) => {
+        // Every attempt claims it, a retry too: a claim released after a definitive
+        // not-applied may since have been taken by another run.
+        let intent_digest = match &manifest.intent {
+            Some(intent) => {
                 let digest =
                     intent_guard::digest(&admission.tenant_id, &manifest.capability_id, intent, &envelope["args"]);
                 if digest.is_none() {
@@ -1212,7 +1214,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
                 digest
             }
-            _ => None,
+            None => None,
         };
         let new_operation = existing_ledger.is_none();
         let mut policy_outcomes = match policy_outcomes {

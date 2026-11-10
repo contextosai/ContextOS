@@ -8,9 +8,16 @@
 //! tenant and capability, form the intent key, claimed by compare-and-swap after the
 //! operation claim and before dispatch, in one tenant-wide document per key. A second
 //! run sending the same request while the claim stands is refused with
-//! `effect_repeated_across_runs` and pointed at the operation that holds it. The claim
-//! is released only when the provider definitively did not apply the effect, and it
-//! lapses after `window_seconds`, after which the same request is a new one.
+//! `effect_repeated_across_runs` and pointed at the operation that holds it. Every
+//! attempt claims the intent, a retry of the same operation too, so a retry never sends
+//! while another run holds it. The claim is released only when the provider
+//! definitively did not apply the effect (inline, or when reconciliation or an
+//! attestation records it not applied, found through the operation's pointer
+//! document), and it lapses after `window_seconds`, after which the same request is a
+//! new one.
+//!
+//! Claim times come from each replica's clock: replicas must keep synchronized clocks
+//! (NTP), or skew shortens or lengthens the effective window.
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{DocKey, DocKind, DocumentStore, StoreError};
@@ -80,6 +87,54 @@ pub(crate) fn digest(tenant_id: &str, capability_id: &str, intent: &IntentKey, a
 
 pub(crate) fn key(tenant_id: &str, digest: &str) -> DocKey {
     DocKey::new(tenant_id, DocKind::IntentClaim, digest)
+}
+
+/// The pointer from a run's operation to the intent it claims, so recovery, which
+/// has the operation but not its arguments, can release the claim.
+fn operation_key(tenant_id: &str, run_id: &str, operation_id: &str) -> DocKey {
+    use contextos_contract::canonical::{quote, sha256_text};
+    let digest = sha256_text(&format!("[{},{}]", quote(run_id), quote(operation_id)));
+    DocKey::new(tenant_id, DocKind::IntentClaim, format!("op:{}", &digest[7..]))
+}
+
+/// Records that `(run_id, operation_id)` claims the intent `digest`.
+async fn point<S: DocumentStore>(
+    store: &S,
+    (tenant_id, run_id, operation_id): (&str, &str, &str),
+    digest: &str,
+) -> Result<(), StoreError> {
+    let key = operation_key(tenant_id, run_id, operation_id);
+    let body = json!({"run_id": run_id, "operation_id": operation_id, "intent_digest": digest});
+    for _ in 0..32_u32 {
+        let written = match store.get(&key).await? {
+            Some(current) if current.body == body => return Ok(()),
+            Some(current) => store.compare_and_swap(&key, current.revision, &body).await.map(|_| ()),
+            None => store.create(&key, &body).await.map(|_| ()),
+        };
+        match written {
+            Err(e) if e.is_conflict() => {}
+            other => return other,
+        }
+    }
+    Err(StoreError::Conflict {
+        expected: None,
+        actual: None,
+    })
+}
+
+/// Releases the intent `(run_id, operation_id)` claimed, if it claimed one and still
+/// holds it: recovery recorded its effect definitively not applied.
+pub(crate) async fn release_operation<S: DocumentStore>(
+    store: &S,
+    (tenant_id, run_id, operation_id): (&str, &str, &str),
+) -> Result<(), StoreError> {
+    let Some(pointer) = store.get(&operation_key(tenant_id, run_id, operation_id)).await? else {
+        return Ok(());
+    };
+    match pointer.body["intent_digest"].as_str() {
+        Some(digest) => release(store, &key(tenant_id, digest), run_id, operation_id).await,
+        None => Ok(()),
+    }
 }
 
 /// The outcome of claiming an intent for an operation.
@@ -204,9 +259,14 @@ pub(crate) async fn claim_call<S: DocumentStore>(
     digest: &str,
     now: &str,
 ) -> (Option<DocKey>, Option<Refusal>) {
+    let pointed = point(store, (tenant_id, run_id, operation_id), digest).await;
     let key = key(tenant_id, digest);
     let now_seconds = contextos_contract::validation::elapsed_millis("1970-01-01T00:00:00Z", now).unwrap_or(0) / 1000;
-    match claim(store, &key, run_id, operation_id, now_seconds, intent.window_seconds).await {
+    let claimed = match pointed {
+        Ok(()) => claim(store, &key, run_id, operation_id, now_seconds, intent.window_seconds).await,
+        Err(e) => Err(e),
+    };
+    match claimed {
         Ok(IntentClaim::Claimed) => (Some(key), None),
         Ok(IntentClaim::Held { run_id, operation_id }) => {
             let message = format!("This request was already sent from run {run_id} as operation {operation_id}.");
