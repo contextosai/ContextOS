@@ -2,11 +2,13 @@
 
 mod support;
 
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use contextos_gateway::{ApprovalNote, OnTimeout, TimeoutPolicy};
-use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore};
+use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore, MemoryStore, ScanCursor, StoreError, Versioned};
 use serde_json::{Value, json};
+use support::outcome::harness_process;
 use support::*;
 
 /// Moves the gateway's record of when it asked back to `at` (the harness clock is fixed
@@ -136,4 +138,82 @@ async fn a_redeemed_request_leaves_the_watch_without_timing_out() {
         .unwrap()
         .unwrap();
     assert_eq!(watch.body["ids"], json!([]));
+}
+
+/// A store where another writer touches the approval request just before the sweep's
+/// first attempt to mark it, so that compare-and-swap conflicts.
+struct RacedMark {
+    inner: Arc<MemoryStore>,
+    raced: AtomicBool,
+}
+
+impl DocumentStore for RacedMark {
+    async fn get(&self, k: &DocKey) -> Result<Option<Versioned>, StoreError> {
+        self.inner.get(k).await
+    }
+    async fn create(&self, k: &DocKey, b: &Value) -> Result<Versioned, StoreError> {
+        self.inner.create(k, b).await
+    }
+    async fn compare_and_swap(&self, k: &DocKey, r: u64, b: &Value) -> Result<Versioned, StoreError> {
+        if k.kind == DocKind::ApprovalRequested
+            && b["timed_out_at"].is_string()
+            && !self.raced.swap(true, Ordering::SeqCst)
+        {
+            let current = self.inner.get(k).await?.unwrap();
+            let mut touched = current.body.clone();
+            touched["touched"] = json!(true);
+            self.inner.compare_and_swap(k, current.revision, &touched).await?;
+        }
+        self.inner.compare_and_swap(k, r, b).await
+    }
+    async fn compare_and_swap_encoded(
+        &self,
+        k: &DocKey,
+        r: u64,
+        b: Value,
+        e: contextos_store::Encoded,
+    ) -> Result<u64, StoreError> {
+        self.inner.compare_and_swap_encoded(k, r, b, e).await
+    }
+    async fn expiring(
+        &self,
+        k: DocKind,
+        t: u64,
+        a: Option<&ScanCursor>,
+        l: usize,
+    ) -> Result<Vec<ScanCursor>, StoreError> {
+        self.inner.expiring(k, t, a, l).await
+    }
+}
+
+#[tokio::test]
+async fn a_mark_that_races_another_write_is_retried_and_audited_once() {
+    let (h, _, request_id) = paused_request(OnTimeout::Deny).await;
+    let tenant = h.admission.tenant_id.clone();
+    requested_at(&h, &request_id, "2026-10-20T09:00:00Z").await;
+    let raced = Arc::new(RacedMark {
+        inner: h.store.clone(),
+        raced: AtomicBool::new(false),
+    });
+    let mut sweeper = harness_process(&h, raced.clone(), 30_000, NOW, manifest());
+    sweeper.set_approval_timeout(Some(TimeoutPolicy {
+        timeout_seconds: 900,
+        on_timeout: OnTimeout::Deny,
+        capabilities: vec![],
+    }));
+
+    assert_eq!(sweeper.expire_approvals(&tenant, 100).await.unwrap(), 1);
+    assert!(raced.raced.load(Ordering::SeqCst), "the first mark conflicted");
+    let stored = h
+        .store
+        .get(&DocKey::new(&tenant, DocKind::ApprovalRequested, &request_id))
+        .await
+        .unwrap()
+        .unwrap()
+        .body;
+    assert!(stored["timed_out_at"].is_string(), "{stored}");
+    assert_eq!(stored["touched"], true, "the other write is kept");
+    assert_eq!(audited(&h, "approval_timed_out").await.len(), 1, "audited once");
+    assert_eq!(sweeper.expire_approvals(&tenant, 100).await.unwrap(), 0);
+    assert_eq!(audited(&h, "approval_timed_out").await.len(), 1);
 }
