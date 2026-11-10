@@ -16,6 +16,9 @@ fn ctx(args: &[&str]) -> (i32, Value) {
     )
 }
 
+/// Listing files written: one per call, since tests run in parallel and draft the same tools.
+static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn listed(names: &[&str]) -> String {
     let tools: Vec<Value> = names
         .iter()
@@ -23,7 +26,8 @@ fn listed(names: &[&str]) -> String {
         .collect();
     let dir = std::env::temp_dir().join(format!("ctx-presets-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!("{}.json", names[0]));
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let path = dir.join(format!("{}-{call}.json", names[0]));
     std::fs::write(&path, json!({"tools": tools}).to_string()).unwrap();
     path.display().to_string()
 }
