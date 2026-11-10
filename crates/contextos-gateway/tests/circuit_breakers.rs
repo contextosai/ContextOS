@@ -113,3 +113,43 @@ async fn repeated_refusals_open_a_refusal_breaker_and_its_own_refusals_do_not_co
         .unwrap();
     assert_eq!(state.body["current"], 2, "circuit_open refusals are not counted");
 }
+
+#[tokio::test]
+async fn calls_refused_before_they_are_sent_are_not_effects() {
+    let mut h = harness("allow", Behavior::Confirm).await;
+    let mut pinned = manifest();
+    pinned.intent = Some(serde_json::from_value(json!({"key_pointers": ["/order_id", "/amount_minor"]})).unwrap());
+    h.gateway.pin_capability(pinned).unwrap();
+    let mut tenant_wide = rule(BreakerCount::Effects, 2, BreakerTrip::Refuse);
+    tenant_wide.scope = BreakerScope::Tenant;
+    h.gateway.set_circuit_breakers(vec![tenant_wide]);
+    let sent = h
+        .gateway
+        .dispatch(&h.admission, &refund("tc_1", "ord_1"))
+        .await
+        .unwrap();
+    assert_eq!(sent.report.status, "completed", "{:?}", sent.report);
+
+    // The same request from another run is refused after its attempt is reserved,
+    // before it is sent: it spends nothing, so it is not an effect.
+    let other = independent_run(&h, "run_2").await;
+    let mut again = refund("tc_2", "ord_1");
+    again["run_id"] = json!("run_2");
+    again["principal_chain"][0]["id"] = json!("agt_independent");
+    let refused = h.gateway.dispatch(&other, &again).await.unwrap();
+    assert_eq!(
+        refused.report.reason_codes,
+        ["effect_repeated_across_runs"],
+        "{:?}",
+        refused.report
+    );
+    assert!(refused.report.attempt_id.is_some());
+
+    let next = h
+        .gateway
+        .dispatch(&h.admission, &refund("tc_3", "ord_2"))
+        .await
+        .unwrap();
+    assert_eq!(next.report.status, "completed", "{:?}", next.report);
+    assert_eq!(h.adapter.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}

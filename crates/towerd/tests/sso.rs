@@ -57,6 +57,9 @@ async fn token(
     Form(form): Form<std::collections::HashMap<String, String>>,
 ) -> axum::Json<Value> {
     *idp.seen.lock().unwrap() = json!(form);
+    if form.get("code").map(String::as_str) == Some("huge-code") {
+        return axum::Json(json!({"id_token": "x".repeat(2 * 1024 * 1024)}));
+    }
     if form.get("code").map(String::as_str) != Some("good-code")
         || form.get("code_verifier").map(String::as_str) != Some(VERIFIER)
     {
@@ -244,6 +247,13 @@ async fn tower_exchanges_a_code_only_for_a_token_it_accepts() {
     let (status, _) = exchange(
         &base,
         &json!({"code": "stolen-code", "code_verifier": VERIFIER, "nonce": nonce}),
+    )
+    .await;
+    assert_eq!(status, 401);
+    // A token response larger than any identity provider sends is not read.
+    let (status, _) = exchange(
+        &base,
+        &json!({"code": "huge-code", "code_verifier": VERIFIER, "nonce": nonce}),
     )
     .await;
     assert_eq!(status, 401);

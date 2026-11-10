@@ -16,6 +16,16 @@ minor versions may break APIs and every break is listed.
 - Erasure (on request and by retention) now removes a run's delegation chain (the
   user's id, the actors and the user's roles) from its admission record, audited in
   `run_data_erased` as `delegation_chain`. Before, it outlived the erasure.
+- Circuit breakers counting `effects` count only calls handed to the provider. Calls
+  refused after their attempt was reserved (intent claim, effect claim, task limits,
+  shared guarantee, dispatch gate) spent nothing and no longer count, so they cannot
+  trip a breaker (or, with `trip = "revoke"`, revoke the agent).
+- Approval timeouts: a write racing the timeout mark is re-read and the mark retried
+  instead of auditing `approval_timed_out` again on the next sweep.
+- Tower SSO: the token-endpoint response is capped at 1 MiB like the metadata and key
+  set, and endpoints found in the issuer's metadata (`authorization_endpoint`,
+  `token_endpoint`, `jwks_uri`) must be HTTPS unless the issuer itself is plain HTTP
+  (development).
 
 ## 0.1.0-alpha.19 - 2026-11-09
 

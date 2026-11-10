@@ -118,7 +118,17 @@ async fn exchange<S, L>(State(t): State<Shared<S, L>>, bytes: Bytes) -> ApiResul
         tracing::info!(status = %response.status(), "sso: code exchange refused");
         return Err(refused());
     }
-    let tokens: Value = response.json().await.map_err(|_| refused())?;
+    if response
+        .content_length()
+        .is_some_and(|n| n > crate::sso::MAX_DOCUMENT_BYTES as u64)
+    {
+        return Err(refused());
+    }
+    let bytes = response.bytes().await.map_err(|_| refused())?;
+    if bytes.len() > crate::sso::MAX_DOCUMENT_BYTES {
+        return Err(refused());
+    }
+    let tokens: Value = serde_json::from_slice(&bytes).map_err(|_| refused())?;
     let id_token = tokens["id_token"].as_str().ok_or_else(refused)?;
     let caller = sso.verify(id_token, Some(&request.nonce)).ok_or_else(|| {
         ApiError::forbidden("Signed in, but the token is not accepted or your groups grant no Tower role.")
