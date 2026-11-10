@@ -7,6 +7,9 @@
 //! compensation records of its effects (arguments of the original calls). Operator
 //! feedback filed against the run (indexed per run) has its free text redacted; its
 //! status and replay obligation stay, so an operator still closes it explicitly.
+//! The run's admission record keeps everything but its delegation chain (the user's
+//! id, the actors and the user's roles), which is removed; a finished run is never
+//! checked against its chain again.
 //! Erasure overwrites the rest with a tombstone that
 //! records who erased them, when, why, and the digest of what was removed, so the
 //! erasure itself is provable and the content can never be re-created under the same
@@ -134,10 +137,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .iter()
             .map(|(kind, _, digest)| json!({"document": kind.as_str(), "content_digest": digest}))
             .collect();
+        let admission_key = DocKey::new(&admission.tenant_id, DocKind::RunAdmission, &admission.run_id);
+        let chain = self
+            .store
+            .get(&admission_key)
+            .await
+            .map_err(GatewayError::from)?
+            .and_then(|current| current.body.get("delegation_chain").filter(|c| !c.is_null()).cloned())
+            .map(|chain| sha256_canonical(&chain).unwrap_or_default());
+        if let Some(digest) = &chain {
+            erased.push(json!({"document": "delegation_chain", "content_digest": digest}));
+        }
         erased.extend(work_erased);
         erased.extend(findings_erased);
         // Audited before the content goes: the trail never misses an erasure.
-        if !pending.is_empty() {
+        if !pending.is_empty() || chain.is_some() {
             let record = json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased});
             self.audit
                 .append(&admission.tenant_id, "run_data_erased", record, &now)
@@ -160,6 +174,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     Err(e) => return Err(GatewayError::from(e).into()),
                 }
             }
+        }
+        if let Some(digest) = &chain {
+            self.erase_delegation_chain(&admission_key, operator, reason, digest, &now)
+                .await?;
         }
         // Feedback is read only after the replay case is a tombstone: feedback filed
         // concurrently either is indexed (with its record) by now, or its filer sees the
@@ -227,6 +245,39 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
         Ok(json!({"run_id": admission.run_id, "operator": operator, "reason": reason, "erased": erased}))
+    }
+
+    /// Removes the delegation chain from the run's admission record, marking it erased.
+    async fn erase_delegation_chain(
+        &self,
+        key: &DocKey,
+        operator: &str,
+        reason: &str,
+        digest: &str,
+        now: &str,
+    ) -> Result<(), ErasureError> {
+        for _ in 0..8 {
+            let Some(current) = self.store.get(key).await.map_err(GatewayError::from)? else {
+                return Ok(());
+            };
+            let mut body = current.body.clone();
+            let Some(fields) = body.as_object_mut() else {
+                return Ok(());
+            };
+            if fields.remove("delegation_chain").is_none_or(|c| c.is_null()) {
+                return Ok(());
+            }
+            fields.insert(
+                "delegation_chain_erased".into(),
+                json!({"erased_at": now, "erased_by": operator, "reason": reason, "content_digest": digest}),
+            );
+            match self.store.compare_and_swap(key, current.revision, &body).await {
+                Ok(_) => return Ok(()),
+                Err(e) if e.is_conflict() => {}
+                Err(e) => return Err(GatewayError::from(e).into()),
+            }
+        }
+        Ok(())
     }
 
     /// Records that the run has a feedback document (`DocKind::Feedback` id), so erasure

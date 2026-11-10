@@ -1900,8 +1900,12 @@ with `effect_repeated_across_runs` and the obligation `reconcile_existing_operat
 the audit entry names the run and operation that hold the claim. Of runs racing with
 one request, exactly one reaches the provider, across replicas sharing a store.
 
-The claim is released when the provider definitively did not apply the effect, or when
-the call is refused before it is sent. An unknown outcome keeps it. After
+Every attempt claims the key, a retry of the same operation too, so a retry is refused
+while another run holds the request. The claim is released when the provider
+definitively did not apply the effect, when the call is refused before it is sent, or
+when reconciliation or an attestation records the effect not applied, so a stuck
+request can be redelivered into a new run without waiting out the window. An unknown
+outcome keeps it. After
 `window_seconds` (default one day, at most 90 days) the same request counts as a new
 one. A call missing an argument the key names is rejected (`intent_key_missing`), and if
 the claim cannot be written the effect is not sent (`intent_guard_unavailable`). Choose
@@ -1910,7 +1914,9 @@ a payment reference. Arguments outside the key do not matter, so a reworded note
 not make a new request. With `"provider_key": true`, the provider idempotency key is
 derived from the intent instead of the run's operation, so a provider that deduplicates
 by key also recognises the request across runs. Repeatable capabilities cannot declare
-an intent.
+an intent. Claim times come from each replica's clock: keep replica clocks synchronized
+(NTP or equivalent), or skew shortens or lengthens the effective window (circuit-breaker
+windows assume the same).
 
 ### The user's privilege, not only the agent's
 
@@ -2126,7 +2132,9 @@ curl -X POST "$CONTEXTOS/v1/runs/$RUN/erase" -H "Authorization: Bearer $OPS_TOKE
 
 Each document becomes a tombstone recording the operator, time, reason and the digest
 of what was removed, audited before the content goes; the replay case then answers
-`410`, so erased runs drop out of release-gate corpora. Signed DecisionRecords and
+`410`, so erased runs drop out of release-gate corpora. The run's admission record
+keeps everything but its delegation chain (the user's id, the actors and the user's
+roles), which is removed and marked `delegation_chain_erased`. Signed DecisionRecords and
 audit entries are not rewritten: keep personal data out of decision outputs and
 rationales and cite evidence by reference instead.
 

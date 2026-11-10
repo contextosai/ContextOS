@@ -7,6 +7,15 @@ minor versions may break APIs and every break is listed.
 
 ### Fixed
 
+- Intent keys: a retried operation claims its intent again before it is sent. Before,
+  only an operation's first attempt claimed it, so a retry after a definitive
+  not-applied could send while another run held the same request.
+- Intent keys: reconciliation and attestations that record an effect not applied now
+  release the operation's intent claim, so the request can be redelivered into a new
+  run instead of being refused until `window_seconds` lapse.
+- Erasure (on request and by retention) now removes a run's delegation chain (the
+  user's id, the actors and the user's roles) from its admission record, audited in
+  `run_data_erased` as `delegation_chain`. Before, it outlived the erasure.
 - Circuit breakers counting `effects` count only calls handed to the provider. Calls
   refused after their attempt was reserved (intent claim, effect claim, task limits,
   shared guarantee, dispatch gate) spent nothing and no longer count, so they cannot
