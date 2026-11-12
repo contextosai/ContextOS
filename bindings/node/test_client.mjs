@@ -187,6 +187,13 @@ try {
   const judge = new Client(client.baseUrl, { token: JUDGE_KEY });
   const scored = await judge.score(run.runId, decision.record.record_id, scores);
   assert.equal(scored.score.scorecard.latency, decision.record.budget_usage.wall_clock_ms);
+  // It also judges the tool call itself; the verdict is in the evidence bundle.
+  const verdict = await judge.evaluateOperation(run.runId, call.idempotency_key, {
+    evaluatorRef: "evaluator.arguments@1", name: "arguments", score: 1, label: "pass",
+  });
+  assert.equal(verdict.evaluation.operation_id, call.idempotency_key);
+  const evidence = await run.evidence();
+  assert.equal(evidence.operation_evaluations[0].evaluations[0].evaluation.label, "pass");
 
   // The reviewer files a correction; an operator closes it with evidence.
   const filed = await judge.fileFeedback(run.runId, {

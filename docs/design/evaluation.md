@@ -1,6 +1,6 @@
 # Evaluation: what the runtime gates, records and leaves to evaluators
 
-Status: plan, 2026-11-12. Baseline: main `b1794ae3`. Sources: see
+Status: built, 2026-11-12 (E1–E4). Baseline: main `b1794ae3`. Sources: see
 [2026-11-12-agent-evaluation-sources.md](../research/2026-11-12-agent-evaluation-sources.md).
 
 ## 1. Three layers

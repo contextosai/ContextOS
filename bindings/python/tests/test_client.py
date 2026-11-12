@@ -281,6 +281,12 @@ def main() -> None:
         judge = Client(client.base_url, JUDGE_KEY)
         scored = judge.score(run.run_id, record_id, "evaluator.refund_quality@3", policy=1.0, utility=0.9, safety=1.0)
         assert scored["score"]["scorecard"]["latency"] == decision["record"]["budget_usage"]["wall_clock_ms"]
+        # It also judges the tool call itself; the verdict is in the evidence bundle.
+        verdict = judge.evaluate_operation(run.run_id, call["idempotency_key"], "evaluator.arguments@1", "arguments",
+                                           score=1.0, label="pass")
+        assert verdict["evaluation"]["operation_id"] == call["idempotency_key"], verdict
+        evaluated = run.evidence()["operation_evaluations"]
+        assert evaluated[0]["evaluations"][0]["evaluation"]["label"] == "pass", evaluated
 
         # The reviewer files a correction; an operator closes it with evidence.
         filed = judge.file_feedback(run.run_id, "correction", "policy", "Refund should have been escalated.",

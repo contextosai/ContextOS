@@ -151,6 +151,7 @@ jobs:
           ./examples/peer-coordination/run.sh
           ./examples/compensation/run.sh
           ./examples/outcome-witness/run.sh
+          ./examples/evaluation-loop/run.sh
           ./examples/keycloak/run.sh
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh

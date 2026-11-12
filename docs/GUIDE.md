@@ -2123,6 +2123,12 @@ tool-call evaluation naming an `evaluator_ref` without a record is refused with 
 `evaluator_ref` and needs its own record, so a judge cannot change silently under a
 gate.
 
+[examples/evaluation-loop](../examples/evaluation-loop/README.md) runs the whole loop:
+a calibrated evaluation platform judges a candidate agent's tool calls, and
+`ctx trials` and `ctx reliability-gate` turn its verdicts into a release decision. The
+clients post tool-call verdicts with `Client.evaluate_operation` (Python) and
+`client.evaluateOperation` (Node).
+
 ### Escalations
 
 When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation

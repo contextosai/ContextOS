@@ -216,6 +216,18 @@ export class Client {
   }
 
   /**
+   * Records an independent evaluator's verdict on one tool call (`evaluate` scope), in
+   * the fields of the OpenTelemetry `gen_ai.evaluation.result` event.
+   */
+  evaluateOperation(runId, operationId, { evaluatorRef, name, score, label, explanationRef }) {
+    const body = { evaluator_ref: evaluatorRef, name };
+    if (score !== undefined) body.score = score;
+    if (label !== undefined) body.label = label;
+    if (explanationRef !== undefined) body.explanation_ref = explanationRef;
+    return this.request("POST", `/v1/runs/${segment(runId)}/operations/${segment(operationId)}/evaluations`, { body });
+  }
+
+  /**
    * Files an operator correction or override against a run as an independent reviewer
    * (`evaluate` scope); the run's replay case becomes its replay obligation.
    */

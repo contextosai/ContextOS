@@ -204,6 +204,19 @@ class Client:
         return self.request("POST", f"/v1/runs/{_quote(run_id)}/decisions/{_quote(record_id)}/scores",
                             {"evaluator_ref": evaluator_ref, "policy": policy, "utility": utility, "safety": safety})
 
+    def evaluate_operation(self, run_id: str, operation_id: str, evaluator_ref: str, name: str, *,
+                           score: Optional[float] = None, label: Optional[str] = None,
+                           explanation_ref: Optional[str] = None) -> dict:
+        """Records an independent evaluator's verdict on one tool call (`evaluate` scope),
+        in the fields of the OpenTelemetry `gen_ai.evaluation.result` event: what was
+        evaluated (`name`, e.g. ``tool_selection`` or ``arguments``), a ``score`` in
+        [0, 1] and/or a ``label``, and where the explanation is kept."""
+        body: Dict[str, Any] = {"evaluator_ref": evaluator_ref, "name": name}
+        for field, value in (("score", score), ("label", label), ("explanation_ref", explanation_ref)):
+            if value is not None:
+                body[field] = value
+        return self.request("POST", f"/v1/runs/{_quote(run_id)}/operations/{_quote(operation_id)}/evaluations", body)
+
     def file_feedback(self, run_id: str, kind: str, target_surface: str, summary: str, *,
                       decision_record_id: Optional[str] = None, expected_outcome: Optional[str] = None) -> dict:
         """Files an operator correction or override against a run as an independent

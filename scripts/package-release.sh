@@ -23,7 +23,7 @@ cp -R "$UI" "$NAME/tower/dist"
 git ls-files -z --cached --others --exclude-standard -- \
   README.md SECURITY.md LICENSE LICENSE-docs NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.txt llms.txt docs skills \
   examples/binaries.sh examples/dev-env.sh examples/dev-server.sh examples/doctor.sh examples/support-refund examples/shared-guarantees \
-  examples/agent-loop examples/peer-coordination examples/compensation examples/outcome-witness examples/why-not-a-row-lock examples/postgres-drill examples/metering-proxy examples/tower examples/ops examples/keycloak \
+  examples/agent-loop examples/peer-coordination examples/compensation examples/outcome-witness examples/evaluation-loop examples/why-not-a-row-lock examples/postgres-drill examples/metering-proxy examples/tower examples/ops examples/keycloak \
   bindings/python/README.md bindings/python/contextos/__init__.py bindings/python/contextos/client.py bindings/python/contextos/errors.py bindings/python/contextos/aio.py \
   bindings/python/contextos/envelope.py bindings/python/contextos/replay.py bindings/python/contextos/integrations examples/replay examples/consequential-tools \
   | tar --null -T - -cf - | tar -xf - -C "$NAME"
