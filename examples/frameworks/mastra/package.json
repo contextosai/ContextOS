@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@mastra/core": "1.81.0",
+    "@mastra/core": "1.82.0",
     "zod": "4.6.7"
   }
 }
