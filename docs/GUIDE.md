@@ -1755,6 +1755,56 @@ latency or cost rise beyond the limits, when a baseline case has no candidate
 scorecards or a measured dimension is no longer measured, and when fewer cases pair
 than `min_cases`. Floors have no defaults: they are the release owner's decision.
 
+### Gate on reliability
+
+An agent that refunds correctly three times in four is not ready to refund. The
+scorecard gate compares how well a candidate does; `ctx reliability-gate` compares how
+*consistently*. Replay each case several times under baseline and candidate (each run
+is a trial), then turn the evidence bundles into trials:
+
+```sh
+ctx trials evidence/base-*.json --case-map base-runs.json --criteria criteria.json > base.json
+# criteria (optional): {"policy_floor": 1.0, "safety_floor": 0.9, "utility_pass": 0.7,
+#                       "require_scores": true}
+```
+
+A trial passes only on the runtime's own record: the run completed, every outcome its
+effects owed was witnessed (a `pending` or `missed` outcome fails it, whatever the
+agent reported), and every independent score meets the criteria. Each trial lists the
+`reasons` it failed, and its `steps` (governed tool calls).
+
+```sh
+ctx reliability-gate --baseline base.json --candidate cand.json --thresholds limits.json
+# limits: {"k": 3, "max_pass_k_drop": 0.05, "min_cases": 30,
+#          "pass_k_floor": 0.9, "must_pass": ["refund_over_limit"],
+#          "max_convergence_drop": 0.1, "z": 1.96}
+```
+
+- **pass^k per case.** With `n` trials and `c` passes, pass^k = C(c, k)/C(n, k): the
+  chance that `k` runs in a row succeed. Each side's figure is the mean over cases.
+  pass@k (at least one of `k`) and pass^1 are reported beside it, never gated.
+- **Non-inferiority, not averages.** The gate takes each paired case's pass^k
+  difference and a normal interval around their mean. It passes when the lower bound
+  is at least `-max_pass_k_drop`, fails as `regression` when the upper bound is below
+  it, and otherwise fails as `inconclusive`: the suite cannot rule out the drop. The
+  report's `pass_k_delta.detectable_drop` is the drop the suite would catch with 80%
+  power; a 20-case suite detects only large drops, so add cases or trials rather than
+  widen the margin.
+- **Path convergence.** For each case, the fewest steps any passing trial took, on
+  either side, over each passing trial's steps, averaged (1.0: every success took the
+  shortest path seen). With `max_convergence_drop`, a candidate that still succeeds
+  but wanders fails `convergence`.
+- **Also fails:** a `must_pass` case with any failing candidate trial, a candidate
+  pass^k under `pass_k_floor`, a baseline case the candidate did not run (`missing`),
+  a case with fewer than `k` trials (`too_few_trials`), and fewer paired cases than
+  `min_cases` (at least 2; `underpowered`).
+- **Listed, not failed:** `flaky_cases` (the baseline passed some trials and failed
+  others) and `broken_cases` (no trial passed on either side, which usually means the
+  case is broken, not the agent).
+
+`k`, the margin and the floors have no defaults. Normal intervals are optimistic below
+a few hundred cases: hold `min_cases` high, or raise `z`, for releases that matter.
+
 ## 6. Budget model calls and replans
 
 Tool calls are not the only spend. Before each model call or replan, the orchestrator

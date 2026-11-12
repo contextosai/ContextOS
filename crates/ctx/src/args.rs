@@ -174,6 +174,35 @@ pub enum Command {
         #[arg(long)]
         thresholds: PathBuf,
     },
+    /// Per-trial pass/fail from run evidence bundles, for `ctx reliability-gate`: a run
+    /// passes when it completed, every outcome it owed was witnessed, and its
+    /// independent scores meet the criteria. One case per run, or per `--case-map` entry
+    /// (replays of one case are its trials).
+    Trials {
+        /// Evidence bundle files.
+        #[arg(required = true)]
+        evidence: Vec<PathBuf>,
+        /// JSON object mapping run ids to case names.
+        #[arg(long)]
+        case_map: Option<PathBuf>,
+        /// `{policy_floor?, safety_floor?, utility_pass?, require_scores?}`.
+        #[arg(long)]
+        criteria: Option<PathBuf>,
+    },
+    /// Reliability release gate: compare how consistently candidate and baseline pass
+    /// the same cases over repeated trials (pass^k per case, a paired non-inferiority
+    /// interval, path convergence). Fails on a regression, an inconclusive suite,
+    /// floors, `must_pass` cases, and missing cases or trials.
+    ReliabilityGate {
+        /// JSON array of `{case, trials: [{passed, steps?}]}` (`ctx trials` output).
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+        /// `{k, max_pass_k_drop, min_cases, pass_k_floor?, must_pass?, max_convergence_drop?, z?}`.
+        #[arg(long)]
+        thresholds: PathBuf,
+    },
     /// Pack tests: check what a Context Pack decides against the author's expectations.
     /// Each suite is `{suite, base: {request, run_context, deps?}, tests: [{name, with?,
     /// expect}]}`; `with` is a JSON merge patch over the base and `expect` names any of

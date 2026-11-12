@@ -21,6 +21,7 @@ pub mod pack_test;
 pub mod pathspec;
 pub mod profiles;
 pub mod release_gate;
+pub mod reliability_gate;
 pub mod run_state;
 pub mod scorecard_gate;
 pub mod shared_exposure;
