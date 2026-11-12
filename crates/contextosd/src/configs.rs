@@ -301,6 +301,16 @@ fn classify(path: &str, from: &Value, to: &Value) -> (&'static str, Option<&'sta
         | "guards.require_user_role"
         | "guards.require_tool_schemas"
         | "guards.require_task_authorization" => (flag(false), None),
+        "guards.evaluator_calibration"
+        | "guards.evaluator_calibration.min_tpr"
+        | "guards.evaluator_calibration.min_tnr"
+        | "guards.evaluator_calibration.min_per_class" => {
+            if to.is_null() || more() == Some(false) {
+                ("loosens", Some("scores may come from less validated evaluators"))
+            } else {
+                ("tightens", None)
+            }
+        }
         "guards.trust_supplied_memory" => (flag(true), Some("unverified recalled memory would be admitted")),
         "guards.identical_tool_calls" => match (from.as_u64(), to.as_u64()) {
             (_, Some(0)) => ("loosens", Some("disables the loop guard")),

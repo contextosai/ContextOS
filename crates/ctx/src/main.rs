@@ -378,6 +378,23 @@ fn run(command: Command) -> Result<Value, Failure> {
             candidate,
             thresholds,
         } => reliability::gate(&baseline, &candidate, &thresholds),
+        Command::Calibrate {
+            evaluator_ref,
+            labels,
+            floors,
+        } => {
+            use contextos_kernel::evaluator_calibration::{CalibrationFloors, Label, calibrate};
+            let labels: Vec<Label> = typed(read(&labels)?, "labels")?;
+            let floors: CalibrationFloors = typed(read(&floors)?, "floors")?;
+            let record =
+                calibrate(&evaluator_ref, &labels, &floors).map_err(|e| Failure::Rejected(json!({"error": e})))?;
+            let value = serde_json::to_value(&record).unwrap_or(Value::Null);
+            if record.shortfalls.is_empty() {
+                Ok(value)
+            } else {
+                Err(Failure::Rejected(value))
+            }
+        }
         Command::InitTool {
             mcp,
             tool,

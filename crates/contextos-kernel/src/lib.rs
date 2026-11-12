@@ -13,6 +13,7 @@ pub mod budget_ledger;
 pub mod compiler;
 pub mod conformance;
 pub mod decision_plan;
+pub mod evaluator_calibration;
 pub mod execution_boundary;
 pub mod negotiation;
 pub mod operation_ledger;

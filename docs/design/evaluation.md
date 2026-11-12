@@ -75,7 +75,8 @@ evaluation platform posts its span-level results.
 
 `ctx calibrate` checks a judge against human labels: TPR, TNR, Youden's J and
 Cohen's kappa from paired verdicts, with the label counts. It writes a calibration
-record bound to the evaluator ref and the label set's digest. With
+record bound to the evaluator ref and the label set's digest. A reader recomputes the
+rates from the counts and applies its own floors. With
 `[guards.evaluator_calibration]`, contextosd loads these records at startup and
 refuses scores and evaluations from an evaluator ref with no record meeting the
 floors (`evaluator_uncalibrated`), so an unvalidated judge cannot hold or release a

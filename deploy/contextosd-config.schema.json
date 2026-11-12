@@ -493,6 +493,42 @@
       ],
       "type": "object"
     },
+    "EvaluatorCalibration": {
+      "additionalProperties": false,
+      "description": "`[guards.evaluator_calibration]`.",
+      "properties": {
+        "min_per_class": {
+          "description": "Fewest labels in each class a record must hold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_tnr": {
+          "description": "Smallest share of human `fail` labels the evaluator must also fail.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_tpr": {
+          "description": "Smallest share of human `pass` labels the evaluator must also pass.",
+          "format": "double",
+          "type": "number"
+        },
+        "records": {
+          "description": "Calibration record files (`ctx calibrate` output), one per evaluator release.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "records",
+        "min_tpr",
+        "min_tnr",
+        "min_per_class"
+      ],
+      "type": "object"
+    },
     "EvidenceIssuerConfig": {
       "additionalProperties": false,
       "description": "`[[evidence_issuers]]`: one service trusted to vouch for named facts.",
@@ -730,6 +766,18 @@
           ],
           "default": null,
           "description": "The environment this gateway serves; calls aimed at another are refused (or, observing, audited; see `contextos_gateway::environment_guard`). Unset: off."
+        },
+        "evaluator_calibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluatorCalibration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only evaluator releases with a calibration record meeting these floors may score decisions or evaluate tool calls (see `evaluator_calibration`). Unset: off."
         },
         "evidence": {
           "anyOf": [
@@ -2124,6 +2172,7 @@
         "circuit_breakers": [],
         "completion_requires_scores": null,
         "environments": null,
+        "evaluator_calibration": null,
         "evidence": null,
         "identical_tool_calls": 5,
         "information_flow": null,

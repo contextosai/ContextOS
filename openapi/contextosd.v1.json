@@ -1946,7 +1946,7 @@
       "post": {
         "operationId": "score_decision",
         "summary": "An independent evaluator's score of a decision, signed into the audit chain",
-        "description": "Policy, utility and safety come from the evaluator; cost and latency are measured by the runtime from the signed decision. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or is the principal that admitted the run or recorded the decision, whatever token it presents. Only record ids the gateway issued for this run can be scored, and each evaluator scores a decision once.",
+        "description": "Policy, utility and safety come from the evaluator; cost and latency are measured by the runtime from the signed decision. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or is the principal that admitted the run or recorded the decision, whatever token it presents. Only record ids the gateway issued for this run can be scored, and each evaluator scores a decision once. With `[guards.evaluator_calibration]`, an `evaluator_ref` without a calibration record meeting the deployment's floors is refused (403 `evaluator_uncalibrated`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"
@@ -2023,7 +2023,7 @@
       "post": {
         "operationId": "evaluate_operation",
         "summary": "An independent evaluator's verdict on one tool call, signed into the audit chain",
-        "description": "Records whether the call used the right tool, filled its arguments correctly, or should not have been made, in the fields of the OpenTelemetry `gen_ai.evaluation.result` event, with the evaluator and its pinned release. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or admitted the run. Only operations the run's ledger holds can be evaluated (`operation_not_found`), and each evaluator gives one evaluation of each `name` per call (`evaluation_exists`). Listed in the evidence bundle under `operation_evaluations`.",
+        "description": "Records whether the call used the right tool, filled its arguments correctly, or should not have been made, in the fields of the OpenTelemetry `gen_ai.evaluation.result` event, with the evaluator and its pinned release. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or admitted the run. Only operations the run's ledger holds can be evaluated (`operation_not_found`), and each evaluator gives one evaluation of each `name` per call (`evaluation_exists`). Listed in the evidence bundle under `operation_evaluations`. With `[guards.evaluator_calibration]`, an `evaluator_ref` without a calibration record meeting the deployment's floors is refused (403 `evaluator_uncalibrated`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/RunId"

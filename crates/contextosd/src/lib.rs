@@ -13,6 +13,7 @@ pub mod config_schema;
 pub mod configs;
 pub mod decision_plans;
 pub mod evaluations_api;
+pub mod evaluator_calibration;
 pub mod evidence_admission;
 pub mod evidence_issuers;
 pub mod evidence_subjects;
@@ -317,6 +318,7 @@ where
         evidence: evidence_admission::mode(config),
         evidence_issuers: Arc::new(evidence_issuers::Issuers::new(&config.evidence_issuers)?),
         evidence_subjects: Arc::new(config.evidence_subjects.clone()),
+        calibrated_evaluators: evaluator_calibration::load(config.guards.evaluator_calibration.as_ref())?.map(Arc::new),
         public_url: config.server.public_url.clone(),
         mcp_origins: crate::mcp_transport::AllowedOrigins::new(
             config.server.public_url.as_deref(),
