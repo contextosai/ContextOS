@@ -23,6 +23,10 @@ minor versions may break APIs and every break is listed.
   `[guards.evaluator_calibration]` loads records at startup against the deployment's
   floors and refuses scores and evaluations from evaluator releases without one
   (`evaluator_uncalibrated`) (GUIDE §7, "Require calibrated evaluators").
+- `Client.evaluate_operation` (Python) and `client.evaluateOperation` (Node), and
+  `examples/evaluation-loop`: a calibrated evaluation platform judges a candidate
+  agent's tool calls and the reliability gate turns its verdicts into a release
+  decision.
 
 ## 0.1.0-alpha.20 - 2026-11-10
 

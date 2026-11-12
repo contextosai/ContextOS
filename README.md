@@ -205,6 +205,7 @@ Agent skills live in [`skills/`](skills/README.md): [pack authoring](skills/cont
 - Drill the shared limit on PostgreSQL across separate processes, with SIGKILLs and a database restart: [examples/postgres-drill](examples/postgres-drill/README.md) (`./examples/postgres-drill/run.sh`), [results](docs/research/2026-10-29-postgres-shared-limit-drill.md)
 - Undo a workflow that failed halfway, as governed compensations: [examples/compensation](examples/compensation/README.md) (`./examples/compensation/run.sh`), [guide](docs/COMPENSATION.md)
 - Count a refund as done only when the refund ledger says it posted (an outcome contract): [examples/outcome-witness](examples/outcome-witness/README.md) (`./examples/outcome-witness/run.sh`)
+- Let a calibrated evaluation platform judge tool calls and gate a release on pass^k: [examples/evaluation-loop](examples/evaluation-loop/README.md) (`./examples/evaluation-loop/run.sh`)
 - Use Keycloak as the identity provider, with each run bound to the user its agent acts for (token exchange delegation): [docs/integrations/keycloak.md](docs/integrations/keycloak.md) (`./examples/keycloak/run.sh`, needs Docker)
 - Govern an agent built with LangGraph, the OpenAI Agents SDK, Google ADK, the Claude Agent SDK, CrewAI, Pydantic AI, LlamaIndex, Microsoft Agent Framework, the Vercel AI SDK or Mastra: [docs/integrations](docs/integrations/README.md), with a runnable example for each in [examples/frameworks](examples/frameworks)
 - Charge model calls what they used: [examples/metering-proxy](examples/metering-proxy/README.md)
