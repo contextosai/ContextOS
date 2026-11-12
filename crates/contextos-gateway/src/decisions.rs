@@ -481,6 +481,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "budget_archives": archives,
             "decisions": decisions,
             "outcomes": self.run_outcomes(admission).await?,
+            "operation_evaluations": self.operation_evaluations(admission).await?,
         }))
     }
 }

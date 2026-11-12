@@ -454,3 +454,96 @@ async fn feedback_index_heals_and_closures_stay_bounded() {
         .count();
     assert_eq!(closures, 1);
 }
+
+#[tokio::test]
+async fn independent_evaluators_evaluate_tool_calls() {
+    let w = world(&ALL_CONTROLS).await;
+    let admitted: Value = reqwest::Client::new()
+        .post(format!("{}/v1/runs", w.base))
+        .bearer_auth("acme-key")
+        .json(&run_body("run_evaluated", 1200))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let http = executor_client(admitted["executor_generation"].as_u64().unwrap());
+    let out: Value = http
+        .post(format!("{}/v1/runs/run_evaluated/tool-calls", w.base))
+        .bearer_auth("acme-key")
+        .json(&tool_call("run_evaluated", "tc_1", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(out["result"]["status"], "completed");
+    let operation = out["report"]["operation_id"].as_str().unwrap().to_owned();
+    let post = |key: &'static str, op: String, body: Value| {
+        let url = format!("{}/v1/runs/run_evaluated/operations/{op}/evaluations", w.base);
+        async move {
+            reqwest::Client::new()
+                .post(url)
+                .bearer_auth(key)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let selection = json!({"evaluator_ref": "evaluator.tool_selection@2", "name": "tool_selection",
+        "score": 1.0, "label": "pass", "explanation_ref": "https://evals.example/t/abc"});
+
+    // The executor cannot evaluate its own calls.
+    assert_eq!(
+        post("acme-key", operation.clone(), selection.clone()).await.status(),
+        403
+    );
+    // Only calls the run made, and well-formed verdicts.
+    assert_eq!(
+        post("judge-key", "op_nope".into(), selection.clone()).await.status(),
+        404
+    );
+    for invalid in [
+        json!({"evaluator_ref": "e@1", "name": "tool_selection"}),
+        json!({"evaluator_ref": "e@1", "name": "tool_selection", "score": 1.5}),
+        json!({"evaluator_ref": "e@1", "name": "tool selection", "label": "pass"}),
+        json!({"evaluator_ref": "e@1", "name": "args", "label": "pass", "explanation": "free text"}),
+    ] {
+        assert_eq!(post("judge-key", operation.clone(), invalid).await.status(), 422);
+    }
+
+    let kept = post("judge-key", operation.clone(), selection.clone()).await;
+    assert_eq!(kept.status(), 201);
+    let kept: Value = kept.json().await.unwrap();
+    conforms("OperationEvaluation", &kept);
+    assert_eq!(kept["evaluation"]["evaluator"], "svc_quality_judge");
+    assert_eq!(kept["evaluation"]["operation_id"], operation.as_str());
+    assert!(kept["evaluation"]["capability_ref"].is_object(), "{kept}");
+    // One verdict per evaluator per evaluation name; another name is another verdict.
+    assert_eq!(post("judge-key", operation.clone(), selection).await.status(), 409);
+    let arguments = json!({"evaluator_ref": "evaluator.arguments@1", "name": "arguments", "label": "fail"});
+    assert_eq!(post("judge-key", operation.clone(), arguments).await.status(), 201);
+
+    let evidence: Value = reqwest::Client::new()
+        .get(format!("{}/v1/runs/run_evaluated/evidence", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    conforms("EvidenceBundle", &evidence);
+    let evaluated = &evidence["operation_evaluations"];
+    assert_eq!(evaluated[0]["operation_id"], operation.as_str());
+    let names: Vec<&str> = evaluated[0]["evaluations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["evaluation"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["tool_selection", "arguments"]);
+}

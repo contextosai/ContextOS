@@ -104,3 +104,24 @@ fn the_gate_exits_by_verdict() {
     assert_eq!(report["failures"][0]["kind"], "regression");
     assert_eq!(report["candidate"]["pass_at_k"], 1.0);
 }
+
+#[test]
+fn failing_tool_call_evaluations_fail_the_trial() {
+    let mut run = bundle("r9", "completed", "witnessed", 1.0, 2);
+    run["operation_evaluations"] = json!([{"operation_id": "op_1", "evaluations": [
+        {"evaluation": {"evaluator_ref": "sel@2", "name": "tool_selection", "label": "pass", "score": 1.0}},
+        {"evaluation": {"evaluator_ref": "args@1", "name": "arguments", "label": "fail", "score": 0.2}}]}]);
+    let path = write("t_eval.json", &run);
+    let criteria = write(
+        "t_eval_criteria.json",
+        &json!({"failing_labels": ["fail"], "evaluation_floor": 0.5}),
+    );
+    let (code, out) = ctx(&["trials", "--criteria", &criteria, &path]);
+    assert_eq!(code, 0, "{out}");
+    let trial = &out[0]["trials"][0];
+    assert_eq!(trial["passed"], false);
+    assert_eq!(
+        trial["reasons"],
+        json!(["args@1 arguments of op_1: fail", "args@1 arguments of op_1: 0.2 < 0.5"])
+    );
+}

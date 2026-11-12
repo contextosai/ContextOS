@@ -44,6 +44,7 @@
 //! | `GET /v1/audit/entries?from=&limit=` | `audit:read` | page the signed audit chain out (with the chain's `head`) |
 //! | `POST /v1/runs/{run_id}/decisions` | `dispatch` | record a DecisionRecord (lineage verified, evidence gate enforced) and its replay packet |
 //! | `POST /v1/runs/{run_id}/decisions/{record_id}/scores` | `evaluate` (without `admit`/`dispatch`) | an independent evaluator's score of a decision, signed into the audit chain |
+//! | `POST /v1/runs/{run_id}/operations/{operation_id}/evaluations` | `evaluate` (without `admit`/`dispatch`) | an independent evaluator's verdict on one tool call (OpenTelemetry evaluation fields), signed into the audit chain |
 //! | `GET /v1/runs/{run_id}/replay-case` | `audit:read` | the run's admission inputs as a release-gate case (`ctx gate`) |
 //! | `GET /v1/runs/{run_id}/evidence` | `audit:read` | the run's evidence bundle |
 //! | `POST /v1/runs` | `admit` | compile, negotiate and admit a run (pins policy, opens ledgers) |
@@ -3167,6 +3168,10 @@ where
         .route(
             "/v1/runs/{run_id}/decisions/{record_id}/scores",
             post(score_decision::<S, L>),
+        )
+        .route(
+            "/v1/runs/{run_id}/operations/{operation_id}/evaluations",
+            post(crate::evaluations_api::evaluate_operation::<S, L>),
         )
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/erase", post(erase_run::<S, L>))

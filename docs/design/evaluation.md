@@ -64,7 +64,8 @@ decision, as the scorecard gate's floors are.
 `POST /v1/runs/{run_id}/operations/{operation_id}/evaluations` (`evaluate` scope,
 same independence rule as decision scores) records one evaluator's verdict on one
 governed tool call, named as OpenTelemetry names it: `name`, `score` and/or
-`label`, `explanation`. Each is signed into the audit chain, listed in the evidence
+`label`, and an `explanation_ref` (explanations are cited, not carried, because
+signed records are never rewritten on erasure). Each is signed into the audit chain, listed in the evidence
 bundle beside the operation, and emitted as a `gen_ai.evaluation.result` event.
 ContextOS adds what the convention lacks: which pinned evaluator gave the verdict.
 This is where tool selection and argument correctness go, and where an external

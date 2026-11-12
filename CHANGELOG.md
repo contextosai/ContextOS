@@ -12,6 +12,12 @@ minor versions may break APIs and every break is listed.
   gate on pass^k per case with a paired non-inferiority interval that can answer
   `inconclusive`, the drop the suite could detect, path convergence, `must_pass` cases
   and floors (GUIDE §5, "Gate on reliability").
+- Tool-call evaluations: `POST /v1/runs/{run_id}/operations/{operation_id}/evaluations`
+  records an independent evaluator's verdict on one governed call in the fields of the
+  OpenTelemetry `gen_ai.evaluation.result` event (name, score, label, explanation by
+  reference) with the evaluator and its pinned release; signed, listed in the evidence
+  bundle under `operation_evaluations`, emitted as a trace event, and counted by
+  `ctx trials` (`failing_labels`, `evaluation_floor`) (GUIDE §7).
 
 ## 0.1.0-alpha.20 - 2026-11-10
 

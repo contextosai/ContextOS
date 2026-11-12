@@ -2019,6 +2019,83 @@
         "x-contextos-scope": "evaluate"
       }
     },
+    "/v1/runs/{run_id}/operations/{operation_id}/evaluations": {
+      "post": {
+        "operationId": "evaluate_operation",
+        "summary": "An independent evaluator's verdict on one tool call, signed into the audit chain",
+        "description": "Records whether the call used the right tool, filled its arguments correctly, or should not have been made, in the fields of the OpenTelemetry `gen_ai.evaluation.result` event, with the evaluator and its pinned release. Refused (`evaluator_not_independent`) when the caller also holds `admit` or `dispatch`, or admitted the run. Only operations the run's ledger holds can be evaluated (`operation_not_found`), and each evaluator gives one evaluation of each `name` per call (`evaluation_exists`). Listed in the evidence bundle under `operation_evaluations`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluationReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded evaluation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationEvaluation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "evaluate"
+            ]
+          }
+        ],
+        "x-contextos-scope": "evaluate"
+      }
+    },
     "/v1/revocations": {
       "get": {
         "operationId": "list_revocations",
@@ -6594,6 +6671,28 @@
             "items": {
               "type": "object"
             }
+          },
+          "operation_evaluations": {
+            "type": "array",
+            "description": "The run's evaluated tool calls, each with its independent evaluations, oldest first.",
+            "items": {
+              "type": "object",
+              "required": [
+                "operation_id",
+                "evaluations"
+              ],
+              "properties": {
+                "operation_id": {
+                  "type": "string"
+                },
+                "evaluations": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OperationEvaluation"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -8342,6 +8441,128 @@
               }
             },
             "description": "Rules that apply for some request."
+          }
+        }
+      },
+      "EvaluationReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evaluator_ref",
+          "name"
+        ],
+        "description": "One evaluator's verdict on one tool call, in the fields of the OpenTelemetry `gen_ai.evaluation.result` event. At least one of `score` and `label`.",
+        "anyOf": [
+          {
+            "required": [
+              "score"
+            ]
+          },
+          {
+            "required": [
+              "label"
+            ]
+          }
+        ],
+        "properties": {
+          "evaluator_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._@:/-]+$",
+            "maxLength": 256,
+            "description": "The pinned evaluator release, e.g. `evaluator.tool_selection@2`"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._@:/-]+$",
+            "maxLength": 64,
+            "description": "What was evaluated (`gen_ai.evaluation.name`), e.g. `tool_selection` or `arguments`"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "`gen_ai.evaluation.score.value`"
+          },
+          "label": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._@:/-]+$",
+            "maxLength": 64,
+            "description": "`gen_ai.evaluation.score.label`, e.g. `pass` or `fail`"
+          },
+          "explanation_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Where the evaluator keeps its explanation (a link or an id); explanations are cited, never carried"
+          }
+        }
+      },
+      "OperationEvaluation": {
+        "type": "object",
+        "required": [
+          "evaluation",
+          "audit_sequence"
+        ],
+        "properties": {
+          "audit_sequence": {
+            "type": "integer"
+          },
+          "evaluation": {
+            "type": "object",
+            "required": [
+              "evaluation_version",
+              "run_id",
+              "trace_id",
+              "operation_id",
+              "capability_ref",
+              "evaluator",
+              "evaluator_ref",
+              "name",
+              "evaluated_at"
+            ],
+            "properties": {
+              "evaluation_version": {
+                "const": "contextos-rs.operation_evaluation.v1"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "trace_id": {
+                "type": "string"
+              },
+              "operation_id": {
+                "type": "string"
+              },
+              "capability_ref": {
+                "type": "object",
+                "description": "The pinned capability the call was made through"
+              },
+              "evaluator": {
+                "type": "string",
+                "description": "The evaluating principal"
+              },
+              "evaluator_ref": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "label": {
+                "type": "string"
+              },
+              "explanation_ref": {
+                "type": "string"
+              },
+              "evaluated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
           }
         }
       }

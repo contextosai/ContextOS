@@ -36,6 +36,7 @@ pub mod delegation_chain;
 pub mod environment_guard;
 mod erasure;
 mod escalation;
+mod evaluations;
 mod exposure_import;
 mod findings;
 mod findings_api;
@@ -105,6 +106,7 @@ pub use delegation::{CloseDecision, CloseOutcome, Lineage, RunLink, delegation_r
 pub use delegation_chain::DelegationChain;
 pub use erasure::{ErasureError, is_erased};
 pub use escalation::EscalationError;
+pub use evaluations::{EvaluationRefusal, EvaluationReport, MAX_EVALUATED_OPERATIONS, MAX_EVALUATIONS_PER_OPERATION};
 pub use exposure_import::ImportRow;
 pub use findings::{
     BasisInput, FindingInput, FindingKind, MAX_FINDINGS, MAX_FINDINGS_BYTES, MAX_NOTICES, MAX_STATEMENT_BYTES,
