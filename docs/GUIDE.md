@@ -2086,6 +2086,43 @@ same independence rule):
   `failing_labels` or whose score is under `evaluation_floor`, so tool-call verdicts
   count in the reliability gate.
 
+### Require calibrated evaluators
+
+A judge's score holds a run or releases a pack only if the judge agrees with people.
+Check each evaluator release against human labels: each label is one item judged by a
+person and by the evaluator, `pass` being the positive class.
+
+```sh
+ctx calibrate --evaluator-ref evaluator.refund_quality@3 --labels labels.json \
+              --floors floors.json > calibrations/refund_quality@3.json
+# labels: [{"id": "case_17", "human": "fail", "judge": "pass"}, …]
+# floors: {"min_tpr": 0.9, "min_tnr": 0.9, "min_per_class": 50}
+```
+
+The record holds the counts (TP, FN, TN, FP), TPR (the human passes the judge also
+passes), TNR (the human failures it also catches), Youden's J and Cohen's kappa, and
+the digest of the labels. TPR and TNR are separate floors because agreement hides a
+lenient judge: when 5% of items fail, a judge that always says `pass` agrees 95% of the
+time and catches none of them. `ctx calibrate` exits 1 when the judge falls short.
+Hold out the labels you test on from those you tuned the judge with, and aim for at
+least 50 of each class.
+
+```toml
+[guards.evaluator_calibration]
+records = ["calibrations/refund_quality@3.json", "calibrations/tool_selection@2.json"]
+min_tpr = 0.9
+min_tnr = 0.9
+min_per_class = 50
+```
+
+At startup contextosd reads every record and checks it against these floors,
+recomputing the rates from its counts. A record that falls short, or cannot be read,
+stops the server, because listing it asserts the judge is fit. A decision score or
+tool-call evaluation naming an `evaluator_ref` without a record is refused with 403
+`evaluator_uncalibrated`. A new judge version (model, prompt, rubric) is a new
+`evaluator_ref` and needs its own record, so a judge cannot change silently under a
+gate.
+
 ### Escalations
 
 When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation

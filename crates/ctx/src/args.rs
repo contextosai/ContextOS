@@ -203,6 +203,20 @@ pub enum Command {
         #[arg(long)]
         thresholds: PathBuf,
     },
+    /// Evaluator calibration: check a judge against human labels (TPR, TNR, Youden's J,
+    /// Cohen's kappa) and write its calibration record for
+    /// `[guards.evaluator_calibration]`. Fails (exit 1) when it falls short of the floors.
+    Calibrate {
+        /// The evaluator release the labels measured, e.g. `evaluator.refund_quality@3`.
+        #[arg(long)]
+        evaluator_ref: String,
+        /// JSON array of `{id, human: "pass"|"fail", judge: "pass"|"fail"}`.
+        #[arg(long)]
+        labels: PathBuf,
+        /// `{min_tpr, min_tnr, min_per_class}`.
+        #[arg(long)]
+        floors: PathBuf,
+    },
     /// Pack tests: check what a Context Pack decides against the author's expectations.
     /// Each suite is `{suite, base: {request, run_context, deps?}, tests: [{name, with?,
     /// expect}]}`; `with` is a JSON merge patch over the base and `expect` names any of

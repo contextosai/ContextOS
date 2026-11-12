@@ -18,6 +18,11 @@ minor versions may break APIs and every break is listed.
   reference) with the evaluator and its pinned release; signed, listed in the evidence
   bundle under `operation_evaluations`, emitted as a trace event, and counted by
   `ctx trials` (`failing_labels`, `evaluation_floor`) (GUIDE §7).
+- Evaluator calibration: `ctx calibrate` checks a judge against human labels (TPR,
+  TNR, Youden's J, Cohen's kappa, label digest) and writes its record;
+  `[guards.evaluator_calibration]` loads records at startup against the deployment's
+  floors and refuses scores and evaluations from evaluator releases without one
+  (`evaluator_uncalibrated`) (GUIDE §7, "Require calibrated evaluators").
 
 ## 0.1.0-alpha.20 - 2026-11-10
 

@@ -151,6 +151,8 @@ pub struct AppState<S, L> {
     pub evidence_issuers: Arc<crate::evidence_issuers::Issuers>,
     /// What each gated requirement's evidence must be about.
     pub evidence_subjects: Arc<Vec<crate::evidence_subjects::EvidenceSubject>>,
+    /// Evaluator releases with a fit calibration record; `None` without the guard.
+    pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
     /// Browser origins that may call the MCP endpoint.
@@ -1312,6 +1314,7 @@ where
             format!("Invalid score: {e}"),
         )
     })?;
+    crate::evaluator_calibration::require(state.calibrated_evaluators.as_deref(), &report.evaluator_ref)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
     match gateway
         .score_decision(&admission, &record_id, &caller.principal_id, &report)

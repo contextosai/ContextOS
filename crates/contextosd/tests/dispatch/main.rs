@@ -6,6 +6,7 @@ mod agent_binding;
 mod api;
 mod audit_sinks;
 mod budgets;
+mod calibration;
 mod checks;
 mod circuit_breakers;
 mod compensation;

@@ -38,6 +38,7 @@ where
             format!("Invalid evaluation: {e}"),
         )
     })?;
+    crate::evaluator_calibration::require(state.calibrated_evaluators.as_deref(), &report.evaluator_ref)?;
     let admission = load_admission(&state, &caller, &run_id).await?;
     match gateway
         .evaluate_operation(&admission, &operation_id, &caller.principal_id, &report)

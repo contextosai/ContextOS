@@ -110,6 +110,11 @@ pub struct GuardsConfig {
     /// development. (Effectful HTTP capabilities always need one.)
     #[serde(default)]
     pub require_completion_contracts: Option<bool>,
+    /// Only evaluator releases with a calibration record meeting these floors may
+    /// score decisions or evaluate tool calls (see [`crate::evaluator_calibration`]).
+    /// Unset: off.
+    #[serde(default)]
+    pub evaluator_calibration: Option<crate::evaluator_calibration::EvaluatorCalibration>,
 }
 
 /// `[guards] completion_requires_scores`: on or off, or explicit floors.
@@ -170,6 +175,7 @@ impl Default for GuardsConfig {
             action_monitor: None,
             approval_review: None,
             approval_timeout: None,
+            evaluator_calibration: None,
         }
     }
 }
