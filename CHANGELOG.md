@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+
+- `ctx trials` and `ctx reliability-gate`: per-trial pass/fail from run evidence (the
+  run completed, every owed outcome witnessed, scores meet the criteria), and a release
+  gate on pass^k per case with a paired non-inferiority interval that can answer
+  `inconclusive`, the drop the suite could detect, path convergence, `must_pass` cases
+  and floors (GUIDE §5, "Gate on reliability").
+
 ## 0.1.0-alpha.20 - 2026-11-10
 
 Twentieth alpha: fixes from the fourteenth review. Intent keys hold across retries

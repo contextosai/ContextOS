@@ -167,8 +167,8 @@ for vulnerabilities.
 - **Evidence**: signed, hash-chained audit, delivered to SIEMs with masked fields that still verify; DecisionRecords with verified lineage and
   replay packets; scores from independent evaluators; conformance assessment against
   signed attestations.
-- **Change**: rule libraries shared across packs (`ctx build`), pack tests of what a pack must decide (`ctx test`), decision plans of what a principal may do (`ctx plan`), pack versions published from a directory without a restart, release gates on replayed cases (`ctx gate`) and on scorecards
-  (`ctx scorecard-gate`), staged rollout of pack versions with shadow governance
+- **Change**: rule libraries shared across packs (`ctx build`), pack tests of what a pack must decide (`ctx test`), decision plans of what a principal may do (`ctx plan`), pack versions published from a directory without a restart, release gates on replayed cases (`ctx gate`), on scorecards
+  (`ctx scorecard-gate`) and on reliability over repeated trials (`ctx reliability-gate`), staged rollout of pack versions with shadow governance
   diffs, and a kill switch for tenants, packs, principals, agents, adapters and
   capabilities.
 - **Operation at scale**: cluster-wide tenant limits, overload shedding, OpenTelemetry

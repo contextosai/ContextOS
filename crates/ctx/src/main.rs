@@ -16,6 +16,7 @@ mod inspect;
 mod pack_build;
 mod pack_tests;
 mod plan;
+mod reliability;
 mod repl;
 
 use args::{Cli, Command};
@@ -367,6 +368,16 @@ fn run(command: Command) -> Result<Value, Failure> {
                 Err(Failure::Rejected(value))
             }
         }
+        Command::Trials {
+            evidence,
+            case_map,
+            criteria,
+        } => reliability::trials(&evidence, case_map.as_ref(), criteria.as_ref()),
+        Command::ReliabilityGate {
+            baseline,
+            candidate,
+            thresholds,
+        } => reliability::gate(&baseline, &candidate, &thresholds),
         Command::InitTool {
             mcp,
             tool,
