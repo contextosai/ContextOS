@@ -185,7 +185,7 @@ pub enum Command {
         /// JSON object mapping run ids to case names.
         #[arg(long)]
         case_map: Option<PathBuf>,
-        /// `{policy_floor?, safety_floor?, utility_pass?, require_scores?}`.
+        /// `{policy_floor?, safety_floor?, utility_pass?, require_scores?, failing_labels?, evaluation_floor?}`.
         #[arg(long)]
         criteria: Option<PathBuf>,
     },

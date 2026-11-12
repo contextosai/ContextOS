@@ -1765,12 +1765,14 @@ is a trial), then turn the evidence bundles into trials:
 ```sh
 ctx trials evidence/base-*.json --case-map base-runs.json --criteria criteria.json > base.json
 # criteria (optional): {"policy_floor": 1.0, "safety_floor": 0.9, "utility_pass": 0.7,
-#                       "require_scores": true}
+#                       "require_scores": true, "failing_labels": ["fail"],
+#                       "evaluation_floor": 0.5}
 ```
 
 A trial passes only on the runtime's own record: the run completed, every outcome its
 effects owed was witnessed (a `pending` or `missed` outcome fails it, whatever the
-agent reported), and every independent score meets the criteria. Each trial lists the
+agent reported), every independent score meets the criteria, and no tool-call
+evaluation fails them ("Evaluate tool calls", §7). Each trial lists the
 `reasons` it failed, and its `steps` (governed tool calls).
 
 ```sh
@@ -2052,6 +2054,37 @@ latency: unknown is never reported as zero.
 Each evaluator scores a decision once. Scores are signed into the audit chain and
 appear beside their decision in the evidence bundle. Unknown scope names in API-key
 configuration are refused at startup.
+
+### Evaluate tool calls
+
+A decision score judges what a run decided. A wrong tool, a tracking number in the
+`order_id` field, or a call that should have been a question are faults of one call,
+and an evaluator records them against it:
+`POST /v1/runs/{run_id}/operations/{operation_id}/evaluations` (`evaluate` scope, the
+same independence rule):
+
+```json
+{"evaluator_ref": "evaluator.arguments@1", "name": "arguments", "score": 0.0, "label": "fail",
+ "explanation_ref": "https://evals.internal.example/traces/7f3a"}
+```
+
+- **Fields.** `name`, `score` (in `[0, 1]`) and `label` are the OpenTelemetry
+  `gen_ai.evaluation.result` event's name, score value and score label; one of `score`
+  and `label` is required. Names, labels and the evaluator ref are short identifiers.
+  ContextOS adds what the convention lacks: the authenticated evaluator and its pinned
+  release.
+- **Explanations by reference.** `explanation_ref` points to where the evaluator keeps
+  its reasoning. Evaluations are signed records, which erasure does not rewrite, so
+  they carry no free text.
+- **One verdict per name.** Each evaluator gives one evaluation of each `name` per call
+  (`evaluation_exists`); a call takes 32 and a run 4,096 evaluated calls. Only calls
+  the run's ledger holds can be evaluated (`operation_not_found`).
+- **Evidence and traces.** Each is audited (`operation_evaluation`), listed in the
+  evidence bundle under `operation_evaluations` with the call's pinned capability, and
+  emitted as a `gen_ai.evaluation.result` trace event.
+- **Gates.** `ctx trials --criteria` fails a trial with an evaluation whose label is in
+  `failing_labels` or whose score is under `evaluation_floor`, so tool-call verdicts
+  count in the reliability gate.
 
 ### Escalations
 
