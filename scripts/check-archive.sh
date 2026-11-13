@@ -14,7 +14,11 @@ for path in examples/dev-server.sh examples/support-refund/requests/run.json bin
     docs/GLOSSARY.md docs/integrations/README.md; do
   [ -e "$path" ] || { echo "release archive lacks $path" >&2; exit 1; }
 done
-env PATH="/usr/bin:/bin" ./examples/shared-guarantees/run.sh
+# The README's archive commands run as published: no CTX or CONTEXTOS_BIN, no cargo.
+env -u CTX -u CONTEXTOS_BIN PATH="/usr/bin:/bin" ./examples/support-refund/check_packs.sh
+env -u CTX -u CONTEXTOS_BIN PATH="/usr/bin:/bin" ./examples/shared-guarantees/run.sh
+env -u CTX -u CONTEXTOS_BIN PATH="/usr/bin:/bin" ./bin/ctx audit-verify \
+    --entries receipts/shared-guarantees/entries.json --keys receipts/shared-guarantees/keys.json >/dev/null
 env PATH="/usr/bin:/bin" ./examples/peer-coordination/run.sh
 # The local server for your own agent starts from the archive and is reachable.
 env PATH="/usr/bin:/bin" ./examples/dev-server.sh > "$WORK/dev-server.log" 2>&1 & DEV=$!

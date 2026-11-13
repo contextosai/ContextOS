@@ -59,7 +59,16 @@ Without Rust: download the archive for your platform from a
 `shasum -a 256 -c` and `gh attestation verify <archive> --repo contextosai/ContextOS`,
 unpack it and run the same script from its directory. The archive carries `ctx`,
 `contextosd`, `towerd`, the Tower UI and the examples below, so it needs only Python,
-Bash and curl. Linux archives need glibc 2.28 or newer (RHEL, AlmaLinux or Rocky 8+,
+Bash and curl. From the unpacked directory, with no environment variables to set:
+
+```sh
+./examples/support-refund/check_packs.sh   # offline: packs match their sources and tests
+./examples/shared-guarantees/run.sh        # the workflow above, writing its receipt
+./bin/ctx audit-verify --entries receipts/shared-guarantees/entries.json \
+    --keys receipts/shared-guarantees/keys.json   # re-verify the receipt offline
+```
+
+Linux archives need glibc 2.28 or newer (RHEL, AlmaLinux or Rocky 8+,
 Debian 10+, Ubuntu 20.04+); `examples/doctor.sh` checks that your system can run the
 executables and names the alternative when it cannot.
 
