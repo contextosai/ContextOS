@@ -1,7 +1,7 @@
 //! `ctx evidence-pack`: a folder a reviewer can check on their own. It holds the audit
 //! export exactly as served (re-verifiable with `ctx audit-verify`), the keys, a
-//! machine-readable control map for the requested frameworks with the events that
-//! evidence each control counted over the period, a coverage statement saying what the
+//! machine-readable control map for the requested frameworks with the events recorded
+//! for each control over the period, a coverage statement saying what the
 //! evidence does and does not show, and a manifest of every file's digest.
 //!
 //! The pack is built only from a chain that verifies. It is deterministic: the same
@@ -19,7 +19,7 @@ use crate::Failure;
 
 /// The frameworks a pack can map to.
 pub(crate) const FRAMEWORKS: [&str; 4] = ["soc2", "iso42001", "eu-ai-act", "owasp-agentic"];
-pub(crate) const PACK_VERSION: &str = "contextos.evidence_pack.v1";
+pub(crate) const PACK_VERSION: &str = "contextos.evidence_pack.v2";
 
 /// The control map: per framework, controls with the audit event kinds that evidence them.
 pub(crate) fn control_map() -> Value {
@@ -43,7 +43,9 @@ fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
-/// Each control with what the period's entries show for it.
+/// Each control with what the period's entries show for it. A status says only whether
+/// the listed event kinds occurred (`events_recorded`), never that the control was tested,
+/// configured everywhere or effective.
 fn controls(frameworks: &[String], counts: &BTreeMap<&str, u64>) -> Value {
     let map = control_map();
     let mut out = Vec::new();
@@ -67,7 +69,7 @@ fn controls(frameworks: &[String], counts: &BTreeMap<&str, u64>) -> Value {
                 let status = if events.is_empty() {
                     "outside_audit"
                 } else if observed.values().any(|n| *n > 0) {
-                    "evidenced"
+                    "events_recorded"
                 } else {
                     "no_events_in_period"
                 };
@@ -127,8 +129,11 @@ fn coverage(period: &Value, verification: &Value, controls: &Value, config_repor
         "## What this evidence covers\n\n\
          - Every run admission, policy decision, approval, effect, refusal and operator change that went \
            through this tenant's ContextOS gateways in the period, signed in order.\n\
-         - Counts per control below are of those entries; a count shows the control acted, not that it was \
-           configured everywhere it should be.\n\n\
+         - Counts per control below are of those entries. `events recorded` means at least one listed event \
+           kind occurred in the period: the control acted at least once. It does not show that every required \
+           behavior of the control was tested, that the control is configured everywhere it should be, or that \
+           it is effective. This pack is an audit export with a control index, not a test result, an \
+           assessment or a compliance finding.\n\n\
          ## What it does not cover\n\n\
          - Calls an agent made to a tool directly, with a credential that bypasses the gateway.\n\
          - Prompts, model outputs and tool content beyond what the entries record.\n\
