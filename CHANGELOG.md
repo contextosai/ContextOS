@@ -5,6 +5,13 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.21 - 2026-11-13
+
+Twenty-first alpha: evaluation gates, conformance acceptance under a pinned suite
+policy, evidence packs that no longer claim a control was evidenced by event counts,
+and release-archive pack checks that run without overrides. See the
+[release notes](docs/releases/v0.1.0-alpha.21.md) before upgrading.
+
 ### Added
 
 - Suite acceptance for conformance assessments: `[[conformance.accepted_suites]]` pins,
