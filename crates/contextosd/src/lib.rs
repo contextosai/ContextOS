@@ -11,6 +11,7 @@ pub mod compensation;
 pub mod config;
 pub mod config_schema;
 pub mod configs;
+pub mod conformance_acceptance;
 pub mod decision_plans;
 pub mod evaluations_api;
 pub mod evaluator_calibration;

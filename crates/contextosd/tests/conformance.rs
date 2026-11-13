@@ -119,6 +119,16 @@ async fn start() -> (String, Value) {
     };
     config.conformance.trusted_assessors = signers(&case["trusted_assessors"]);
     config.conformance.trusted_evidence_observers = signers(&case["trusted_evidence_observers"]);
+    // The suite this deployment accepts for the vector's workflow, pinned independently
+    // of the report, with the cases it must show passed.
+    config.conformance.accepted_suites = vec![
+        serde_json::from_value(json!({
+        "tenant_id": "tenant_acme_prod", "workflow_id": case["report"]["workflow_id"],
+        "suite": case["report"]["suite_ref"],
+        "required_case_ids": ["identity.authenticated.denied", "owner_scheduling.useful"],
+        "optional_failures": "block"}))
+        .unwrap(),
+    ];
     let state = build_state(
         &config,
         Arc::new(MemoryStore::new()),
@@ -179,6 +189,8 @@ async fn reports_are_assessed_against_the_deployments_trust_anchors() {
     assert_eq!(passed.status(), 200);
     let passed: Value = passed.json().await.unwrap();
     assert_eq!(passed["outcome"], "passed", "{passed}");
+    assert_eq!(passed["acceptance"]["status"], "accepted", "{passed}");
+    assert_eq!(passed["acceptance"]["reasons"], json!([]));
 
     // The caller cannot bring its own trust anchors or evaluation time.
     let mut forged = caller_part(&input);
@@ -211,6 +223,7 @@ async fn reports_are_assessed_against_the_deployments_trust_anchors() {
         .await
         .unwrap();
     assert_ne!(tampered["outcome"], "passed", "{tampered}");
+    assert_eq!(tampered["acceptance"]["status"], "not_accepted", "{tampered}");
     // Another tenant has no trust anchors here.
     let other = assess("other-key", caller_part(&input)).await;
     assert_eq!(other.status(), 409);
@@ -233,4 +246,50 @@ async fn reports_are_assessed_against_the_deployments_trust_anchors() {
         .collect();
     assert_eq!(outcomes.len(), 2, "both assessments are audited: {audit}");
     assert!(outcomes[0].contains("\"passed\""), "{}", outcomes[0]);
+    assert!(outcomes[0].contains("\"accepted\""), "{}", outcomes[0]);
+}
+
+#[test]
+fn suite_policies_state_their_optional_failure_rule_and_cases() {
+    let base = r#"
+        [server]
+        listen = "127.0.0.1:0"
+        [store]
+        kind = "memory"
+        [audit]
+        signing_seed_env = "UNUSED"
+        key_id = "audit-test"
+        [support]
+        implementation_id = "impl"
+        implementation_version = "1"
+        profiles = []
+        controls = []
+        [[conformance.accepted_suites]]
+        tenant_id = "tenant_a"
+        workflow_id = "support.refund"
+        suite = { artifact_type = "conformance_suite", artifact_id = "refunds", version = "3", sha256 = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+        "#;
+    let parse = |extra: &str| {
+        Config::parse(&format!("{base}{extra}"))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    assert!(parse("required_case_ids = [\"refund.useful\"]\noptional_failures = \"disclose\"\n").is_ok());
+    // The optional-failure rule is stated, never defaulted.
+    assert!(parse("required_case_ids = [\"refund.useful\"]\n").is_err());
+    let empty = parse("required_case_ids = []\noptional_failures = \"block\"\n").unwrap_err();
+    assert!(empty.contains("required_case_ids is empty"), "{empty}");
+    let repeated = parse("required_case_ids = [\"a\", \"a\"]\noptional_failures = \"block\"\n").unwrap_err();
+    assert!(repeated.contains("repeated"), "{repeated}");
+    let unpinned = Config::parse(&format!(
+        "{}required_case_ids = [\"a\"]\noptional_failures = \"block\"\n",
+        base.replace(
+            ", sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+            ""
+        )
+    ))
+    .map(|_| ())
+    .unwrap_err()
+    .to_string();
+    assert!(unpinned.contains("suite must be"), "{unpinned}");
 }

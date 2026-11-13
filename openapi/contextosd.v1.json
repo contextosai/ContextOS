@@ -2337,7 +2337,7 @@
       "post": {
         "operationId": "assess_conformance",
         "summary": "Assess a conformance report for this deployment",
-        "description": "The caller supplies the report, its verification, the control evidence, the contract, features and the workflow scope. The deployment supplies its implementation identity, support declaration, the standard profile registry, the evaluation time and the trusted assessors and evidence observers configured for the caller's tenant (`conformance_not_configured` otherwise); the caller cannot supply any of these. Every attestation must carry an Ed25519 signature by the trusted principal it names, over a domain-separated digest; caller-asserted verification is refused (`attestation_unverified`). Every outcome is audited.",
+        "description": "The caller supplies the report, its verification, the control evidence, the contract, features and the workflow scope. The deployment supplies its implementation identity, support declaration, the standard profile registry, the evaluation time and the trusted assessors and evidence observers configured for the caller's tenant (`conformance_not_configured` otherwise); the caller cannot supply any of these. Every attestation must carry an Ed25519 signature by the trusted principal it names, over a domain-separated digest; caller-asserted verification is refused (`attestation_unverified`). Every outcome is audited. The response's `acceptance` applies the tenant's `[[conformance.accepted_suites]]` policy for the report's workflow: `accepted` only when the assessment `passed`, the report names exactly the pinned suite, every required case passed under a required control or as a utility result, and no optional control failed where the policy blocks optional failures; `not_accepted` with reasons otherwise; `no_policy` when none is configured.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6945,7 +6945,8 @@
           "limitations",
           "missing_controls",
           "unsupported_optional",
-          "release_refs"
+          "release_refs",
+          "acceptance"
         ],
         "properties": {
           "outcome": {
@@ -6996,6 +6997,48 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "acceptance": {
+            "type": "object",
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "description": "Whether this deployment accepts the assessment under its pinned suite policy.",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "not_accepted",
+                  "no_policy"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "`no_suite_policy`, `assessment_not_passed`, `suite_not_accepted`, `required_case_missing:<id>`, `required_case_not_passed:<id>`, `optional_control_failed:<control>@<version>`"
+              },
+              "suite": {
+                "description": "The pinned suite reference, under a policy"
+              },
+              "optional_failures": {
+                "type": "string",
+                "enum": [
+                  "block",
+                  "disclose"
+                ]
+              },
+              "optional_failed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional controls that failed, as `<control>@<version>`, listed under either policy"
+              }
             }
           }
         }

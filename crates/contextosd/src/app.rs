@@ -2588,13 +2588,20 @@ where
         "trusted_assessors": assessors, "trusted_evidence_observers": observers,
     });
     let assessment = contextos_kernel::conformance::assess_conformance_report(&input);
+    let acceptance = crate::conformance_acceptance::accept(
+        &state.conformance.accepted_suites,
+        &caller.tenant_id,
+        &body.report,
+        &assessment.outcome,
+    );
     state
         .audit
         .append(
             &caller.tenant_id,
             "conformance_assessed",
             json!({"report_id": assessment.report_id, "workflow_id": assessment.workflow_id,
-                "outcome": assessment.outcome, "reasons": assessment.reasons, "assessed_for": caller.principal_id}),
+                "outcome": assessment.outcome, "reasons": assessment.reasons, "assessed_for": caller.principal_id,
+                "acceptance": {"status": acceptance["status"], "reasons": acceptance["reasons"]}}),
             &now,
         )
         .await
@@ -2605,7 +2612,9 @@ where
                 "The audit log is unavailable.",
             )
         })?;
-    Ok(axum::Json(assessment).into_response())
+    let mut response = serde_json::to_value(&assessment).unwrap_or(Value::Null);
+    response["acceptance"] = acceptance;
+    Ok(axum::Json(response).into_response())
 }
 
 #[derive(serde::Deserialize)]

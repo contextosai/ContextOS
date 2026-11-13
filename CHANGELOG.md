@@ -7,6 +7,13 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Suite acceptance for conformance assessments: `[[conformance.accepted_suites]]` pins,
+  per tenant and workflow, the one accepted suite (type, id, version and digest), the
+  cases it must show passed, and whether a failed optional control blocks
+  (`optional_failures = "block" | "disclose"`, required). `POST /v1/conformance/assess`
+  returns `acceptance` (`accepted`, `not_accepted` with reasons, or `no_policy`) beside
+  the unchanged assessment, and audits it. A wrong suite, a missing or failed listed
+  case, or a blocked optional failure cannot yield `accepted` (GUIDE §10).
 - `ctx trials` and `ctx reliability-gate`: per-trial pass/fail from run evidence (the
   run completed, every owed outcome witnessed, scores meet the criteria), and a release
   gate on pass^k per case with a paired non-inferiority interval that can answer

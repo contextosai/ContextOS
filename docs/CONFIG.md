@@ -96,8 +96,21 @@ Principals whose conformance reports and control evidence this deployment trusts
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `accepted_suites` | array of tables | `[]` | Per tenant and workflow, the one suite this deployment accepts, the cases it must show passed and what a failed optional control does. An assessment's `acceptance` is `accepted` only under such a policy. |
 | `trusted_assessors` | array of tables | `[]` | Principals whose conformance reports are trusted. |
 | `trusted_evidence_observers` | array of tables | `[]` | Principals whose control evidence is trusted. |
+
+### `[[conformance.accepted_suites]]`
+
+The one suite a tenant accepts for a workflow, and what it must show.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `optional_failures` | `"block"` \| `"disclose"` | required | What a failed optional control does: `block` or `disclose`. Required. |
+| `required_case_ids` | array of string | required | Cases the report must show passed, under a required control or as utility results. Include the regressions the workflow depends on; a case reported only under an optional control does not count. |
+| `suite` | any | required | The accepted suite, exactly: `{artifact_type, artifact_id, version, sha256}`. A report naming any other suite, or another version or digest, is not accepted. |
+| `tenant_id` | string | required | Tenant whose assessments this policy governs. |
+| `workflow_id` | string | required | Workflow the suite is accepted for. |
 
 ### `[[conformance.trusted_assessors]]`
 
