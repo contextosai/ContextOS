@@ -2303,6 +2303,35 @@ by its observer (`evidence_signatures`); see `contextosd::attest` for the domain
 stale, synthetic or unverified evidence yields `insufficient_evidence`; every outcome is
 audited.
 
+### Accept a suite, not just a report
+
+A verified report shows which suite it names, not that you accept that suite, and
+the assessor's `passed` covers the required controls of the contract, not the cases
+your workflow depends on. Pin both, per tenant and workflow:
+
+```toml
+[[conformance.accepted_suites]]
+tenant_id = "tenant_acme_prod"
+workflow_id = "support.refund"
+suite = { artifact_type = "conformance_suite", artifact_id = "refund_suite", version = "3", sha256 = "sha256:…" }
+# Include the regressions you rely on, e.g. a retry reclaiming an intent another run holds.
+required_case_ids = ["refund.useful", "refund.duplicate_blocked", "intent.retry_reclaims"]
+optional_failures = "block"   # or "disclose"; required, never defaulted
+```
+
+Every assessment response then carries `acceptance`. It is `accepted` only when the
+assessment `passed`, the report names exactly the pinned suite (type, id, version and
+digest), every listed case is reported as passed under a required control or as a
+utility result (where the assessor checked its evidence; a case reported only under an
+optional control does not count), and, with `optional_failures = "block"`, no optional
+control or case failed. Otherwise it is `not_accepted` with reasons
+(`assessment_not_passed`, `suite_not_accepted`, `required_case_missing:<id>`,
+`required_case_not_passed:<id>`, `optional_control_failed:<control>@<version>`).
+Without a policy for the workflow it is `no_policy`: treat that as not accepted.
+`optional_failed` lists failed optional controls under either setting, because the
+assessor's `outcome` can be `passed` while an optional control failed. The acceptance is
+recorded with the audited outcome.
+
 ## 11. Verify the audit trail independently
 
 An auditor should not have to trust the system being audited. Export a tenant's chain

@@ -152,6 +152,11 @@ pub struct ConformanceConfig {
     /// Principals whose control evidence is trusted.
     #[serde(default)]
     pub trusted_evidence_observers: Vec<crate::attest::TrustedSigner>,
+    /// Per tenant and workflow, the one suite this deployment accepts, the cases it must
+    /// show passed and what a failed optional control does. An assessment's
+    /// `acceptance` is `accepted` only under such a policy.
+    #[serde(default)]
+    pub accepted_suites: Vec<crate::conformance_acceptance::AcceptedSuite>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]

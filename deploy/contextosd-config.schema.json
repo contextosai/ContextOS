@@ -1,5 +1,41 @@
 {
   "$defs": {
+    "AcceptedSuite": {
+      "additionalProperties": false,
+      "description": "The one suite a tenant accepts for a workflow, and what it must show.",
+      "properties": {
+        "optional_failures": {
+          "$ref": "#/$defs/OptionalFailures",
+          "description": "What a failed optional control does: `block` or `disclose`. Required."
+        },
+        "required_case_ids": {
+          "description": "Cases the report must show passed, under a required control or as utility results. Include the regressions the workflow depends on; a case reported only under an optional control does not count.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "suite": {
+          "description": "The accepted suite, exactly: `{artifact_type, artifact_id, version, sha256}`. A report naming any other suite, or another version or digest, is not accepted."
+        },
+        "tenant_id": {
+          "description": "Tenant whose assessments this policy governs.",
+          "type": "string"
+        },
+        "workflow_id": {
+          "description": "Workflow the suite is accepted for.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "workflow_id",
+        "suite",
+        "required_case_ids",
+        "optional_failures"
+      ],
+      "type": "object"
+    },
     "AdapterConfig": {
       "additionalProperties": false,
       "properties": {
@@ -406,6 +442,14 @@
       "additionalProperties": false,
       "description": "Principals whose conformance reports and control evidence this deployment trusts, with the Ed25519 keys their attestations are signed with (see `attest`). Each principal names its tenant; an assessment uses those of the caller's tenant only. The caller of an assessment never supplies these.",
       "properties": {
+        "accepted_suites": {
+          "default": [],
+          "description": "Per tenant and workflow, the one suite this deployment accepts, the cases it must show passed and what a failed optional control does. An assessment's `acceptance` is `accepted` only under such a policy.",
+          "items": {
+            "$ref": "#/$defs/AcceptedSuite"
+          },
+          "type": "array"
+        },
         "trusted_assessors": {
           "default": [],
           "description": "Principals whose conformance reports are trusted.",
@@ -1231,6 +1275,21 @@
         {
           "const": "deny",
           "description": "Refuse any later decision on the request.",
+          "type": "string"
+        }
+      ]
+    },
+    "OptionalFailures": {
+      "description": "What a failed optional control does to acceptance.",
+      "oneOf": [
+        {
+          "const": "block",
+          "description": "A failed optional control (or a failed case under one) prevents acceptance.",
+          "type": "string"
+        },
+        {
+          "const": "disclose",
+          "description": "Failed optional controls are listed in the acceptance, which can still be `accepted`.",
           "type": "string"
         }
       ]
@@ -2132,6 +2191,7 @@
     "conformance": {
       "$ref": "#/$defs/ConformanceConfig",
       "default": {
+        "accepted_suites": [],
         "trusted_assessors": [],
         "trusted_evidence_observers": []
       },
