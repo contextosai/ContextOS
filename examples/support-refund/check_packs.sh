@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
 # Offline pack checks: the built 5.3.0 pack matches its sources, and each pack meets
-# its tests. Needs a built ctx (cargo build --release -p ctx).
+# its tests. Runs from a release archive or a checkout, from any directory. Uses ctx
+# from $CTX, else $CONTEXTOS_BIN, else the archive's bin/, else this checkout's
+# target/release or target/debug (cargo build -p ctx), else PATH.
 set -euo pipefail
 cd "$(dirname "$0")"
-CTX="$(cd "$(dirname "${CTX:-../../target/release/ctx}")" && pwd)/$(basename "${CTX:-../../target/release/ctx}")"
+if [ -z "${CTX:-}" ]; then
+    for candidate in "${CONTEXTOS_BIN:+$CONTEXTOS_BIN/ctx}" ../../bin/ctx ../../target/release/ctx ../../target/debug/ctx; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then CTX="$candidate"; break; fi
+    done
+fi
+[ -n "${CTX:-}" ] || CTX="$(command -v ctx || true)"
+[ -n "$CTX" ] && [ -x "$CTX" ] || {
+    echo "ctx not found: run from a release archive, build it (cargo build -p ctx) or set CTX" >&2
+    exit 2
+}
+CTX="$(cd "$(dirname "$CTX")" && pwd)/$(basename "$CTX")"
 "$CTX" build authoring/pack.source.json --check authoring/pack-5.3.0.json >/dev/null
 "$CTX" test --pack pack.json pack_test.json >/dev/null
 "$CTX" test --pack authoring/pack-5.3.0.json authoring/pack_test.json >/dev/null

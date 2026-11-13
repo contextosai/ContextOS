@@ -2375,13 +2375,16 @@ options give the same files.
 | File | What it holds |
 |---|---|
 | `entries.json`, `keys.json` (and `anchor.json` with `--continues`) | The export and keys exactly as supplied, so `ctx audit-verify` re-checks them |
-| `controls.json` | Per framework and control: what ContextOS enforces, the audit event kinds that evidence it, their counts over the period, and a status: `evidenced`, `no_events_in_period` or `outside_audit` (organizational or deployment duties, with a note) |
+| `controls.json` | Per framework and control: what ContextOS enforces, the audit event kinds that evidence it, their counts over the period, and a status: `events_recorded` (at least one listed event occurred), `no_events_in_period` or `outside_audit` (organizational or deployment duties, with a note) |
 | `coverage.md` | The period, the verification, what the evidence covers and what it does not (calls that bypass the gateway, content beyond the entries, organizational controls, configuration unless a report is attached), and the control tables |
 | `config-report.txt` (or the supplied extension) | The `--config-report` file, included as supplied |
 | `manifest.json` | The period, verification result, event counts, control status tally and every file's SHA-256 |
 
-A count shows that a control acted in the period, not that it was configured
-everywhere it should be. The configuration report covers that part.
+A count shows that a control acted in the period. It does not show that every required
+behavior of the control was tested, that it was configured everywhere it should be, or
+that it is effective: the pack is an audit export with a control index, not a test
+result or a compliance finding. The configuration report covers configuration;
+conformance assessment (section 10) covers tested behavior.
 
 ## 12. Operate
 

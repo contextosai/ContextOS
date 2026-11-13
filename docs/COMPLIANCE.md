@@ -7,9 +7,10 @@ control on. The tests named in each threat-model entry are the evidence. For wha
 ContextOS does not cover, see [SCOPE.md](SCOPE.md).
 
 `ctx evidence-pack` turns this map into a reviewer's folder for SOC 2, ISO/IEC 42001,
-the EU AI Act or the OWASP agentic list: a verified audit export, the events behind
-each control counted over the period, and a statement of what the evidence does not
-cover (GUIDE §11).
+the EU AI Act or the OWASP agentic list: a verified audit export, the events recorded
+for each control counted over the period, and a statement of what the evidence does not
+cover (GUIDE §11). A control with events recorded acted in the period; the pack does not
+show that the control was tested or is effective.
 
 This is an evidence map, not legal advice. Which obligations apply depends on your
 role (provider or deployer), your use case and your jurisdiction. ContextOS covers the

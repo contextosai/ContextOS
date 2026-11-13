@@ -35,6 +35,23 @@ minor versions may break APIs and every break is listed.
   agent's tool calls and the reliability gate turns its verdicts into a release
   decision.
 
+### Changed (breaking)
+
+- `ctx evidence-pack` reports a control whose event kinds occurred in the period as
+  `events_recorded` instead of `evidenced`, and the pack version is now
+  `contextos.evidence_pack.v2`. A count of audit events shows a control acted; it does
+  not show that its required behaviors were tested or that it is effective, and
+  `coverage.md` now says so.
+
+### Fixed
+
+- `examples/support-refund/check_packs.sh` and the pack-authoring skill's
+  `check_pack.sh` find `ctx` in a release archive's `bin/` (then `CONTEXTOS_BIN`, a
+  release or debug build, `PATH`) instead of defaulting to an absent
+  `target/release/ctx`, so the archive's pack checks run without overrides. The README
+  lists the archive's pack-check, workflow and receipt-verification commands, and the
+  release-archive gate runs each of them with no overrides.
+
 ## 0.1.0-alpha.20 - 2026-11-10
 
 Twentieth alpha: fixes from the fourteenth review. Intent keys hold across retries

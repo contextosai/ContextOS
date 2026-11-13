@@ -93,7 +93,7 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
 
     let read = |name: &str| std::fs::read(out.join(name)).unwrap();
     let manifest: Value = serde_json::from_slice(&read("manifest.json")).unwrap();
-    assert_eq!(manifest["pack_version"], "contextos.evidence_pack.v1");
+    assert_eq!(manifest["pack_version"], "contextos.evidence_pack.v2");
     assert_eq!(manifest["verification"]["verified"], true);
     // Every file the manifest lists is in the pack with that digest.
     for (name, digest) in manifest["files"].as_object().unwrap() {
@@ -127,7 +127,7 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
             .clone()
     };
     let oversight = find("eu-ai-act", "Art. 14(4)(b)");
-    assert_eq!(oversight["status"], "evidenced");
+    assert_eq!(oversight["status"], "events_recorded");
     assert_eq!(oversight["observed"]["approval_timed_out"], 1);
     assert_eq!(oversight["observed"]["approval_review_too_fast"], 0);
     assert_eq!(find("eu-ai-act", "Art. 14(4)(e)")["status"], "no_events_in_period");
@@ -136,6 +136,9 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
     let coverage = String::from_utf8(read("coverage.md")).unwrap();
     assert!(coverage.contains("## What it does not cover"), "{coverage}");
     assert!(coverage.contains("bypasses the gateway"), "{coverage}");
+    // The pack never claims a control was tested or met.
+    assert!(coverage.contains("not a test result"), "{coverage}");
+    assert!(!coverage.contains("| evidenced |"), "{coverage}");
     assert!(coverage.contains("config-report.json"), "{coverage}");
 
     // Deterministic: the same export gives the same pack.

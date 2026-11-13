@@ -17,6 +17,6 @@ mkdir -p .claude/skills
 ln -s "$(pwd)/skills/contextos-pack-authoring" .claude/skills/contextos-pack-authoring
 ```
 
-The skill's scripts need `ctx` on `PATH`, in `$CTX`, or built in this checkout
-(`cargo build --release -p ctx`). `examples/support-refund/check_packs.sh` runs them
+The skill's scripts need `ctx` on `PATH`, in `$CTX` or `$CONTEXTOS_BIN`, in a release
+archive's `bin/`, or built in this checkout (`cargo build -p ctx`). `examples/support-refund/check_packs.sh` runs them
 in CI, so the commands a skill teaches stay working.
