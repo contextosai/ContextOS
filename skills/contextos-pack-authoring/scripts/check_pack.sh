@@ -5,16 +5,25 @@
 #   check_pack.sh --pack PACK [--tests SUITE]... [--run RUN [--roles r1,r2] [--intent I]]
 #                 [--baseline OLD --cases CASES [--acknowledge ACK]]
 #
-# Uses `ctx` from $CTX, else PATH, else this checkout's target/release/ctx. Exits
-# non-zero on the first failing check; prints each plan for a person to read.
+# Uses `ctx` from $CTX, else PATH, else $CONTEXTOS_BIN, else a release archive's bin/,
+# else this checkout's target/release or target/debug. Exits non-zero on the first
+# failing check; prints each plan for a person to read.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
+ctx=""
 if [[ -n "${CTX:-}" ]]; then ctx="$CTX"
 elif command -v ctx >/dev/null 2>&1; then ctx="$(command -v ctx)"
-else ctx="$repo/target/release/ctx"; fi
-[[ -x "$ctx" ]] || { echo "ctx not found: set CTX or build it (cargo build --release -p ctx)" >&2; exit 2; }
+else
+    for candidate in "${CONTEXTOS_BIN:+$CONTEXTOS_BIN/ctx}" "$repo/bin/ctx" "$repo/target/release/ctx" "$repo/target/debug/ctx"; do
+        if [[ -n "$candidate" && -x "$candidate" ]]; then ctx="$candidate"; break; fi
+    done
+fi
+[[ -n "$ctx" && -x "$ctx" ]] || {
+    echo "ctx not found: run from a release archive, build it (cargo build -p ctx) or set CTX" >&2
+    exit 2
+}
 
 pack="" run="" roles="" intent="" baseline="" cases="" ack=""
 tests=()

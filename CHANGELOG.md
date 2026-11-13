@@ -28,6 +28,15 @@ minor versions may break APIs and every break is listed.
   agent's tool calls and the reliability gate turns its verdicts into a release
   decision.
 
+### Fixed
+
+- `examples/support-refund/check_packs.sh` and the pack-authoring skill's
+  `check_pack.sh` find `ctx` in a release archive's `bin/` (then `CONTEXTOS_BIN`, a
+  release or debug build, `PATH`) instead of defaulting to an absent
+  `target/release/ctx`, so the archive's pack checks run without overrides. The README
+  lists the archive's pack-check, workflow and receipt-verification commands, and the
+  release-archive gate runs each of them with no overrides.
+
 ## 0.1.0-alpha.20 - 2026-11-10
 
 Twentieth alpha: fixes from the fourteenth review. Intent keys hold across retries
