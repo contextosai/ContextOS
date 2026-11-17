@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.99.1-bookworm AS build
+FROM rust:1.100.0-bookworm AS build
 WORKDIR /src
 COPY . .
 # Use the image's installed compiler without installing development components.
