@@ -54,7 +54,7 @@ toml = "1"
 uuid = { version = "1", features = ["v7"] }
 clap = { version = "4", features = ["derive"] }
 # jsonwebtoken needs a crypto backend; rust_crypto would pull rsa (RUSTSEC-2023-0071).
-jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", features = ["aws_lc_rs"] }
 ring = "0.17"
 mimalloc = { version = "0.1", default-features = false }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
