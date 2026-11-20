@@ -32,6 +32,17 @@ chosen opportunity, competing approaches and unvalidated assumptions.
 
 > Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.21](docs/releases/v0.1.0-alpha.21.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
+## See it fail first
+
+The [Agent Failure Lab](lab) needs nothing installed: pick one of five ways a refund
+agent moves money it should not (a lost response and a redelivered ticket, a refund
+beyond what the customer asked, a split to get under an approval line, small refunds
+past a daily limit, a loop) and step through it with and without a gateway, including
+the fairest baseline for each (idempotency keys, a check in the tool). It replays a
+recorded run of the real gateway; open `lab/index.html` from a checkout. To ask the same
+question of your own agent, [replay its refund calls](examples/replay-refunds) through a
+local gateway.
+
 ## Quickstart
 
 Install the Rust toolchain specified in [rust-toolchain.toml](rust-toolchain.toml),

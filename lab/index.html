@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent Failure Lab</title>
+<meta name="description" content="Five ways an agent with a refund tool moves money it should not, stepped through with and without a ContextOS gateway. Replayed from a recorded run of the real gateway.">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">ContextOS · Agent Failure Lab</p>
+    <h1>Five ways an agent moves money it should not.</h1>
+    <p class="lede">A support agent has a refund tool. Pick a failure and step through it. The same attempts go straight
+      to the payment API on one side and through a ContextOS gateway on the other, and you see what each one paid.</p>
+    <p class="note">Replayed from a recorded run of the real gateway against a synthetic card processor. Nothing to
+      install, no account, no real money.</p>
+  </header>
+
+  <main>
+    <section class="menu" id="menu" aria-labelledby="menu-title">
+      <h2 id="menu-title">Pick a failure</h2>
+      <ol class="choices" id="menu-list"></ol>
+    </section>
+
+    <section class="stage" id="stage" aria-labelledby="stage-title" hidden>
+      <ol class="rail" id="rail" aria-label="Steps of this failure"></ol>
+      <div class="prompt" id="prompt" aria-live="polite"></div>
+    </section>
+
+    <section id="worlds" class="worlds" aria-label="What each side paid after this step" hidden></section>
+
+    <section class="record" id="record" aria-labelledby="record-title" hidden></section>
+
+    <section class="ending" id="ending" hidden></section>
+
+    <section class="tally" id="tally" aria-labelledby="tally-title"></section>
+  </main>
+
+  <footer class="colophon" id="colophon"></footer>
+</div>
+<noscript><p class="page">This lab plays back a recorded run and needs JavaScript.</p></noscript>
+<script src="story.js"></script>
+<script src="words.js"></script>
+<script src="lab.js"></script>
+</body>
+</html>

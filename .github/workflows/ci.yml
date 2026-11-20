@@ -156,6 +156,8 @@ jobs:
           ./examples/metering-proxy/run.sh
           ./examples/tower/run.sh
           ./examples/replay/run.sh
+          ./examples/replay-refunds/run.sh
+          ./examples/failure-lab/check.sh
           ./examples/consequential-tools/run.sh
       - name: Node HTTP client against contextosd
         run: |

@@ -5,6 +5,23 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+
+- Agent Failure Lab (`lab/`): a static page where a visitor picks one of five failures of
+  a refund agent (a lost response and a redelivered ticket, a refund beyond the task, a
+  split under the approval line, refunds past a daily limit, a loop) and compares what
+  was paid without a gateway, with the strongest baseline for each, and behind
+  ContextOS. It plays back `lab/story.js`, recorded from contextosd by
+  `examples/failure-lab`; `examples/failure-lab/check.sh` (in `scripts/check.sh` and CI)
+  fails when the runtime's behaviour no longer matches the recording, and verifies each
+  scenario's audit log with `ctx audit-verify`.
+- Refund replay (`examples/replay-refunds`): replays an agent's own refund tool calls,
+  in common log shapes, through a local gateway and reports in money what would have been
+  sent, held, refused as a repeat, stopped at an order ceiling or sent for approval, with
+  possible false blocks and repeats to review. Shipped in release archives.
+- `local_gateway` in the replay example takes a replacement pack and reports the
+  development fact services' URLs.
+
 ## 0.1.0-alpha.21 - 2026-11-13
 
 Twenty-first alpha: evaluation gates, conformance acceptance under a pinned suite

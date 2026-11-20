@@ -1,0 +1,11 @@
+{"ts": "2026-11-03T09:14:00Z", "run_id": "conv_8812", "tool": "lookup_order", "args": {"order": "A-1042"}, "outcome": "ok", "output": {"status": "delivered", "total": 89.0}}
+{"ts": "2026-11-03T09:14:05Z", "run_id": "conv_8812", "tool": "refund_payment", "args": {"order": "A-1042", "customer": "cus_301", "amount": 25.0, "reason": "damaged"}, "outcome": "ok", "output": {"refund_id": "re_9a1"}}
+{"ts": "2026-11-03T09:14:41Z", "run_id": "conv_8812", "tool": "refund_payment", "args": {"order": "A-1042", "customer": "cus_301", "amount": 25.0, "reason": "damaged"}, "outcome": "ok", "output": {"refund_id": "re_9a2"}}
+{"ts": "2026-11-03T09:19:30Z", "run_id": "conv_8812-redelivered", "tool": "refund_payment", "args": {"order": "A-1042", "customer": "cus_301", "amount": 25.0, "reason": "damaged"}, "outcome": "ok", "output": {"refund_id": "re_9a3"}}
+{"ts": "2026-11-03T10:02:11Z", "run_id": "conv_8840", "tool": "refund_payment", "arguments": "{\"order\": \"B-2210\", \"customer\": \"cus_118\", \"amount\": 40.0}", "outcome": "timeout"}
+{"ts": "2026-11-03T10:02:52Z", "run_id": "conv_8840", "tool": "refund_payment", "arguments": "{\"order\": \"B-2210\", \"customer\": \"cus_118\", \"amount\": 40.0}", "outcome": "ok", "output": {"refund_id": "re_b77"}}
+{"ts": "2026-11-03T11:30:00Z", "run_id": "conv_8901", "tool": "refund_payment", "args": {"order": "C-3301", "customer": "cus_502", "amount": 15.0}, "outcome": "ok", "output": {"refund_id": "re_c01"}}
+{"ts": "2026-11-03T11:31:10Z", "run_id": "conv_8901", "tool": "refund_payment", "args": {"order": "C-3301", "customer": "cus_502", "amount": 10.0}, "outcome": "ok", "output": {"refund_id": "re_c02"}}
+{"ts": "2026-11-03T11:31:20Z", "run_id": "conv_8901", "tool": "send_email", "args": {"to": "cus_502", "template": "refund_issued"}, "outcome": "ok"}
+{"ts": "2026-11-03T15:45:00Z", "run_id": "conv_9007", "tool": "refund_payment", "args": {"order": "D-4410", "customer": "cus_77", "amount": 120.0}, "outcome": "ok", "output": {"refund_id": "re_d10"}}
+{"ts": "2026-11-06T08:12:00Z", "run_id": "conv_9310", "tool": "refund_payment", "args": {"order": "D-4410", "customer": "cus_77", "amount": 120.0}, "outcome": "ok", "output": {"refund_id": "re_d11"}}

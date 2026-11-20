@@ -26,7 +26,7 @@ class CheckScriptTests(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
             for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
-                         "compensation", "outcome-witness", "evaluation-loop", "why-not-a-row-lock", "postgres-drill", "replay", "consequential-tools", "tower"):
+                         "compensation", "outcome-witness", "evaluation-loop", "why-not-a-row-lock", "postgres-drill", "replay", "replay-refunds", "failure-lab", "consequential-tools", "tower"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"
@@ -42,6 +42,8 @@ class CheckScriptTests(unittest.TestCase):
                     text += "echo 'evaluation loop complete'\n"
                 if name == "replay":
                     text += "echo 'replay report written'\n"
+                if name == "replay-refunds":
+                    text += "echo 'refund replay report written'\n"
                 if name == "consequential-tools":
                     text += "echo 'consequential-tools report written'\n"
                 if name == "why-not-a-row-lock":
@@ -55,6 +57,8 @@ class CheckScriptTests(unittest.TestCase):
                         text += "for ((i=0; i<10000; i++)); do echo 'additional example output'; done\n"
                     text += f"exit {agent_exit if name == 'agent-loop' else tower_exit}\n"
                 (example / "run.sh").write_text(text)
+                if name == "failure-lab":
+                    (example / "check.sh").write_text("#!/usr/bin/env bash\necho 'failure lab story matches the runtime'\n")
                 if name == "support-refund":
                     (example / "check_packs.sh").write_text("#!/usr/bin/env bash\necho 'example packs checked'\n")
             # The drill runs only when a database is configured; never inherit one.
