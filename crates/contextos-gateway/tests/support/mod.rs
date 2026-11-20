@@ -183,6 +183,15 @@ pub struct Approvals(
 
 impl Approvals {
     pub fn approve(&self, digest: &str) {
+        self.decide(digest, "approved");
+    }
+
+    /// A verified decision refusing the action, as a reviewer's "deny".
+    pub fn deny(&self, digest: &str) {
+        self.decide(digest, "denied");
+    }
+
+    fn decide(&self, digest: &str, verdict: &str) {
         let mut store = self.1.lock().unwrap();
         let binding = store.get(digest).cloned().expect("requested binding");
         let proposal = json!({"request_id": "req_1", "proposal_id": binding["proposal_id"], "run_id": binding["run_id"],
@@ -208,7 +217,7 @@ impl Approvals {
             ("approval_id", json!("approval_1")),
             ("approval_request_id", json!(request_id)),
             ("approver", approver.clone()),
-            ("decision", json!("approved")),
+            ("decision", json!(verdict)),
             ("decided_at", json!("2026-10-20T09:30:00Z")),
             ("verification_ref", artifact("approval_decision", "approval_1")),
         ] {

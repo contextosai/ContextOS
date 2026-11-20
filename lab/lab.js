@@ -185,6 +185,9 @@
         return `Revoked ${p.kind} ${p.target}, by ${p.operator}`;
       case "revocation_restored":
         return `Restored ${p.kind} ${p.target}, by ${p.operator}: ${p.reason}`;
+      case "revocation_refusal":
+        return p.stage === "admission" ? `Refused a new run of ${p.agent_id}: the ${p.revoked_kind} was revoked by ${p.revoked_by}`
+          : `Refused the call: the ${p.revoked_kind} was revoked by ${p.revoked_by}`;
       default:
         return WORDS.kinds[entry.kind] || entry.kind.replace(/_/g, " ");
     }

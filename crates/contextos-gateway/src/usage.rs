@@ -22,7 +22,7 @@ use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, transac
 use serde_json::{Value, json};
 
 use crate::admission::RunAdmission;
-use crate::revocations::{matching, revocations_key, run_targets};
+use crate::revocations::{matched, revocations_key, run_targets};
 use crate::{Gateway, GatewayError};
 
 /// What a reservation covers.
@@ -36,8 +36,8 @@ pub enum UsageKind {
 pub enum UsageRefusal {
     #[error("the budget cannot fit this reservation: {0:?}")]
     Budget(Vec<String>),
-    #[error("revoked: {0}")]
-    Revoked(String),
+    #[error("revoked: {}", .0.reason_code)]
+    Revoked(crate::Revoked),
     #[error("the usage values are out of range")]
     Invalid,
     #[error("no such usage reservation in this run")]
@@ -76,8 +76,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .get(&revocations_key(&admission.tenant_id))
             .await
             .map_err(GatewayError::from)?;
-        match matching(revocations.as_ref().map(|r| &r.body), &run_targets(admission)) {
-            Some(reason) => Err(UsageRefusal::Revoked(reason)),
+        match matched(revocations.as_ref().map(|r| &r.body), &run_targets(admission)) {
+            Some(revoked) => Err(UsageRefusal::Revoked(revoked)),
             None => Ok(()),
         }
     }

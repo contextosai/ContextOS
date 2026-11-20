@@ -63,6 +63,12 @@ class ToolPaused(ToolOutcome):
     def input_requests(self) -> Optional[dict]:
         return (self.result.get("output") or {}).get("result", {}).get("inputRequests")
 
+    @property
+    def applied_operation(self) -> Optional[dict]:
+        """For a ``duplicate`` whose operation was already applied: its id, outcome and
+        the recorded observation it rests on. Stop retrying and use that result."""
+        return (self.result.get("metadata") or {}).get("applied_operation")
+
 
 class ToolBlocked(ToolOutcome):
     """Authority, policy, constraints or budget refused the call."""

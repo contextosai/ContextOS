@@ -7,7 +7,8 @@ laptop with no dependencies beyond Python 3:
   :7701 authority   - an identity/mandate broker that grants exactly what is asked
   :7702 constraints - a control plane that attests every required control
   :7703 approvals   - an approval service: it records each request, and a reviewer grants
-                      one with {"op": "approve", "approval_request_id": ...}
+                      one with {"op": "approve", "approval_request_id": ...} or refuses
+                      it with {"op": "deny", ...}
   :7704 tools       - an MCP (2026-07-28, stateless) server with issue_refund and lookup_order
 
 The gateway still verifies every fact it receives (currency, binding, scope, digests),
@@ -100,8 +101,9 @@ def constraints(req):
 
 # Inside every window, and never before the decision it verifies.
 DECIDED = "2026-01-02T00:00:00Z"
-# action digest -> the request as opened, and the verified approval once granted.
+# action digest -> the request as opened, and the verified decision once a reviewer made it.
 REQUESTS, APPROVED = {}, {}
+DECISIONS = {"approve": "approved", "deny": "denied"}
 
 
 def approvals(req):
@@ -114,14 +116,17 @@ def approvals(req):
         return {"approval_request_id": request_id}
     # A reviewer's decision. A real approval service authenticates the person, checks
     # their entitlement and shows them the exact binding before recording a decision.
+    # A denial is a verified decision too: the gateway refuses the action
+    # (approval_denied) instead of waiting for one.
+    verdict = DECISIONS[req["op"]]
     action_digest, opened = next((d, r) for d, r in REQUESTS.items() if r["request_id"] == req["approval_request_id"])
-    APPROVED[action_digest] = approved(action_digest, opened)
-    print(f"[approvals] approved {opened['request_id']}", flush=True)
-    return {"approved": opened["request_id"]}
+    APPROVED[action_digest] = approved(action_digest, opened, verdict)
+    print(f"[approvals] {verdict} {opened['request_id']}", flush=True)
+    return {verdict: opened["request_id"]}
 
 
-def approved(action_digest, opened):
-    """The verified approval material for one exact action: request, decision, the
+def approved(action_digest, opened, verdict="approved"):
+    """The verified decision material for one exact action: request, decision, the
     observation that verified the decision, and the approver's entitlement."""
     run, binding, request_id = opened["run"], opened["binding"], opened["request_id"]
     tenant = run["tenant_id"]
@@ -135,7 +140,7 @@ def approved(action_digest, opened):
                "eligible_approvers": [approver], "eligible_approver_roles": ["finance_lead"], "required_approvals": 1,
                "prohibit_self_approval": True, "verification_ref": artifact("approval_request", request_id)}
     decision = {**proposal, "approval_id": f"{request_id}:1", "approval_request_id": request_id, "approver": approver,
-                "decision": "approved", "decided_at": DECIDED,
+                "decision": verdict, "decided_at": DECIDED,
                 "verification_ref": artifact("approval_decision", f"{request_id}:1")}
     observation = {"approval_id": decision["approval_id"],
                    "decision_digest": digest({"domain": "contextos.approval_decision.v1", "decision": decision}),

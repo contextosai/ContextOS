@@ -2139,7 +2139,7 @@
       "post": {
         "operationId": "revoke",
         "summary": "Revoke a tenant, pack, agent, adapter or capability",
-        "description": "Kinds: tenant, pack, principal (the authenticated caller and the runs it admitted), agent (the agent id a run declares), adapter, capability. Effective for the next dispatch and admission: effects of runs bound to a revoked tenant, pack or agent, and calls to a revoked adapter or capability, are blocked before anything is claimed (`revoked_<kind>`); new runs of a revoked tenant, pack or agent are refused. Audited before it takes effect; idempotent.",
+        "description": "Kinds: tenant, pack, principal (the authenticated caller and the runs it admitted), agent (the agent id a run declares), adapter, capability. Effective for the next dispatch and admission: effects of runs bound to a revoked tenant, pack or agent, and calls to a revoked adapter or capability, are blocked before anything is claimed (`revoked_<kind>`); new runs of a revoked tenant, pack or agent are refused. Each refusal is audited as `revocation_refusal`, naming who revoked the target. Audited before it takes effect; idempotent.",
         "requestBody": {
           "required": true,
           "content": {

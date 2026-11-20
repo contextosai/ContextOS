@@ -92,6 +92,11 @@ export class ToolPaused extends ToolOutcome {
   get inputRequests() {
     return this.result.output?.result?.inputRequests ?? null;
   }
+  /** For a `duplicate` whose operation was already applied: its id, outcome and the
+   * recorded observation it rests on. Stop retrying and use that result. */
+  get appliedOperation() {
+    return this.result.metadata?.applied_operation ?? null;
+  }
 }
 export class ToolBlocked extends ToolOutcome {}
 export class ToolRejected extends ToolOutcome {}

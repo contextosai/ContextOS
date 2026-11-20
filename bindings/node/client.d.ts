@@ -124,6 +124,20 @@ export declare class ToolPaused extends ToolOutcome {
    */
   readonly kind: "approval" | "input" | "unknown_outcome" | "duplicate" | "other";
   readonly inputRequests: Record<string, Json> | null;
+  /**
+   * For a `duplicate` whose operation was already applied: its id, outcome and the
+   * recorded observation it rests on. Stop retrying and use that result.
+   */
+  readonly appliedOperation: AppliedOperation | null;
+}
+/** An applied operation a refused retry repeats (`metadata.applied_operation`). */
+export interface AppliedOperation {
+  operation_id: string;
+  outcome: "confirmed" | "partial";
+  attempt_id: string;
+  observation_id: string;
+  observed_at: string;
+  evidence_ref: Record<string, Json>;
 }
 /** Authority, policy, constraints or budget refused the call. */
 export declare class ToolBlocked extends ToolOutcome {}

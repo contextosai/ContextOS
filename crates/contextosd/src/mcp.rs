@@ -206,14 +206,20 @@ fn call_outcome(outcome: &DispatchOutcome) -> Value {
             "requestState": report.operation_id,
         });
     }
-    let summary = json!({
+    let mut summary = json!({
         "status": status, "reason_codes": report.reason_codes, "obligations": report.obligations,
         "operation_id": report.operation_id, "approval_request_id": report.approval_request_id,
     });
+    let applied = result["metadata"].get("applied_operation");
+    if let Some(applied) = applied {
+        summary["applied_operation"] = applied.clone();
+    }
     // Tell the model plainly whether anything happened, so it neither retries an effect
     // that may have applied nor reports one that did not.
     let consequence = if report.obligations.iter().any(|o| o == "reconcile_effect_before_retry") {
         "The outcome is unknown and must be reconciled; do not retry it."
+    } else if applied.is_some() {
+        "This call had no effect, but the same operation was applied earlier; do not retry it."
     } else {
         "This call had no effect; do not retry it unchanged."
     };

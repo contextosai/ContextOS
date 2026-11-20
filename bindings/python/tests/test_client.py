@@ -59,7 +59,7 @@ def start_world():
             break
         except OSError:
             time.sleep(0.05)
-    return server, base
+    return server, base, ports
 
 
 def transport() -> None:
@@ -137,7 +137,7 @@ def main() -> None:
     if not BINARY.exists():
         print(f"skipped: {BINARY} not built")
         return
-    server, base = start_world()
+    server, base, ports = start_world()
     try:
         client = Client(base, token=KEY)
         admission = json.loads((EXAMPLE / "requests/run.json").read_text())
@@ -171,6 +171,9 @@ def main() -> None:
             raise AssertionError("replay must not succeed")
         except ToolPaused as paused:
             assert paused.reason_codes == ["retry_unsafe"], paused.reason_codes
+            # The answer names the refund already made, so the agent can stop retrying.
+            assert paused.applied_operation["operation_id"] == call["idempotency_key"], paused.result
+            assert paused.applied_operation["outcome"] == "confirmed", paused.result
 
         # This example's refund declares no compensation: nothing is listed, and a request
         # to compensate it is refused before the provider.
@@ -333,10 +336,40 @@ def main() -> None:
         entries = list(client.audit_entries(page=2))
         assert [e["sequence"] for e in entries] == list(range(1, len(entries) + 1))
         print(f"ok: client end to end ({len(entries)} audit entries)")
+        denied_approval(client, admission, call, ports["approvals"])
         asyncio.run(async_client(base, admission))
     finally:
         server.terminate()
         server.wait(timeout=10)
+
+
+def denied_approval(client: Client, admission: dict, call: dict, approvals_port: int) -> None:
+    """A refund above the pack's approval line pauses; a reviewer denies it in the
+    development approval service, and the same call is then refused, not sent."""
+    admission = json.loads(json.dumps(admission))
+    admission["run_context"]["run_id"] = admission["contract"]["run_id"] = "run_denied"
+    admission["contract"]["contract_id"] = "contract_run_denied"
+    admission["request"]["input"]["context"]["refund_amount"] = 4200
+    run = client.admit(admission)
+    args = {**call["args"], "amount_minor": 420_000}
+    send = lambda: run.call_tool(call["capability_id"], args, approval_mode="destructive",  # noqa: E731
+                                 idempotency_key="refund:denied", evidence_refs=call["evidence_refs"])
+    try:
+        send()
+        raise AssertionError("a refund above the approval line ran unapproved")
+    except ToolPaused as paused:
+        assert paused.kind == "approval", paused.obligations
+        request_id = paused.report["approval_request_id"]
+    body = json.dumps({"op": "deny", "approval_request_id": request_id}).encode()
+    with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{approvals_port}/", body,
+                                                      {"Content-Type": "application/json"})) as response:
+        assert json.load(response) == {"denied": request_id}
+    try:
+        send()
+        raise AssertionError("a denied refund ran")
+    except ToolBlocked as blocked:
+        assert "approval_denied" in blocked.reason_codes, blocked.reason_codes
+    print("ok: a denied approval refuses the call")
 
 
 async def async_client(base: str, admission: dict) -> None:

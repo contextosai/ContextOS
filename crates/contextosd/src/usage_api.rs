@@ -71,12 +71,9 @@ fn usage_error(refusal: UsageRefusal) -> ApiError {
             "The run's budget cannot fit this.",
         )
         .with_detail(json!(reasons)),
-        UsageRefusal::Revoked(reason) => ApiError::new(
-            StatusCode::FORBIDDEN,
-            "revoked",
-            "This run has been revoked by an operator.",
-        )
-        .with_detail(json!([reason])),
+        UsageRefusal::Revoked(revoked) => {
+            ApiError::new(StatusCode::FORBIDDEN, "revoked", revoked.message()).with_detail(json!([revoked.reason_code]))
+        }
         UsageRefusal::Invalid => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "usage_invalid",
