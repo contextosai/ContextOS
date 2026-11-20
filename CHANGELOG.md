@@ -22,6 +22,11 @@ minor versions may break APIs and every break is listed.
 - `local_gateway` in the replay example takes a replacement pack and reports the
   development fact services' URLs.
 
+### Changed
+
+- Align local, CI and container builds on Rust 1.100.0; update jsonwebtoken to 12 and
+  jsonschema to 0.61.
+
 ## 0.1.0-alpha.21 - 2026-11-13
 
 Twenty-first alpha: evaluation gates, conformance acceptance under a pinned suite
