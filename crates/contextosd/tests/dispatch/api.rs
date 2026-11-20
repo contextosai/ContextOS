@@ -105,6 +105,10 @@ async fn agent_hosts_use_governed_tools_over_mcp() {
         json!(["retry_unsafe"])
     );
     assert_eq!(retried["result"]["_meta"]["io.contextos/operationId"], operation);
+    // It names the refund already made, so the host can stop retrying.
+    let applied = &retried["result"]["structuredContent"]["applied_operation"];
+    assert_eq!(applied["operation_id"], operation, "{retried}");
+    assert_eq!(applied["outcome"], "confirmed");
     assert_eq!(w.provider_calls.load(Ordering::SeqCst), 1);
 
     // The listed name and the capability id name the same tool: a retry by either is the

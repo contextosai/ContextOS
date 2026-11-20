@@ -98,7 +98,8 @@ try {
   assert.equal((await run.checkToolCall(call.capability_id, call.args, options)).operation_exists, true);
 
   await assert.rejects(run.callTool(call.capability_id, call.args, options), (error) =>
-    error instanceof ToolPaused && error.reasonCodes[0] === "retry_unsafe");
+    error instanceof ToolPaused && error.reasonCodes[0] === "retry_unsafe"
+      && error.appliedOperation?.operation_id === call.idempotency_key && error.appliedOperation.outcome === "confirmed");
 
   // This example's refund declares no compensation: nothing is listed, and a request to
   // compensate it is refused before the provider.

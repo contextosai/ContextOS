@@ -21,11 +21,34 @@ minor versions may break APIs and every break is listed.
   possible false blocks and repeats to review. Shipped in release archives.
 - `local_gateway` in the replay example takes a replacement pack and reports the
   development fact services' URLs.
+- Evidence required per capability: a manifest's `"evidence_required": true` rejects a
+  call that cites no evidence admitted for its run (`evidence_required`, obligation
+  `cite_admitted_evidence`). Off by default; compensations are exempt.
+- A refused run of a revoked agent, pack, principal, user or delegation is audited as
+  `revocation_refusal` with `stage: "admission"`, the agent and who revoked it
+  (`revoked_by`); blocked calls' `revocation_refusal` entries name the revoker too.
+- A retry of an operation that was already applied names the recorded result in
+  `metadata.applied_operation` (operation id, outcome, attempt, observation time and
+  evidence ref) and says it was applied. The Python client's `ToolPaused` has
+  `applied_operation`, the Node client's `appliedOperation`.
+- The development approval service (`examples/support-refund/dev_services.py`) can deny
+  a request (`{"op": "deny", ...}`), so a demo can show a call refused with
+  `approval_denied`.
 
 ### Changed
 
 - Align local, CI and container builds on Rust 1.100.0; update jsonwebtoken to 12 and
   jsonschema to 0.61.
+- Revocation refusals name who revoked the target: "The agent has been revoked by
+  circuit breaker refund_rate." instead of always "revoked by an operator". The Rust
+  `Gateway::admission_revoked` returns the matching `Revoked` (reason code, kind, target,
+  revoker), and `UsageRefusal::Revoked` carries it.
+
+### Fixed
+
+- Retrying an applied operation under a shared guarantee no longer appends another
+  `shared_guarantee_settlement_requested` and `shared_guarantee_settled` pair each time;
+  a settlement is audited once.
 
 ## 0.1.0-alpha.21 - 2026-11-13
 

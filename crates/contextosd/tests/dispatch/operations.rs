@@ -110,10 +110,32 @@ async fn operators_revoke_and_restore_targets() {
         .await
         .unwrap();
     assert_eq!(refused.status(), 403);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["detail"], json!(["revoked_agent"]));
     assert_eq!(
-        refused.json::<Value>().await.unwrap()["error"]["detail"],
-        json!(["revoked_agent"])
+        refused["error"]["message"],
+        "The agent has been revoked by an operator."
     );
+    // The refused admission is in the audit log, naming the agent and the revoker.
+    let entries: Value = plain
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let refusal = entries["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|e| e["kind"] == "revocation_refusal")
+        .map(|e| e["payload"].clone())
+        .unwrap();
+    assert_eq!(refusal["stage"], "admission");
+    assert_eq!(refusal["agent_id"], "agt_support");
+    assert_eq!(refusal["revoked_by"], "svc_oncall");
 
     let verified: Value = plain
         .get(format!("{}/v1/audit/verify", w.base))

@@ -46,7 +46,8 @@ key — the gateway rejects it as incompatible reuse. Raise `refund_amount` in
 `requests/run.json` above 3000 — the pack's high-value rule pins `require_approval` and
 dispatch pauses for approval. Approving the request in the development approval service
 (`{"op": "approve", "approval_request_id": …}` to its port) and re-sending the identical
-call redeems the approval once; `./examples/frameworks/run.sh <framework> --approval`
+call redeems the approval once (`{"op": "deny", …}` refuses it instead, and the call is
+blocked with `approval_denied`); `./examples/frameworks/run.sh <framework> --approval`
 does this through each framework's human-in-the-loop path.
 
 [`pack_test.json`](pack_test.json) states what this pack must decide (a refund over

@@ -8,7 +8,8 @@
 //! a `delegation` (one exact chain of actors for one user, by its digest; see
 //! [`crate::delegation_chain`]), an `adapter` or a `capability`. While revoked:
 //!
-//! - admission refuses new runs of a revoked tenant, pack or agent;
+//! - admission refuses new runs of a revoked tenant, pack or agent, audited as
+//!   `revocation_refusal` (`stage: "admission"`) with the agent and the revoker;
 //! - dispatch refuses every effect of a run whose tenant, pack or agent is revoked,
 //!   and every call to a revoked adapter or capability, before anything is claimed.
 //!   The check is part of the concurrent authorization reads, so it adds no serial
@@ -51,13 +52,45 @@ pub(crate) fn revocations_key(tenant_id: &str) -> DocKey {
     DocKey::new(tenant_id, DocKind::Revocations, "revocations")
 }
 
-/// The first revoked target that applies, as a reason code (`revoked_<kind>`).
-pub(crate) fn matching(revocations: Option<&Value>, targets: &[(&str, &str)]) -> Option<String> {
+/// A revocation that applies to a run or a call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Revoked {
+    /// `revoked_<kind>`.
+    pub reason_code: String,
+    pub kind: String,
+    pub target: String,
+    /// Who revoked it: an operator's principal, or `circuit_breaker:<id>` when a
+    /// breaker tripped it.
+    pub by: String,
+}
+
+impl Revoked {
+    /// Who revoked it, as told to the caller: the breaker by id, an operator unnamed.
+    pub fn revoker(&self) -> String {
+        match self.by.strip_prefix("circuit_breaker:") {
+            Some(id) => format!("circuit breaker {id}"),
+            None => "an operator".to_owned(),
+        }
+    }
+
+    /// The refusal's message, naming what is revoked and by whom.
+    pub fn message(&self) -> String {
+        format!("The {} has been revoked by {}.", self.kind, self.revoker())
+    }
+}
+
+/// The first revoked target that applies.
+pub(crate) fn matched(revocations: Option<&Value>, targets: &[(&str, &str)]) -> Option<Revoked> {
     let list = revocations?.get("revoked")?.as_array()?;
     targets.iter().find_map(|(kind, id)| {
         list.iter()
-            .any(|r| r["kind"] == *kind && r["target"] == *id)
-            .then(|| format!("revoked_{kind}"))
+            .find(|r| r["kind"] == *kind && r["target"] == *id)
+            .map(|r| Revoked {
+                reason_code: format!("revoked_{kind}"),
+                kind: (*kind).to_owned(),
+                target: (*id).to_owned(),
+                by: r["by"].as_str().unwrap_or_default().to_owned(),
+            })
     })
 }
 
@@ -101,10 +134,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .map_or_else(|| json!({"revoked": []}), |r| r.body))
     }
 
-    /// The reason code if a new run of this tenant, pack, admitting principal, agent,
-    /// declared user or delegation chain is revoked, or if the parent of a delegated run
-    /// is.
-    pub async fn admission_revoked(&self, new: &AdmissionTargets<'_>) -> Result<Option<String>, GatewayError> {
+    /// The revocation that applies if a new run of this tenant, pack, admitting
+    /// principal, agent, declared user or delegation chain is revoked, or if the parent
+    /// of a delegated run is. A refusal is audited (`revocation_refusal`, `stage:
+    /// "admission"`) with the agent, the kind of target revoked and who revoked it.
+    pub async fn admission_revoked(&self, new: &AdmissionTargets<'_>) -> Result<Option<Revoked>, GatewayError> {
         let current = self.store.get(&revocations_key(new.tenant_id)).await?;
         let mut targets = vec![
             ("tenant", new.tenant_id),
@@ -121,7 +155,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Some(parent) = new.parent {
             targets.extend(run_targets(parent));
         }
-        Ok(matching(current.as_ref().map(|r| &r.body), &targets))
+        let Some(revoked) = matched(current.as_ref().map(|r| &r.body), &targets) else {
+            return Ok(None);
+        };
+        let refusal = json!({"stage": "admission", "agent_id": new.agent_id, "principal_id": new.principal,
+            "pack_ref": new.pack_ref, "parent_run_id": new.parent.map(|p| &p.run_id),
+            "reason_codes": [revoked.reason_code], "revoked_kind": revoked.kind, "revoked_by": revoked.by});
+        self.audit
+            .append(new.tenant_id, "revocation_refusal", refusal, &self.now())
+            .await?;
+        Ok(Some(revoked))
     }
 
     /// Revokes (`revoke = true`) or restores a target. Idempotent; audited either way.

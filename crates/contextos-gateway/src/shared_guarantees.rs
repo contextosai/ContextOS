@@ -190,6 +190,16 @@ fn link_key(admission: &RunAdmission, operation: &str) -> Result<DocKey, Gateway
     ))
 }
 
+/// Written once an operation's settlement is audited, so settling it again (a retry
+/// of the applied operation, a repeated reconciliation) appends nothing new.
+fn settled_key(admission: &RunAdmission, operation: &str) -> Result<DocKey, GatewayError> {
+    Ok(DocKey::new(
+        &admission.tenant_id,
+        DocKind::ExposureLink,
+        hash(&json!([admission.run_id, operation, "settled"]))?,
+    ))
+}
+
 /// Create-or-compare is idempotent and race-safe. Never replace a pinned binding.
 pub(crate) async fn pin<S: DocumentStore>(store: &S, key: &DocKey, body: &Value) -> Result<bool, StoreError> {
     match store.create(key, body).await {
@@ -510,6 +520,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if outcome == "held" {
             return Ok(vec![]);
         }
+        // Settled and audited before: committed and released are final, so there is
+        // nothing to repair. An interrupted settlement has no marker and is repeated.
+        let settled = settled_key(admission, operation)?;
+        if let Some(done) = self.store.get(&settled).await?
+            && done.body["outcome"] == outcome
+            && read.body["receipts"][&link.reservation_id]["status"] == outcome
+        {
+            return Ok(vec![]);
+        }
         // Sign the evidence and requested transition BEFORE allowing capacity to be
         // released. A repeated reconciliation can repair any interrupted commit.
         let intent = self
@@ -540,6 +559,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 &self.now(),
             )
             .await?;
+        let marker = json!({"run_id": admission.run_id, "operation_id": operation, "outcome": outcome,
+            "settled_sequence": entry.sequence});
+        match self.store.create(&settled, &marker).await {
+            Ok(_) => {}
+            Err(e) if e.is_conflict() => {}
+            Err(e) => return Err(e.into()),
+        }
         Ok(vec![intent.sequence, entry.sequence])
     }
 }

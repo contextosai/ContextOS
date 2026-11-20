@@ -208,7 +208,7 @@ window.LAB_WORDS = {
           rail: "New run",
           title: "The loop starts another run.",
           text: "Loops do not give up. The application starts a new run for the same agent, and without a gateway its refund is paid like the others.",
-          gated: "Not admitted. The agent is revoked, so the run never starts and has no tool calls to make.",
+          gated: "Not admitted. The circuit breaker revoked the agent, so the run never starts and has no tool calls to make. The refusal is in the signed record, naming the agent and the breaker that revoked it.",
           next: "On-call steps in",
         },
         restore: {

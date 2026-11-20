@@ -58,7 +58,7 @@ _REFUSALS = {
     "reservation_not_found": (403, "contextos_reservation_unknown",
                               "The ContextOS usage reservation is unknown, settled or not for a model call."),
     "reservation_claimed": (409, "contextos_reservation_reused", "This reservation already covered a model call."),
-    "revoked": (403, "contextos_revoked", "This run has been revoked by an operator."),
+    "revoked": (403, "contextos_revoked", "This run has been revoked."),
     "run_not_found": (403, "contextos_run_unknown", "No such ContextOS run."),
 }
 _MISCONFIGURED = {"unauthenticated", "scope_missing", "meter_not_independent", "request_invalid"}

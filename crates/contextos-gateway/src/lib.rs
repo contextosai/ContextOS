@@ -22,6 +22,7 @@
 
 pub mod action_monitor;
 pub mod admission;
+mod applied;
 mod approval_events;
 pub mod approval_review;
 pub mod approval_timeout;
@@ -126,7 +127,7 @@ pub use ports::{
 };
 pub use reconcile::{ReconcileOutcome, Resolution};
 pub use resource_identity::{ResourceCanonicalizer, ResourceIdentityProvider};
-pub use revocations::{AdmissionTargets, MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, run_targets};
+pub use revocations::{AdmissionTargets, MAX_REVOCATIONS, REVOCATION_KINDS, RevocationError, Revoked, run_targets};
 pub use scores::{MAX_SCORES_PER_DECISION, ScoreRefusal, ScoreReport};
 pub use shared_guarantees::{EXPOSURE_RECEIPT_RETENTION_SECONDS, SharedGuarantee};
 pub use shared_inspection::MAX_INSPECTION_SCAN;
@@ -337,6 +338,8 @@ struct Pipeline<'a> {
     escalation_id: Option<String>,
     /// The operation this call compensates.
     compensates: Option<String>,
+    /// The applied operation a refused retry repeats (see [`applied`]).
+    applied_operation: Option<Value>,
     /// Only check the call (see [`tool_call_check`]): nothing is written, requested or
     /// claimed, and the pipeline stops before approval redemption.
     check: bool,
@@ -366,6 +369,7 @@ impl<'a> Pipeline<'a> {
             policy_decision_id: None,
             escalation_id: None,
             compensates: None,
+            applied_operation: None,
             check: false,
             stages: observe::Stages::new(),
         }
@@ -411,6 +415,9 @@ impl<'a> Pipeline<'a> {
         }
         if let Some(id) = &self.compensates {
             metadata.insert("compensates_operation_id".into(), json!(id));
+        }
+        if let Some(applied) = self.applied_operation.take() {
+            metadata.insert("applied_operation".into(), applied);
         }
         // Tool output is evidence, never instructions: it cannot grant authority.
         metadata.insert("instruction_treatment".into(), json!("data_only"));
@@ -907,6 +914,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 }
             }
         }
+        if manifest.evidence_required && evidence_refs.is_empty() && compensates.is_none() {
+            p.report.obligations.push("cite_admitted_evidence".into());
+            return Ok(p.stop(
+                "rejected",
+                vec!["evidence_required".into()],
+                "This capability requires citing evidence admitted for this run.",
+            ));
+        }
 
         // 2. Bind.
         p.stages.enter("bind");
@@ -1090,10 +1105,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             ("adapter", manifest.adapter_id.as_str()),
             ("capability", manifest.capability_id.as_str()),
         ]);
-        if let Some(reason) = revocations::matching(revoked.as_ref().map(|r| &r.body), &targets) {
-            let body = json!({"run_id": admission.run_id, "operation_id": operation_id, "reason_codes": [reason]});
+        if let Some(revoked) = revocations::matched(revoked.as_ref().map(|r| &r.body), &targets) {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "reason_codes": [revoked.reason_code], "revoked_kind": revoked.kind, "revoked_by": revoked.by});
             self.record(&mut p, "revocation_refusal", body, &now).await?;
-            return Ok(p.stop("blocked", vec![reason], "This action has been revoked by an operator."));
+            return Ok(p.stop("blocked", vec![revoked.reason_code.clone()], &revoked.message()));
         }
         // Circuit breakers: too many effects or refusals for this agent, principal or
         // tenant across runs stops the call (and, once per window, trips the breaker).
@@ -1612,11 +1628,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 };
                 if let Some(reason) = reason {
                     p.report.obligations.push("reconcile_existing_operation".into());
-                    return Ok(p.stop(
-                        "paused",
-                        vec![reason.to_owned()],
-                        "The operation cannot be dispatched now.",
-                    ));
+                    p.applied_operation = applied::applied_operation(op).filter(|_| reason == "retry_unsafe");
+                    let message = if p.applied_operation.is_some() {
+                        applied::APPLIED_MESSAGE
+                    } else {
+                        "The operation cannot be dispatched now."
+                    };
+                    return Ok(p.stop("paused", vec![reason.to_owned()], message));
                 }
             }
         }

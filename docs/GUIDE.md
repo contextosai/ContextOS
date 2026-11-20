@@ -161,7 +161,10 @@ from the capability and arguments, so a host that retries a call it thinks faile
 cannot apply the effect twice. The same derivation means two calls in one run with
 identical capability and arguments are one operation: once the first applied, the
 second is not sent and comes back `paused` with `retry_unsafe` (while the first is in
-flight, `operation_in_flight`). When equal calls are meant as separate
+flight, `operation_in_flight`). When the first was applied, the answer says so and
+names its recorded result in `structuredContent.applied_operation` (`metadata` in the
+HTTP tool result): operation id, outcome, and the attempt, time and evidence ref of the
+observation that established it, so the agent can stop retrying and use that result. When equal calls are meant as separate
 effects (two equal top-ups), give each its own `io.contextos/idempotencyKey` and mark
 the capability `"repeatable": true` (see "Repeated effects"). Cited evidence goes in `_meta["io.contextos/evidenceRefs"]`,
 and the host's own call id, if it has one, in `_meta["io.contextos/toolCallId"]`. Every
@@ -172,6 +175,12 @@ operations, but the gateway sends only one of them; it refuses the other
 (`effect_repeated`, see "Repeated effects" below), even when the two race.
 A tool's `input_required` is passed through with `requestState`, and the host's retry
 with `inputResponses` continues the same operation.
+
+A capability whose calls must rest on evidence sets `"evidence_required": true`: a call
+citing no evidence admitted for its run is then rejected (`evidence_required`,
+obligation `cite_admitted_evidence`), as a call citing evidence that was not admitted
+always is (`evidence_not_admitted`). It is off by default, when citing is optional, and
+compensations are exempt.
 
 Give capability manifests an `input_schema` (JSON Schema) and `description`: the
 schema is shown to hosts and enforced on every call (`arguments_invalid`), and
@@ -2215,6 +2224,14 @@ delegation are refused. A call already past authorization completes. `POST /v1/r
 with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
+
+Every refusal is audited as `revocation_refusal` with the reason code, the kind of
+target revoked (`revoked_kind`) and who revoked it (`revoked_by`: the operator, or
+`circuit_breaker:<id>`): a blocked call with its run and operation, a refused run with
+`stage: "admission"`, its agent, admitting principal and pack. The refusal's message
+names the revoker the same way, unnamed for an operator ("The agent has been revoked by
+an operator.") and by id for a breaker ("The agent has been revoked by circuit breaker
+refund_rate.").
 
 ### Circuit breakers
 

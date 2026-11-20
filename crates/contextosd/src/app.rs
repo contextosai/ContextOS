@@ -574,13 +574,9 @@ where
         .await
     {
         Ok(None) => {}
-        Ok(Some(reason)) => {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "revoked",
-                "This run has been revoked by an operator.",
-            )
-            .with_detail(json!([reason])));
+        Ok(Some(revoked)) => {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "revoked", revoked.message())
+                .with_detail(json!([revoked.reason_code])));
         }
         Err(_) => {
             return Err(ApiError::new(

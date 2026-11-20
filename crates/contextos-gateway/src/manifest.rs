@@ -191,6 +191,12 @@ pub struct CapabilityManifest {
     /// already applied is refused with `effect_repeated`.
     #[serde(default)]
     pub repeatable: bool,
+    /// Every call must cite at least one evidence ref admitted for its run; a call
+    /// citing none is rejected with `evidence_required`. Off by default, when citing
+    /// evidence is optional (a cited ref must still be admitted). Compensations are
+    /// exempt: they are requested by naming the effect, not by an agent's call.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub evidence_required: bool,
     pub recovery: Recovery,
     pub timeout_ms: u64,
     pub reservation: CallCost,
