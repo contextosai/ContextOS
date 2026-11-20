@@ -287,7 +287,7 @@ jobs:
           tags: contextosd:e2e
           cache-from: type=gha,scope=kubernetes-e2e
           cache-to: type=gha,mode=max,scope=kubernetes-e2e
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
         with:
           version: v3.16.2
       - name: Create a kind cluster and load the image
@@ -302,7 +302,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
         with:
           version: v3.16.2
       - name: Lint and validate the chart
