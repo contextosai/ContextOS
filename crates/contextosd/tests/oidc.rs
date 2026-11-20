@@ -176,7 +176,7 @@ async fn verified_tokens_authenticate_and_everything_else_is_refused() {
     // Algorithm confusion: an HMAC token keyed with the issuer's public key.
     let mut header = Header::new(Algorithm::HS256);
     header.kid = Some("k1".into());
-    let forged = jsonwebtoken::encode(&header, &claims(), &EncodingKey::from_secret(&issuer.public)).unwrap();
+    let forged = jsonwebtoken::encode(&header, &claims(), &EncodingKey::from_secret(&issuer.public).unwrap()).unwrap();
     assert_eq!(audit_status(&base, &forged).await, 401);
 
     // Tampered payload with the original signature.

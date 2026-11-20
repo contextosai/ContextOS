@@ -21,3 +21,8 @@ napi-derive = "3"
 
 [build-dependencies]
 napi-build = "2"
+
+# N-API exports expand to unsafe glue, so this crate cannot take the workspace's
+# `unsafe_code = "forbid"`; say so instead of inheriting the workspace lints.
+[lints.cargo]
+missing_lints_inheritance = "allow"
