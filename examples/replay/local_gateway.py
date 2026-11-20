@@ -26,10 +26,12 @@ def free_port() -> int:
 
 
 @contextlib.contextmanager
-def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]] = None) -> Iterator[Tuple[str, str]]:
-    """Runs contextosd with `extra` appended to the configuration and the manifests in
-    `capabilities` (support-refund file name to replacement) swapped in; yields its base
-    URL and API key."""
+def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]] = None,
+                  pack: Optional[Path] = None, services: Optional[Dict[str, str]] = None) -> Iterator[Tuple[str, str]]:
+    """Runs contextosd with `extra` appended to the configuration, the manifests in
+    `capabilities` (support-refund file name to replacement) and `pack` swapped in;
+    yields its base URL and API key. `services`, when given, receives the URL of each
+    development fact service (authority, constraints, approvals)."""
     spec = importlib.util.spec_from_file_location("dev_services", EXAMPLE / "dev_services.py")
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
@@ -37,6 +39,8 @@ def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]
     for name, handler in (("authority", dev.authority), ("constraints", dev.constraints),
                           ("approvals", dev.approvals)):
         dev.serve(ports[name], handler)
+        if services is not None:
+            services[name] = f"http://127.0.0.1:{ports[name]}"
     config = (EXAMPLE / "contextosd.toml").read_text()
     config = config.replace("127.0.0.1:8080", f"127.0.0.1:{ports['server']}")
     for name, default in (("authority", 7701), ("constraints", 7702), ("approvals", 7703)):
@@ -45,6 +49,8 @@ def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]
     config = config.replace("http://127.0.0.1:7704/mcp", tools.url)
     for name, path in (capabilities or {}).items():
         config = config.replace(f'"examples/support-refund/capabilities/{name}"', f'"{path}"')
+    if pack is not None:
+        config = config.replace('"examples/support-refund/pack.json"', f'"{pack}"')
     config = config.replace('"examples/', f'"{ROOT}/examples/')
     config = config.replace("sha256:REPLACED_BY_RUN_SH", "sha256:" + hashlib.sha256(KEY.encode()).hexdigest())
     config += extra
