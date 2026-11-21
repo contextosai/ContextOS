@@ -6,11 +6,7 @@ all-features = true
 [advisories]
 # Every RustSec advisory fails the build unless explicitly reviewed and listed here
 # with a justification and an expiry.
-ignore = [
-    # sqlx-core 0.8 requires webpki-roots ^0.26; 0.26.11 is a semver-trick shim that
-    # re-exports webpki-roots 1, locked at the patched 1.0.10. Expires with sqlx 0.9.
-    { id = "RUSTSEC-2026-0381", reason = "0.26.11 re-exports the patched webpki-roots 1.0.10" },
-]
+ignore = []
 
 [licenses]
 confidence-threshold = 0.93
