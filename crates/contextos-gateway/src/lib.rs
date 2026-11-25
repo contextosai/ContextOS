@@ -27,6 +27,7 @@ mod approval_events;
 pub mod approval_review;
 pub mod approval_timeout;
 mod attestation;
+pub mod change_windows;
 mod checkpoints;
 pub mod circuit_breakers;
 mod compensation;
@@ -307,6 +308,8 @@ pub struct Gateway<S, L> {
     environments: Option<environment_guard::EnvironmentPolicy>,
     /// What each capability's risk tier needs (see [`risk_tiers`]).
     risk_tiers: Option<risk_tiers::TierPolicy>,
+    /// Times some capabilities are refused or need approval (see [`change_windows`]).
+    change_windows: Vec<change_windows::ChangeWindow>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -563,6 +566,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             information_flow: None,
             environments: None,
             risk_tiers: None,
+            change_windows: Vec::new(),
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -577,6 +581,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "information_flow": self.information_flow,
             "action_monitor": self.action_monitor.as_ref().map(|(_, policy)| policy),
             "risk_tiers": self.risk_tiers,
+            "change_windows": (!self.change_windows.is_empty()).then_some(&self.change_windows),
         }))
     }
 
@@ -595,6 +600,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// `policy` names (see [`environment_guard`]).
     pub fn set_environments(&mut self, policy: Option<environment_guard::EnvironmentPolicy>) {
         self.environments = policy;
+    }
+
+    /// Refuses, or asks approval for, calls inside `windows` (see [`change_windows`]).
+    pub fn set_change_windows(&mut self, windows: Vec<change_windows::ChangeWindow>) {
+        self.change_windows = windows;
     }
 
     /// Applies what each capability's risk tier needs (see [`risk_tiers`]).
@@ -1302,7 +1312,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let tier_gate = self
             .tier_guard(&mut p, admission, manifest, &operation_id, &now)
             .await?;
-        for gate in [tier_gate, flow_gate, monitor_gate] {
+        let window_gate = self
+            .window_guard(&mut p, admission, manifest, &operation_id, &now)
+            .await?;
+        for gate in [window_gate, tier_gate, flow_gate, monitor_gate] {
             match gate {
                 guard_policy::FlowGate::Pass => {}
                 guard_policy::FlowGate::Outcome(outcome, codes) => {

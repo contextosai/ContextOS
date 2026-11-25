@@ -7,6 +7,7 @@ mod api;
 mod audit_sinks;
 mod budgets;
 mod calibration;
+mod change_windows;
 mod checks;
 mod circuit_breakers;
 mod compensation;

@@ -67,6 +67,8 @@ pub struct DispatchSetup {
     pub environments: Option<contextos_gateway::environment_guard::EnvironmentPolicy>,
     /// `[guards.risk_tiers]`.
     pub risk_tiers: Option<contextos_gateway::risk_tiers::TierPolicy>,
+    /// `[[guards.change_windows]]`.
+    pub change_windows: Vec<contextos_gateway::change_windows::ChangeWindow>,
     /// `[[guards.circuit_breakers]]`.
     pub circuit_breakers: Vec<contextos_gateway::circuit_breakers::BreakerRule>,
     /// `[providers.action_monitor]` with `[guards.action_monitor]`.
@@ -127,6 +129,7 @@ where
     gateway.set_information_flow(setup.information_flow);
     gateway.set_environments(setup.environments);
     gateway.set_risk_tiers(setup.risk_tiers);
+    gateway.set_change_windows(setup.change_windows);
     gateway.set_circuit_breakers(setup.circuit_breakers);
     gateway.set_action_monitor(setup.action_monitor);
     if let Some(screening) = setup.result_screening {
@@ -425,6 +428,16 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
             }
         }
     }
+    for window in &config.guards.change_windows {
+        for id in window.capabilities.iter().filter(|c| *c != "*") {
+            if !manifests.iter().any(|m| &m.capability_id == id) {
+                return Err(format!(
+                    "[[guards.change_windows]] {} names {id}, which is not a configured capability",
+                    window.name
+                ));
+            }
+        }
+    }
     // Startup guards are for what is dispatched; a retired version only recovers.
     let retired = config
         .retired_capabilities
@@ -453,6 +466,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         information_flow: config.guards.information_flow.clone(),
         environments: config.guards.environments.clone(),
         risk_tiers: config.guards.risk_tiers.clone(),
+        change_windows: config.guards.change_windows.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),
         action_monitor: match &providers.action_monitor {
             Some(p) => Some((
