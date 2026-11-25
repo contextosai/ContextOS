@@ -56,6 +56,48 @@ jobs:
           python3 -c 'from pathlib import Path; assert Path("received/binary.bin").read_bytes() == bytes(range(256))'
           python3 -c 'from pathlib import Path; assert Path("received/sbom/contextos.cdx.json").read_text() == "{\"bomFormat\":\"CycloneDX\"}\n"'
           python3 -c 'from pathlib import Path; assert sum(p.is_file() for p in Path("received").rglob("*")) == 2'
+  # Release gate: README's Quickstart, as written, on a fresh runner of each OS.
+  quickstart:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
+      - run: python3 scripts/quickstart_from_readme.py
+  # Release gate: the previous release's store and packs migrate and still verify.
+  upgrade:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: contextos
+          POSTGRES_PASSWORD: contextos
+          POSTGRES_DB: contextos_upgrade
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U contextos" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PREVIOUS_RELEASE: v0.1.0-alpha.21
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo build --release -q -p contextosd -p ctx
+      - name: Download and check the previous release
+        run: |
+          archive="contextos-$PREVIOUS_RELEASE-x86_64-unknown-linux-gnu.tar.gz"
+          base="https://github.com/contextosai/ContextOS/releases/download/$PREVIOUS_RELEASE"
+          curl -fsSLO "$base/$archive" && curl -fsSLO "$base/$archive.sha256"
+          sha256sum -c "$archive.sha256"
+          mkdir previous && tar -xzf "$archive" -C previous --strip-components=1
+      - name: Upgrade from the previous release
+        env:
+          CONTEXTOS_UPGRADE_DATABASE_URL: postgres://contextos:contextos@localhost:5432/contextos_upgrade
+        run: python3 scripts/upgrade_check.py --previous previous --current target/release
   conformance:
     runs-on: ubuntu-24.04
     defaults:
