@@ -105,6 +105,10 @@ pub struct GuardsConfig {
     /// it claims a call (see [`contextos_gateway::model_allowlist`]). Unset: any model.
     #[serde(default)]
     pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
+    /// Model tokens or spend per agent or tenant per window, shared by every run
+    /// (see [`contextos_gateway::usage_ceilings`]). Empty: none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_ceilings: Vec<contextos_gateway::usage_ceilings::UsageCeiling>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -200,6 +204,7 @@ impl Default for GuardsConfig {
             break_glass: None,
             release_evaluations: None,
             models: None,
+            usage_ceilings: Vec::new(),
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

@@ -1962,6 +1962,37 @@ and fails closed. [`examples/metering-proxy`](../examples/metering-proxy) is a
 standard-library reference of the same contract for OpenAI Chat Completions and
 Responses and Anthropic Messages, streamed or not.
 
+### Usage ceilings across runs
+
+A run's budget caps one run. To cap an agent or the whole tenant across every run, add
+ceilings on model tokens or spend per window:
+
+```toml
+[[guards.usage_ceilings]]
+id = "support-tokens-hourly"
+resource = "tokens"          # or "cost_cents"
+per = "agent"                # or "tenant"
+agents = ["agt_support"]     # with per = "agent"; every agent when left out
+limit = 2_000_000
+window_seconds = 3600
+
+[[guards.usage_ceilings]]
+id = "tenant-spend-daily"
+resource = "cost_cents"
+per = "tenant"
+limit = 50_000
+window_seconds = 86400
+```
+
+Each model-call reservation holds its amount on every ceiling that covers the run
+before the run's own budget is reserved, using the same conserved ledger as shared
+guarantees on tool effects: a hold counts until it settles, so concurrent runs cannot
+pass a ceiling together. A reservation that would pass one is refused
+(`budget_exhausted` with `usage_ceiling_reached:<id>`, audited as `usage_refused`), and
+any holds it took are given back. Settling commits the hold at the reserved amount.
+Windows are fixed (aligned to the epoch); a hold never settled stays counted until its
+window ends. Replans are not model usage and are not capped here.
+
 ### Allowed models
 
 List the models runs may use, for every agent and per agent:

@@ -293,3 +293,73 @@ async fn only_allowed_models_are_pinned_or_called() {
         .await;
     assert_eq!(status, 200, "{body}");
 }
+
+#[tokio::test]
+async fn a_usage_ceiling_is_shared_by_every_run_of_an_agent() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.usage_ceilings = serde_json::from_value(json!([{"id": "agent-tokens", "resource": "tokens",
+            "per": "agent", "limit": 5000, "window_seconds": 3600}]))
+        .unwrap();
+    })
+    .await;
+    let first = admitted(&w, "run_ceiling_a").await;
+    let second = admitted(&w, "run_ceiling_b").await;
+    let call = json!({"kind": "model_call", "tokens": 2000, "cost_cents": 1});
+    let a = first.reserve(call.clone()).await;
+    second.reserve(call.clone()).await;
+    // Each run's own budget has room; the agent's shared ceiling does not.
+    let (status, body) = second.post("acme-key", "reserve", call.clone()).await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (409, Some("budget_exhausted")),
+        "{body}"
+    );
+    assert_eq!(body["error"]["detail"], json!(["usage_ceiling_reached:agent-tokens"]));
+    let refusals = second.audit("usage_refused").await;
+    assert_eq!(
+        refusals[0]["reason_codes"],
+        json!(["usage_ceiling_reached:agent-tokens"])
+    );
+    // Settling commits the held amount: it still counts against the ceiling.
+    let (status, body) = first.post("acme-key", "settle", json!({"reservation_id": a})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(first.post("acme-key", "reserve", call.clone()).await.0, 409);
+    // Replans are not model usage.
+    assert_eq!(
+        first.post("acme-key", "reserve", json!({"kind": "replan"})).await.0,
+        201
+    );
+}
+
+#[tokio::test]
+async fn concurrent_runs_never_pass_a_usage_ceiling_together() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.usage_ceilings = serde_json::from_value(json!([{"id": "tenant-spend", "resource": "cost_cents",
+            "per": "tenant", "limit": 50, "window_seconds": 86400}]))
+        .unwrap();
+    })
+    .await;
+    let ids = [
+        "run_c0", "run_c1", "run_c2", "run_c3", "run_c4", "run_c5", "run_c6", "run_c7", "run_c8", "run_c9",
+    ];
+    let mut runs = Vec::new();
+    for run in ids {
+        runs.push(admitted(&w, run).await);
+    }
+    let mut tasks = tokio::task::JoinSet::new();
+    for calls in runs {
+        tasks.spawn(async move {
+            calls
+                .post(
+                    "acme-key",
+                    "reserve",
+                    json!({"kind": "model_call", "tokens": 100, "cost_cents": 10}),
+                )
+                .await
+        });
+    }
+    let statuses = tasks.join_all().await;
+    let admitted = statuses.iter().filter(|(s, _)| *s == 201).count();
+    assert_eq!(admitted, 5, "{statuses:?}");
+    assert!(statuses.iter().all(|(s, _)| *s == 201 || *s == 409), "{statuses:?}");
+}
