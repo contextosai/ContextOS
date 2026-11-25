@@ -798,6 +798,41 @@ issue text and treats every write as public; raise `output_classification` to
 `INTERNAL` for issues of private repositories, and the egress ceiling of writes to
 repositories that are never public. Review preset labels like every other field.
 
+#### Regulated data categories and where they may go
+
+Beside the level, a run tracks which categories of regulated data it has read: `pii`,
+`phi`, `pci` and `secrets`. Declare them on the tools that return such data, and the
+destination of the tools that send data out:
+
+```json
+"flow": {"output_classification": "CONFIDENTIAL", "output_categories": ["pii"]}
+"flow": {"egress_ceiling": "CONFIDENTIAL", "egress_vendor": "mailer_eu", "egress_region": "eu"}
+```
+
+Boundaries say where each category may go:
+
+```toml
+[guards.information_flow]
+initial_categories = []              # e.g. ["pii"] when every request carries personal data
+[[guards.information_flow.boundaries]]
+categories = ["pci"]
+capabilities = ["adp_payments.charge"]       # only the payment processor
+[[guards.information_flow.boundaries]]
+categories = ["pii", "phi"]
+vendors = ["mailer_eu"]                       # a declared vendor in a declared region
+regions = ["eu"]
+verdict = "ask"                               # default "deny"
+```
+
+An egress call (the capability `sends_data` or names recipients) in a run that has
+read a boundary's category, through a capability the boundary does not clear, gets
+the boundary's verdict (`flow_category_boundary`): denied, or an approval of the exact
+call. A capability is cleared when the boundary names it, or when its declared vendor
+and region are both cleared; one that declares neither is not. Categories only rise
+within a run, pass to delegated children and back, and appear in the audit facts.
+They are metadata the manifests declare: the runtime never inspects the data, so a tool
+that returns personal data without saying so is not caught (see SCOPE.md).
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an

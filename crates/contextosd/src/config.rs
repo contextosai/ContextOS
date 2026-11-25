@@ -178,6 +178,9 @@ impl Config {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
         contextos_gateway::change_windows::validate(&config.guards.change_windows).map_err(ConfigError::Invalid)?;
+        if let Some(flow) = &config.guards.information_flow {
+            flow.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(tiers) = &config.guards.risk_tiers {
             tiers.validate().map_err(ConfigError::Invalid)?;
         }

@@ -303,6 +303,49 @@
       ],
       "type": "object"
     },
+    "Boundary": {
+      "additionalProperties": false,
+      "description": "One `[[guards.information_flow.boundaries]]` entry.",
+      "properties": {
+        "capabilities": {
+          "description": "Egress capabilities cleared for them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "categories": {
+          "description": "The categories this boundary keeps in.",
+          "items": {
+            "$ref": "#/$defs/DataCategory"
+          },
+          "type": "array"
+        },
+        "regions": {
+          "description": "Destination regions cleared for them (a capability's `flow.egress_region`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vendors": {
+          "description": "Destination vendors cleared for them (a capability's `flow.egress_vendor`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/$defs/FlowVerdict",
+          "default": "deny",
+          "description": "What a call through an uncleared capability gets: `deny` (default) or `ask`."
+        }
+      },
+      "required": [
+        "categories"
+      ],
+      "type": "object"
+    },
     "BreakerCount": {
       "description": "What a breaker counts.",
       "oneOf": [
@@ -540,6 +583,15 @@
       },
       "type": "object"
     },
+    "DataCategory": {
+      "enum": [
+        "pii",
+        "phi",
+        "pci",
+        "secrets"
+      ],
+      "type": "string"
+    },
     "DelegationConfig": {
       "additionalProperties": false,
       "description": "`[oidc.delegation]`: how a delegated token names its actor and user.",
@@ -738,10 +790,24 @@
       "additionalProperties": false,
       "description": "`[guards.information_flow]`.",
       "properties": {
+        "boundaries": {
+          "description": "Where regulated data categories may go (see `categories`).",
+          "items": {
+            "$ref": "#/$defs/Boundary"
+          },
+          "type": "array"
+        },
         "classified_egress": {
           "$ref": "#/$defs/FlowVerdict",
           "default": "deny",
           "description": "An egress call carrying data above its capability's `egress_ceiling`."
+        },
+        "initial_categories": {
+          "description": "Categories every run starts with (for requests that carry such data).",
+          "items": {
+            "$ref": "#/$defs/DataCategory"
+          },
+          "type": "array"
         },
         "initial_classification": {
           "$ref": "#/$defs/Classification",
