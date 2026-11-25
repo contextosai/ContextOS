@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Reference result screener (`examples/result-screening`): a stdlib service for
+  `[providers.result_screening]` that redacts e-mail addresses, phone numbers,
+  Luhn-valid card numbers and tokens by JSON pointer and withholds outputs carrying a
+  private key. Pattern based and off by default; tested in CI.
 - Legal holds and deletion requests: `POST /v1/legal-holds` (runs, subjects or the whole
   tenant) keeps runs' content from erasure and retention until released
   (`POST /v1/legal-holds/{id}/release`); `[privacy] subject_pointers` indexes runs under
