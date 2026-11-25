@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Access reviews in Tower: `GET /api/access-review` and an Access review page list each
+  agent's grants as used, unused or never used in a window, stale delegations, dormant
+  agents in production, and waivers and reviews expiring within 30 days (CSV export);
+  `POST /api/access-review/attest` records a risk reviewer's attestation citing the
+  report's digest, refused if the findings changed since it was read.
 - Every `authorization_decision` audit entry of a delegated run carries `delegation`:
   the actor chain's depth and digest (`user_chain`, no identities) and, for a child
   run, its lineage to the root (`run_lineage`).

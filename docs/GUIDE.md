@@ -2863,6 +2863,15 @@ business_unit = "Customer Operations"
   time-boxed and decided by someone other than the requester.
 - **Reviews and drift.** A risk review approves an agent's current authority; any
   capability added later is drift until reviewed again.
+- **Access reviews.** `GET /api/access-review?days=90` (and the Access review page,
+  with CSV export) lists every grant an agent holds (capabilities pinned in its packs or
+  surfaced to its runs) as used, unused in the window or never used; delegations to
+  agents that no longer run; agents in pilot or production that stopped running; and
+  waivers and reviews expiring within 30 days. A risk reviewer attests with
+  `POST /api/access-review/attest` (days, notes and the report's `digest`): Tower refuses
+  an attestation if the findings changed since the reviewer read them, and journals
+  `access_review_attested`. Act on findings with the existing routes: the fleet kill
+  switch, a lifecycle request, or a pack change.
 - **Lifecycle.** An agent moves through `proposed`, `approved`, active (`pilot`,
   `production`, `deprecated`), `suspended` and `retired`. Each move is requested and
   approved by a second person (a risk reviewer, not the agent's owner) and signed into
