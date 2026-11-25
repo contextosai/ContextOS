@@ -108,6 +108,8 @@ pub enum DocKind {
     LegalHolds,
     /// The runs about one data subject, keyed by the subject's digest.
     SubjectIndex,
+    /// The tenant's break-glass grants.
+    BreakGlass,
 }
 
 impl DocKind {
@@ -156,6 +158,7 @@ impl DocKind {
             DocKind::ApprovalTimeouts => "approval_timeouts",
             DocKind::LegalHolds => "legal_holds",
             DocKind::SubjectIndex => "subject_index",
+            DocKind::BreakGlass => "break_glass",
         }
     }
 }

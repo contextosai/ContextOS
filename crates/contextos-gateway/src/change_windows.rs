@@ -270,6 +270,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if strongest.observe {
             return Ok(FlowGate::Pass);
         }
+        if let Some(grant) = self
+            .break_glass_for(
+                &admission.tenant_id,
+                &manifest.capability_id,
+                crate::break_glass::Lift::ChangeWindows,
+                now,
+            )
+            .await?
+        {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "grant_id": grant, "lifted": "change_windows",
+                "window": strongest.name});
+            self.record(p, "break_glass_used", body, now).await?;
+            return Ok(FlowGate::Pass);
+        }
         if strongest.action == WindowAction::Refuse {
             return Ok(FlowGate::Refuse(vec!["change_window_closed".to_owned()]));
         }

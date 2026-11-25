@@ -27,6 +27,7 @@ mod approval_events;
 pub mod approval_review;
 pub mod approval_timeout;
 mod attestation;
+pub mod break_glass;
 pub mod change_windows;
 mod checkpoints;
 pub mod circuit_breakers;
@@ -313,6 +314,8 @@ pub struct Gateway<S, L> {
     change_windows: Vec<change_windows::ChangeWindow>,
     /// JSON pointers to data-subject identifiers in run requests (see [`privacy`]).
     subject_pointers: Vec<String>,
+    /// Who may lift which guards in an incident (see [`break_glass`]).
+    break_glass: Option<break_glass::BreakGlassPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -571,6 +574,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             risk_tiers: None,
             change_windows: Vec::new(),
             subject_pointers: Vec::new(),
+            break_glass: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -1137,7 +1141,25 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         // Circuit breakers: too many effects or refusals for this agent, principal or
         // tenant across runs stops the call (and, once per window, trips the breaker).
-        if let Some(open) = breaker? {
+        let breaker = breaker?;
+        let lifted = match &breaker {
+            Some(open) => self
+                .break_glass_for(
+                    &admission.tenant_id,
+                    &manifest.capability_id,
+                    break_glass::Lift::CircuitBreakers,
+                    &now,
+                )
+                .await?
+                .map(|grant| (grant, open.rule.id.clone())),
+            None => None,
+        };
+        if let Some((grant, breaker_id)) = lifted {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "grant_id": grant, "lifted": "circuit_breakers",
+                "breaker": breaker_id});
+            self.record(&mut p, "break_glass_used", body, &now).await?;
+        } else if let Some(open) = breaker {
             let tripped = self.trip_breaker(admission, &open, &now).await?;
             p.report.audit_sequences.extend(tripped);
             p.report.obligations.push("wait_for_circuit".into());

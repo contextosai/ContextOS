@@ -18,6 +18,7 @@ use crate::fleet::{AgentActivity, Fleet, Hour, hour_index};
 
 mod builtin;
 pub use builtin::builtin;
+pub mod break_glass;
 mod lifecycle;
 use builtin::finding;
 

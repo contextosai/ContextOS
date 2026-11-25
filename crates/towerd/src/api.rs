@@ -16,6 +16,7 @@
 //! | `GET /api/runs/{source}/{run}/evidence` | viewer | a run's evidence, fetched from its runtime (journalled) |
 //! | `GET /api/changes` | viewer | governance changes across the fleet |
 //! | `GET /api/access-review`, `POST /api/access-review/attest` | viewer / risk | grants held vs used, stale delegations, dormant agents, expiring waivers and reviews; attest by digest ([`crate::ops::access_review`]) |
+//! | `GET /api/break-glass`, `POST /api/break-glass/review` | viewer / risk (not the opener) | break-glass grants and their post-incident review ([`crate::ops::break_glass`]) |
 //! | `GET /api/inventory` | viewer | agents, capabilities, adapters, models and owners, declared or seen ([`crate::ops::inventory`]) |
 //! | `GET /api/spend`, `GET /api/agents/{key}/spend` | viewer | model spend, measured vs self-reported ([`crate::ops::spend`]) |
 //! | `GET /api/sources` | viewer | runtimes and their verification state |
@@ -199,10 +200,12 @@ pub(crate) async fn snapshot<S: DocumentStore, L: AppendLog>(t: &Tower<S, L>) ->
     let reviews = t.records.load("reviews").await?;
     let guardrails = t.records.load("guardrails").await?;
     let waivers = t.records.load("waivers").await?;
+    let break_glass_reviews = t.records.load("break_glass_reviews").await?;
     let now = wall_clock();
     let fleet = t.fleet.read().await;
     let views = governance::views(&fleet, &declarations, &reviews, &now);
-    let findings = governance::findings(&fleet, &views, &guardrails, &waivers, &now);
+    let mut findings = governance::findings(&fleet, &views, &guardrails, &waivers, &now);
+    findings.extend(governance::break_glass::findings(&fleet, &break_glass_reviews));
     let anomalies = governance::anomalies(&fleet);
     Ok(Snapshot {
         views,

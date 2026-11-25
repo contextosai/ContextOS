@@ -50,13 +50,15 @@ fn micros_now() -> u64 {
 }
 
 /// The record collections, recovered at startup.
-pub const COLLECTIONS: [&str; 6] = [
+pub const COLLECTIONS: [&str; 8] = [
     "declarations",
     "reviews",
     "guardrails",
     "waivers",
     "restore_requests",
     "sources",
+    "lifecycle_requests",
+    "break_glass_reviews",
 ];
 
 /// What an agent's owner states about it. Inputs to review, never evidence.

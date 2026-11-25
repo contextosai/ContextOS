@@ -5,6 +5,7 @@ mod action_monitor;
 mod agent_binding;
 mod api;
 mod audit_sinks;
+mod break_glass;
 mod budgets;
 mod calibration;
 mod change_windows;

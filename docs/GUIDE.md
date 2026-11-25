@@ -2396,6 +2396,42 @@ parallel may overshoot the threshold by their concurrency: a breaker bounds a
 runaway, it is not an exact quota. Scope `agent` is as strong as agent binding: turn
 on `[guards] agent_binding` so a credential cannot pose as another agent.
 
+### Break-glass
+
+In an incident, a freeze or an open circuit breaker can block the fix. Break-glass lets
+a separate credential lift those two guards, and only those, for named capabilities
+and a short time:
+
+```toml
+[guards.break_glass]
+max_ttl_seconds = 3600              # 60 to 3600
+lifts = ["change_windows", "circuit_breakers"]
+
+[[api_keys]]                        # an incident lead's key: no admit, no dispatch
+key_sha256 = "sha256:…"
+tenant_id = "tenant_acme_prod"
+principal_id = "oncall_lead"
+scopes = ["break_glass"]
+```
+
+```sh
+curl -X POST "$CONTEXTOS/v1/break-glass" -H "Authorization: Bearer $LEAD_TOKEN" -d '{
+  "capabilities": ["adp_payments.issue_refund"], "lifts": ["change_windows"], "ttl_seconds": 900,
+  "justification": "INC-311: refunds for the failed payout run must go out during the freeze",
+  "incident_ref": "INC-311"}'
+curl -X POST "$CONTEXTOS/v1/break-glass/$GRANT/close" -H "Authorization: Bearer $LEAD_TOKEN"
+```
+
+A grant never lifts a revocation (a kill switch, or a breaker that revoked, needs a
+restore), an approval, a budget, a shared ceiling, a risk tier, an information-flow
+rule or tenant isolation: those decide every call as before. A credential that admits
+or dispatches cannot hold `break_glass` (startup refuses the key; a token with both is
+refused at the route). Opening and closing are audited (`break_glass_opened`,
+`break_glass_closed`), and every call a grant lets through is audited as
+`break_glass_used` with the guard it lifted. Tower reports each grant as
+`break_glass_unreviewed` (high) until a risk reviewer other than its opener records a
+review (`POST /api/break-glass/review`).
+
 ## 9. Erase personal content
 
 A run's user-provided content lives in its replay case (the original request), its
