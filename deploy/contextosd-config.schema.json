@@ -255,6 +255,11 @@
           "minimum": 0,
           "type": "integer"
         },
+        "format": {
+          "$ref": "#/$defs/SinkFormat",
+          "default": "contextos",
+          "description": "The wire format: `contextos` (default), `splunk_hec`, `datadog` or `elastic_bulk` (see `audit_sink_formats`)."
+        },
         "id": {
           "description": "Sink id, used in metrics and delivery cursors.",
           "type": "string"
@@ -290,6 +295,13 @@
           "$ref": "#/$defs/Start",
           "default": "genesis",
           "description": "`genesis` (default): deliver each tenant's whole chain; `head`: from now on."
+        },
+        "token_env": {
+          "description": "Environment variable holding the SIEM's credential (HEC token, API key); required for every format but `contextos`. Sent only in its header, never logged.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "url": {
           "description": "HTTPS endpoint (HTTP only in development).",
@@ -2158,6 +2170,15 @@
         "unit"
       ],
       "type": "object"
+    },
+    "SinkFormat": {
+      "enum": [
+        "contextos",
+        "splunk_hec",
+        "datadog",
+        "elastic_bulk"
+      ],
+      "type": "string"
     },
     "Start": {
       "enum": [

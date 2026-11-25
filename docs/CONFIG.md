@@ -85,12 +85,14 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `batch` | integer | `100` | Entries per request. |
+| `format` | `"contextos"` \| `"splunk_hec"` \| `"datadog"` \| `"elastic_bulk"` | `"contextos"` | The wire format: `contextos` (default), `splunk_hec`, `datadog` or `elastic_bulk` (see `audit_sink_formats`). |
 | `id` | string | required | Sink id, used in metrics and delivery cursors. |
 | `kinds` | array of string | `[]` | Entry kinds to deliver; every kind when empty. |
 | `mask` | array of string | `[]` | Payload fields to mask (see the module documentation). |
 | `mask_key_env` | string | unset | Environment variable holding the masking key (at least 32 bytes); required with `mask`. |
 | `secret_env` | string | required | Environment variable holding the request signing secret (at least 32 bytes). |
 | `start` | `"genesis"` \| `"head"` | `"genesis"` | `genesis` (default): deliver each tenant's whole chain; `head`: from now on. |
+| `token_env` | string | unset | Environment variable holding the SIEM's credential (HEC token, API key); required for every format but `contextos`. Sent only in its header, never logged. |
 | `url` | string | required | HTTPS endpoint (HTTP only in development). |
 
 ## `[conformance]`

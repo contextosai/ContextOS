@@ -592,6 +592,33 @@ least once, so drop duplicates by `(tenant_id, sequence)`. `kinds` filters what 
 the cursor still passes the rest. `contextos_audit_sink_batches_total{sink, outcome}`
 counts batches.
 
+To send straight to a SIEM's ingestion API, set `format` and the credential it takes;
+masking, ordering and retries are the same in every format:
+
+| `format` | `url` | `token_env` holds | Sent as |
+|---|---|---|---|
+| `contextos` (default) | your receiver | (none) | the batch above |
+| `splunk_hec` | `https://splunk:8088/services/collector/event` | an HEC token | one HEC event per entry (`time` from `emitted_at`, `sourcetype` `contextos:audit`) |
+| `datadog` | `https://http-intake.logs.datadoghq.com/api/v2/logs` (your site) | an API key | a log per entry, tagged `tenant`, `kind`, `sink` |
+| `elastic_bulk` | `https://es:9200/contextos-audit/_bulk` | an API key (`id:key`, base64) | `create` actions with `_id` `<tenant>:<sequence>` |
+
+```toml
+[[audit_sinks]]
+id = "splunk"
+url = "https://splunk.example.com:8088/services/collector/event"
+format = "splunk_hec"
+token_env = "CONTEXTOS_SPLUNK_HEC_TOKEN"
+secret_env = "CONTEXTOS_SIEM_SECRET"
+mask = ["email"]
+mask_key_env = "CONTEXTOS_SIEM_MASK_KEY"
+```
+
+The credential is sent only in its header and never logged. Elasticsearch drops a
+redelivered entry by its `_id`; a bulk reply with a failed item is not accepted, so the
+batch is sent again (items already created answer 409 and count as delivered). Splunk
+and Datadog may receive an entry twice after a retry; deduplicate on `tenant_id` and
+`sequence` in search.
+
 `mask` names payload fields: an entry starting with `/` is a JSON Pointer where `*`
 matches any member or index; any other entry is a member name masked wherever it
 occurs. A masked value becomes `masked:hmac-sha256:<hex>`, an HMAC of its canonical JSON

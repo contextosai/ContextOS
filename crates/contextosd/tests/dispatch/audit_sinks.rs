@@ -8,6 +8,7 @@ use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use contextos_audit::{AuditEntry, verify_chain_withheld};
+use contextosd::audit_sink_formats::SinkFormat;
 use contextosd::audit_sinks::{AuditSinkConfig, Exporter, Sink, Start};
 use serde_json::{Value, json};
 
@@ -52,6 +53,8 @@ fn sink(url: &str, kinds: &[&str], batch: usize) -> Sink {
             mask_key_env: Some("UNUSED".into()),
             batch,
             start: Start::Genesis,
+            format: SinkFormat::Contextos,
+            token_env: None,
         },
         SECRET.as_bytes(),
         Some(MASK_KEY.as_bytes()),
@@ -194,4 +197,115 @@ async fn kinds_limit_what_is_delivered_but_not_where_the_cursor_stands() {
         entries.iter().filter(|e| e["payload"]["escalation_id"] == "e").count(),
         1
     );
+}
+
+/// An Elasticsearch `_bulk` endpoint: checks the API key, records each created `_id`, and
+/// fails one item the first time, as a mapping error would.
+async fn bulk_receiver(fail_once: Arc<AtomicBool>) -> (String, Arc<Mutex<Vec<String>>>) {
+    let ids: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen = ids.clone();
+    let base = serve(Router::new().route(
+        "/audit/_bulk",
+        post(move |headers: HeaderMap, body: String| {
+            let seen = seen.clone();
+            let fail_once = fail_once.clone();
+            async move {
+                if headers["authorization"] != "ApiKey es-token" || headers["content-type"] != "application/x-ndjson" {
+                    return (StatusCode::UNAUTHORIZED, String::new());
+                }
+                let fail = fail_once.swap(false, Ordering::SeqCst);
+                let mut items = Vec::new();
+                for (i, line) in body.lines().enumerate().filter(|(i, _)| i % 2 == 0) {
+                    let action: Value = serde_json::from_str(line).unwrap();
+                    let id = action["create"]["_id"].as_str().unwrap().to_owned();
+                    let status = if fail && i == 0 { 400 } else { 201 };
+                    if status == 201 {
+                        let mut seen = seen.lock().unwrap();
+                        if seen.contains(&id) {
+                            items.push(json!({"create": {"_id": id, "status": 409}}));
+                            continue;
+                        }
+                        seen.push(id.clone());
+                    }
+                    items.push(json!({"create": {"_id": id, "status": status}}));
+                }
+                (StatusCode::OK, json!({"errors": fail, "items": items}).to_string())
+            }
+        }),
+    ))
+    .await;
+    (format!("{base}/audit/_bulk"), ids)
+}
+
+#[tokio::test]
+async fn an_elastic_bulk_sink_creates_each_entry_once_and_retries_a_failed_item() {
+    let fail_once = Arc::new(AtomicBool::new(true));
+    let (url, ids) = bulk_receiver(fail_once.clone()).await;
+    let w = world(&ALL_CONTROLS).await;
+    let now = || w.state.gateway.as_ref().unwrap().now();
+    for n in 0..3 {
+        w.state
+            .audit
+            .append(TENANT, "operator_note", json!({"n": n}), &now())
+            .await
+            .unwrap();
+    }
+    let sink = Sink::with_token(
+        AuditSinkConfig {
+            id: "elastic".into(),
+            url,
+            secret_env: "UNUSED".into(),
+            kinds: vec![],
+            mask: vec![],
+            mask_key_env: None,
+            batch: 100,
+            start: Start::Genesis,
+            format: SinkFormat::ElasticBulk,
+            token_env: Some("UNUSED".into()),
+        },
+        SECRET.as_bytes(),
+        None,
+        Some("es-token".into()),
+    )
+    .unwrap();
+    let mut exporter = Exporter::new(
+        w.state.store.clone(),
+        w.state.audit.clone(),
+        w.state.metrics.clone(),
+        vec![sink],
+        vec![TENANT.into()],
+        true,
+    );
+    exporter.tick().await;
+    // One item failed: the batch was not accepted, so the cursor did not move.
+    assert!(!fail_once.load(Ordering::SeqCst));
+    let first = ids.lock().unwrap().len();
+    // Redelivered after the backoff: the failed item is created, the rest are 409s.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    exporter.tick().await;
+    let ids = ids.lock().unwrap().clone();
+    assert_eq!(ids.len(), first + 1, "{ids:?}");
+    let mut unique = ids.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), ids.len());
+    assert!(ids.iter().all(|id| id.starts_with(&format!("{TENANT}:"))));
+}
+
+#[test]
+fn a_siem_format_without_its_token_is_refused() {
+    let config = AuditSinkConfig {
+        id: "splunk".into(),
+        url: "https://splunk.example.com:8088/services/collector/event".into(),
+        secret_env: "UNUSED".into(),
+        kinds: vec![],
+        mask: vec![],
+        mask_key_env: None,
+        batch: 100,
+        start: Start::Genesis,
+        format: SinkFormat::SplunkHec,
+        token_env: None,
+    };
+    assert!(Sink::with_token(config.clone(), SECRET.as_bytes(), None, None).is_err());
+    assert!(Sink::with_token(config, SECRET.as_bytes(), None, Some("hec".into())).is_ok());
 }

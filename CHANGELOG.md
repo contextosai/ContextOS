@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- SIEM formats for audit sinks: `format = "splunk_hec" | "datadog" | "elastic_bulk"`
+  with the SIEM's credential in `token_env`; masking, ordering and retries unchanged;
+  Elasticsearch deduplicates by `<tenant>:<sequence>` and a bulk reply with a failed
+  item is retried.
 - `ctx audit-pack`: one signed folder for an auditor (evidence pack, inventory,
   approvals, packs in force, the configuration's digest), with a manifest signed with
   Ed25519 and a standalone `verify.py` that checks it with Python's standard library.

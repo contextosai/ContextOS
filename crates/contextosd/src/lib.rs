@@ -4,6 +4,7 @@ pub mod absence;
 pub mod agent_binding;
 pub mod app;
 pub mod attest;
+pub mod audit_sink_formats;
 pub mod audit_sinks;
 pub mod auth;
 pub mod break_glass_api;
