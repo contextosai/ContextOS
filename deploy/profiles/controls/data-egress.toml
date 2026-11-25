@@ -1,0 +1,14 @@
+# Control pack: data egress.
+#
+# Track what each run's agent has read, and gate what it sends out on it. Label your
+# capabilities' outputs (`flow.output_integrity`, `flow.output_classification`) and
+# egress tools (`flow.egress_ceiling`) in their manifests (docs/GUIDE.md, "Gate effects
+# on what the agent has read").
+[guards.information_flow]
+mode = "enforce"                     # "observe" to measure first
+# Sending data above a tool's egress ceiling needs an approval of the exact call.
+classified_egress = "ask"
+# After reading untrusted text (a ticket, an email, a web page), effects need approval.
+untrusted_effects = "ask"
+# Untrusted input + confidential data + egress in one run: at least an approval.
+rule_of_two = true

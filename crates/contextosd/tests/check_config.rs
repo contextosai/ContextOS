@@ -261,3 +261,39 @@ fn the_enforced_profile_refuses_the_quickstart_until_its_gaps_are_closed() {
         assert!(text.contains(expected), "{expected} missing from {text}");
     }
 }
+
+/// The quickstart configuration with `packs` from `deploy/profiles/controls` appended.
+fn with_controls(name: &str, packs: &[&str]) -> PathBuf {
+    let path = config(name, "127.0.0.1:0");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    for pack in packs {
+        text.push('\n');
+        text.push_str(&std::fs::read_to_string(root().join("deploy/profiles/controls").join(pack)).unwrap());
+    }
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[test]
+fn every_control_pack_starts_the_quickstart_alone_and_together() {
+    let seed = "11".repeat(32);
+    let mut packs: Vec<String> = std::fs::read_dir(root().join("deploy/profiles/controls"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| std::path::Path::new(n).extension().is_some_and(|x| x == "toml"))
+        .collect();
+    packs.sort();
+    assert_eq!(packs.len(), 7, "{packs:?}");
+    for pack in &packs {
+        let (ok, text) = check(&with_controls(&format!("check-control-{pack}"), &[pack]), Some(&seed));
+        assert!(ok, "{pack}: {text}");
+    }
+    // data-egress and pii-touch are alternatives (both set [guards.information_flow]).
+    let together: Vec<&str> = packs
+        .iter()
+        .map(String::as_str)
+        .filter(|p| *p != "data-egress.toml")
+        .collect();
+    let (ok, text) = check(&with_controls("check-controls-all.toml", &together), Some(&seed));
+    assert!(ok, "{text}");
+}

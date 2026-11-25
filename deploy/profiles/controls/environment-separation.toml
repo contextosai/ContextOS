@@ -1,0 +1,12 @@
+# Control pack: production and staging separation.
+#
+# This gateway serves one environment and refuses effects aimed at another. Name the
+# capabilities that can reach more than one, and how their arguments say which
+# (docs/GUIDE.md, "Effects aimed at another environment").
+[guards.environments]
+current = "production"
+mode = "required"                    # "observe" to measure first
+[[guards.environments.targets]]
+capabilities = ["adp_payments.issue_refund"]
+pointer = "/order_id"
+prefixes = { "ord_" = "production", "test_ord_" = "staging" }

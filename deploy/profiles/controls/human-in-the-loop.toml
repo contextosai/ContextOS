@@ -1,0 +1,20 @@
+# Control pack: human-in-the-loop thresholds.
+#
+# Which actions need a person is the pack's decision (approval gates in its rules);
+# these guards make the person's approval worth something.
+
+# An approval decided faster than a person can read the action does not count.
+[guards.approval_review]
+min_review_seconds = 20
+capabilities = ["adp_payments.issue_refund"]
+
+# Large approvals count only after the approver's recent strong sign-in.
+[guards.approval_step_up]
+amount_at_least = [{ currency = "INR", minor_units = 500000 }]
+amr_values = ["mfa", "hwk"]
+max_age_seconds = 300
+
+# An approval nobody decides within half an hour goes to the escalation inbox.
+[guards.approval_timeout]
+timeout_seconds = 1800
+on_timeout = "escalate"

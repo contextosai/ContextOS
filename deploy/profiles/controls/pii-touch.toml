@@ -1,0 +1,16 @@
+# Control pack: personal data (PII) handling.
+#
+# Rule- and metadata-based: mark the capabilities that return personal data
+# `flow.output_classification = "CONFIDENTIAL"` (or `RESTRICTED`) and give egress tools an
+# `egress_ceiling`. ContextOS does not read the data itself; plug a classifier into
+# [providers.result_screening] if you need content screening (off by default).
+[guards.information_flow]
+mode = "enforce"
+classified_egress = "deny"           # personal data never leaves through a tool not cleared for it
+untrusted_effects = "ask"
+rule_of_two = true
+
+# Delete run content (requests, tool outputs) after 30 days; the audit chain keeps only
+# digests and is never pruned.
+[retention]
+run_content_days = 30

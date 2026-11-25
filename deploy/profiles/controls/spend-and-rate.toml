@@ -1,0 +1,32 @@
+# Control pack: spend and rate limits.
+#
+# Append to contextosd.toml and replace the example capability, pointers and amounts
+# with yours (docs/GUIDE.md, "Ready-made control packs"). Every limit here is shared by
+# all runs and agents: concurrent runs cannot each spend up to it.
+
+# Per agent per day: one agent refunds at most INR 25,000 in 24 hours. A capability is
+# covered by one guarantee; to cap per order instead, use resource_pointer = "/order_id"
+# in place of resource_from and window_seconds (a lifetime ceiling per order).
+[[guarantees]]
+id = "refunds-per-agent-daily"
+capability_ids = ["adp_payments.issue_refund"]
+resource_from = "actor"
+amount_pointer = "/amount_minor"
+limit = 2500000
+unit = "INR_minor"
+window_seconds = 86400
+
+# A runaway loop of effects is refused while the rate stays high.
+[[guards.circuit_breakers]]
+id = "effect_rate"
+scope = "agent"
+count = "effects"
+threshold = 30
+window_seconds = 60
+
+# Request rate and concurrent effects per tenant.
+[[limits.tenants]]
+tenant_id = "tenant_acme_prod"
+requests_per_second = 50
+burst = 100
+max_concurrent_dispatch = 16

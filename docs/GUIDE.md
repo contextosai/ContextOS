@@ -2126,6 +2126,16 @@ rates, and the environment guard. `observe-first.toml` is the same set reporting
 instead of refusing where it can. Append one to your configuration, replace the example
 capability ids, and run `contextosd --check-config`: it lists what is still missing.
 
+### Ready-made control packs
+
+[`deploy/profiles/controls`](../deploy/profiles/controls) holds one snippet per control
+family, to add to a starter profile or your own configuration: spend and rate limits,
+data egress, personal data, destructive actions (risk tiers), environment separation,
+change freezes and human-in-the-loop approvals. Each names the section of this guide
+that explains it, starts the quickstart configuration on its own, and CI checks that
+they do (together too, except the two information-flow alternatives). They are
+configuration, not policy rules: what needs approval stays in your packs.
+
 ## 7. Score decisions independently
 
 The system under evaluation cannot score itself. Give each evaluator (a rubric
