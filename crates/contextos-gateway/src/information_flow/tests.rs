@@ -24,6 +24,7 @@ fn labels(integrity: Integrity, classification: Classification) -> RunLabels {
     RunLabels {
         integrity,
         classification,
+        categories: Categories::default(),
     }
 }
 
@@ -116,4 +117,87 @@ fn undeclared_output_is_untrusted_internal() {
     assert_eq!(flow, FlowLabels::default());
     assert_eq!(flow.output_integrity, Integrity::Untrusted);
     assert!(serde_json::from_value::<FlowLabels>(json!({"output_integrity": "maybe"})).is_err());
+}
+
+fn egress(id: &str, flow: Value) -> CapabilityManifest {
+    let mut m = manifest("external_state", true, Some(flow));
+    m.capability_id = id.into();
+    m
+}
+
+#[test]
+fn a_category_read_cannot_leave_through_an_uncleared_capability() {
+    let policy: FlowPolicy = serde_json::from_value(json!({
+    "classified_egress": "allow", "untrusted_effects": "allow", "rule_of_two": false,
+    "boundaries": [
+        {"categories": ["pci"], "capabilities": ["psp.charge"]},
+        {"categories": ["pii"], "vendors": ["mailer_eu"], "regions": ["eu"], "verdict": "ask"}
+    ]}))
+    .unwrap();
+    policy.validate().unwrap();
+    let mut run = policy.labels(None);
+    // Nothing regulated read yet: every egress is allowed.
+    assert_eq!(
+        policy.check(run, &egress("crm.export", json!({}))).verdict,
+        FlowVerdict::Allow
+    );
+    run.categories = Categories::of(&[DataCategory::Pci]);
+    let refused = policy.check(run, &egress("crm.export", json!({})));
+    assert_eq!(refused.verdict, FlowVerdict::Deny);
+    assert_eq!(refused.reason_codes, vec!["flow_category_boundary".to_owned()]);
+    assert_eq!(
+        policy.check(run, &egress("psp.charge", json!({}))).verdict,
+        FlowVerdict::Allow
+    );
+    // Personal data: only a cleared vendor in a cleared region; a capability that
+    // declares neither is not cleared.
+    run.categories = Categories::of(&[DataCategory::Pii]);
+    let eu = json!({"egress_vendor": "mailer_eu", "egress_region": "eu"});
+    let us = json!({"egress_vendor": "mailer_eu", "egress_region": "us"});
+    assert_eq!(policy.check(run, &egress("mail.send", eu)).verdict, FlowVerdict::Allow);
+    assert_eq!(policy.check(run, &egress("mail.send", us)).verdict, FlowVerdict::Ask);
+    assert_eq!(
+        policy.check(run, &egress("mail.send", json!({}))).verdict,
+        FlowVerdict::Ask
+    );
+    // A call that sends nothing out is not egress.
+    assert_eq!(
+        policy.check(run, &manifest("external_state", false, None)).verdict,
+        FlowVerdict::Allow
+    );
+}
+
+#[test]
+fn categories_only_rise_and_an_unreadable_document_counts_as_all() {
+    let policy = FlowPolicy::default();
+    let read = policy.labels(Some(
+        &json!({"integrity": "trusted", "classification": "PUBLIC", "categories": ["phi"]}),
+    ));
+    assert_eq!(read.categories.list(), vec![DataCategory::Phi]);
+    let joined = read.join(RunLabels::received(
+        &serde_json::from_value(json!({"output_categories": ["pii"]})).unwrap(),
+    ));
+    assert_eq!(joined.categories.list(), vec![DataCategory::Pii, DataCategory::Phi]);
+    let bogus = policy.labels(Some(
+        &json!({"integrity": "trusted", "classification": "PUBLIC", "categories": "lots"}),
+    ));
+    assert_eq!(bogus.categories, Categories::all());
+    // A document written before categories existed has none.
+    assert_eq!(
+        policy
+            .labels(Some(&json!({"integrity": "trusted", "classification": "PUBLIC"})))
+            .categories,
+        Categories::default()
+    );
+}
+
+#[test]
+fn invalid_boundaries_are_refused() {
+    let bad = |b: Value| {
+        serde_json::from_value::<FlowPolicy>(json!({"boundaries": [b]})).map_or(true, |p| p.validate().is_err())
+    };
+    assert!(bad(json!({"categories": []})));
+    assert!(bad(json!({"categories": ["pci"], "verdict": "allow"})));
+    assert!(bad(json!({"categories": ["biometric"]})));
+    assert!(!bad(json!({"categories": ["secrets"]})));
 }

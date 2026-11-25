@@ -104,6 +104,12 @@ pub enum DocKind {
     IntentClaim,
     /// The approval requests a tenant's approval timeout still watches.
     ApprovalTimeouts,
+    /// The tenant's legal holds, placed and released.
+    LegalHolds,
+    /// The runs about one data subject, keyed by the subject's digest.
+    SubjectIndex,
+    /// The tenant's break-glass grants.
+    BreakGlass,
 }
 
 impl DocKind {
@@ -150,6 +156,9 @@ impl DocKind {
             DocKind::ApprovalRequested => "approval_requested",
             DocKind::IntentClaim => "intent_claim",
             DocKind::ApprovalTimeouts => "approval_timeouts",
+            DocKind::LegalHolds => "legal_holds",
+            DocKind::SubjectIndex => "subject_index",
+            DocKind::BreakGlass => "break_glass",
         }
     }
 }

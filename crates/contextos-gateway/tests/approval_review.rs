@@ -81,6 +81,8 @@ async fn a_rubber_stamped_approval_is_refused_and_a_reviewed_one_counts() {
         redeemed[0]["approvers"].as_array().is_some_and(|a| !a.is_empty()),
         "{redeemed:?}"
     );
+    // The pack's own gate needed this approval, not a runtime guard: no override.
+    assert_eq!(redeemed[0]["guard_reasons"], serde_json::json!([]), "{redeemed:?}");
 
     // Re-sending the completed call redeems nothing again.
     h.gateway.dispatch(&h.admission, &call).await.unwrap();

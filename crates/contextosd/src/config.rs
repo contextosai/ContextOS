@@ -55,6 +55,13 @@ pub struct Config {
     /// Retention of runs' personal content (see [`crate::retention`]); off by default.
     #[serde(default)]
     pub retention: crate::retention::RetentionConfig,
+    /// Who may use the runtime-wide kill switch.
+    #[serde(default)]
+    pub kill_switch: KillSwitchConfig,
+    /// Data subjects named by run requests, for deletion requests and legal holds (see
+    /// [`contextos_gateway::privacy`]).
+    #[serde(default)]
+    pub privacy: crate::privacy_api::PrivacyConfig,
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
@@ -178,6 +185,12 @@ impl Config {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
         contextos_gateway::change_windows::validate(&config.guards.change_windows).map_err(ConfigError::Invalid)?;
+        if let Some(bg) = &config.guards.break_glass {
+            bg.validate().map_err(ConfigError::Invalid)?;
+        }
+        if let Some(flow) = &config.guards.information_flow {
+            flow.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(tiers) = &config.guards.risk_tiers {
             tiers.validate().map_err(ConfigError::Invalid)?;
         }
@@ -278,6 +291,17 @@ impl Config {
                 key.principal_id
             )));
         }
+        // Whoever can lift guards in an incident does not also act under them.
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "break_glass") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both open break-glass and admit or dispatch",
+                key.principal_id
+            )));
+        }
         // Whoever widens a task on its principal's behalf does not also run it.
         if let Some(key) = self
             .api_keys
@@ -330,6 +354,17 @@ impl Config {
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
         self.retention.check().map_err(ConfigError::Invalid)?;
+        if let Some(tls) = &self.server.tls
+            && !tls.spiffe_agents.is_empty()
+        {
+            if tls.client_ca_path.is_none() {
+                return Err(ConfigError::Invalid(
+                    "[server.tls] spiffe_agents needs client_ca_path (mutual TLS)".into(),
+                ));
+            }
+            crate::svid::validate(&tls.spiffe_agents).map_err(ConfigError::Invalid)?;
+        }
+        contextos_gateway::privacy::validate_pointers(&self.privacy.subject_pointers).map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {
             issuer.check(development).map_err(ConfigError::Invalid)?;
@@ -377,4 +412,15 @@ mod tests {
         let error = Config::parse(&published).unwrap_err().to_string();
         assert!(error.contains("published example key"), "{error}");
     }
+}
+
+/// `[kill_switch]`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KillSwitchConfig {
+    /// Principals that may revoke and restore `global` (every tenant of this runtime at
+    /// once) through `POST /v1/revocations`; each also needs the `control` scope. Empty:
+    /// no one, and the global kill switch is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub global_principals: Vec<String>,
 }

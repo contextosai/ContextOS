@@ -105,6 +105,15 @@ Every agent, capability, adapter, model and owning team, as
 rows as CSV (`text/csv`, sets joined with `;`, cells starting with `=`, `+`, `-` or `@`
 prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
 
+### `GET /api/access-review?days=&format=`, `POST /api/access-review/attest`
+
+`days` 7 to 365 (default 90). JSON: `grants` (agent, owner team, capability, adapter,
+packs, `status` `used`/`unused`/`never_used`, `last_used`), `stale_delegations`,
+`dormant_agents`, `expiring_waivers`, `expiring_reviews` (within 30 days), `summary`
+and `digest` (over the findings, not the time). `format=csv` returns the grants.
+`POST …/attest` (risk): `{"days", "digest", "notes"}`; 409 when the digest no longer
+matches the findings. Journal: `access_review_attested`.
+
 ### `GET /api/agents/{key}`
 
 `key` is URL-encoded (`tenant_acme_prod%2Fagt_support`). Returns `row`, `facts` (see
@@ -139,12 +148,14 @@ prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
 ### `GET /api/approvals`
 
 Approval quality (viewer), folded from the runtimes' `approval_requested`,
-`approval_redeemed`, `approval_review_too_fast`, `approval_step_up_refused` and
-`approval_timed_out` events:
+`approval_redeemed`, `approval_review_too_fast`, `approval_step_up_refused`,
+`approval_timed_out` and `approval_denied` events:
 `buckets_seconds` (upper bounds of the decision-time buckets), then `capabilities` and
 `approvers`, each row with `requested`, `redeemed`, `decision_seconds` (one count per
 bucket, then slower), `untimed`, `within_ten_seconds`, `refused_too_fast`,
-`refused_step_up` and `timed_out`. Decision time is from the gateway's own request time to the fastest
+`refused_step_up`, `timed_out`, `denied`, `overridden` (redemptions whose
+`guard_reasons` is not empty), `denial_rate` (denied of decided) and `override_rate`
+(overridden of redeemed; null without data). Decision time is from the gateway's own request time to the fastest
 approver's `decided_at`, as the approval service reports it.
 
 ### `GET /api/spend?hours=&group=`

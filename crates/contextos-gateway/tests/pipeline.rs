@@ -1299,6 +1299,21 @@ async fn delegated_children_act_within_a_narrowed_lane_and_settle_into_the_paren
         out.result["status"], "blocked",
         "the child cannot exceed its sub-budget"
     );
+    // Every decision of the child shows the path it acts through.
+    let decisions: Vec<serde_json::Value> = contextos_store::AppendLog::range(h.audit.log(), TENANT, 1, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.body)
+        .filter(|e| e["kind"] == "authorization_decision")
+        .collect();
+    assert_ne!(decisions.len(), 0, "the child made decided calls");
+    for d in &decisions {
+        let lineage = &d["payload"]["delegation"]["run_lineage"];
+        assert_eq!(lineage["root_run_id"], "run_1", "{d}");
+        assert_eq!(lineage["parent_run_id"], "run_1");
+        assert!(d["payload"]["delegation"]["user_chain"].is_null(), "no user chain: {d}");
+    }
 
     let closed = h
         .gateway
@@ -3119,7 +3134,7 @@ async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
             for crash_at in 0..writes {
                 for after_commit in [false, true] {
                     explored += 1;
-                    match crash_case(behavior, guarded, &[(crash_at, after_commit)]).await {
+                    match Box::pin(crash_case(behavior, guarded, &[(crash_at, after_commit)])).await {
                         Recovery::Recovered => recovered += 1,
                         Recovery::InFlight => in_flight += 1,
                         Recovery::Settled => {}
@@ -3156,7 +3171,7 @@ async fn every_pair_of_crash_points_is_safe_to_retry() {
     let explored = cases.len();
     let mut running = tokio::task::JoinSet::new();
     for (behavior, guarded, crashes) in cases {
-        running.spawn(async move { crash_case(behavior, guarded, &crashes).await });
+        running.spawn(async move { Box::pin(crash_case(behavior, guarded, &crashes)).await });
     }
     let (mut recovered, mut in_flight) = (0, 0);
     while let Some(outcome) = running.join_next().await {

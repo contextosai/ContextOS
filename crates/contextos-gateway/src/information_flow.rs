@@ -40,6 +40,9 @@ use crate::guard_policy::FlowGate;
 use crate::manifest::CapabilityManifest;
 use crate::{Gateway, GatewayError, Pipeline};
 
+mod categories;
+pub use categories::{Boundary, Categories, DataCategory};
+
 /// Raises recorded per run at most (labels have five levels, so real runs need few).
 const MAX_SOURCES: usize = 16;
 
@@ -84,6 +87,15 @@ pub struct FlowLabels {
     /// it sends data or names recipients.
     #[serde(default = "internal")]
     pub egress_ceiling: Classification,
+    /// Regulated data categories the tool's output may carry (see [`categories`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_categories: Vec<DataCategory>,
+    /// Who receives what this capability sends out, for category boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_vendor: Option<String>,
+    /// Where it goes, for category boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_region: Option<String>,
 }
 
 impl Default for FlowLabels {
@@ -92,6 +104,9 @@ impl Default for FlowLabels {
             output_integrity: Integrity::Untrusted,
             output_classification: Classification::Internal,
             egress_ceiling: Classification::Internal,
+            output_categories: Vec::new(),
+            egress_vendor: None,
+            egress_region: None,
         }
     }
 }
@@ -157,6 +172,12 @@ pub struct FlowPolicy {
     pub initial_integrity: Integrity,
     #[serde(default = "public")]
     pub initial_classification: Classification,
+    /// Categories every run starts with (for requests that carry such data).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub initial_categories: Vec<DataCategory>,
+    /// Where regulated data categories may go (see [`categories`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundaries: Vec<Boundary>,
 }
 
 impl Default for FlowPolicy {
@@ -168,6 +189,8 @@ impl Default for FlowPolicy {
             rule_of_two: true,
             initial_integrity: Integrity::Trusted,
             initial_classification: Classification::Public,
+            initial_categories: Vec::new(),
+            boundaries: Vec::new(),
         }
     }
 }
@@ -177,13 +200,24 @@ impl Default for FlowPolicy {
 pub struct RunLabels {
     pub integrity: Integrity,
     pub classification: Classification,
+    pub categories: Categories,
 }
 
 impl RunLabels {
-    fn join(self, integrity: Integrity, classification: Classification) -> Self {
+    fn join(self, other: Self) -> Self {
         Self {
-            integrity: self.integrity.max(integrity),
-            classification: self.classification.max(classification),
+            integrity: self.integrity.max(other.integrity),
+            classification: self.classification.max(other.classification),
+            categories: self.categories.union(other.categories),
+        }
+    }
+
+    /// What receiving output labelled `flow` adds.
+    pub(crate) fn received(flow: &FlowLabels) -> Self {
+        Self {
+            integrity: flow.output_integrity,
+            classification: flow.output_classification,
+            categories: Categories::of(&flow.output_categories),
         }
     }
 }
@@ -209,13 +243,15 @@ impl FlowPolicy {
         let initial = RunLabels {
             integrity: self.initial_integrity,
             classification: self.initial_classification,
+            categories: Categories::of(&self.initial_categories),
         };
         state.map_or(initial, |s| {
             // A document the guard cannot read is treated as the worst case.
-            initial.join(
-                parse(&s["integrity"]).unwrap_or(Integrity::Untrusted),
-                parse(&s["classification"]).unwrap_or(Classification::Restricted),
-            )
+            initial.join(RunLabels {
+                integrity: parse(&s["integrity"]).unwrap_or(Integrity::Untrusted),
+                classification: parse(&s["classification"]).unwrap_or(Classification::Restricted),
+                categories: Categories::parse(&s["categories"]),
+            })
         })
     }
 
@@ -243,6 +279,14 @@ impl FlowPolicy {
         if egress && labels.classification > flow.egress_ceiling {
             apply(self.classified_egress, "flow_classified_egress");
         }
+        for boundary in &self.boundaries {
+            if egress
+                && labels.categories.intersects(Categories::of(&boundary.categories))
+                && !boundary.clears(manifest)
+            {
+                apply(boundary.verdict, "flow_category_boundary");
+            }
+        }
         if self.rule_of_two
             && untrusted
             && labels.classification >= Classification::Confidential
@@ -251,6 +295,11 @@ impl FlowPolicy {
             apply(FlowVerdict::Ask, "flow_rule_of_two");
         }
         FlowCheck { verdict, reason_codes }
+    }
+
+    /// Refuses invalid boundaries.
+    pub fn validate(&self) -> Result<(), String> {
+        categories::validate(&self.boundaries)
     }
 
     /// The pinned reference the guard's outcomes cite.
@@ -269,16 +318,14 @@ pub(crate) async fn raise<S: DocumentStore>(
     policy: &FlowPolicy,
     admission: &RunAdmission,
     source: Value,
-    integrity: Integrity,
-    classification: Classification,
+    received: RunLabels,
 ) -> Result<bool, StoreError> {
     raise_key(
         store,
         policy,
         &key(&admission.tenant_id, &admission.run_id),
         source,
-        integrity,
-        classification,
+        received,
     )
     .await
 }
@@ -289,8 +336,7 @@ pub(crate) async fn raise_key<S: DocumentStore>(
     policy: &FlowPolicy,
     key: &DocKey,
     source: Value,
-    integrity: Integrity,
-    classification: Classification,
+    received: RunLabels,
 ) -> Result<bool, StoreError> {
     for attempt in 0..32_u32 {
         if attempt > 0 {
@@ -298,7 +344,7 @@ pub(crate) async fn raise_key<S: DocumentStore>(
         }
         let current = store.get(key).await?;
         let before = policy.labels(current.as_ref().map(|c| &c.body));
-        let after = before.join(integrity, classification);
+        let after = before.join(received);
         if after == before && current.is_some() {
             return Ok(false);
         }
@@ -309,7 +355,8 @@ pub(crate) async fn raise_key<S: DocumentStore>(
         if after != before && sources.len() < MAX_SOURCES {
             sources.push(source.clone());
         }
-        let body = json!({"integrity": after.integrity, "classification": after.classification, "sources": sources});
+        let body = json!({"integrity": after.integrity, "classification": after.classification,
+            "categories": after.categories.list(), "sources": sources});
         let written = match &current {
             None => store.create(key, &body).await.map(|_| ()),
             Some(c) => store.compare_and_swap(key, c.revision, &body).await.map(|_| ()),
@@ -328,7 +375,7 @@ pub(crate) async fn raise_key<S: DocumentStore>(
 
 /// The run's labels as audit facts.
 pub(crate) fn facts(labels: RunLabels) -> Value {
-    json!({"integrity": labels.integrity, "classification": labels.classification})
+    json!({"integrity": labels.integrity, "classification": labels.classification, "categories": labels.categories.list()})
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
@@ -381,14 +428,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         };
         let flow = manifest.flow.clone().unwrap_or_default();
         let source = json!({"capability_id": manifest.capability_id, "operation_id": operation_id,
-            "integrity": flow.output_integrity, "classification": flow.output_classification});
+            "integrity": flow.output_integrity, "classification": flow.output_classification,
+            "categories": flow.output_categories});
         raise(
             self.store.as_ref(),
             policy,
             admission,
             source,
-            flow.output_integrity,
-            flow.output_classification,
+            RunLabels::received(&flow),
         )
         .await?;
         Ok(())
@@ -402,15 +449,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let state = self.store.get(&key(&parent.tenant_id, &parent.run_id)).await?;
         let labels = policy.labels(state.as_ref().map(|s| &s.body));
         let source = json!({"parent_run_id": parent.run_id});
-        raise(
-            self.store.as_ref(),
-            policy,
-            child,
-            source,
-            labels.integrity,
-            labels.classification,
-        )
-        .await?;
+        raise(self.store.as_ref(), policy, child, source, labels).await?;
         Ok(())
     }
 
@@ -423,15 +462,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let state = self.store.get(&key(&child.tenant_id, &child.run_id)).await?;
         let labels = policy.labels(state.as_ref().map(|s| &s.body));
         let source = json!({"child_run_id": child.run_id});
-        raise(
-            self.store.as_ref(),
-            policy,
-            parent,
-            source,
-            labels.integrity,
-            labels.classification,
-        )
-        .await?;
+        raise(self.store.as_ref(), policy, parent, source, labels).await?;
         Ok(())
     }
 }

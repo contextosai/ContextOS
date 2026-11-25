@@ -6,7 +6,10 @@
 //! agent id a run declares; to stop whoever runs it, revoke the principal), a `user`
 //! (every run a delegated credential says acts for them, and new runs declaring them),
 //! a `delegation` (one exact chain of actors for one user, by its digest; see
-//! [`crate::delegation_chain`]), an `adapter` or a `capability`. While revoked:
+//! [`crate::delegation_chain`]), an `adapter` or a `capability`. A `global`
+//! revocation (target `*`, set only by the principals the deployment lists) stops
+//! every tenant of the runtime at once; it is kept apart from every tenant's set and
+//! read with each. While revoked:
 //!
 //! - admission refuses new runs of a revoked tenant, pack or agent, audited as
 //!   `revocation_refusal` (`stage: "admission"`) with the agent and the revoker;
@@ -27,7 +30,8 @@ use crate::{Gateway, GatewayError};
 /// Targets revoked per tenant at most.
 pub const MAX_REVOCATIONS: usize = 1024;
 
-pub const REVOCATION_KINDS: [&str; 8] = [
+pub const REVOCATION_KINDS: [&str; 9] = [
+    "global",
     "tenant",
     "pack",
     "principal",
@@ -50,6 +54,18 @@ pub enum RevocationError {
 
 pub(crate) fn revocations_key(tenant_id: &str) -> DocKey {
     DocKey::new(tenant_id, DocKind::Revocations, "revocations")
+}
+
+/// Where the runtime-wide revocation lives: not a tenant id any caller can hold.
+pub const GLOBAL_SCOPE: &str = "*";
+
+pub(crate) fn global_key() -> DocKey {
+    DocKey::new(GLOBAL_SCOPE, DocKind::Revocations, "revocations")
+}
+
+/// The global revocation, if one is in force.
+pub(crate) fn global_matched(global: Option<&Value>) -> Option<Revoked> {
+    matched(global, &[("global", GLOBAL_SCOPE)])
 }
 
 /// A revocation that applies to a run or a call.
@@ -125,13 +141,15 @@ pub struct AdmissionTargets<'a> {
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
-    /// The tenant's current revocations.
+    /// The tenant's current revocations, with a global one first when in force.
     pub async fn revocations(&self, tenant_id: &str) -> Result<Value, GatewayError> {
-        Ok(self
-            .store
-            .get(&revocations_key(tenant_id))
-            .await?
-            .map_or_else(|| json!({"revoked": []}), |r| r.body))
+        let list = |doc: Option<contextos_store::Versioned>| {
+            doc.and_then(|d| d.body["revoked"].as_array().cloned())
+                .unwrap_or_default()
+        };
+        let mut revoked = list(self.store.get(&global_key()).await?);
+        revoked.extend(list(self.store.get(&revocations_key(tenant_id)).await?));
+        Ok(json!({"revoked": revoked}))
     }
 
     /// The revocation that applies if a new run of this tenant, pack, admitting
@@ -140,6 +158,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// "admission"`) with the agent, the kind of target revoked and who revoked it.
     pub async fn admission_revoked(&self, new: &AdmissionTargets<'_>) -> Result<Option<Revoked>, GatewayError> {
         let current = self.store.get(&revocations_key(new.tenant_id)).await?;
+        let global = self.store.get(&global_key()).await?;
         let mut targets = vec![
             ("tenant", new.tenant_id),
             ("pack", new.pack_ref),
@@ -155,7 +174,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Some(parent) = new.parent {
             targets.extend(run_targets(parent));
         }
-        let Some(revoked) = matched(current.as_ref().map(|r| &r.body), &targets) else {
+        let Some(revoked) = global_matched(global.as_ref().map(|g| &g.body))
+            .or_else(|| matched(current.as_ref().map(|r| &r.body), &targets))
+        else {
             return Ok(None);
         };
         let refusal = json!({"stage": "admission", "agent_id": new.agent_id, "principal_id": new.principal,
@@ -181,8 +202,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if !REVOCATION_KINDS.contains(&kind) || !sized(target, 256) || !sized(reason, 1024) {
             return Err(RevocationError::Invalid);
         }
+        if kind == "global" && target != GLOBAL_SCOPE {
+            return Err(RevocationError::Invalid);
+        }
         let now = self.now();
-        let key = revocations_key(tenant_id);
+        let key = if kind == "global" {
+            global_key()
+        } else {
+            revocations_key(tenant_id)
+        };
         let present = |list: &[Value]| list.iter().any(|r| r["kind"] == kind && r["target"] == target);
         let mut current = self.store.get(&key).await.map_err(GatewayError::from)?;
         let listed = |c: &Option<contextos_store::Versioned>| {

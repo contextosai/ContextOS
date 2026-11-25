@@ -1,6 +1,7 @@
 //! `towerd`: ContextOS Tower, the organisation's governance plane over ContextOS
 //! runtimes. See docs/design/tower-governance-plane.md.
 
+pub mod access_review;
 pub mod api;
 pub mod approvals;
 pub mod authority;

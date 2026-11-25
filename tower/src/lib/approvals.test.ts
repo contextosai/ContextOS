@@ -3,7 +3,7 @@ import { bucketLabels, medianBucket, rubberStampShare } from "./approvals";
 
 const row = (decision_seconds: number[]) => ({
   requested: 4, redeemed: 4, decision_seconds, untimed: 0, refused_too_fast: 0, refused_step_up: 0, timed_out: 0,
-  within_ten_seconds: decision_seconds[0] ?? 0,
+  within_ten_seconds: decision_seconds[0] ?? 0, denied: 0, overridden: 0,
 });
 
 describe("approvals", () => {

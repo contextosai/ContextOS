@@ -236,6 +236,7 @@ id across requests.
 | `agent_looping` | medium | the loop guard fired or repeated effects were withheld | Inspect the runs |
 | `ungoverned_or_dormant` | high | declared `production` but no governed run in 30 days | Route its tools through a runtime, or deprecate and revoke |
 | `retired_but_running` | high | declared `retired`, `suspended` or `deprecated` and ran in the last 24 hours | Revoke it fleet-wide, or fix the lifecycle |
+| `break_glass_unreviewed` | high | a runtime's verified chain shows a break-glass grant with no recorded review | Review the calls made under it; `POST /api/break-glass/review` (risk, not the opener) |
 | `lifecycle_not_enforced` | critical | declared `suspended` or `retired`, and the verified chain of a source it ran on shows no revocation of the agent | Give Tower a control key for that runtime and revoke the agent there |
 | `uncovered_model_usage` | high | in the last 7 days, measured model usage exceeded what the run's budget could still cover (§4.10) | Reserve each call's expected size; review the contract's budget ceilings |
 | `unmetered_model_spend` | medium | in the last 7 days, more than half of at least 10,000 charged model tokens were self-reported (§4.10) | Route model calls through a metering gateway (the ContextOS LiteLLM plugin) and reserve with `metered=True` |

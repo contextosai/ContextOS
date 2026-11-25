@@ -36,7 +36,7 @@ use crate::oidc_claims::{resolve, strings, valid_path};
 pub use crate::oidc_delegation::DelegationConfig;
 
 /// Scopes a token may grant; anything else in the scope claim is ignored.
-pub const KNOWN_SCOPES: [&str; 13] = [
+pub const KNOWN_SCOPES: [&str; 14] = [
     "compile",
     "admit",
     "dispatch",
@@ -50,6 +50,7 @@ pub const KNOWN_SCOPES: [&str; 13] = [
     "attest",
     "exposure:import",
     "outcome:report",
+    "break_glass",
 ];
 
 const MAX_JWKS_BYTES: usize = 1024 * 1024;

@@ -7,6 +7,58 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Approval relay (`examples/approval-relay`): a reference approval service that delivers
+  requests to Slack, Microsoft Teams and e-mail, takes decisions back through signed
+  callbacks, maps channel identities to approvers, escalates through tiers while a
+  request is undecided, and lets an approver on leave delegate until a date. Tested end
+  to end against contextosd (approve, deny, forged callback refused).
+- Approval analytics: the gateway audits `approval_denied` (with the deniers) and adds
+  `guard_reasons` to `approval_redeemed`; Tower's Approvals page and `GET /api/approvals`
+  show denials, overrides (approvals of actions a runtime guard had flagged), a denial
+  rate and an override rate per capability and approver.
+- Global kill switch: a `global` revocation (target `*`) stops every tenant of the runtime
+  at once, set and restored only by principals in `[kill_switch] global_principals`
+  (with `control`). It is read alongside each tenant's revocations at admission,
+  dispatch and usage, and listed first for every tenant. GUIDE §8 documents the kill
+  switch at all four scopes: agent, tool, tenant, global.
+- X.509 SVID agent binding: with mutual TLS, `[server.tls] spiffe_agents` maps client
+  certificates' SPIFFE IDs to agent ids and narrows each caller's agents to its
+  certificate's, so `agent_binding = "required"` admits runs only as the workload the
+  certificate names. The identity reaches handlers only from the TLS connection.
+- Break-glass: `[guards.break_glass]` and `POST /v1/break-glass` (new `break_glass`
+  scope, never held with `admit` or `dispatch`) lift change windows and open circuit
+  breakers, and nothing else, for named capabilities for at most an hour, with a
+  justification. Opening, closing and every call let through are audited
+  (`break_glass_opened`, `break_glass_closed`, `break_glass_used`); Tower reports each
+  grant as `break_glass_unreviewed` until a risk reviewer other than its opener records
+  a review (GUIDE §8).
+- Access reviews in Tower: `GET /api/access-review` and an Access review page list each
+  agent's grants as used, unused or never used in a window, stale delegations, dormant
+  agents in production, and waivers and reviews expiring within 30 days (CSV export);
+  `POST /api/access-review/attest` records a risk reviewer's attestation citing the
+  report's digest, refused if the findings changed since it was read.
+- Every `authorization_decision` audit entry of a delegated run carries `delegation`:
+  the actor chain's depth and digest (`user_chain`, no identities) and, for a child
+  run, its lineage to the root (`run_lineage`).
+- Reference result screener (`examples/result-screening`): a stdlib service for
+  `[providers.result_screening]` that redacts e-mail addresses, phone numbers,
+  Luhn-valid card numbers and tokens by JSON pointer and withholds outputs carrying a
+  private key. Pattern based and off by default; tested in CI.
+- Legal holds and deletion requests: `POST /v1/legal-holds` (runs, subjects or the whole
+  tenant) keeps runs' content from erasure and retention until released
+  (`POST /v1/legal-holds/{id}/release`); `[privacy] subject_pointers` indexes runs under
+  a digest of the people their requests name, and `POST /v1/subjects/runs` and
+  `POST /v1/subjects/erase` find and erase a person's finished, unheld runs. Subjects
+  travel in request bodies and are stored and audited only as digests
+  (`legal_hold_placed`, `legal_hold_released`, `subject_erasure`); the chain still
+  verifies (GUIDE §9).
+- Data categories and boundaries: manifests declare the regulated categories a tool's
+  output may carry (`flow.output_categories`: `pii`, `phi`, `pci`, `secrets`) and an
+  egress tool's `egress_vendor` and `egress_region`; runs track the categories they read.
+  `[[guards.information_flow.boundaries]]` names the capabilities, vendors and regions a
+  category may leave through; egress through anything else is denied or needs an
+  approval of the exact call (`flow_category_boundary`). Metadata based: the runtime
+  never reads the data (GUIDE §3, "Regulated data categories and where they may go").
 - Control packs (`deploy/profiles/controls`): ready-made configuration snippets for spend
   and rate limits, data egress, personal data, destructive actions, environment
   separation, change freezes and human-in-the-loop approvals, each checked in CI to
@@ -86,6 +138,14 @@ minor versions may break APIs and every break is listed.
   declarations keep their stage. Scripts that declare agents straight into `pilot` or
   `production` set `lifecycle_approval = false` while they move to requests.
 - `retired_but_running` also covers `suspended` agents.
+- The OpenAPI document lists every revocation kind (`user` and `delegation` were
+  missing; `global` is new).
+- `POST /v1/runs/{id}/erase` answers `409 legal_hold` for a run under a legal hold; the
+  Rust `ErasureError` gains `Held`, and the retention sweep's `Swept` a `held` count.
+- Rust API: `information_flow::RunLabels` has a `categories` field, and `FlowLabels`
+  and `FlowPolicy` gain optional fields; code that builds them with struct literals
+  adds them (`Categories::default()`, or `..Default::default()`).
+
 - Update dependencies: url 2.5.9 (fixes RUSTSEC-2026-0592, a stack overflow in
   `Url::origin()` on nested `blob:` URLs), bytes, clap, zeroize, jsonschema 0.62, toml,
   the Tower UI's react-router, react-query and vitest, the framework examples' AI SDK
@@ -98,6 +158,9 @@ minor versions may break APIs and every break is listed.
   revoker), and `UsageRefusal::Revoked` carries it.
 
 ### Fixed
+
+- Tower recovers unjournaled lifecycle-request changes at startup and in its periodic
+  sweep (the collection was missing from the recovery list).
 
 - Retrying an applied operation under a shared guarantee no longer appends another
   `shared_guarantee_settlement_requested` and `shared_guarantee_settled` pair each time;

@@ -27,17 +27,21 @@ def free_port() -> int:
 
 @contextlib.contextmanager
 def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]] = None,
-                  pack: Optional[Path] = None, services: Optional[Dict[str, str]] = None) -> Iterator[Tuple[str, str]]:
+                  pack: Optional[Path] = None, services: Optional[Dict[str, str]] = None,
+                  approvals: Optional[str] = None) -> Iterator[Tuple[str, str]]:
     """Runs contextosd with `extra` appended to the configuration, the manifests in
     `capabilities` (support-refund file name to replacement) and `pack` swapped in;
     yields its base URL and API key. `services`, when given, receives the URL of each
-    development fact service (authority, constraints, approvals)."""
+    development fact service (authority, constraints, approvals). `approvals`, when given,
+    is the URL of an approval service to use instead of the development one."""
     spec = importlib.util.spec_from_file_location("dev_services", EXAMPLE / "dev_services.py")
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
     ports = {name: free_port() for name in ("authority", "constraints", "approvals", "server")}
     for name, handler in (("authority", dev.authority), ("constraints", dev.constraints),
                           ("approvals", dev.approvals)):
+        if name == "approvals" and approvals is not None:
+            continue
         dev.serve(ports[name], handler)
         if services is not None:
             services[name] = f"http://127.0.0.1:{ports[name]}"
@@ -45,6 +49,8 @@ def local_gateway(tools, extra: str = "", capabilities: Optional[Dict[str, Path]
     config = config.replace("127.0.0.1:8080", f"127.0.0.1:{ports['server']}")
     for name, default in (("authority", 7701), ("constraints", 7702), ("approvals", 7703)):
         config = config.replace(f"127.0.0.1:{default}", f"127.0.0.1:{ports[name]}")
+    if approvals is not None:
+        config = config.replace(f"http://127.0.0.1:{ports['approvals']}", approvals)
     # Every adapter answers from the recording.
     config = config.replace("http://127.0.0.1:7704/mcp", tools.url)
     for name, path in (capabilities or {}).items():

@@ -27,6 +27,7 @@ mod approval_events;
 pub mod approval_review;
 pub mod approval_timeout;
 mod attestation;
+pub mod break_glass;
 pub mod change_windows;
 mod checkpoints;
 pub mod circuit_breakers;
@@ -60,6 +61,7 @@ mod outcome_sweep;
 pub mod outcomes;
 mod ownership;
 pub mod ports;
+pub mod privacy;
 pub mod privilege;
 mod reconcile;
 pub mod resource_identity;
@@ -310,6 +312,10 @@ pub struct Gateway<S, L> {
     risk_tiers: Option<risk_tiers::TierPolicy>,
     /// Times some capabilities are refused or need approval (see [`change_windows`]).
     change_windows: Vec<change_windows::ChangeWindow>,
+    /// JSON pointers to data-subject identifiers in run requests (see [`privacy`]).
+    subject_pointers: Vec<String>,
+    /// Who may lift which guards in an incident (see [`break_glass`]).
+    break_glass: Option<break_glass::BreakGlassPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -567,6 +573,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             environments: None,
             risk_tiers: None,
             change_windows: Vec::new(),
+            subject_pointers: Vec::new(),
+            break_glass: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -1077,6 +1085,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // the operation ledger read used by the duplicate fast path): fetch them at once.
         let operations_key = operation_ledger_key(admission, &operation_id);
         let revocations_key = revocations::revocations_key(&admission.tenant_id);
+        let global_revocations_key = revocations::global_key();
         let call_signature = loop_guard::signature(&manifest.capability_id, &binding["arguments"]);
         let loop_key = loop_guard::key(admission);
         let flow_key = information_flow::key(&admission.tenant_id, &admission.run_id);
@@ -1086,7 +1095,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             approval_material,
             existing_ledger,
             boundary,
-            revoked,
+            (revoked, global_revoked),
             loops,
             flow,
             breaker,
@@ -1099,7 +1108,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.ports.approvals.approval(admission, &action_digest),
             self.store.get(&operations_key),
             self.boundary_readiness(admission, &now),
-            self.store.get(&revocations_key),
+            async {
+                tokio::join!(
+                    self.store.get(&revocations_key),
+                    self.store.get(&global_revocations_key)
+                )
+            },
             async {
                 if self.loop_limit.is_some() || self.refuse_repeated_effects {
                     self.store.get(&loop_key).await
@@ -1120,12 +1134,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
         let revoked = revoked?;
+        let global_revoked = global_revoked?;
         let mut targets = revocations::run_targets(admission);
         targets.extend([
             ("adapter", manifest.adapter_id.as_str()),
             ("capability", manifest.capability_id.as_str()),
         ]);
-        if let Some(revoked) = revocations::matched(revoked.as_ref().map(|r| &r.body), &targets) {
+        if let Some(revoked) = revocations::global_matched(global_revoked.as_ref().map(|g| &g.body))
+            .or_else(|| revocations::matched(revoked.as_ref().map(|r| &r.body), &targets))
+        {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
                 "reason_codes": [revoked.reason_code], "revoked_kind": revoked.kind, "revoked_by": revoked.by});
             self.record(&mut p, "revocation_refusal", body, &now).await?;
@@ -1133,7 +1150,25 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         // Circuit breakers: too many effects or refusals for this agent, principal or
         // tenant across runs stops the call (and, once per window, trips the breaker).
-        if let Some(open) = breaker? {
+        let breaker = breaker?;
+        let lifted = match &breaker {
+            Some(open) => self
+                .break_glass_for(
+                    &admission.tenant_id,
+                    &manifest.capability_id,
+                    break_glass::Lift::CircuitBreakers,
+                    &now,
+                )
+                .await?
+                .map(|grant| (grant, open.rule.id.clone())),
+            None => None,
+        };
+        if let Some((grant, breaker_id)) = lifted {
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id, "grant_id": grant, "lifted": "circuit_breakers",
+                "breaker": breaker_id});
+            self.record(&mut p, "break_glass_used", body, &now).await?;
+        } else if let Some(open) = breaker {
             let tripped = self.trip_breaker(admission, &open, &now).await?;
             p.report.audit_sequences.extend(tripped);
             p.report.obligations.push("wait_for_circuit".into());
@@ -1416,10 +1451,36 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "required_constraints": admission.required_controls,
             "constraint_observations": constraint_observations,
         }));
-        let decision = serde_json::to_value(&authorization.decision).unwrap_or(Value::Null);
+        let mut decision = serde_json::to_value(&authorization.decision).unwrap_or(Value::Null);
+        if let Some(chain) = delegation_chain::decision_record(admission)
+            && let Some(fields) = decision.as_object_mut()
+        {
+            fields.insert("delegation".into(), chain);
+        }
         self.record(&mut p, "authorization_decision", decision, &now).await?;
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
+        // What runtime guards added to this decision, for approval analytics.
+        let guard_reasons = outside_task.clone();
         p.report.reason_codes.extend(outside_task);
+        if authorization
+            .decision
+            .reason_codes
+            .iter()
+            .any(|r| r == "approval_denied")
+        {
+            let deniers: Vec<&Value> = approval_input["decisions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|d| d["decision"] == "denied")
+                .map(|d| &d["approver"]["principal_id"])
+                .collect();
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id,
+                "approval_request_id": approval_input["request"]["approval_request_id"],
+                "approvers": deniers, "guard_reasons": guard_reasons});
+            self.record(&mut p, "approval_denied", body, &now).await?;
+        }
         if let Some(request_id) = step_up_refused {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
                 "capability_id": manifest.capability_id, "approval_request_id": request_id});
@@ -1591,6 +1652,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         admission,
                         &approval_input,
                         (&operation_id, &manifest.capability_id),
+                        &guard_reasons,
                         &now,
                     )
                     .await?;

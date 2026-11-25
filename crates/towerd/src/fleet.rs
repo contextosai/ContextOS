@@ -193,6 +193,9 @@ pub struct SourceState {
     #[serde(skip)]
     pub revocations: BTreeMap<String, Revoked>,
     pub conformance: Vec<Value>,
+    /// Break-glass grants opened on this source (the newest [`MAX_BREAK_GLASS`]), with
+    /// the calls each let through.
+    pub break_glass: Vec<Value>,
     #[serde(skip)]
     pub deployment: Value,
     #[serde(skip)]
@@ -240,6 +243,8 @@ pub struct Fleet {
 const MAX_CHANGES: usize = 2_000;
 pub const MAX_ATTEMPTS: usize = 200_000;
 pub const MAX_UNRESOLVED: usize = 1_000;
+/// Break-glass grants kept per source.
+pub const MAX_BREAK_GLASS: usize = 256;
 /// Agents per source tenant.
 pub const MAX_AGENTS: usize = 50_000;
 /// Agents in the whole fleet, whatever the number of tenants.
@@ -635,6 +640,34 @@ impl Fleet {
                 }
                 let verb = if restored { "Restored" } else { "Revoked" };
                 self.change(source, entry, format!("{verb} {target}: {reason}"), s(&p["operator"]));
+            }
+            "break_glass_opened" => {
+                let state = self.source(source);
+                if state.break_glass.len() >= MAX_BREAK_GLASS {
+                    state.break_glass.remove(0);
+                }
+                let mut grant = p.clone();
+                grant["sequence"] = json!(entry.sequence);
+                grant["calls"] = json!(0);
+                state.break_glass.push(grant);
+                self.change(
+                    source,
+                    entry,
+                    format!("Break-glass opened: {}", s(&p["justification"]).unwrap_or("?")),
+                    s(&p["opened_by"]),
+                );
+            }
+            "break_glass_used" => {
+                let state = self.source(source);
+                if let Some(g) = state.break_glass.iter_mut().find(|g| g["grant_id"] == p["grant_id"]) {
+                    g["calls"] = json!(g["calls"].as_u64().unwrap_or(0) + 1);
+                }
+            }
+            "break_glass_closed" => {
+                let state = self.source(source);
+                if let Some(g) = state.break_glass.iter_mut().find(|g| g["grant_id"] == p["grant_id"]) {
+                    g["closed_at"] = json!(at);
+                }
             }
             "conformance_assessed" => {
                 self.source(source)

@@ -44,6 +44,8 @@ step outcome-witness; check_example examples/outcome-witness/run.sh "outcome wit
 step evaluation-loop; check_example examples/evaluation-loop/run.sh "evaluation loop complete" || fail "evaluation loop"
 step row-lock; check_example examples/why-not-a-row-lock/run.sh "row lock comparison complete" || fail "row lock comparison"
 step metering;   bash examples/metering-proxy/run.sh >/dev/null 2>&1   || fail "metering proxy"
+step relay;      bash examples/approval-relay/run.sh >/dev/null 2>&1 || fail "approval relay"
+step screening;  python3 -m unittest discover -s examples/result-screening -p 'test_*.py' >/dev/null 2>&1 || fail "result screener"
 step replay; check_example examples/replay/run.sh "replay report written" || fail "replay"
 step replay-refunds; check_example examples/replay-refunds/run.sh "refund replay report written" || fail "refund replay"
 step failure-lab; check_example examples/failure-lab/check.sh "failure lab story matches the runtime" || fail "failure lab drifted"

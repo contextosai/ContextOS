@@ -653,6 +653,7 @@ dependencies = [
  "reqwest",
  "ring",
  "rustls",
+ "rustls-webpki",
  "schemars",
  "serde",
  "serde_json",

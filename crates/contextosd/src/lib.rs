@@ -6,6 +6,7 @@ pub mod app;
 pub mod attest;
 pub mod audit_sinks;
 pub mod auth;
+pub mod break_glass_api;
 pub mod check;
 pub mod compensation;
 pub mod config;
@@ -41,11 +42,13 @@ pub mod outcome_witness;
 pub mod pack_binding;
 pub mod pack_intents;
 pub mod pack_registry;
+pub mod privacy_api;
 pub mod protected_resource;
 pub mod reconcile;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;
+pub mod svid;
 pub mod task_amendment;
 pub mod telemetry;
 pub mod tls_server;
@@ -321,6 +324,13 @@ where
         evidence_subjects: Arc::new(config.evidence_subjects.clone()),
         calibrated_evaluators: evaluator_calibration::load(config.guards.evaluator_calibration.as_ref())?.map(Arc::new),
         public_url: config.server.public_url.clone(),
+        global_kill_switch: config.kill_switch.global_principals.clone(),
+        spiffe_agents: config
+            .server
+            .tls
+            .as_ref()
+            .map(|t| t.spiffe_agents.clone())
+            .filter(|m| !m.is_empty()),
         mcp_origins: crate::mcp_transport::AllowedOrigins::new(
             config.server.public_url.as_deref(),
             &config.server.allowed_origins,

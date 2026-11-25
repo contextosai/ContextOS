@@ -23,12 +23,14 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `guarantees` | array of tables | `[]` | Trusted business-resource limits shared by unrelated agent runs. |
 | `guards` | table | see below | Runtime guards on agent behaviour. |
 | `identity` | table | unset | Agent trust domain and the gateway's own principal; defaults suit one deployment. |
+| `kill_switch` | table | see below | Who may use the runtime-wide kill switch. |
 | `limits` | table | see below | Overload protection (see `limits`). |
 | `notifications` | array of tables | `[]` | Webhooks told when escalations open and resolve (see `notifications`). |
 | `oidc` | array of tables | `[]` | OIDC issuers whose JWTs authenticate callers. |
 | `pack_dirs` | array of string | `[]` | Directories whose JSON files (recursively; names starting with `.` skipped) are Context Packs, loaded at startup and re-read on reload (see `pack_registry`). |
 | `pack_reload_secs` | integer | `0` | Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only. |
 | `packs` | array of string | `[]` | Context Pack JSON files to load at startup. |
+| `privacy` | table | see below | Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`). |
 | `providers` | table | unset | Remote fact services; dispatch is disabled without them. |
 | `readiness` | table | unset | Opt-in profile holding consequential workflows to every safety mechanism they rely on (see `workflow_readiness`). Unset: not checked. |
 | `result_schemas` | array of tables | `[]` | Schemas delegated runs' results must meet, by the `output_schema_ref` a delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`. |
@@ -182,6 +184,7 @@ Guards on agent behaviour.
 | `approval_review` | table | unset | Approvals count only if decided at least `min_review_seconds` after they were requested (see `contextos_gateway::approval_review`). |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
 | `approval_timeout` | table | unset | Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`). |
+| `break_glass` | table | unset | Lets a `break_glass` credential lift change windows or open circuit breakers for named capabilities for at most an hour, audited (see `contextos_gateway::break_glass`). Unset: off. |
 | `change_windows` | array of tables | `[]` | Freezes and recurring windows when some capabilities' calls are refused or need an approval of the exact action, decided on the server clock (see `contextos_gateway::change_windows`). |
 | `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |
 | `completion_requires_scores` | boolean \| table | unset | Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them. |
@@ -233,6 +236,14 @@ One `[[guards.circuit_breakers]]` rule.
 | `trip` | `"refuse"` \| `"revoke"` | `"refuse"` | What a trip does besides refusing. |
 | `window_seconds` | integer | `60` |  |
 
+## `[kill_switch]`
+
+`[kill_switch]`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `global_principals` | array of string | unset | Principals that may revoke and restore `global` (every tenant of this runtime at once) through `POST /v1/revocations`; each also needs the `control` scope. Empty: no one, and the global kill switch is off. |
+
 ## `[limits]`
 
 | Key | Type | Default | Description |
@@ -280,6 +291,14 @@ One `[[guards.circuit_breakers]]` rule.
 | `tenant_claim` | string | `"tenant_id"` | Claim path naming the tenant: a string, an array or an object keyed by name (Keycloak's `organization`). It must name exactly one of `tenants`. |
 | `tenant_map` | table of any | see below | Maps `tenant_claim` values (for example Keycloak organization aliases) to tenant ids. Empty: the claim value itself is the tenant id. |
 | `tenants` | array of string | required | Tenants this issuer may assert. A token naming any other tenant is rejected. |
+
+## `[privacy]`
+
+`[privacy]`: where run requests name their data subjects.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `subject_pointers` | array of string | unset | JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index. |
 
 ## `[[result_schemas]]`
 

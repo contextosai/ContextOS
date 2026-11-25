@@ -293,9 +293,26 @@ records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit thei
 parent's binding (`bound: "inherited"`); their agent is the one the parent's
 delegation names, and `named_by_credential` says whether the admitting credential
 names it too. SPIRE's OIDC discovery provider publishes the
-JWKS for JWT-SVIDs, so they need no other integration. X.509 SVIDs can restrict who
-may connect at all (`[server.tls] client_ca_path`, under Operate), but they do not
-name the agent: binding still comes from the token.
+JWKS for JWT-SVIDs, so they need no other integration.
+
+X.509 SVIDs can name the agent too. With mutual TLS, map each workload's SPIFFE ID to
+the agent it runs:
+
+```toml
+[server.tls]
+client_ca_path = "/etc/contextos/tls/spire-bundle.pem"
+[server.tls.spiffe_agents]
+"spiffe://acme.internal/ns/support/sa/refund-agent" = "agt_support"
+```
+
+The server reads the verified client certificate's `spiffe://` URI and narrows the
+caller's agents to the one it maps to: a token or key that names agents keeps only that
+one (none if it is not among them), one that names none gets it, and a connection
+without a mapped certificate names no agent, so `agent_binding = "required"` refuses
+its admissions. `run_admitted` records the source as `x509_svid` (or the credential's
+source plus `+x509_svid`). The identity reaches handlers only from the TLS connection:
+any client-sent copy of the internal header is removed. Behind a proxy that terminates
+TLS the mapping has nothing to read, so keep JWT-SVIDs there.
 
 #### Bind runs to the user the agent acts for
 
@@ -341,8 +358,12 @@ assistant-a, which acted for the user). The whole chain is read, current actor f
 and kept on the run; a delegated child run inherits its parent's. A chain longer than
 `max_chain`, naming an actor twice, or naming the user as an actor rejects the token.
 `run_admitted` records `delegation` with the chain's `depth` and `chain_digest`
-(SHA-256 over the user and actors in order), never the identities. The kill switch
-(section 8) can then stop the user, one exact chain, or any actor on it.
+(SHA-256 over the user and actors in order), never the identities. Every
+`authorization_decision` of the run carries the same path as `delegation.user_chain`,
+and a delegated child's decisions also carry `delegation.run_lineage` (root, parent,
+delegation id and depth), so each decision shows who it acted through without
+another lookup. The kill switch (section 8) can then stop the user, one exact chain,
+or any actor on it.
 
 #### Hold runs to the intents their pack governs
 
@@ -798,6 +819,41 @@ issue text and treats every write as public; raise `output_classification` to
 `INTERNAL` for issues of private repositories, and the egress ceiling of writes to
 repositories that are never public. Review preset labels like every other field.
 
+#### Regulated data categories and where they may go
+
+Beside the level, a run tracks which categories of regulated data it has read: `pii`,
+`phi`, `pci` and `secrets`. Declare them on the tools that return such data, and the
+destination of the tools that send data out:
+
+```json
+"flow": {"output_classification": "CONFIDENTIAL", "output_categories": ["pii"]}
+"flow": {"egress_ceiling": "CONFIDENTIAL", "egress_vendor": "mailer_eu", "egress_region": "eu"}
+```
+
+Boundaries say where each category may go:
+
+```toml
+[guards.information_flow]
+initial_categories = []              # e.g. ["pii"] when every request carries personal data
+[[guards.information_flow.boundaries]]
+categories = ["pci"]
+capabilities = ["adp_payments.charge"]       # only the payment processor
+[[guards.information_flow.boundaries]]
+categories = ["pii", "phi"]
+vendors = ["mailer_eu"]                       # a declared vendor in a declared region
+regions = ["eu"]
+verdict = "ask"                               # default "deny"
+```
+
+An egress call (the capability `sends_data` or names recipients) in a run that has
+read a boundary's category, through a capability the boundary does not clear, gets
+the boundary's verdict (`flow_category_boundary`): denied, or an approval of the exact
+call. A capability is cleared when the boundary names it, or when its declared vendor
+and region are both cleared; one that declares neither is not. Categories only rise
+within a run, pass to delegated children and back, and appear in the audit facts.
+They are metadata the manifests declare: the runtime never inspects the data, so a tool
+that returns personal data without saying so is not caught (see SCOPE.md).
+
 ### Delegating to child runs (subagent lanes)
 
 Admit a child with the usual `POST /v1/runs` body for the child, plus an
@@ -1143,9 +1199,13 @@ minimal, development-only implementation):
     approvals were rubber-stamped.
   - With or without a floor, the gateway audits `approval_requested` the first time it
     asks for an approval and `approval_redeemed` when one is redeemed, with the
-    approvers, `decided_at` and `decision_seconds`. Tower's Approvals page
-    (`GET /api/approvals`) folds them into decision-time distributions per capability
-    and per approver.
+    approvers, `decided_at`, `decision_seconds` and `guard_reasons` (the runtime guards,
+    such as a risk tier or the information-flow guard, whose verdict made the action need
+    the approval), and `approval_denied` when an approval is denied, with its deniers.
+    Tower's Approvals page (`GET /api/approvals`) folds them into decision-time
+    distributions per capability and per approver, a denial rate and an override rate
+    (approvals of actions a runtime guard had flagged). An approver who never denies and
+    approves every flagged action within seconds is a rubber stamp.
 
   With `[guards.approval_timeout]`, an approval request nobody decides does not leave
   its run waiting unnoticed:
@@ -2234,6 +2294,18 @@ a calibrated evaluation platform judges a candidate agent's tool calls, and
 clients post tool-call verdicts with `Client.evaluate_operation` (Python) and
 `client.evaluateOperation` (Node).
 
+### Approvals in Slack, Teams and e-mail
+
+The approval service (`[providers.approvals]`) is the deployment's: it decides who is
+asked and records their decision; the kernel verifies the decision against the exact
+action before anything runs. `examples/approval-relay` is a reference approval service
+that delivers each request to Slack, Microsoft Teams or e-mail, takes decisions back
+through signed callbacks (Slack signatures, Teams HMAC, signed expiring e-mail links),
+maps channel identities to approvers, escalates through tiers while a request is
+undecided, and lets an approver on leave delegate until a date. Its `trusted_observers`
+must be the ones the authority service vouches with. Run `./examples/approval-relay/run.sh`
+to watch a real gateway approve and deny a refund from Slack.
+
 ### Escalations
 
 When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation
@@ -2321,6 +2393,25 @@ with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
 
+The kill switch works at four scopes:
+
+| Scope | Kind and target | Who |
+|---|---|---|
+| One agent | `agent` (its id), or `principal` to stop whoever runs it; `user` or `delegation` for one user's runs | `control` in the tenant |
+| One tool | `capability` (one call), or `adapter` (every capability of an MCP server or API) | `control` in the tenant |
+| One tenant | `tenant` | `control` in the tenant |
+| Everything | `global`, target `*`: every tenant of the runtime at once | `control` and listed in `[kill_switch] global_principals` |
+
+```toml
+[kill_switch]
+global_principals = ["svc_incident_commander"]   # empty (the default): no global switch
+```
+
+A global revocation is kept apart from every tenant's set, read with each, and listed
+first by `GET /v1/revocations` for every tenant; it is audited in the revoking
+principal's tenant. Tower's fleet kill switch (`POST /api/fleet/revoke`) applies an
+agent, capability, adapter, pack or principal revocation on every runtime it controls.
+
 Every refusal is audited as `revocation_refusal` with the reason code, the kind of
 target revoked (`revoked_kind`) and who revoked it (`revoked_by`: the operator, or
 `circuit_breaker:<id>`): a blocked call with its run and operation, a refused run with
@@ -2357,6 +2448,42 @@ parallel may overshoot the threshold by their concurrency: a breaker bounds a
 runaway, it is not an exact quota. Scope `agent` is as strong as agent binding: turn
 on `[guards] agent_binding` so a credential cannot pose as another agent.
 
+### Break-glass
+
+In an incident, a freeze or an open circuit breaker can block the fix. Break-glass lets
+a separate credential lift those two guards, and only those, for named capabilities
+and a short time:
+
+```toml
+[guards.break_glass]
+max_ttl_seconds = 3600              # 60 to 3600
+lifts = ["change_windows", "circuit_breakers"]
+
+[[api_keys]]                        # an incident lead's key: no admit, no dispatch
+key_sha256 = "sha256:…"
+tenant_id = "tenant_acme_prod"
+principal_id = "oncall_lead"
+scopes = ["break_glass"]
+```
+
+```sh
+curl -X POST "$CONTEXTOS/v1/break-glass" -H "Authorization: Bearer $LEAD_TOKEN" -d '{
+  "capabilities": ["adp_payments.issue_refund"], "lifts": ["change_windows"], "ttl_seconds": 900,
+  "justification": "INC-311: refunds for the failed payout run must go out during the freeze",
+  "incident_ref": "INC-311"}'
+curl -X POST "$CONTEXTOS/v1/break-glass/$GRANT/close" -H "Authorization: Bearer $LEAD_TOKEN"
+```
+
+A grant never lifts a revocation (a kill switch, or a breaker that revoked, needs a
+restore), an approval, a budget, a shared ceiling, a risk tier, an information-flow
+rule or tenant isolation: those decide every call as before. A credential that admits
+or dispatches cannot hold `break_glass` (startup refuses the key; a token with both is
+refused at the route). Opening and closing are audited (`break_glass_opened`,
+`break_glass_closed`), and every call a grant lets through is audited as
+`break_glass_used` with the guard it lifted. Tower reports each grant as
+`break_glass_unreviewed` (high) until a risk reviewer other than its opener records a
+review (`POST /api/break-glass/review`).
+
 ## 9. Erase personal content
 
 A run's user-provided content lives in its replay case (the original request), its
@@ -2390,7 +2517,55 @@ The leader replica (smallest id among live replicas) sweeps runs admitted more t
 that many days ago every `sweep_interval_ms` (default 60 s), `batch` runs (default 500)
 per sweep, and erases each finished run exactly as `POST /v1/runs/{id}/erase` would,
 with `contextos.retention` as the operator. Runs still in progress are revisited on a
-later sweep, never erased under their executor.
+later sweep, never erased under their executor. Runs under a legal hold are skipped
+and counted (`held`).
+
+### Legal holds
+
+A legal hold keeps runs' content from erasure while litigation, an investigation or
+an audit needs it (`control` scope):
+
+```sh
+curl -X POST "$CONTEXTOS/v1/legal-holds" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "hold_id": "case-2026-114", "reason": "Litigation hold for case 114",
+  "subjects": ["cus_77"], "run_ids": ["run_8812"], "tenant_wide": false}'
+curl -X POST "$CONTEXTOS/v1/legal-holds/case-2026-114/release" -H "Authorization: Bearer $OPS_TOKEN" \
+  -d '{"reason": "Case 114 closed by counsel"}'
+```
+
+While a hold covers a run (named, indexed under a named subject, or every run of the
+tenant), `POST /v1/runs/{id}/erase` answers `409 legal_hold` and retention skips it.
+Placing and releasing are audited (`legal_hold_placed`, `legal_hold_released`) with a
+reason of at least 10 characters; subjects are kept and audited as digests, and a
+released hold stays listed (`GET /v1/legal-holds`).
+
+### Deletion requests by data subject
+
+Tell the runtime where run requests name the people they are about, and it indexes
+each run under a digest of each identifier:
+
+```toml
+[privacy]
+subject_pointers = ["/input/context/customer_id", "/input/context/email"]
+```
+
+Then find and erase a person's runs. The identifier travels in the request body, never
+the path, so it stays out of access logs:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/subjects/runs" -H "Authorization: Bearer $OPS_TOKEN" -d '{"subject": "cus_77"}'
+curl -X POST "$CONTEXTOS/v1/subjects/erase" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "subject": "cus_77", "reason": "Deletion request DSR-88"}'
+# {"subject_digest": "sha256:…", "runs": 2, "erased": ["run_8812", "run_8840"], "held": [], "active": [], …}
+```
+
+Each finished run is erased as above (tombstones, a `run_data_erased` entry); runs under
+a hold and runs still active are listed and left, and the request itself is audited as
+`subject_erasure` with the subject's digest. Only runs admitted after the pointers were
+configured are indexed. The audit chain is never rewritten: it verifies after any
+erasure (`GET /v1/audit/verify`, `ctx audit-verify`). What the runtime cannot erase is
+what it never held as content: personal data a deployment writes into decision outputs,
+rationales or audit-visible arguments stays in signed records, so keep it out of them.
 
 ## 10. Assess conformance
 
@@ -2685,8 +2860,8 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
   cert-manager Secret) are served to new connections within `reload_secs`; a
   rotation that does not load keeps the previous certificate and logs a warning.
-  Callers still authenticate with their token: mTLS decides who may connect, not who
-  they are. `--check-config` loads the files. The Helm chart mounts them with
+  Callers still authenticate with their token: mTLS decides who may connect, and with
+  `spiffe_agents` which agent they may admit runs as (section 3, agent binding). `--check-config` loads the files. The Helm chart mounts them with
   `extraVolumes` and `extraVolumeMounts`.
 
   Without a proxy the server bounds slow clients itself: a TLS handshake has 10
@@ -2776,6 +2951,15 @@ business_unit = "Customer Operations"
   time-boxed and decided by someone other than the requester.
 - **Reviews and drift.** A risk review approves an agent's current authority; any
   capability added later is drift until reviewed again.
+- **Access reviews.** `GET /api/access-review?days=90` (and the Access review page,
+  with CSV export) lists every grant an agent holds (capabilities pinned in its packs or
+  surfaced to its runs) as used, unused in the window or never used; delegations to
+  agents that no longer run; agents in pilot or production that stopped running; and
+  waivers and reviews expiring within 30 days. A risk reviewer attests with
+  `POST /api/access-review/attest` (days, notes and the report's `digest`): Tower refuses
+  an attestation if the findings changed since the reviewer read them, and journals
+  `access_review_attested`. Act on findings with the existing routes: the fleet kill
+  switch, a lifecycle request, or a pack change.
 - **Lifecycle.** An agent moves through `proposed`, `approved`, active (`pilot`,
   `production`, `deprecated`), `suspended` and `retired`. Each move is requested and
   approved by a second person (a risk reviewer, not the agent's owner) and signed into

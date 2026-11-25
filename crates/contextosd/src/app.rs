@@ -27,6 +27,9 @@
 //! | `POST /v1/runs/{run_id}/usage/reserve` | `dispatch` | reserve budget for a model call or a replan |
 //! | `POST /v1/runs/{run_id}/usage/claim` | `meter` | claim a model-call reservation for the one call a metering gateway forwards; returns what it covers |
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
+//! | `GET/POST /v1/legal-holds`, `POST /v1/legal-holds/{hold_id}/release` | `control` | legal holds that keep runs from erasure ([`crate::privacy_api`]) |
+//! | `GET /v1/break-glass`, `POST /v1/break-glass`, `POST /v1/break-glass/{grant_id}/close` | `control` / `break_glass` | incident grants that lift change windows or open breakers ([`crate::break_glass_api`]) |
+//! | `POST /v1/subjects/runs`, `POST /v1/subjects/erase` | `control` | a data subject's runs, and erasing them (deletion requests) |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
 //! | `POST /v1/rollouts` | `control` | route a percentage of a baseline pack's new runs to a candidate pack (optionally shadow-diffing the rest) |
@@ -155,6 +158,10 @@ pub struct AppState<S, L> {
     pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// `[kill_switch] global_principals`: who may revoke every tenant at once.
+    pub global_kill_switch: Vec<String>,
+    /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
+    pub spiffe_agents: Option<std::collections::BTreeMap<String, String>>,
     /// Browser origins that may call the MCP endpoint.
     pub mcp_origins: crate::mcp_transport::AllowedOrigins,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -2651,6 +2658,11 @@ where
             "run_active",
             "Only a finished run can be erased.",
         )),
+        Err(ErasureError::Held(hold)) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "legal_hold",
+            format!("Legal hold {hold} covers this run; release it before erasing."),
+        )),
         Err(ErasureError::Invalid) => Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "request_invalid",
@@ -2704,6 +2716,14 @@ where
             format!("Invalid revocation: {e}"),
         )
     })?;
+    // Stopping every tenant at once is for the principals the deployment names.
+    if change.kind == "global" && !state.global_kill_switch.iter().any(|p| p == &caller.principal_id) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "global_kill_switch_forbidden",
+            "Only principals in [kill_switch] global_principals may revoke or restore globally.",
+        ));
+    }
     match gateway
         .set_revocation(
             &caller.tenant_id,
@@ -3184,6 +3204,24 @@ where
         .route("/v1/runs/{run_id}/replay-case", get(replay_case::<S, L>))
         .route("/v1/runs/{run_id}/erase", post(erase_run::<S, L>))
         .route(
+            "/v1/legal-holds",
+            get(crate::privacy_api::list_holds::<S, L>).post(crate::privacy_api::place_hold::<S, L>),
+        )
+        .route(
+            "/v1/legal-holds/{hold_id}/release",
+            post(crate::privacy_api::release_hold::<S, L>),
+        )
+        .route("/v1/subjects/runs", post(crate::privacy_api::subject_runs::<S, L>))
+        .route(
+            "/v1/break-glass",
+            get(crate::break_glass_api::list::<S, L>).post(crate::break_glass_api::open::<S, L>),
+        )
+        .route(
+            "/v1/break-glass/{grant_id}/close",
+            post(crate::break_glass_api::close::<S, L>),
+        )
+        .route("/v1/subjects/erase", post(crate::privacy_api::erase_subject::<S, L>))
+        .route(
             "/v1/runs/{run_id}/usage/reserve",
             post(crate::usage_api::reserve_usage::<S, L>),
         )
@@ -3258,6 +3296,8 @@ where
         ))
         .layer(tower_http::trace::TraceLayer::new_for_http().make_span_with(request_span))
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
+        // Outermost: the peer identity header comes only from the TLS connection.
+        .layer(middleware::from_fn(crate::svid::propagate))
         .with_state(state)
 }
 

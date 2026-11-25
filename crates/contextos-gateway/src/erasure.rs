@@ -59,6 +59,9 @@ fn pending_index_key(admission: &RunAdmission) -> DocKey {
 pub enum ErasureError {
     #[error("only a finished run can be erased")]
     RunActive,
+    /// A legal hold covers the run; nothing erases it until the hold is released.
+    #[error("legal hold {0} covers the run")]
+    Held(String),
     #[error("a reason is required")]
     Invalid,
     #[error(transparent)]
@@ -81,6 +84,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     ) -> Result<Value, ErasureError> {
         if reason.trim().is_empty() || reason.len() > 1024 {
             return Err(ErasureError::Invalid);
+        }
+        if let Some(hold) = self.held_by(admission).await? {
+            return Err(ErasureError::Held(hold));
         }
         let status = self
             .run_state(admission)

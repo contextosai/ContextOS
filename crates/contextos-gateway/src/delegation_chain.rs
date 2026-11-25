@@ -54,6 +54,21 @@ impl DelegationChain {
     }
 }
 
+/// The delegation a decision records, so every decision shows the path it acts
+/// through: the actor chain from the user (its depth and the digest that is also its
+/// revocation target; the audit holds no identities, the run's admission record keeps
+/// them) and, for a delegated run, its run lineage up to the root. `None` for a run
+/// that is neither.
+#[must_use]
+pub fn decision_record(admission: &crate::admission::RunAdmission) -> Option<Value> {
+    let user = admission.delegation_chain.as_ref().map(DelegationChain::audit_record);
+    let runs = admission.lineage.as_ref().map(|l| {
+        json!({"root_run_id": l.root_run_id, "parent_run_id": l.parent_run_id,
+            "delegation_id": l.delegation_id, "depth": l.links.len()})
+    });
+    (user.is_some() || runs.is_some()).then(|| json!({"user_chain": user, "run_lineage": runs}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

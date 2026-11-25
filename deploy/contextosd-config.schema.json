@@ -303,6 +303,74 @@
       ],
       "type": "object"
     },
+    "Boundary": {
+      "additionalProperties": false,
+      "description": "One `[[guards.information_flow.boundaries]]` entry.",
+      "properties": {
+        "capabilities": {
+          "description": "Egress capabilities cleared for them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "categories": {
+          "description": "The categories this boundary keeps in.",
+          "items": {
+            "$ref": "#/$defs/DataCategory"
+          },
+          "type": "array"
+        },
+        "regions": {
+          "description": "Destination regions cleared for them (a capability's `flow.egress_region`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vendors": {
+          "description": "Destination vendors cleared for them (a capability's `flow.egress_vendor`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/$defs/FlowVerdict",
+          "default": "deny",
+          "description": "What a call through an uncleared capability gets: `deny` (default) or `ask`."
+        }
+      },
+      "required": [
+        "categories"
+      ],
+      "type": "object"
+    },
+    "BreakGlassPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.break_glass]`.",
+      "properties": {
+        "lifts": {
+          "default": [
+            "change_windows",
+            "circuit_breakers"
+          ],
+          "description": "What a grant may lift.",
+          "items": {
+            "$ref": "#/$defs/Lift"
+          },
+          "type": "array"
+        },
+        "max_ttl_seconds": {
+          "default": 3600,
+          "description": "The longest a grant may last, 60 to 3600 seconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "BreakerCount": {
       "description": "What a breaker counts.",
       "oneOf": [
@@ -540,6 +608,15 @@
       },
       "type": "object"
     },
+    "DataCategory": {
+      "enum": [
+        "pii",
+        "phi",
+        "pci",
+        "secrets"
+      ],
+      "type": "string"
+    },
     "DelegationConfig": {
       "additionalProperties": false,
       "description": "`[oidc.delegation]`: how a delegated token names its actor and user.",
@@ -738,10 +815,24 @@
       "additionalProperties": false,
       "description": "`[guards.information_flow]`.",
       "properties": {
+        "boundaries": {
+          "description": "Where regulated data categories may go (see `categories`).",
+          "items": {
+            "$ref": "#/$defs/Boundary"
+          },
+          "type": "array"
+        },
         "classified_egress": {
           "$ref": "#/$defs/FlowVerdict",
           "default": "deny",
           "description": "An egress call carrying data above its capability's `egress_ceiling`."
+        },
+        "initial_categories": {
+          "description": "Categories every run starts with (for requests that carry such data).",
+          "items": {
+            "$ref": "#/$defs/DataCategory"
+          },
+          "type": "array"
         },
         "initial_classification": {
           "$ref": "#/$defs/Classification",
@@ -849,6 +940,18 @@
           ],
           "default": null,
           "description": "Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`)."
+        },
+        "break_glass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakGlassPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lets a `break_glass` credential lift change windows or open circuit breakers for named capabilities for at most an hour, audited (see `contextos_gateway::break_glass`). Unset: off."
         },
         "change_windows": {
           "default": [],
@@ -1060,6 +1163,20 @@
         }
       ]
     },
+    "KillSwitchConfig": {
+      "additionalProperties": false,
+      "description": "`[kill_switch]`.",
+      "properties": {
+        "global_principals": {
+          "description": "Principals that may revoke and restore `global` (every tenant of this runtime at once) through `POST /v1/revocations`; each also needs the `control` scope. Empty: no one, and the global kill switch is off.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "KmsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1104,6 +1221,13 @@
         "public_key"
       ],
       "type": "object"
+    },
+    "Lift": {
+      "enum": [
+        "change_windows",
+        "circuit_breakers"
+      ],
+      "type": "string"
     },
     "LimitsConfig": {
       "additionalProperties": false,
@@ -1392,6 +1516,20 @@
         "off"
       ],
       "type": "string"
+    },
+    "PrivacyConfig": {
+      "additionalProperties": false,
+      "description": "`[privacy]`: where run requests name their data subjects.",
+      "properties": {
+        "subject_pointers": {
+          "description": "JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "ProvidersConfig": {
       "additionalProperties": false,
@@ -2221,6 +2359,13 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "spiffe_agents": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "SPIFFE IDs of client certificates to the agent each may admit runs as (see `svid`). Needs `client_ca_path`; set, a caller's agents are narrowed to its certificate's.",
+          "type": "object"
         }
       },
       "required": [
@@ -2407,6 +2552,7 @@
         "approval_review": null,
         "approval_step_up": null,
         "approval_timeout": null,
+        "break_glass": null,
         "change_windows": [],
         "circuit_breakers": [],
         "completion_requires_scores": null,
@@ -2440,6 +2586,11 @@
       ],
       "default": null,
       "description": "Agent trust domain and the gateway's own principal; defaults suit one deployment."
+    },
+    "kill_switch": {
+      "$ref": "#/$defs/KillSwitchConfig",
+      "default": {},
+      "description": "Who may use the runtime-wide kill switch."
     },
     "limits": {
       "$ref": "#/$defs/LimitsConfig",
@@ -2491,6 +2642,11 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyConfig",
+      "default": {},
+      "description": "Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`)."
     },
     "providers": {
       "anyOf": [
