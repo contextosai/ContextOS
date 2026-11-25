@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Evaluation-gated releases: `POST /v1/agent-releases/evaluations` (evaluator) records a
+  suite's result on an `agent_release`, signed; with `[guards.release_evaluations]`, runs
+  of a covered agent are admitted only when the latest result of every required suite on
+  that exact release passed (`release_unevaluated`, `agent_release_missing`).
 - Behaviour flags in Tower: `new_tool_used`, `new_model_used` and `unusual_hour`
   findings for an agent with a week of history doing something it has not done before.
   They ask for a review and never block.

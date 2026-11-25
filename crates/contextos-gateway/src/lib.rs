@@ -64,6 +64,7 @@ pub mod ports;
 pub mod privacy;
 pub mod privilege;
 mod reconcile;
+pub mod release_evaluations;
 pub mod resource_identity;
 pub mod result_screening;
 mod retired;
@@ -316,6 +317,8 @@ pub struct Gateway<S, L> {
     subject_pointers: Vec<String>,
     /// Who may lift which guards in an incident (see [`break_glass`]).
     break_glass: Option<break_glass::BreakGlassPolicy>,
+    /// Which evaluation suites agent releases must pass (see [`release_evaluations`]).
+    release_evaluations: Option<release_evaluations::ReleaseEvaluationPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -575,6 +578,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             change_windows: Vec::new(),
             subject_pointers: Vec::new(),
             break_glass: None,
+            release_evaluations: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

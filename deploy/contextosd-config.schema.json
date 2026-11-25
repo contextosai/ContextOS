@@ -685,6 +685,31 @@
       ],
       "type": "object"
     },
+    "EvaluationRule": {
+      "additionalProperties": false,
+      "description": "One `[[guards.release_evaluations.rules]]` entry.",
+      "properties": {
+        "agents": {
+          "description": "Agent ids the rule covers, or `\"*\"` for every agent.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "suites": {
+          "description": "Suite ids that must have passed on the release.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents",
+        "suites"
+      ],
+      "type": "object"
+    },
     "EvaluatorCalibration": {
       "additionalProperties": false,
       "description": "`[guards.evaluator_calibration]`.",
@@ -1059,6 +1084,18 @@
           "default": true,
           "description": "Refuse a new operation whose effect is identical (same capability and arguments) to one the run already applied, unless the capability is `repeatable`: `effect_repeated`. On by default.",
           "type": "boolean"
+        },
+        "release_evaluations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReleaseEvaluationPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Evaluation suites an agent release must have passed before its runs are admitted (see `contextos_gateway::release_evaluations`). Unset: off."
         },
         "require_completion_contracts": {
           "default": null,
@@ -1680,6 +1717,22 @@
           "type": "string"
         }
       ]
+    },
+    "ReleaseEvaluationPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.release_evaluations]`.",
+      "properties": {
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/EvaluationRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "type": "object"
     },
     "RemoteProvider": {
       "additionalProperties": false,
@@ -2564,6 +2617,7 @@
         "model_call_min_tokens": 1000,
         "pack_intents": null,
         "refuse_repeated_effects": true,
+        "release_evaluations": null,
         "require_completion_contracts": null,
         "require_task_authorization": false,
         "require_tool_schemas": false,

@@ -185,6 +185,9 @@ impl Config {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
         contextos_gateway::change_windows::validate(&config.guards.change_windows).map_err(ConfigError::Invalid)?;
+        if let Some(re) = &config.guards.release_evaluations {
+            re.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(bg) = &config.guards.break_glass {
             bg.validate().map_err(ConfigError::Invalid)?;
         }

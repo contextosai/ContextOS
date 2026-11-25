@@ -71,6 +71,8 @@ pub struct DispatchSetup {
     pub subject_pointers: Vec<String>,
     /// `[guards.break_glass]`.
     pub break_glass: Option<contextos_gateway::break_glass::BreakGlassPolicy>,
+    /// `[guards.release_evaluations]`.
+    pub release_evaluations: Option<contextos_gateway::release_evaluations::ReleaseEvaluationPolicy>,
     /// `[[guards.change_windows]]`.
     pub change_windows: Vec<contextos_gateway::change_windows::ChangeWindow>,
     /// `[[guards.circuit_breakers]]`.
@@ -136,6 +138,7 @@ where
     gateway.set_change_windows(setup.change_windows);
     gateway.set_subject_pointers(setup.subject_pointers);
     gateway.set_break_glass(setup.break_glass);
+    gateway.set_release_evaluations(setup.release_evaluations);
     gateway.set_circuit_breakers(setup.circuit_breakers);
     gateway.set_action_monitor(setup.action_monitor);
     if let Some(screening) = setup.result_screening {
@@ -475,6 +478,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         change_windows: config.guards.change_windows.clone(),
         subject_pointers: config.privacy.subject_pointers.clone(),
         break_glass: config.guards.break_glass.clone(),
+        release_evaluations: config.guards.release_evaluations.clone(),
         circuit_breakers: config.guards.circuit_breakers.clone(),
         action_monitor: match &providers.action_monitor {
             Some(p) => Some((
