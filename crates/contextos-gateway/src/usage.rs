@@ -76,7 +76,14 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .get(&revocations_key(&admission.tenant_id))
             .await
             .map_err(GatewayError::from)?;
-        match matched(revocations.as_ref().map(|r| &r.body), &run_targets(admission)) {
+        let global = self
+            .store
+            .get(&crate::revocations::global_key())
+            .await
+            .map_err(GatewayError::from)?;
+        let hit = crate::revocations::global_matched(global.as_ref().map(|g| &g.body))
+            .or_else(|| matched(revocations.as_ref().map(|r| &r.body), &run_targets(admission)));
+        match hit {
             Some(revoked) => Err(UsageRefusal::Revoked(revoked)),
             None => Ok(()),
         }

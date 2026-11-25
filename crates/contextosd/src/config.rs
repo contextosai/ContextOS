@@ -55,6 +55,9 @@ pub struct Config {
     /// Retention of runs' personal content (see [`crate::retention`]); off by default.
     #[serde(default)]
     pub retention: crate::retention::RetentionConfig,
+    /// Who may use the runtime-wide kill switch.
+    #[serde(default)]
+    pub kill_switch: KillSwitchConfig,
     /// Data subjects named by run requests, for deletion requests and legal holds (see
     /// [`contextos_gateway::privacy`]).
     #[serde(default)]
@@ -409,4 +412,15 @@ mod tests {
         let error = Config::parse(&published).unwrap_err().to_string();
         assert!(error.contains("published example key"), "{error}");
     }
+}
+
+/// `[kill_switch]`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KillSwitchConfig {
+    /// Principals that may revoke and restore `global` (every tenant of this runtime at
+    /// once) through `POST /v1/revocations`; each also needs the `control` scope. Empty:
+    /// no one, and the global kill switch is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub global_principals: Vec<String>,
 }

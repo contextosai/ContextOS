@@ -7397,10 +7397,13 @@
         "properties": {
           "kind": {
             "enum": [
+              "global",
               "tenant",
               "pack",
               "principal",
               "agent",
+              "user",
+              "delegation",
               "adapter",
               "capability"
             ]

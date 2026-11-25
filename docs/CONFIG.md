@@ -23,6 +23,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `guarantees` | array of tables | `[]` | Trusted business-resource limits shared by unrelated agent runs. |
 | `guards` | table | see below | Runtime guards on agent behaviour. |
 | `identity` | table | unset | Agent trust domain and the gateway's own principal; defaults suit one deployment. |
+| `kill_switch` | table | see below | Who may use the runtime-wide kill switch. |
 | `limits` | table | see below | Overload protection (see `limits`). |
 | `notifications` | array of tables | `[]` | Webhooks told when escalations open and resolve (see `notifications`). |
 | `oidc` | array of tables | `[]` | OIDC issuers whose JWTs authenticate callers. |
@@ -234,6 +235,14 @@ One `[[guards.circuit_breakers]]` rule.
 | `threshold` | integer | required | Events per window at which the breaker opens. |
 | `trip` | `"refuse"` \| `"revoke"` | `"refuse"` | What a trip does besides refusing. |
 | `window_seconds` | integer | `60` |  |
+
+## `[kill_switch]`
+
+`[kill_switch]`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `global_principals` | array of string | unset | Principals that may revoke and restore `global` (every tenant of this runtime at once) through `POST /v1/revocations`; each also needs the `control` scope. Empty: no one, and the global kill switch is off. |
 
 ## `[limits]`
 

@@ -2377,6 +2377,25 @@ with the same body restores the target, and `GET /v1/revocations` lists what is
 revoked. Every change is audited before it takes effect, with the operator and reason.
 The check runs alongside the other authorization reads, so it adds no serial latency.
 
+The kill switch works at four scopes:
+
+| Scope | Kind and target | Who |
+|---|---|---|
+| One agent | `agent` (its id), or `principal` to stop whoever runs it; `user` or `delegation` for one user's runs | `control` in the tenant |
+| One tool | `capability` (one call), or `adapter` (every capability of an MCP server or API) | `control` in the tenant |
+| One tenant | `tenant` | `control` in the tenant |
+| Everything | `global`, target `*`: every tenant of the runtime at once | `control` and listed in `[kill_switch] global_principals` |
+
+```toml
+[kill_switch]
+global_principals = ["svc_incident_commander"]   # empty (the default): no global switch
+```
+
+A global revocation is kept apart from every tenant's set, read with each, and listed
+first by `GET /v1/revocations` for every tenant; it is audited in the revoking
+principal's tenant. Tower's fleet kill switch (`POST /api/fleet/revoke`) applies an
+agent, capability, adapter, pack or principal revocation on every runtime it controls.
+
 Every refusal is audited as `revocation_refusal` with the reason code, the kind of
 target revoked (`revoked_kind`) and who revoked it (`revoked_by`: the operator, or
 `circuit_breaker:<id>`): a blocked call with its run and operation, a refused run with
