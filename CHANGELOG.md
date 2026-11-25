@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Change windows: `[[guards.change_windows]]` refuses, or asks an approval of the exact
+  action for, some capabilities' calls during a freeze (`from`/`until`) or a recurring
+  window (`days`, `start`, `end`, fixed `utc_offset`), decided on the server clock and
+  audited as `change_window_decision` with the time decided at; `observe` audits only
+  (GUIDE §6, "Change freezes and out-of-hours windows").
 - Risk tiers: `[guards.risk_tiers]` maps a capability's tier (`low`, `limited`, `high`,
   `prohibited`) to allow, an approval of the exact action, or refusal. The tier is the
   riskier of the manifest's new `"risk_tier"` and the configuration's `capabilities`

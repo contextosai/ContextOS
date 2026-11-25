@@ -2061,6 +2061,36 @@ approval until someone classifies it. Classifying a capability that is not confi
 refuses startup. Owners record an agent's own tier in Tower's declaration
 (`risk_tier`); the runtime decides by the capability's.
 
+### Change freezes and out-of-hours windows
+
+Hold consequential changes during a release freeze, or outside office hours:
+
+```toml
+[[guards.change_windows]]
+name = "year-end freeze"
+capabilities = ["*"]                # every capability
+from = "2026-12-20T00:00:00Z"       # inclusive
+until = "2027-01-04T00:00:00Z"      # exclusive
+
+[[guards.change_windows]]
+name = "infrastructure changes out of hours"
+capabilities = ["adp_infra.deploy", "adp_infra.delete_volume"]
+days = ["mon", "tue", "wed", "thu", "fri"]   # the day a window starts; empty: every day
+start = "18:00"                     # an end at or before the start runs past midnight
+end = "08:00"
+utc_offset = "+05:30"               # a fixed offset; daylight saving is not modelled
+action = "approval"                 # default "refuse"
+# observe = true                    # audit only
+```
+
+A call inside a window is refused (`change_window_closed`) or, with `action =
+"approval"`, needs an approval of the exact action (`change_window_approval_required`,
+obligation `approve_during_change_window`). Refusal wins when several windows apply.
+The gateway decides on its own clock (the kernel has none), and each
+`change_window_decision` audit entry records the windows, whether each was enforced
+and `decided_at`. Keep the server clock synchronised (NTP); a window naming a
+capability that is not configured refuses startup.
+
 ### Starter profiles
 
 [`deploy/profiles`](../deploy/profiles) holds two configurations to start from.

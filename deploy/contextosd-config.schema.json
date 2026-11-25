@@ -417,6 +417,77 @@
         }
       ]
     },
+    "ChangeWindow": {
+      "additionalProperties": false,
+      "description": "One `[[guards.change_windows]]` entry.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WindowAction",
+          "default": "refuse"
+        },
+        "capabilities": {
+          "description": "Capability ids, or `\"*\"` for every capability.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "days": {
+          "description": "A recurring window's days (of its `start`); empty: every day.",
+          "items": {
+            "$ref": "#/$defs/Weekday"
+          },
+          "type": "array"
+        },
+        "end": {
+          "description": "A recurring window's local end, `HH:MM` (exclusive; at or before `start`: the next day).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "description": "A freeze's first instant (contract timestamp).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "observe": {
+          "description": "Audit only.",
+          "type": "boolean"
+        },
+        "start": {
+          "description": "A recurring window's local start, `HH:MM`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "until": {
+          "description": "A freeze's end (exclusive).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "utc_offset": {
+          "description": "The fixed offset local times are in, `±HH:MM`; `+00:00` when unset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "capabilities"
+      ],
+      "type": "object"
+    },
     "Classification": {
       "description": "Data sensitivity; `Ord` is the rank.",
       "enum": [
@@ -778,6 +849,14 @@
           ],
           "default": null,
           "description": "Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`)."
+        },
+        "change_windows": {
+          "default": [],
+          "description": "Freezes and recurring windows when some capabilities' calls are refused or need an approval of the exact action, decided on the server clock (see `contextos_gateway::change_windows`).",
+          "items": {
+            "$ref": "#/$defs/ChangeWindow"
+          },
+          "type": "array"
         },
         "circuit_breakers": {
           "default": [],
@@ -2227,6 +2306,25 @@
         "secret_env"
       ],
       "type": "object"
+    },
+    "Weekday": {
+      "enum": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "type": "string"
+    },
+    "WindowAction": {
+      "enum": [
+        "refuse",
+        "approval"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2309,6 +2407,7 @@
         "approval_review": null,
         "approval_step_up": null,
         "approval_timeout": null,
+        "change_windows": [],
         "circuit_breakers": [],
         "completion_requires_scores": null,
         "environments": null,

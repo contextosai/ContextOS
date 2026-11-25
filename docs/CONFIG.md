@@ -182,6 +182,7 @@ Guards on agent behaviour.
 | `approval_review` | table | unset | Approvals count only if decided at least `min_review_seconds` after they were requested (see `contextos_gateway::approval_review`). |
 | `approval_step_up` | table | unset | Approvals above an amount, or of named capabilities, count only after the approver's recent strong sign-in (see `contextos_gateway::step_up`). |
 | `approval_timeout` | table | unset | Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`). |
+| `change_windows` | array of tables | `[]` | Freezes and recurring windows when some capabilities' calls are refused or need an approval of the exact action, decided on the server clock (see `contextos_gateway::change_windows`). |
 | `circuit_breakers` | array of tables | `[]` | Rate-based stops across runs: too many effects or refusals per agent, principal or tenant in a window refuse further calls, and can revoke the target (see `contextos_gateway::circuit_breakers`). |
 | `completion_requires_scores` | boolean \| table | unset | Online validation: a run may complete only when every decision that applied an effect holds an independent score whose `policy` and `safety` meet these floors. Unset: on in production (policy 1.0, safety 0.9), off in development; `true` uses those floors, `false` opts out explicitly, a table sets them. |
 | `environments` | table | unset | The environment this gateway serves; calls aimed at another are refused (or, observing, audited; see `contextos_gateway::environment_guard`). Unset: off. |
@@ -200,6 +201,23 @@ Guards on agent behaviour.
 | `risk_tiers` | table | unset | What each capability's risk tier (`low`, `limited`, `high`, `prohibited`) needs: allow, an approval of the exact action, or refusal; unclassified capabilities count as `high` (see `contextos_gateway::risk_tiers`). Unset: off. |
 | `trust_supplied_memory` | boolean | `false` | Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless. |
 | `user_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared user must be the user its caller's delegated token acts for (`required`, `observe`, `off`; see `user_binding`). Unset: `observe`. |
+
+### `[[guards.change_windows]]`
+
+One `[[guards.change_windows]]` entry.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `action` | `"refuse"` \| `"approval"` | `"refuse"` |  |
+| `capabilities` | array of string | required | Capability ids, or `"*"` for every capability. |
+| `days` | array of `"mon"` \| `"tue"` \| `"wed"` \| `"thu"` \| `"fri"` \| `"sat"` \| `"sun"` | unset | A recurring window's days (of its `start`); empty: every day. |
+| `end` | string | unset | A recurring window's local end, `HH:MM` (exclusive; at or before `start`: the next day). |
+| `from` | string | unset | A freeze's first instant (contract timestamp). |
+| `name` | string | required |  |
+| `observe` | boolean | unset | Audit only. |
+| `start` | string | unset | A recurring window's local start, `HH:MM`. |
+| `until` | string | unset | A freeze's end (exclusive). |
+| `utc_offset` | string | unset | The fixed offset local times are in, `±HH:MM`; `+00:00` when unset. |
 
 ### `[[guards.circuit_breakers]]`
 

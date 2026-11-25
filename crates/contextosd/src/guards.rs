@@ -86,6 +86,11 @@ pub struct GuardsConfig {
     /// count as `high` (see [`contextos_gateway::risk_tiers`]). Unset: off.
     #[serde(default)]
     pub risk_tiers: Option<contextos_gateway::risk_tiers::TierPolicy>,
+    /// Freezes and recurring windows when some capabilities' calls are refused or need
+    /// an approval of the exact action, decided on the server clock (see
+    /// [`contextos_gateway::change_windows`]).
+    #[serde(default)]
+    pub change_windows: Vec<contextos_gateway::change_windows::ChangeWindow>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -177,6 +182,7 @@ impl Default for GuardsConfig {
             information_flow: None,
             environments: None,
             risk_tiers: None,
+            change_windows: Vec::new(),
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
