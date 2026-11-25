@@ -1459,6 +1459,20 @@
       ],
       "type": "string"
     },
+    "PrivacyConfig": {
+      "additionalProperties": false,
+      "description": "`[privacy]`: where run requests name their data subjects.",
+      "properties": {
+        "subject_pointers": {
+          "description": "JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "ProvidersConfig": {
       "additionalProperties": false,
       "properties": {
@@ -2557,6 +2571,11 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyConfig",
+      "default": {},
+      "description": "Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`)."
     },
     "providers": {
       "anyOf": [

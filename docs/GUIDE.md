@@ -2425,7 +2425,55 @@ The leader replica (smallest id among live replicas) sweeps runs admitted more t
 that many days ago every `sweep_interval_ms` (default 60 s), `batch` runs (default 500)
 per sweep, and erases each finished run exactly as `POST /v1/runs/{id}/erase` would,
 with `contextos.retention` as the operator. Runs still in progress are revisited on a
-later sweep, never erased under their executor.
+later sweep, never erased under their executor. Runs under a legal hold are skipped
+and counted (`held`).
+
+### Legal holds
+
+A legal hold keeps runs' content from erasure while litigation, an investigation or
+an audit needs it (`control` scope):
+
+```sh
+curl -X POST "$CONTEXTOS/v1/legal-holds" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "hold_id": "case-2026-114", "reason": "Litigation hold for case 114",
+  "subjects": ["cus_77"], "run_ids": ["run_8812"], "tenant_wide": false}'
+curl -X POST "$CONTEXTOS/v1/legal-holds/case-2026-114/release" -H "Authorization: Bearer $OPS_TOKEN" \
+  -d '{"reason": "Case 114 closed by counsel"}'
+```
+
+While a hold covers a run (named, indexed under a named subject, or every run of the
+tenant), `POST /v1/runs/{id}/erase` answers `409 legal_hold` and retention skips it.
+Placing and releasing are audited (`legal_hold_placed`, `legal_hold_released`) with a
+reason of at least 10 characters; subjects are kept and audited as digests, and a
+released hold stays listed (`GET /v1/legal-holds`).
+
+### Deletion requests by data subject
+
+Tell the runtime where run requests name the people they are about, and it indexes
+each run under a digest of each identifier:
+
+```toml
+[privacy]
+subject_pointers = ["/input/context/customer_id", "/input/context/email"]
+```
+
+Then find and erase a person's runs. The identifier travels in the request body, never
+the path, so it stays out of access logs:
+
+```sh
+curl -X POST "$CONTEXTOS/v1/subjects/runs" -H "Authorization: Bearer $OPS_TOKEN" -d '{"subject": "cus_77"}'
+curl -X POST "$CONTEXTOS/v1/subjects/erase" -H "Authorization: Bearer $OPS_TOKEN" -d '{
+  "subject": "cus_77", "reason": "Deletion request DSR-88"}'
+# {"subject_digest": "sha256:…", "runs": 2, "erased": ["run_8812", "run_8840"], "held": [], "active": [], …}
+```
+
+Each finished run is erased as above (tombstones, a `run_data_erased` entry); runs under
+a hold and runs still active are listed and left, and the request itself is audited as
+`subject_erasure` with the subject's digest. Only runs admitted after the pointers were
+configured are indexed. The audit chain is never rewritten: it verifies after any
+erasure (`GET /v1/audit/verify`, `ctx audit-verify`). What the runtime cannot erase is
+what it never held as content: personal data a deployment writes into decision outputs,
+rationales or audit-visible arguments stays in signed records, so keep it out of them.
 
 ## 10. Assess conformance
 

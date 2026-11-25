@@ -55,6 +55,10 @@ pub struct Config {
     /// Retention of runs' personal content (see [`crate::retention`]); off by default.
     #[serde(default)]
     pub retention: crate::retention::RetentionConfig,
+    /// Data subjects named by run requests, for deletion requests and legal holds (see
+    /// [`contextos_gateway::privacy`]).
+    #[serde(default)]
+    pub privacy: crate::privacy_api::PrivacyConfig,
     /// Context Pack JSON files to load at startup.
     #[serde(default)]
     pub packs: Vec<PathBuf>,
@@ -333,6 +337,7 @@ impl Config {
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
         self.retention.check().map_err(ConfigError::Invalid)?;
+        contextos_gateway::privacy::validate_pointers(&self.privacy.subject_pointers).map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {
             issuer.check(development).map_err(ConfigError::Invalid)?;

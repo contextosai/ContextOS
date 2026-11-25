@@ -68,6 +68,8 @@ impl RetentionConfig {
 pub struct Swept {
     pub erased: usize,
     pub still_running: usize,
+    /// Runs a legal hold keeps (see [`contextos_gateway::privacy`]).
+    pub held: usize,
 }
 
 /// Sweeps one page of runs admitted before `cutoff_us` after `cursor`; returns what it
@@ -101,6 +103,7 @@ where
         match gateway.erase_run(&admission, RETENTION_PRINCIPAL, &reason).await {
             Ok(_) => swept.erased += 1,
             Err(ErasureError::RunActive) => swept.still_running += 1,
+            Err(ErasureError::Held(_)) => swept.held += 1,
             Err(error) => return Err(error.to_string()),
         }
     }
@@ -134,10 +137,11 @@ where
         let cutoff = now_us().saturating_sub(keep_us);
         match sweep_once(store.as_ref(), &gateway, days, cutoff, cursor.take(), config.batch).await {
             Ok((swept, next)) => {
-                if swept.erased > 0 {
+                if swept.erased > 0 || swept.held > 0 {
                     tracing::info!(
                         erased = swept.erased,
                         still_running = swept.still_running,
+                        held = swept.held,
                         "retention sweep"
                     );
                 }

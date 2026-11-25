@@ -149,7 +149,8 @@ async fn retention_erases_finished_runs_and_waits_for_live_ones() {
         swept,
         Swept {
             erased: 1,
-            still_running: 1
+            still_running: 1,
+            held: 0,
         }
     );
     assert!(next.is_none(), "one page covered everything");
@@ -180,7 +181,8 @@ async fn retention_erases_finished_runs_and_waits_for_live_ones() {
         swept,
         Swept {
             erased: 0,
-            still_running: 1
+            still_running: 1,
+            held: 0,
         }
     );
 
