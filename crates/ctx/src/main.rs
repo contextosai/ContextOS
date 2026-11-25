@@ -9,6 +9,7 @@ use std::process::ExitCode;
 mod args;
 mod attest;
 mod audit_verify;
+mod chargeback;
 mod evidence_pack;
 mod flow_presets;
 mod init_tool;
@@ -248,6 +249,21 @@ fn run(command: Command) -> Result<Value, Failure> {
             declarations: declarations.as_ref(),
             csv: csv.as_ref(),
             fail_on_shadow,
+        }),
+        Command::Chargeback {
+            entries,
+            keys,
+            continues,
+            declarations,
+            group,
+            csv,
+        } => chargeback::build(&chargeback::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            declarations: declarations.as_ref(),
+            group: &group,
+            csv: csv.as_ref(),
         }),
         Command::TrajectoryGate {
             baseline,

@@ -7,6 +7,9 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Chargeback: Tower's spend groups by `business_unit`, `owner` and `tenant` too, and
+  exports CSV (`GET /api/spend?format=csv`, Export CSV on Model spend); `ctx chargeback`
+  builds the same rows offline from a verified export.
 - Usage ceilings across runs: `[[guards.usage_ceilings]]` caps model tokens or spend per
   agent or tenant per window, held on the shared-guarantee ledger before each call so
   concurrent runs cannot pass a ceiling together (`usage_ceiling_reached:<id>`).
@@ -176,6 +179,9 @@ minor versions may break APIs and every break is listed.
   revoker), and `UsageRefusal::Revoked` carries it.
 
 ### Fixed
+
+- `ctx inventory` attributed only the export's last run to its agent: activity of
+  earlier runs was dropped. Every run in an export is now kept while folding.
 
 - Tower recovers unjournaled lifecycle-request changes at startup and in its periodic
   sweep (the collection was missing from the recovery list).

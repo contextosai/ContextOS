@@ -182,10 +182,15 @@ bucket, then slower), `untimed`, `within_ten_seconds`, `refused_too_fast`,
 (overridden of redeemed; null without data). Decision time is from the gateway's own request time to the fastest
 approver's `decided_at`, as the approval service reports it.
 
-### `GET /api/spend?hours=&group=`
+### `GET /api/spend?hours=&group=&format=`
 
 Model spend over the last `hours` (24, 168 or 720; default 24), grouped by `agent`
-(default), `team` (the declared team, `(undeclared)` otherwise) or `model`. Rows are
+(default), `team`, `business_unit` or `owner` (from the declaration, `(undeclared)`
+otherwise), `tenant` (an agent seen in several tenants counts under
+`(several tenants)`, never split by guess) or `model`. `format=csv` returns the rows as
+CSV for chargeback (`chargeback.csv`: cost in dollars and hundredths of a cent, verified,
+self-reported and uncovered usage in separate columns; fields quoted, formulas
+neutralised); `ctx chargeback` builds the same rows offline from a verified export. Rows are
 ranked by cost, then tokens; at most 500 are returned (`total_rows` counts all). The
 series is hourly, or daily for 720 hours. Costs are in hundredths of a cent; see
 [§4.10](04-governance-model.md#410-model-spend).

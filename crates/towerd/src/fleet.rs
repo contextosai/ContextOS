@@ -20,6 +20,10 @@ use serde_json::{Value, json};
 
 pub type AgentKey = String;
 
+/// Runs remembered when folding an export offline (`ctx inventory`, `ctx chargeback`):
+/// enough that every run in any export a person reads keeps its agent.
+pub const OFFLINE_RUNS: usize = 1 << 20;
+
 /// Outcomes of an agent's governed effects for one capability.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct Counts {

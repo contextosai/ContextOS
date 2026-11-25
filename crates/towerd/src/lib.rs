@@ -6,6 +6,7 @@ pub mod api;
 pub mod approvals;
 pub mod authority;
 pub mod callers;
+pub mod chargeback;
 pub mod collector;
 pub mod config;
 pub mod console;

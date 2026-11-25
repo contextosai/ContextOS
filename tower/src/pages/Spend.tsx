@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useState } from "react";
+import { api, download } from "../lib/api";
 import { n, pct } from "../lib/format";
 import { bucketLabel, measuredShare, money, tokens, WINDOWS } from "../lib/spend";
 import type { SpendGroup, SpendReport, SpendRow, SpendUsage } from "../lib/types";
@@ -10,6 +11,9 @@ import { MeteringBadge } from "../components/AgentSpend";
 const GROUPS: [SpendGroup, string][] = [
   ["agent", "Agents"],
   ["team", "Teams"],
+  ["business_unit", "Units"],
+  ["owner", "Owners"],
+  ["tenant", "Tenants"],
   ["model", "Models"],
 ];
 
@@ -28,6 +32,9 @@ export function Spend() {
   const share = t ? measuredShare(t) : undefined;
   const refusals = Object.entries(data?.refusals ?? {}).sort((x, y) => y[1] - x[1]);
   const series = data?.series ?? [];
+  const [exportError, setExportError] = useState<unknown>(null);
+  const exportCsv = () =>
+    download(`/api/spend?hours=${hours}&group=${group}&format=csv`, `chargeback-${group}-${hours}h.csv`).catch(setExportError);
 
   return (
     <div className="stack">
@@ -35,16 +42,21 @@ export function Spend() {
         title="Model spend"
         sub="What agents spend on model calls, from the runtimes' budget settlements. Measured spend was settled by a metering gateway from the provider's own usage; self-reported spend was settled by the agent and charged as reserved."
         actions={
-          <div className="seg">
-            {WINDOWS.map(([h, label]) => (
-              <button key={h} className={hours === h ? "on" : ""} onClick={() => set("hours", String(h))}>
-                {label}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="seg">
+              {WINDOWS.map(([h, label]) => (
+                <button key={h} className={hours === h ? "on" : ""} onClick={() => set("hours", String(h))}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button onClick={exportCsv} title="This window's rows, grouped as shown, as CSV for chargeback">
+              Export CSV
+            </button>
+          </>
         }
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error ?? exportError} />
       <div className="grid kpis">
         <Kpi label="Spend" value={money(t?.cost_units)} hint={`${n(t?.calls)} model calls`} plane="action" />
         <Kpi label="Tokens" value={tokens(t?.tokens)} hint={`${tokens(t?.verified_tokens)} measured`} plane="intelligence" />

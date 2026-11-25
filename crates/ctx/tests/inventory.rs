@@ -151,3 +151,28 @@ fn an_export_that_does_not_verify_lists_nothing() {
     assert!(report.get("items").is_none());
     assert!(!csv.exists());
 }
+
+#[test]
+fn every_run_in_an_export_is_attributed_to_its_agent() {
+    let work = dir("two-runs");
+    let (chain, keys) = signed_chain(&[
+        (
+            "run_admitted",
+            json!({"run_id": "r1", "agent_id": "agt_support", "trace_id": "t1"}),
+        ),
+        (
+            "run_admitted",
+            json!({"run_id": "r2", "agent_id": "agt_triage", "trace_id": "t2"}),
+        ),
+        (
+            "operation_claim",
+            json!({"run_id": "r1", "operation_id": "op", "attempt_id": "a1", "capability_id": "adp_payments.issue_refund"}),
+        ),
+    ]);
+    let entries = write(&work, "export.json", &json!({"entries": chain}));
+    let keys = write(&work, "keys.json", &keys);
+    let (code, report) = ctx(&["inventory", "--entries", &entries, "--keys", &keys]);
+    assert_eq!(code, 0, "{report}");
+    let capability = row(&report, "capability", "adp_payments.issue_refund");
+    assert_eq!(capability["agents"], json!(["acme/agt_support"]), "{report}");
+}
