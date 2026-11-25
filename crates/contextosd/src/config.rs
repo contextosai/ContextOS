@@ -351,6 +351,16 @@ impl Config {
         }
         self.limits.check().map_err(ConfigError::Invalid)?;
         self.retention.check().map_err(ConfigError::Invalid)?;
+        if let Some(tls) = &self.server.tls
+            && !tls.spiffe_agents.is_empty()
+        {
+            if tls.client_ca_path.is_none() {
+                return Err(ConfigError::Invalid(
+                    "[server.tls] spiffe_agents needs client_ca_path (mutual TLS)".into(),
+                ));
+            }
+            crate::svid::validate(&tls.spiffe_agents).map_err(ConfigError::Invalid)?;
+        }
         contextos_gateway::privacy::validate_pointers(&self.privacy.subject_pointers).map_err(ConfigError::Invalid)?;
         let development = self.server.mode == Mode::Development;
         for issuer in &self.oidc {

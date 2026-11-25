@@ -2345,6 +2345,13 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "spiffe_agents": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "SPIFFE IDs of client certificates to the agent each may admit runs as (see `svid`). Needs `client_ca_path`; set, a caller's agents are narrowed to its certificate's.",
+          "type": "object"
         }
       },
       "required": [

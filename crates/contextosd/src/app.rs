@@ -158,6 +158,8 @@ pub struct AppState<S, L> {
     pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
+    pub spiffe_agents: Option<std::collections::BTreeMap<String, String>>,
     /// Browser origins that may call the MCP endpoint.
     pub mcp_origins: crate::mcp_transport::AllowedOrigins,
     /// [`crate::deployment_summary`], served at `GET /v1/deployment`.
@@ -3284,6 +3286,8 @@ where
         ))
         .layer(tower_http::trace::TraceLayer::new_for_http().make_span_with(request_span))
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
+        // Outermost: the peer identity header comes only from the TLS connection.
+        .layer(middleware::from_fn(crate::svid::propagate))
         .with_state(state)
 }
 

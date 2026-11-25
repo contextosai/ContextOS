@@ -48,6 +48,7 @@ pub mod reconcile;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;
+pub mod svid;
 pub mod task_amendment;
 pub mod telemetry;
 pub mod tls_server;
@@ -323,6 +324,12 @@ where
         evidence_subjects: Arc::new(config.evidence_subjects.clone()),
         calibrated_evaluators: evaluator_calibration::load(config.guards.evaluator_calibration.as_ref())?.map(Arc::new),
         public_url: config.server.public_url.clone(),
+        spiffe_agents: config
+            .server
+            .tls
+            .as_ref()
+            .map(|t| t.spiffe_agents.clone())
+            .filter(|m| !m.is_empty()),
         mcp_origins: crate::mcp_transport::AllowedOrigins::new(
             config.server.public_url.as_deref(),
             &config.server.allowed_origins,

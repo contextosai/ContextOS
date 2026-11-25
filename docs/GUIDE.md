@@ -293,9 +293,26 @@ records `agent_binding` (`mode`, `bound`, `source`). Delegated runs inherit thei
 parent's binding (`bound: "inherited"`); their agent is the one the parent's
 delegation names, and `named_by_credential` says whether the admitting credential
 names it too. SPIRE's OIDC discovery provider publishes the
-JWKS for JWT-SVIDs, so they need no other integration. X.509 SVIDs can restrict who
-may connect at all (`[server.tls] client_ca_path`, under Operate), but they do not
-name the agent: binding still comes from the token.
+JWKS for JWT-SVIDs, so they need no other integration.
+
+X.509 SVIDs can name the agent too. With mutual TLS, map each workload's SPIFFE ID to
+the agent it runs:
+
+```toml
+[server.tls]
+client_ca_path = "/etc/contextos/tls/spire-bundle.pem"
+[server.tls.spiffe_agents]
+"spiffe://acme.internal/ns/support/sa/refund-agent" = "agt_support"
+```
+
+The server reads the verified client certificate's `spiffe://` URI and narrows the
+caller's agents to the one it maps to: a token or key that names agents keeps only that
+one (none if it is not among them), one that names none gets it, and a connection
+without a mapped certificate names no agent, so `agent_binding = "required"` refuses
+its admissions. `run_admitted` records the source as `x509_svid` (or the credential's
+source plus `+x509_svid`). The identity reaches handlers only from the TLS connection:
+any client-sent copy of the internal header is removed. Behind a proxy that terminates
+TLS the mapping has nothing to read, so keep JWT-SVIDs there.
 
 #### Bind runs to the user the agent acts for
 
@@ -2808,8 +2825,8 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   HTTP/2 and HTTP/1.1 are offered by ALPN. Rotated files (for example a
   cert-manager Secret) are served to new connections within `reload_secs`; a
   rotation that does not load keeps the previous certificate and logs a warning.
-  Callers still authenticate with their token: mTLS decides who may connect, not who
-  they are. `--check-config` loads the files. The Helm chart mounts them with
+  Callers still authenticate with their token: mTLS decides who may connect, and with
+  `spiffe_agents` which agent they may admit runs as (section 3, agent binding). `--check-config` loads the files. The Helm chart mounts them with
   `extraVolumes` and `extraVolumeMounts`.
 
   Without a proxy the server bounds slow clients itself: a TLS handshake has 10

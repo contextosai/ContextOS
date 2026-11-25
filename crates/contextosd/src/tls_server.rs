@@ -76,6 +76,11 @@ pub struct TlsConfig {
     /// client may take to send a request's headers, before it is closed (at least 1).
     #[serde(default = "default_header_timeout")]
     pub header_timeout_secs: u64,
+    /// SPIFFE IDs of client certificates to the agent each may admit runs as (see
+    /// [`crate::svid`]). Needs `client_ca_path`; set, a caller's agents are narrowed
+    /// to its certificate's.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub spiffe_agents: std::collections::BTreeMap<String, String>,
 }
 
 fn default_reload() -> u64 {
@@ -239,10 +244,7 @@ pub async fn serve(
             .clone();
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
         let activity = idle::Activity::new();
-        let service = hyper_util::service::TowerToHyperService::new(idle::Counted {
-            app: app.clone(),
-            activity: activity.clone(),
-        });
+        let app = app.clone();
         let builder = builder.clone();
         let watcher = graceful.watcher();
         tokio::spawn(async move {
@@ -258,6 +260,17 @@ pub async fn serve(
                     return;
                 }
             };
+            // The verified client certificate's SPIFFE id, for every request on it.
+            let peer_id = stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(<[_]>::first)
+                .and_then(crate::svid::spiffe_id);
+            let service = hyper_util::service::TowerToHyperService::new(idle::Counted {
+                app: app.layer(axum::Extension(crate::svid::PeerSpiffeId(peer_id))),
+                activity: activity.clone(),
+            });
             let connection = builder.serve_connection_with_upgrades(hyper_util::rt::TokioIo::new(stream), service);
             tokio::select! {
                 _ = watcher.watch(connection.into_owned()) => {}
