@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Signed packs: `ctx pack-sign` writes a detached Ed25519 signature (`<pack>.sig`) over
+  a pack's canonical digest; with `[pack_signing]` trusted keys, unsigned, forged or
+  untrusted packs are not loaded (startup stops; reload refuses `signature_refused`),
+  and `pack_loaded` records `signed_by`.
 - Quarantine for drifted upstream tools: a capability whose pinned MCP tool drifted stays
   refused (`upstream_tool_quarantined`) even if the tool changes back, on every replica
   and across restarts, until it is re-pinned or released with a reason

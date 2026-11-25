@@ -114,6 +114,8 @@ pub struct LoadedPack {
     /// Canonical digest of the pack document: one reference, one content.
     pub sha256: String,
     pub compiler: ContextPackCompiler,
+    /// The trusted key that signed it, when `[pack_signing]` is set.
+    pub signed_by: Option<String>,
 }
 
 pub struct AppState<S, L> {
@@ -3383,6 +3385,7 @@ pub fn load_pack(text: &str) -> Result<(String, LoadedPack), String> {
             tenant_id,
             sha256,
             compiler,
+            signed_by: None,
         },
     ))
 }

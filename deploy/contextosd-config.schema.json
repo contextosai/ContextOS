@@ -1619,6 +1619,23 @@
       ],
       "type": "string"
     },
+    "PackSigning": {
+      "additionalProperties": false,
+      "description": "`[pack_signing]`: the keys trusted to sign packs.",
+      "properties": {
+        "trusted_keys": {
+          "description": "`[[pack_signing.trusted_keys]] kid = \"…\", public_key = \"<base64url ed25519>\"`.",
+          "items": {
+            "$ref": "#/$defs/TrustedPackKey"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trusted_keys"
+      ],
+      "type": "object"
+    },
     "PrivacyConfig": {
       "additionalProperties": false,
       "description": "`[privacy]`: where run requests name their data subjects.",
@@ -2492,6 +2509,24 @@
       ],
       "type": "object"
     },
+    "TrustedPackKey": {
+      "additionalProperties": false,
+      "description": "One key trusted to sign packs.",
+      "properties": {
+        "kid": {
+          "type": "string"
+        },
+        "public_key": {
+          "description": "The Ed25519 public key, base64url without padding (`ctx pack-sign --public-key`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kid",
+        "public_key"
+      ],
+      "type": "object"
+    },
     "TrustedSigner": {
       "additionalProperties": false,
       "description": "A trusted principal and the Ed25519 key its attestations are signed with.",
@@ -2796,6 +2831,17 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "pack_signing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackSigning"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When set, every pack must carry a valid detached signature (`<file>.sig`) by one of these keys, or it is not loaded (see `contextos_audit::pack_signature`)."
     },
     "packs": {
       "default": [],

@@ -44,7 +44,9 @@ const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 type Packs = HashMap<String, Arc<LoadedPack>>;
 /// A source file and what reading it gave.
-type ReadPack = (PathBuf, Result<(String, LoadedPack), String>);
+/// The pack carries its signer when its signature verified; a refused signature is the
+/// third element, so the refusal can name the pack.
+type ReadPack = (PathBuf, Result<(String, LoadedPack, Option<String>), String>);
 /// A pack a reload may add once it is bound: its reference, the pack and its source.
 type Candidate = (String, LoadedPack, String);
 
@@ -53,6 +55,8 @@ type Candidate = (String, LoadedPack, String);
 pub struct PackSources {
     pub files: Vec<PathBuf>,
     pub dirs: Vec<PathBuf>,
+    /// `[pack_signing]`'s trusted keys: when set, each pack needs a valid `.sig`.
+    pub trusted_keys: Option<Arc<Vec<(String, ed25519_dalek::VerifyingKey)>>>,
 }
 
 impl PackSources {
@@ -60,6 +64,11 @@ impl PackSources {
         Self {
             files: config.packs.clone(),
             dirs: config.pack_dirs.clone(),
+            // Validated with the configuration; an invalid set trusts nothing.
+            trusted_keys: config
+                .pack_signing
+                .as_ref()
+                .map(|s| Arc::new(s.keys().unwrap_or_default())),
         }
     }
 
@@ -97,14 +106,38 @@ fn walk(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
-/// Reads and validates one pack file.
-fn read_pack(path: &Path) -> Result<(String, LoadedPack), String> {
+/// Reads and validates one pack file, and its signature when packs must be signed.
+fn read_pack(
+    path: &Path,
+    trusted: Option<&[(String, ed25519_dalek::VerifyingKey)]>,
+) -> Result<(String, LoadedPack, Option<String>), String> {
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     if size > MAX_FILE_BYTES {
         return Err(format!("larger than {MAX_FILE_BYTES} bytes"));
     }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    load_pack(&text)
+    let (pack_ref, mut pack) = load_pack(&text)?;
+    if let Some(trusted) = trusted {
+        let mut sig_path = path.as_os_str().to_owned();
+        sig_path.push(".sig");
+        let signature: Option<serde_json::Value> = std::fs::read(&sig_path)
+            .ok()
+            .filter(|b| b.len() <= 4096)
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        let Some(signature) = signature else {
+            let refused = format!("pack_signature_missing: {pack_ref} has no readable <file>.sig next to it");
+            return Ok((pack_ref, pack, Some(refused)));
+        };
+        let trusted = trusted.iter().map(|(k, v)| (k.as_str(), v));
+        match contextos_audit::pack_signature::verify(&signature, &pack.sha256, trusted) {
+            Ok(kid) => pack.signed_by = Some(kid),
+            Err(r) => {
+                let refused = format!("{}: the signature of {pack_ref} was refused", r.as_str());
+                return Ok((pack_ref, pack, Some(refused)));
+            }
+        }
+    }
+    Ok((pack_ref, pack, None))
 }
 
 /// Reads every source for startup: any invalid file, or one reference with two
@@ -112,7 +145,11 @@ fn read_pack(path: &Path) -> Result<(String, LoadedPack), String> {
 pub fn load_all(sources: &PackSources) -> Result<HashMap<String, LoadedPack>, String> {
     let mut packs: HashMap<String, LoadedPack> = HashMap::new();
     for path in sources.paths()? {
-        let (pack_ref, pack) = read_pack(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let trusted = sources.trusted_keys.as_deref().map(Vec::as_slice);
+        let (pack_ref, pack, refused) = read_pack(&path, trusted).map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Some(refused) = refused {
+            return Err(format!("{}: {refused}", path.display()));
+        }
         if let Some(loaded) = packs.get(&pack_ref)
             && loaded.sha256 != pack.sha256
         {
@@ -141,7 +178,8 @@ pub struct RefusedPack {
     pub pack_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
-    /// `invalid`, `pack_ref_immutable`, `tenant_not_configured` or `unrecorded`.
+    /// `invalid`, `signature_refused`, `pack_ref_immutable`, `tenant_not_configured` or
+    /// `unrecorded`.
     pub reason: &'static str,
     pub detail: String,
 }
@@ -208,7 +246,7 @@ impl PackRegistry {
         let loaded = self.snapshot();
         for (path, result) in read {
             let path_text = path.display().to_string();
-            let (pack_ref, pack) = match result {
+            let (pack_ref, pack, signature_refused) = match result {
                 Ok(found) => found,
                 Err(detail) => {
                     report.refused.push(RefusedPack {
@@ -228,6 +266,10 @@ impl PackRegistry {
                 reason,
                 detail,
             };
+            if let Some(detail) = signature_refused {
+                report.refused.push(refuse("signature_refused", detail));
+                continue;
+            }
             let seen = loaded
                 .get(&pack_ref)
                 .map(|p| p.sha256.clone())
@@ -291,6 +333,7 @@ where
             tenant_id: &pack.tenant_id,
             sha256: &pack.sha256,
             source: "startup",
+            signed_by: pack.signed_by.as_deref(),
         };
         if bind(state.store.as_ref(), &state.audit, identity, &now)
             .await
@@ -317,7 +360,7 @@ where
             paths
                 .into_iter()
                 .map(|p| {
-                    let r = read_pack(&p);
+                    let r = read_pack(&p, sources.trusted_keys.as_deref().map(Vec::as_slice));
                     (p, r)
                 })
                 .collect::<Vec<_>>()
@@ -334,6 +377,7 @@ where
             tenant_id: &pack.tenant_id,
             sha256: &pack.sha256,
             source: &path,
+            signed_by: pack.signed_by.as_deref(),
         };
         match bind(state.store.as_ref(), &state.audit, identity, &now).await {
             Ok(_) => {

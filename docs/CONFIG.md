@@ -29,6 +29,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `oidc` | array of tables | `[]` | OIDC issuers whose JWTs authenticate callers. |
 | `pack_dirs` | array of string | `[]` | Directories whose JSON files (recursively; names starting with `.` skipped) are Context Packs, loaded at startup and re-read on reload (see `pack_registry`). |
 | `pack_reload_secs` | integer | `0` | Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only. |
+| `pack_signing` | table | unset | When set, every pack must carry a valid detached signature (`<file>.sig`) by one of these keys, or it is not loaded (see `contextos_audit::pack_signature`). |
 | `packs` | array of string | `[]` | Context Pack JSON files to load at startup. |
 | `privacy` | table | see below | Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`). |
 | `providers` | table | unset | Remote fact services; dispatch is disabled without them. |
