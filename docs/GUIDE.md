@@ -1649,6 +1649,31 @@ reload every replica (or wait one interval) before a rollout names a new version
 then a replica that has not loaded it answers `pack_not_found`. Write access to the
 directory is the authority to publish packs: give it to the release pipeline only.
 
+### Simulate a pack change on recorded traffic
+
+Before rolling out, read what a candidate would decide differently on runs you have
+already seen. Fetch each run's admission inputs as a case, then simulate:
+
+```sh
+mkdir cases
+for run in $(cat run_ids.txt); do
+  curl -s "$CONTEXTOS/v1/runs/$run/replay-case" -H "Authorization: Bearer $AUDIT_TOKEN" > "cases/$run.json"
+done
+ctx simulate --baseline pack-5.2.0.json --candidate pack-5.3.0.json --cases cases/ --report simulation.md
+```
+
+Each case is read under both packs exactly as admission reads it (surfaced
+capabilities, the composed policy verdict, obligations, applying rules). The JSON
+report lists every case with its `effect`: `unchanged`, `widens` (more allowed: a
+looser verdict, a dropped obligation, a new capability, or a case the baseline refused),
+`narrows`, `mixed` or `regression` (the candidate no longer compiles it). The summary
+counts verdict transitions (`require_approval -> allow`), capabilities surfaced or
+withdrawn and rules that start or stop applying; `--report` writes it as Markdown for
+the reviewer. Simulation decides nothing: it exits 0 unless `--fail-on-widening`, which
+fails CI on any widening, mixed or regression case. Then gate the release
+(`ctx gate`, which fails on unacknowledged widenings) and roll out in stages. A run that
+was never recorded is not simulated; shadow mode covers live traffic.
+
 ### Roll out in stages
 
 Load both pack versions, then steer a share of the baseline's new runs to the

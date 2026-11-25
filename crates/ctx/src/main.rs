@@ -19,6 +19,7 @@ mod pack_tests;
 mod plan;
 mod reliability;
 mod repl;
+mod simulate;
 
 use args::{Cli, Command};
 
@@ -215,6 +216,19 @@ fn run(command: Command) -> Result<Value, Failure> {
             frameworks: &frameworks,
             config_report: config_report.as_ref(),
             out: &out,
+        }),
+        Command::Simulate {
+            baseline,
+            candidate,
+            cases,
+            report,
+            fail_on_widening,
+        } => simulate::run(&simulate::Options {
+            baseline: &baseline,
+            candidate: &candidate,
+            cases: &cases,
+            report: report.as_ref(),
+            fail_on_widening,
         }),
         Command::Inventory {
             entries,
