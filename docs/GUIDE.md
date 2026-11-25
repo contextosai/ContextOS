@@ -2677,6 +2677,11 @@ business_unit = "Customer Operations"
   time-boxed and decided by someone other than the requester.
 - **Reviews and drift.** A risk review approves an agent's current authority; any
   capability added later is drift until reviewed again.
+- **Lifecycle.** An agent moves through `proposed`, `approved`, active (`pilot`,
+  `production`, `deprecated`), `suspended` and `retired`. Each move is requested and
+  approved by a second person (a risk reviewer, not the agent's owner) and signed into
+  Tower's journal; approving a suspension or retirement revokes the agent on every
+  runtime, and `lifecycle_not_enforced` names a runtime that still admits it.
 - **Anomalies and the fleet kill switch.** Each agent's last hour against its own week;
   operators revoke an agent or capability on every runtime at once.
 - **Intelligence (optional).** With `[intelligence] provider = "anthropic"` and

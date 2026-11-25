@@ -84,6 +84,8 @@ export interface Me {
   intelligence: string | null;
   /** Restores need a request and a second operator's approval. */
   two_person_restore?: boolean;
+  /** Lifecycle stages change only through approved requests. */
+  lifecycle_approval?: boolean;
 }
 
 export function useMe() {

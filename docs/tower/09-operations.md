@@ -111,6 +111,7 @@ so map those). Keycloak: a group or realm-role mapper on the client.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `lifecycle_approval` | `true` | An agent's lifecycle stage changes only through a request approved by a risk reviewer who is not the requester, owner or declarer; a new declaration starts at `proposed`. Suspending or retiring revokes the agent on every runtime with a control key. Set `false` only while migrating scripts that declare agents straight into a stage (docs/tower §4.7) |
 | `two_person_restore` | `true` | Restoring a revoked target needs a second operator: one requests it (`POST /api/revocations/restore-requests`), another approves it, and only the approval acts on the runtimes. `POST /api/fleet/restore` then answers `409 two_person_required`. Revoking always stays one operator's action |
 
 ### `[collector]`

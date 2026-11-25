@@ -281,7 +281,10 @@ pub fn builtin(view: &AgentView, now_hour: i64) -> Vec<Finding> {
             json!({"last_seen": a.last_seen}),
         ));
     }
-    if matches!(lifecycle, "retired" | "deprecated") && a.runs > 0 && hour_index(&a.last_seen) >= now_hour - 24 {
+    if matches!(lifecycle, "retired" | "deprecated" | "suspended")
+        && a.runs > 0
+        && hour_index(&a.last_seen) >= now_hour - 24
+    {
         out.push(finding(
             "retired_but_running",
             "high",

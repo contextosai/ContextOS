@@ -9,6 +9,7 @@ use crate::api::Shared;
 pub mod approvals;
 pub mod inbox;
 pub mod inventory;
+pub mod lifecycle;
 pub mod revocations;
 mod sources;
 pub mod spend;
@@ -24,6 +25,7 @@ where
         .merge(approvals::routes())
         .merge(inbox::routes())
         .merge(inventory::routes())
+        .merge(lifecycle::routes())
         .merge(revocations::routes())
         .merge(sources::routes())
         .merge(spend::routes())

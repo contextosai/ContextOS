@@ -220,7 +220,7 @@ its public key. `/api/journal/keys` needs no authentication, like a JWKS endpoin
 t -X PUT "$TOWER/api/agents/tenant_acme_prod%2Fagt_support/declaration" -d '{
   "owner": "maya", "team": "support-ai", "business_unit": "Customer Operations",
   "purpose": "Refunds damaged deliveries up to the order amount; never without identity verification.",
-  "users_served": "customers", "lifecycle": "production",
+  "users_served": "customers", "lifecycle": "proposed",
   "data_categories": ["orders", "payments"], "regulatory_contexts": [],
   "risk_tier": "high", "models": ["claude-opus-5-5"]
 }'
@@ -229,8 +229,8 @@ t -X PUT "$TOWER/api/agents/tenant_acme_prod%2Fagt_support/declaration" -d '{
 `risk_tier` (optional): `low`, `limited`, `high`, `prohibited`. `models` (optional, up
 to 64): the models the agent is declared to use, as `id` (any version) or
 `id@version`; a model seen in its runs and not listed is a shadow row.
-`users_served`: `internal`, `customers`, `public`. `lifecycle`: `proposed`, `pilot`,
-`production`, `deprecated`, `retired`. An owner can only declare for teams in their
+`users_served`: `internal`, `customers`, `public`. `lifecycle`: `proposed`, `approved`,
+`pilot`, `production`, `deprecated`, `suspended`, `retired` (see lifecycle changes below). An owner can only declare for teams in their
 `teams` and cannot move another team's agent. Journal: `agent_declared`.
 
 ### `POST /api/agents/{key}/review` (risk; not the owner or declarer)
@@ -245,6 +245,29 @@ t -X POST "$TOWER/api/agents/tenant_acme_prod%2Fagt_support/review" -d '{
 `decision`: `approved`, `changes_requested`, `rejected`. Approval needs a declaration.
 Records the current capability list, graph digest and required profile. Journal:
 `agent_reviewed`.
+
+### Lifecycle changes
+
+```sh
+t -X POST "$TOWER/api/agents/tenant_acme_prod%2Fagt_support/lifecycle" \
+  -d '{"to": "suspended", "reason": "Refund disputes under investigation (INC-42)"}'
+t -X POST "$TOWER/api/lifecycle-requests/$ID/approve"     # risk; not the requester, owner or declarer
+```
+
+`POST /api/agents/{key}/lifecycle` (owner of the team, or risk): `to` must follow the
+current stage ([§4.7](04-governance-model.md#47-reviews-drift-and-waivers)); `reason`
+10 to 2048 characters; one waiting request per agent (409 otherwise); requests lapse
+after 7 days. `GET /api/lifecycle-requests?agent=` (viewer) lists them, newest first,
+with `status` `requested`, `applied`, `rejected`, `cancelled`, `expired` or `failed`.
+`…/{id}/approve` (risk; not the requester, owner or declarer; `to = approved` needs a
+current approved review) applies the change and returns the request with `results`, one
+per runtime: `ok`, or `error`, or `skipped` for a resume where the agent's revocation is
+not the suspension's. `…/{id}/reject` (risk, not the requester), `…/{id}/cancel` (the
+requester).
+
+With `[governance] lifecycle_approval` on (the default), `PUT …/declaration` creates an
+agent only at `proposed` (422 otherwise) and refuses a changed `lifecycle` for an
+existing one (409).
 
 ### Guardrails (risk)
 

@@ -10,7 +10,7 @@ use super::{IntelError, Model, add_usage, checked, text};
 /// over the same vocabulary the guardrail evaluator uses.
 pub const FACTS_GUIDE: &str = r"Each agent is described by a JSON facts object:
 - agent: key (fleet-wide id), agent_id, agent_urn, sources (runtime tenants it runs in), packs (Context Packs), intents, models (model_profile releases), evaluators.
-- declared (bool) and declaration: owner, team, business_unit, purpose, users_served (internal|customers|public), lifecycle (proposed|pilot|production|deprecated|retired), data_categories, regulatory_contexts.
+- declared (bool) and declaration: owner, team, business_unit, purpose, users_served (internal|customers|public), lifecycle (proposed|approved|pilot|production|deprecated|suspended|retired), data_categories, regulatory_contexts.
 - reviewed (bool) and review: the last risk review (decision, reviewed_by, reviewed_at, capabilities approved).
 - capabilities: the agent's authority graph. Each: id, adapter, effect (none|local_state|external_state|physical_world), authority (agent|service|user_delegated|human_approved), reversibility (read_only|reversible|compensatable|irreversible), interaction (api|browser|computer|agent_to_agent|human_handoff), data_scope (PUBLIC|INTERNAL|CONFIDENTIAL|RESTRICTED), approval_mode, surfaced (offered to its runs), used (called).
 - exposure: external_effects, irreversible_external, physical, human_approved_authority, data_scopes, restricted_data, confidential_data, approval_gates (count in its packs), browser, computer.
@@ -50,7 +50,7 @@ pub fn analyst_tools() -> Vec<Value> {
         tool(
             "list_agents",
             "Agents in the inventory with owner, lifecycle, required profile, exposure and open finding counts. Filter by text (matches key, owner, team, purpose, pack), required profile, or lifecycle.",
-            json!({"query": nullable("string", "text to match"), "required_profile": nullable("string", "e.g. contextos.high-assurance"), "lifecycle": nullable("string", "proposed|pilot|production|deprecated|retired|undeclared")}),
+            json!({"query": nullable("string", "text to match"), "required_profile": nullable("string", "e.g. contextos.high-assurance"), "lifecycle": nullable("string", "proposed|approved|pilot|production|deprecated|suspended|retired|undeclared")}),
             &["query", "required_profile", "lifecycle"],
         ),
         tool(
