@@ -61,6 +61,64 @@ pub fn builtin(view: &AgentView, now_hour: i64) -> Vec<Finding> {
             json!({"runs": a.runs, "first_seen": a.first_seen, "admitted_by": a.admitted_by}),
         ));
     }
+    // Tools the agent reached for outside every pin: refused at the runtime, but a sign
+    // of an agent working outside what was reviewed (or of an injected instruction).
+    let shadow_tools: Vec<&str> = view
+        .graph
+        .iter()
+        .filter(|c| c.packs.is_empty() && !c.surfaced && a.capabilities.contains_key(&c.id))
+        .map(|c| c.id.as_str())
+        .collect();
+    if !shadow_tools.is_empty() {
+        let attempts: u64 = shadow_tools
+            .iter()
+            .filter_map(|c| a.capabilities.get(*c))
+            .map(|c| c.attempted + c.refused)
+            .sum();
+        out.push(finding(
+            "shadow_tool",
+            "medium",
+            view,
+            format!("{name} reached for tools no pack gives it"),
+            format!(
+                "{attempts} call(s) to {}: pinned in no pack the agent runs under and never surfaced to its runs.",
+                shadow_tools.join(", ")
+            ),
+            "Find out why the agent called them (a prompt, a framework default, an injected instruction). Pin and review the tool if the agent needs it; otherwise fix the agent.",
+            json!({"capabilities": shadow_tools, "calls": attempts}),
+        ));
+    }
+    let declared_models = view
+        .declaration
+        .as_ref()
+        .and_then(|d| d["models"].as_array())
+        .map(|m| {
+            m.iter()
+                .filter_map(|x| x.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let undeclared_models: Vec<&str> = a
+        .models
+        .iter()
+        .filter(|m| !declared_models.is_empty() && !crate::inventory::model_declared(&declared_models, m))
+        .map(String::as_str)
+        .collect();
+    if !undeclared_models.is_empty() {
+        out.push(finding(
+            "undeclared_model",
+            "medium",
+            view,
+            format!("{name} runs on models its declaration does not list"),
+            format!(
+                "Seen at admission: {}. Declared: {}.",
+                undeclared_models.join(", "),
+                declared_models.join(", ")
+            ),
+            "Add the model to the declaration after reviewing it, or pin the agent's release to a declared model.",
+            json!({"models": undeclared_models, "declared": declared_models}),
+        ));
+    }
     // A current review that no longer covers the graph is reported as drift below.
     let drifted = !view.drift.is_empty() || !view.risk_changed.is_empty();
     if !view.approved && !drifted && (lifecycle == "production" || (a.runs > 0 && !external.is_empty())) {

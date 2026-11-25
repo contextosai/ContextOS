@@ -219,6 +219,8 @@ id across requests.
 
 | Rule | Severity | Fires when | Fix it gives |
 |---|---|---|---|
+| `shadow_tool` | medium | the agent called capabilities pinned in no pack it runs under and never surfaced to its runs (the runtime refused them) | Find out why; pin and review the tool, or fix the agent |
+| `undeclared_model` | medium | the declaration lists `models` and a run was admitted on a model not among them (`id` matches any version) | Declare the model after review, or pin a declared one |
 | `undeclared_agent` | critical if the agent has external capabilities, else high | the agent has runs and no declaration | Declare owner, team, purpose, users, lifecycle |
 | `unreviewed` | high if external, else medium | no current approval (none, or expired: the title then says so), and the agent is in production or has run with external capabilities | Run an intake review |
 | `authority_drift` | high | a current approval no longer covers the graph: capabilities it did not include, or reviewed capabilities whose risk changed (evidence lists reviewed and current risk) | Re-review, or restore what was reviewed |

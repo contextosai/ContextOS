@@ -121,6 +121,9 @@ fn a_verified_export_lists_what_ran_and_marks_the_shadow_rows() {
     assert_eq!(row(&report, "model", "claude-opus-5-5@1")["declared"], false);
     // The undeclared model, the unpinned capability and its adapter.
     assert_eq!(report["shadow"], 3, "{report}");
+    let (code, failed) = ctx(&["inventory", "--entries", &entries, "--keys", &keys, "--fail-on-shadow"]);
+    assert_eq!(code, 1, "{failed}");
+    assert_eq!(failed["shadow"], 4, "{failed}");
     let text = std::fs::read_to_string(&csv).unwrap();
     assert!(text.starts_with("kind,id,declared,"), "{text}");
     assert!(text.contains("capability,crm.delete_customer,false,"), "{text}");
