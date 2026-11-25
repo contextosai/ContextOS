@@ -7,6 +7,9 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Behaviour flags in Tower: `new_tool_used`, `new_model_used` and `unusual_hour`
+  findings for an agent with a week of history doing something it has not done before.
+  They ask for a review and never block.
 - Incident cases in Tower: open a case from a finding, refusal, held effect or anomaly,
   link evidence by reference, keep a timeline, move it through open, investigating,
   contained, resolved and closed with an owner, and export a Markdown or JSON report
