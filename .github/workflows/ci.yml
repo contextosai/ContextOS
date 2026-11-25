@@ -12,10 +12,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Commit gate regression tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
-  artifact-transport:
+  # Releases upload artifacts in one job and download them in a later one; the check
+  # does the same, since a download in the uploading job races the artifact index.
+  artifact-transport-upload:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Prepare release transport fixtures
         run: |
           mkdir -p smoke/binaries smoke/sbom smoke/other
@@ -37,6 +38,10 @@ jobs:
           name: transport-smoke.dockerbuild
           path: smoke/other
           retention-days: 1
+  artifact-transport:
+    needs: artifact-transport-upload
+    runs-on: ubuntu-24.04
+    steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: binaries-*
@@ -48,8 +53,8 @@ jobs:
           path: received/sbom
       - name: Verify bytes and release payload selection
         run: |
-          cmp smoke/binaries/binary.bin received/binary.bin
-          cmp smoke/sbom/contextos.cdx.json received/sbom/contextos.cdx.json
+          python3 -c 'from pathlib import Path; assert Path("received/binary.bin").read_bytes() == bytes(range(256))'
+          python3 -c 'from pathlib import Path; assert Path("received/sbom/contextos.cdx.json").read_text() == "{\"bomFormat\":\"CycloneDX\"}\n"'
           python3 -c 'from pathlib import Path; assert sum(p.is_file() for p in Path("received").rglob("*")) == 2'
   conformance:
     runs-on: ubuntu-24.04
@@ -196,7 +201,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: ./examples/frameworks/run.sh ${{ matrix.example }}
       - run: ./examples/frameworks/run.sh ${{ matrix.example }} --approval
   litellm:
@@ -207,7 +212,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - name: Test environment
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/litellm"
@@ -237,7 +242,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
         with:
           command: check advisories bans licenses sources
       - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
