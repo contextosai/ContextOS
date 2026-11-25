@@ -112,3 +112,30 @@ async fn the_enterprise_profile_requires_every_admitting_credential_to_name_its_
     config.api_keys[0].agent_ids = None;
     assert!(agent_binding::check(&config).is_ok());
 }
+
+#[tokio::test]
+async fn an_svid_mapping_needs_mutual_tls_and_spiffe_ids() {
+    let (config, _) = world_setup(&ALL_CONTROLS).await;
+    let with = |table: &str| contextosd::config::Config::parse(&format!("{}\n{table}", config.source));
+    let tls = "[server.tls]\ncert_path = \"/etc/contextos/server.pem\"\nkey_path = \"/etc/contextos/server.key\"\n";
+    let error = with(&format!(
+        "{tls}[server.tls.spiffe_agents]\n\"spiffe://acme/sa/support\" = \"agt_support\""
+    ))
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.contains("client_ca_path"), "{error}");
+    let mutual = format!("{tls}client_ca_path = \"/etc/contextos/client-ca.pem\"\n");
+    assert!(
+        with(&format!(
+            "{mutual}[server.tls.spiffe_agents]\n\"https://acme/sa\" = \"agt\""
+        ))
+        .is_err()
+    );
+    assert!(
+        with(&format!(
+            "{mutual}[server.tls.spiffe_agents]\n\"spiffe://acme/sa/support\" = \"agt_support\""
+        ))
+        .is_ok()
+    );
+}

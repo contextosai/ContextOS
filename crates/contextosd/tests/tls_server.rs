@@ -97,6 +97,7 @@ fn config(dir: &Path, mutual: bool) -> TlsConfig {
         reload_secs: 1,
         max_connections: 10_000,
         header_timeout_secs: 30,
+        spiffe_agents: std::collections::BTreeMap::new(),
     }
 }
 
@@ -282,4 +283,67 @@ async fn https_mutual_tls_and_rotation() {
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(presented(&dir, &url).await, rotated);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An app that echoes the peer identity header after the router's middleware.
+fn echo_peer() -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/peer",
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                headers
+                    .get(contextosd::svid::PEER_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("none")
+                    .to_owned()
+            }),
+        )
+        .layer(axum::middleware::from_fn(contextosd::svid::propagate))
+}
+
+#[tokio::test]
+async fn the_peer_identity_comes_from_the_certificate_never_from_the_client() {
+    let dir = std::env::temp_dir().join(format!("contextos-svid-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    if !certificates(&dir) {
+        eprintln!("openssl unavailable; skipping");
+        return;
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let tls = config(&dir, true);
+    tokio::spawn(async move { serve(listener, echo_peer(), tls, std::future::pending()).await.unwrap() });
+    let url = format!("https://{addr}/peer");
+    let agent = client(&dir, Some("agent"));
+    let seen = agent.get(&url).send().await.unwrap().text().await.unwrap();
+    assert_eq!(seen, "spiffe://contextos.test/agent");
+    let forged = agent
+        .get(&url)
+        .header(contextosd::svid::PEER_HEADER, "spiffe://contextos.test/admin")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(
+        forged, "spiffe://contextos.test/agent",
+        "a client-sent header is replaced"
+    );
+
+    // Without TLS nothing can set it.
+    let plain = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let plain_addr = plain.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(plain, echo_peer()).await.unwrap() });
+    let forged = reqwest::Client::new()
+        .get(format!("http://{plain_addr}/peer"))
+        .header(contextosd::svid::PEER_HEADER, "spiffe://contextos.test/admin")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(forged, "none");
 }

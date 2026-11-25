@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- X.509 SVID agent binding: with mutual TLS, `[server.tls] spiffe_agents` maps client
+  certificates' SPIFFE IDs to agent ids and narrows each caller's agents to its
+  certificate's, so `agent_binding = "required"` admits runs only as the workload the
+  certificate names. The identity reaches handlers only from the TLS connection.
 - Break-glass: `[guards.break_glass]` and `POST /v1/break-glass` (new `break_glass`
   scope, never held with `admit` or `dispatch`) lift change windows and open circuit
   breakers, and nothing else, for named capabilities for at most an hour, with a

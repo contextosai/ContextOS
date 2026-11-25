@@ -119,6 +119,8 @@ pub(crate) fn authorize_resource<S, L>(
     let caller = state.auth.authenticate(header).ok_or_else(|| {
         ApiError::unauthorized().with_challenge(crate::protected_resource::challenge(public_url, resource_path, None))
     })?;
+    let peer = headers.get(crate::svid::PEER_HEADER).and_then(|v| v.to_str().ok());
+    let caller = crate::svid::narrow(state.spiffe_agents.as_ref(), peer, caller);
     if let Some(scope) = scope
         && !caller.has(scope)
     {
