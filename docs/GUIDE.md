@@ -341,8 +341,12 @@ assistant-a, which acted for the user). The whole chain is read, current actor f
 and kept on the run; a delegated child run inherits its parent's. A chain longer than
 `max_chain`, naming an actor twice, or naming the user as an actor rejects the token.
 `run_admitted` records `delegation` with the chain's `depth` and `chain_digest`
-(SHA-256 over the user and actors in order), never the identities. The kill switch
-(section 8) can then stop the user, one exact chain, or any actor on it.
+(SHA-256 over the user and actors in order), never the identities. Every
+`authorization_decision` of the run carries the same path as `delegation.user_chain`,
+and a delegated child's decisions also carry `delegation.run_lineage` (root, parent,
+delegation id and depth), so each decision shows who it acted through without
+another lookup. The kill switch (section 8) can then stop the user, one exact chain,
+or any actor on it.
 
 #### Hold runs to the intents their pack governs
 

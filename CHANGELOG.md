@@ -7,6 +7,9 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Every `authorization_decision` audit entry of a delegated run carries `delegation`:
+  the actor chain's depth and digest (`user_chain`, no identities) and, for a child
+  run, its lineage to the root (`run_lineage`).
 - Reference result screener (`examples/result-screening`): a stdlib service for
   `[providers.result_screening]` that redacts e-mail addresses, phone numbers,
   Luhn-valid card numbers and tokens by JSON pointer and withholds outputs carrying a

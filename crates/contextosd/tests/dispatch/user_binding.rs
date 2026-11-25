@@ -322,9 +322,47 @@ async fn a_delegation_chain_is_recorded_and_any_link_of_it_can_be_revoked() {
     assert_eq!(stored["delegation_chain"]["user_roles"], json!([role]));
     assert_eq!(stored["delegation_chain"]["digest"], digest.as_str());
 
+    // Each decision shows the chain it acts through, by depth and digest only.
+    let http = executor_client(body["executor_generation"].as_u64().unwrap());
+    let first: Value = http
+        .post(format!("{}/v1/runs/run_chain/tool-calls", w.base))
+        .bearer_auth(&token)
+        .json(&tool_call("run_chain", "tc_before", 120_000))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries: Value = reqwest::Client::new()
+        .get(format!("{}/v1/audit/entries?from=1&limit=1000", w.base))
+        .bearer_auth("acme-key")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let decisions: Vec<&Value> = entries["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "authorization_decision" && e["payload"]["run_id"] == "run_chain")
+        .collect();
+    assert!(!decisions.is_empty(), "{first}");
+    for d in decisions {
+        assert_eq!(
+            d["payload"]["delegation"]["user_chain"]["chain_digest"],
+            digest.as_str()
+        );
+        assert_eq!(d["payload"]["delegation"]["user_chain"]["depth"], 2);
+        for secret in [user.as_str(), "assistant-a"] {
+            assert!(!d.to_string().contains(secret), "no identities in decisions");
+        }
+    }
+
     // Revoking the earlier actor stops the run's effects, though it never called.
     revoke(&w, "", "principal", "assistant-a").await;
-    let http = executor_client(body["executor_generation"].as_u64().unwrap());
     let blocked: Value = http
         .post(format!("{}/v1/runs/run_chain/tool-calls", w.base))
         .bearer_auth(&token)
