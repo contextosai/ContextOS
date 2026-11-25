@@ -159,6 +159,8 @@ pub struct AppState<S, L> {
     pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// `[guards.models]`: which models runs may use.
+    pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
     /// `[kill_switch] global_principals`: who may revoke every tenant at once.
     pub global_kill_switch: Vec<String>,
     /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
@@ -393,6 +395,19 @@ where
             "The execution contract must pin these release artifacts in release_refs ([guards] required_release_refs).",
         )
         .with_detail(json!({"artifact_types": unpinned})));
+    }
+    // Pinned models the deployment does not allow for this agent are refused.
+    if let Some(models) = &state.models {
+        let agent_id = run_context_value["agent"]["agent_id"].as_str().unwrap_or_default();
+        let refused = models.refused_profiles(agent_id, pinned.map_or(&[][..], Vec::as_slice));
+        if !refused.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "model_not_allowed",
+                "The run pins a model this agent may not use ([guards.models]).",
+            )
+            .with_detail(json!({"models": refused})));
+        }
     }
     // An agent release runs only after the suites the deployment requires passed on it.
     if let Ok(gateway) = dispatch_gateway(&state) {

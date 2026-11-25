@@ -100,6 +100,11 @@ pub struct GuardsConfig {
     /// admitted (see [`contextos_gateway::release_evaluations`]). Unset: off.
     #[serde(default)]
     pub release_evaluations: Option<contextos_gateway::release_evaluations::ReleaseEvaluationPolicy>,
+    /// Which models runs may use, for every agent and per agent: checked against a run's
+    /// pinned `model_profile` at admission and the model a metering gateway reports when
+    /// it claims a call (see [`contextos_gateway::model_allowlist`]). Unset: any model.
+    #[serde(default)]
+    pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -194,6 +199,7 @@ impl Default for GuardsConfig {
             change_windows: Vec::new(),
             break_glass: None,
             release_evaluations: None,
+            models: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

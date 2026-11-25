@@ -55,6 +55,7 @@ mod loop_guard;
 pub mod manifest;
 pub mod manifest_review;
 mod memory;
+pub mod model_allowlist;
 mod observe;
 pub mod outcome_fence;
 mod outcome_sweep;
