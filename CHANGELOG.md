@@ -7,6 +7,13 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Data categories and boundaries: manifests declare the regulated categories a tool's
+  output may carry (`flow.output_categories`: `pii`, `phi`, `pci`, `secrets`) and an
+  egress tool's `egress_vendor` and `egress_region`; runs track the categories they read.
+  `[[guards.information_flow.boundaries]]` names the capabilities, vendors and regions a
+  category may leave through; egress through anything else is denied or needs an
+  approval of the exact call (`flow_category_boundary`). Metadata based: the runtime
+  never reads the data (GUIDE §3, "Regulated data categories and where they may go").
 - Control packs (`deploy/profiles/controls`): ready-made configuration snippets for spend
   and rate limits, data egress, personal data, destructive actions, environment
   separation, change freezes and human-in-the-loop approvals, each checked in CI to
@@ -86,6 +93,10 @@ minor versions may break APIs and every break is listed.
   declarations keep their stage. Scripts that declare agents straight into `pilot` or
   `production` set `lifecycle_approval = false` while they move to requests.
 - `retired_but_running` also covers `suspended` agents.
+- Rust API: `information_flow::RunLabels` has a `categories` field, and `FlowLabels`
+  and `FlowPolicy` gain optional fields; code that builds them with struct literals
+  adds them (`Categories::default()`, or `..Default::default()`).
+
 - Update dependencies: url 2.5.9 (fixes RUSTSEC-2026-0592, a stack overflow in
   `Url::origin()` on nested `blob:` URLs), bytes, clap, zeroize, jsonschema 0.62, toml,
   the Tower UI's react-router, react-query and vitest, the framework examples' AI SDK

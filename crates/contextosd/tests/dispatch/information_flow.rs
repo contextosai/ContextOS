@@ -75,4 +75,13 @@ async fn the_policy_is_parsed_from_the_guards_table() {
     assert_eq!(policy.classified_egress, FlowVerdict::Ask);
     assert!(!policy.rule_of_two);
     assert!(with("[guards.information_flow]\nuntrusted_effects = \"maybe\"").is_err());
+    let bounded = with(
+        "[guards.information_flow]\ninitial_categories = [\"pii\"]\n[[guards.information_flow.boundaries]]\ncategories = [\"pii\", \"pci\"]\ncapabilities = [\"adp_payments.issue_refund\"]\nverdict = \"ask\"",
+    )
+    .unwrap();
+    let policy = bounded.guards.information_flow.unwrap();
+    assert_eq!(policy.boundaries.len(), 1);
+    assert_eq!(policy.initial_categories.len(), 1);
+    assert!(with("[[guards.information_flow.boundaries]]\ncategories = []").is_err());
+    assert!(with("[[guards.information_flow.boundaries]]\ncategories = [\"pci\"]\nverdict = \"allow\"").is_err());
 }

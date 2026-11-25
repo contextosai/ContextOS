@@ -5,7 +5,7 @@
 use std::process::Command;
 
 use contextos_gateway::CapabilityManifest;
-use contextos_gateway::information_flow::{Classification, FlowPolicy, FlowVerdict, Integrity, RunLabels};
+use contextos_gateway::information_flow::{Categories, Classification, FlowPolicy, FlowVerdict, Integrity, RunLabels};
 use serde_json::{Value, json};
 
 fn ctx(args: &[&str]) -> (i32, Value) {
@@ -80,12 +80,14 @@ fn after(read: &[&CapabilityManifest]) -> RunLabels {
         RunLabels {
             integrity: Integrity::Trusted,
             classification: Classification::Public,
+            categories: Categories::default(),
         },
         |labels, m| {
             let flow = m.flow.clone().unwrap_or_default();
             RunLabels {
                 integrity: labels.integrity.max(flow.output_integrity),
                 classification: labels.classification.max(flow.output_classification),
+                categories: labels.categories.union(Categories::of(&flow.output_categories)),
             }
         },
     )
