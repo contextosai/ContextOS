@@ -1199,9 +1199,13 @@ minimal, development-only implementation):
     approvals were rubber-stamped.
   - With or without a floor, the gateway audits `approval_requested` the first time it
     asks for an approval and `approval_redeemed` when one is redeemed, with the
-    approvers, `decided_at` and `decision_seconds`. Tower's Approvals page
-    (`GET /api/approvals`) folds them into decision-time distributions per capability
-    and per approver.
+    approvers, `decided_at`, `decision_seconds` and `guard_reasons` (the runtime guards,
+    such as a risk tier or the information-flow guard, whose verdict made the action need
+    the approval), and `approval_denied` when an approval is denied, with its deniers.
+    Tower's Approvals page (`GET /api/approvals`) folds them into decision-time
+    distributions per capability and per approver, a denial rate and an override rate
+    (approvals of actions a runtime guard had flagged). An approver who never denies and
+    approves every flagged action within seconds is a rubber stamp.
 
   With `[guards.approval_timeout]`, an approval request nobody decides does not leave
   its run waiting unnoticed:

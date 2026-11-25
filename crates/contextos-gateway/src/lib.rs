@@ -1459,7 +1459,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         }
         self.record(&mut p, "authorization_decision", decision, &now).await?;
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
+        // What runtime guards added to this decision, for approval analytics.
+        let guard_reasons = outside_task.clone();
         p.report.reason_codes.extend(outside_task);
+        if authorization
+            .decision
+            .reason_codes
+            .iter()
+            .any(|r| r == "approval_denied")
+        {
+            let deniers: Vec<&Value> = approval_input["decisions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|d| d["decision"] == "denied")
+                .map(|d| &d["approver"]["principal_id"])
+                .collect();
+            let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
+                "capability_id": manifest.capability_id,
+                "approval_request_id": approval_input["request"]["approval_request_id"],
+                "approvers": deniers, "guard_reasons": guard_reasons});
+            self.record(&mut p, "approval_denied", body, &now).await?;
+        }
         if let Some(request_id) = step_up_refused {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
                 "capability_id": manifest.capability_id, "approval_request_id": request_id});
@@ -1631,6 +1652,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         admission,
                         &approval_input,
                         (&operation_id, &manifest.capability_id),
+                        &guard_reasons,
                         &now,
                     )
                     .await?;

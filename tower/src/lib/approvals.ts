@@ -10,6 +10,10 @@ export interface ApprovalStats {
   /** Requests nobody decided before the approval timeout. */
   timed_out: number;
   within_ten_seconds: number;
+  /** Approvals denied. */
+  denied: number;
+  /** Redemptions of actions a runtime guard had flagged. */
+  overridden: number;
 }
 
 export interface ApprovalRow extends ApprovalStats {

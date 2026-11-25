@@ -98,6 +98,16 @@ async fn a_denied_approval_refuses_the_call() {
         refused.report
     );
     assert_eq!(h.adapter.calls.load(Ordering::SeqCst), 0, "nothing was sent");
+    // The denial is evidence too, for approval analytics.
+    let denied: Vec<serde_json::Value> = contextos_store::AppendLog::range(h.audit.log(), TENANT, 1, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.body)
+        .filter(|e| e["kind"] == "approval_denied")
+        .collect();
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0]["payload"]["capability_id"], "adp_payments.issue_refund");
 }
 
 #[tokio::test]

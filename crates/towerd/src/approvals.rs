@@ -16,6 +16,11 @@
 //! | `approval_review_too_fast` | `capability_id` |
 //! | `approval_step_up_refused` | `capability_id` |
 //! | `approval_timed_out` | `capability_id` |
+//! | `approval_denied` | `capability_id`, `approvers` |
+//!
+//! A redemption whose `guard_reasons` is not empty is an **override**: a person approved
+//! an action a runtime guard had flagged. Denials and overrides are the two numbers that
+//! show approvers making decisions rather than passing everything through.
 //!
 //! Memory is bounded: at most [`MAX_KEYS`] capabilities and approvers are tracked;
 //! the rest are counted under [`OTHER`].
@@ -46,6 +51,10 @@ pub struct Stats {
     pub refused_step_up: u64,
     /// Requests nobody decided before the approval timeout.
     pub timed_out: u64,
+    /// Approvals denied.
+    pub denied: u64,
+    /// Redemptions of actions a runtime guard had flagged.
+    pub overridden: u64,
 }
 
 impl Stats {
@@ -80,6 +89,7 @@ pub fn is_approval(kind: &str) -> bool {
             | "approval_review_too_fast"
             | "approval_step_up_refused"
             | "approval_timed_out"
+            | "approval_denied"
     )
 }
 
@@ -101,7 +111,9 @@ impl Approvals {
             "approval_requested" => stats.requested += 1,
             "approval_redeemed" => {
                 let seconds = p["decision_seconds"].as_u64();
+                let flagged = p["guard_reasons"].as_array().is_some_and(|r| !r.is_empty());
                 stats.redeemed += 1;
+                stats.overridden += u64::from(flagged);
                 stats.timed(seconds);
                 for approver in p["approvers"]
                     .as_array()
@@ -111,7 +123,19 @@ impl Approvals {
                 {
                     let by = slot(&mut self.approvers, approver);
                     by.redeemed += 1;
+                    by.overridden += u64::from(flagged);
                     by.timed(seconds);
+                }
+            }
+            "approval_denied" => {
+                stats.denied += 1;
+                for approver in p["approvers"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|a| a.as_str())
+                {
+                    slot(&mut self.approvers, approver).denied += 1;
                 }
             }
             "approval_review_too_fast" => stats.refused_too_fast += 1,
@@ -156,6 +180,29 @@ mod tests {
         assert_eq!(a.approvers["fin_lead"].redeemed, 2);
         assert_eq!(a.approvers["ops_lead"].decision_seconds[4], 1);
         assert!(is_approval("approval_step_up_refused") && !is_approval("usage_settled"));
+    }
+
+    #[test]
+    fn denials_and_overrides_are_counted() {
+        let mut a = Approvals::default();
+        a.apply(&entry(
+            "approval_redeemed",
+            json!({"capability_id": "pay.refund", "approvers": ["fin_lead"],
+            "decision_seconds": 40, "guard_reasons": ["risk_tier_approval_required"]}),
+        ));
+        a.apply(&entry(
+            "approval_redeemed",
+            json!({"capability_id": "pay.refund", "approvers": ["fin_lead"],
+            "decision_seconds": 40, "guard_reasons": []}),
+        ));
+        a.apply(&entry(
+            "approval_denied",
+            json!({"capability_id": "pay.refund", "approvers": ["ops_lead"]}),
+        ));
+        let s = &a.capabilities["pay.refund"];
+        assert_eq!((s.redeemed, s.overridden, s.denied), (2, 1, 1));
+        assert_eq!(a.approvers["fin_lead"].overridden, 1);
+        assert_eq!(a.approvers["ops_lead"].denied, 1);
     }
 
     #[test]
