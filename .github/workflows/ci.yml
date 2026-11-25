@@ -160,6 +160,7 @@ jobs:
           ./examples/keycloak/run.sh
           ./examples/metering-proxy/run.sh
           python3 -m unittest discover -s examples/result-screening -p 'test_*.py'
+          ./examples/approval-relay/run.sh
           ./examples/tower/run.sh
           ./examples/replay/run.sh
           ./examples/replay-refunds/run.sh

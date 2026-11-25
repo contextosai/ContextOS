@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Approval relay (`examples/approval-relay`): a reference approval service that delivers
+  requests to Slack, Microsoft Teams and e-mail, takes decisions back through signed
+  callbacks, maps channel identities to approvers, escalates through tiers while a
+  request is undecided, and lets an approver on leave delegate until a date. Tested end
+  to end against contextosd (approve, deny, forged callback refused).
 - Approval analytics: the gateway audits `approval_denied` (with the deniers) and adds
   `guard_reasons` to `approval_redeemed`; Tower's Approvals page and `GET /api/approvals`
   show denials, overrides (approvals of actions a runtime guard had flagged), a denial
