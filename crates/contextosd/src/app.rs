@@ -871,6 +871,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    let started = std::time::Instant::now();
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
         ApiError::new(
@@ -907,6 +908,9 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state
+        .metrics
+        .tool_execution(capability, &outcome.report.status, started.elapsed().as_secs_f64());
     state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
@@ -1010,6 +1014,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    let started = std::time::Instant::now();
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
         ApiError::new(
@@ -1053,6 +1058,9 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state
+        .metrics
+        .tool_execution(capability, &outcome.report.status, started.elapsed().as_secs_f64());
     state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
