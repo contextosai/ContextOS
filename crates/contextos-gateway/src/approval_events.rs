@@ -9,7 +9,10 @@
 //! these an audit consumer (Tower's approvals report, a SIEM) can compute approval
 //! rates, decision-time distributions and approvers who decide in seconds, per
 //! capability. `decided_at` is the approval service's claim, as everything about a
-//! decision is.
+//! decision is. `guard_reasons` names the runtime guards (risk tier, information flow,
+//! action monitor, change window) whose verdict made the action need an approval, so a
+//! redemption with any is a person approving what an automated control flagged.
+//! `approval_denied` records a denied approval with its deniers, so refusals count too.
 
 use contextos_contract::validation::elapsed_millis;
 use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore};
@@ -63,6 +66,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         admission: &RunAdmission,
         material: &Value,
         (operation_id, capability_id): (&str, &str),
+        guard_reasons: &[String],
         now: &str,
     ) -> Result<(u64, Option<u64>), GatewayError> {
         let request_id = material["request"]["approval_request_id"].as_str().unwrap_or_default();
@@ -97,7 +101,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 "approval_redeemed",
                 json!({"run_id": admission.run_id, "operation_id": operation_id, "capability_id": capability_id,
                     "approval_request_id": request_id, "approvers": approvers, "requested_at": requested_at,
-                    "decided_at": decided_at, "decision_seconds": seconds}),
+                    "decided_at": decided_at, "decision_seconds": seconds, "guard_reasons": guard_reasons}),
                 now,
             )
             .await?;

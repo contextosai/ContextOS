@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Approval analytics: the gateway audits `approval_denied` (with the deniers) and adds
+  `guard_reasons` to `approval_redeemed`; Tower's Approvals page and `GET /api/approvals`
+  show denials, overrides (approvals of actions a runtime guard had flagged), a denial
+  rate and an override rate per capability and approver.
 - Global kill switch: a `global` revocation (target `*`) stops every tenant of the runtime
   at once, set and restored only by principals in `[kill_switch] global_principals`
   (with `control`). It is read alongside each tenant's revocations at admission,

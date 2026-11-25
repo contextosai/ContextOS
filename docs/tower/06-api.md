@@ -148,12 +148,14 @@ matches the findings. Journal: `access_review_attested`.
 ### `GET /api/approvals`
 
 Approval quality (viewer), folded from the runtimes' `approval_requested`,
-`approval_redeemed`, `approval_review_too_fast`, `approval_step_up_refused` and
-`approval_timed_out` events:
+`approval_redeemed`, `approval_review_too_fast`, `approval_step_up_refused`,
+`approval_timed_out` and `approval_denied` events:
 `buckets_seconds` (upper bounds of the decision-time buckets), then `capabilities` and
 `approvers`, each row with `requested`, `redeemed`, `decision_seconds` (one count per
 bucket, then slower), `untimed`, `within_ten_seconds`, `refused_too_fast`,
-`refused_step_up` and `timed_out`. Decision time is from the gateway's own request time to the fastest
+`refused_step_up`, `timed_out`, `denied`, `overridden` (redemptions whose
+`guard_reasons` is not empty), `denial_rate` (denied of decided) and `override_rate`
+(overridden of redeemed; null without data). Decision time is from the gateway's own request time to the fastest
 approver's `decided_at`, as the approval service reports it.
 
 ### `GET /api/spend?hours=&group=`
