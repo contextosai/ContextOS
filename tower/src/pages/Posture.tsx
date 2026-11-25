@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router";
 import { ago, n } from "../lib/format";
 import { PROFILE_LABEL, type Posture as PostureData } from "../lib/types";
 import { usePosture } from "../components/Shell";
+import { Governance } from "../components/Governance";
 import { Badge, Card, Empty, ErrorNote, FindingCounts, HBars, Kpi, PageHead, ProfileBadge, SeverityBadge } from "../components/ui";
 
 function pct(part: number, total: number) {
@@ -46,6 +47,8 @@ export function Posture() {
         <Kpi label="Anomalies" value={n(p.anomalies)} hint="against each agent's own baseline" plane="action" alert={p.anomalies > 0} to="/activity" />
         <Kpi label="Guardrails active" value={n(p.guardrails)} hint="organisation rules over every agent" plane="context" to="/guardrails" />
       </div>
+
+      <Governance />
 
       <div className="grid two">
         <Card title="What needs attention" actions={<Link to="/findings">All findings →</Link>} flush>

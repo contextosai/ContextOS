@@ -17,6 +17,7 @@
 //! | `GET /api/changes` | viewer | governance changes across the fleet |
 //! | `GET /api/access-review`, `POST /api/access-review/attest` | viewer / risk | grants held vs used, stale delegations, dormant agents, expiring waivers and reviews; attest by digest ([`crate::ops::access_review`]) |
 //! | `GET /api/break-glass`, `POST /api/break-glass/review` | viewer / risk (not the opener) | break-glass grants and their post-incident review ([`crate::ops::break_glass`]) |
+//! | `GET /api/dashboard` | viewer | the governance dashboard: held, denied, waiting, ceilings, drift, evidence ([`crate::ops::dashboard`]) |
 //! | `GET /api/inventory` | viewer | agents, capabilities, adapters, models and owners, declared or seen ([`crate::ops::inventory`]) |
 //! | `GET /api/spend`, `GET /api/agents/{key}/spend` | viewer | model spend, measured vs self-reported ([`crate::ops::spend`]) |
 //! | `GET /api/sources` | viewer | runtimes and their verification state |

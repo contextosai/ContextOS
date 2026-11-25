@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Governance dashboard in Tower: the Posture page and `GET /api/dashboard` show held
+  effects, refusals by reason, approvals waiting, shared ceilings near their limit (read
+  live from each runtime), policy drift, active waivers, unreviewed break-glass grants
+  and evidence-chain health.
 - Approval relay (`examples/approval-relay`): a reference approval service that delivers
   requests to Slack, Microsoft Teams and e-mail, takes decisions back through signed
   callbacks, maps channel identities to approvers, escalates through tiers while a

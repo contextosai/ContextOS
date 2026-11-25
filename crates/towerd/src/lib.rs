@@ -9,6 +9,7 @@ pub mod callers;
 pub mod collector;
 pub mod config;
 pub mod console;
+pub mod dashboard;
 pub mod fleet;
 pub mod governance;
 pub mod inbox;

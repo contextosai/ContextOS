@@ -2951,6 +2951,11 @@ business_unit = "Customer Operations"
   time-boxed and decided by someone other than the requester.
 - **Reviews and drift.** A risk review approves an agent's current authority; any
   capability added later is drift until reviewed again.
+- **Governance dashboard.** The Posture page (and `GET /api/dashboard`) shows effects
+  held on an unknown outcome, refusals by reason, approvals waiting for a person,
+  shared ceilings near their limit (read live from each runtime with the read-only
+  key), policy drift, active waivers, unreviewed break-glass grants and whether every
+  evidence chain verifies. Every number links to the finding, agent or page behind it.
 - **Access reviews.** `GET /api/access-review?days=90` (and the Access review page,
   with CSV export) lists every grant an agent holds (capabilities pinned in its packs or
   surfaced to its runs) as used, unused in the window or never used; delegations to
