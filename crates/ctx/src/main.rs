@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 mod args;
 mod attest;
+mod audit_pack;
 mod audit_verify;
 mod chargeback;
 mod evidence_pack;
@@ -250,6 +251,31 @@ fn run(command: Command) -> Result<Value, Failure> {
             declarations: declarations.as_ref(),
             csv: csv.as_ref(),
             fail_on_shadow,
+        }),
+        Command::AuditPack {
+            entries,
+            keys,
+            continues,
+            framework,
+            pack,
+            config,
+            config_report,
+            declarations,
+            seed_env,
+            kid,
+            out,
+        } => audit_pack::build(&audit_pack::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            frameworks: &framework,
+            packs: &pack,
+            config: config.as_ref(),
+            config_report: config_report.as_ref(),
+            declarations: declarations.as_ref(),
+            seed_env: &seed_env,
+            kid: &kid,
+            out: &out,
         }),
         Command::Chargeback {
             entries,
