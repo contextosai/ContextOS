@@ -1299,6 +1299,21 @@ async fn delegated_children_act_within_a_narrowed_lane_and_settle_into_the_paren
         out.result["status"], "blocked",
         "the child cannot exceed its sub-budget"
     );
+    // Every decision of the child shows the path it acts through.
+    let decisions: Vec<serde_json::Value> = contextos_store::AppendLog::range(h.audit.log(), TENANT, 1, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.body)
+        .filter(|e| e["kind"] == "authorization_decision")
+        .collect();
+    assert_ne!(decisions.len(), 0, "the child made decided calls");
+    for d in &decisions {
+        let lineage = &d["payload"]["delegation"]["run_lineage"];
+        assert_eq!(lineage["root_run_id"], "run_1", "{d}");
+        assert_eq!(lineage["parent_run_id"], "run_1");
+        assert!(d["payload"]["delegation"]["user_chain"].is_null(), "no user chain: {d}");
+    }
 
     let closed = h
         .gateway

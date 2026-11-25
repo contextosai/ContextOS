@@ -1420,7 +1420,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             "required_constraints": admission.required_controls,
             "constraint_observations": constraint_observations,
         }));
-        let decision = serde_json::to_value(&authorization.decision).unwrap_or(Value::Null);
+        let mut decision = serde_json::to_value(&authorization.decision).unwrap_or(Value::Null);
+        if let Some(chain) = delegation_chain::decision_record(admission)
+            && let Some(fields) = decision.as_object_mut()
+        {
+            fields.insert("delegation".into(), chain);
+        }
         self.record(&mut p, "authorization_decision", decision, &now).await?;
         p.report.reason_codes.clone_from(&authorization.decision.reason_codes);
         p.report.reason_codes.extend(outside_task);
