@@ -3134,7 +3134,7 @@ async fn every_crash_point_of_a_dispatch_is_safe_to_retry() {
             for crash_at in 0..writes {
                 for after_commit in [false, true] {
                     explored += 1;
-                    match crash_case(behavior, guarded, &[(crash_at, after_commit)]).await {
+                    match Box::pin(crash_case(behavior, guarded, &[(crash_at, after_commit)])).await {
                         Recovery::Recovered => recovered += 1,
                         Recovery::InFlight => in_flight += 1,
                         Recovery::Settled => {}
@@ -3171,7 +3171,7 @@ async fn every_pair_of_crash_points_is_safe_to_retry() {
     let explored = cases.len();
     let mut running = tokio::task::JoinSet::new();
     for (behavior, guarded, crashes) in cases {
-        running.spawn(async move { crash_case(behavior, guarded, &crashes).await });
+        running.spawn(async move { Box::pin(crash_case(behavior, guarded, &crashes)).await });
     }
     let (mut recovered, mut in_flight) = (0, 0);
     while let Some(outcome) = running.join_next().await {

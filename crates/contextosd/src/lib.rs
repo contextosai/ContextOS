@@ -6,6 +6,7 @@ pub mod app;
 pub mod attest;
 pub mod audit_sinks;
 pub mod auth;
+pub mod break_glass_api;
 pub mod check;
 pub mod compensation;
 pub mod config;

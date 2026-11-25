@@ -346,6 +346,31 @@
       ],
       "type": "object"
     },
+    "BreakGlassPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.break_glass]`.",
+      "properties": {
+        "lifts": {
+          "default": [
+            "change_windows",
+            "circuit_breakers"
+          ],
+          "description": "What a grant may lift.",
+          "items": {
+            "$ref": "#/$defs/Lift"
+          },
+          "type": "array"
+        },
+        "max_ttl_seconds": {
+          "default": 3600,
+          "description": "The longest a grant may last, 60 to 3600 seconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "BreakerCount": {
       "description": "What a breaker counts.",
       "oneOf": [
@@ -916,6 +941,18 @@
           "default": null,
           "description": "Approval requests with no decision after `timeout_seconds` are escalated to a human, or refused (see `contextos_gateway::approval_timeout`)."
         },
+        "break_glass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakGlassPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lets a `break_glass` credential lift change windows or open circuit breakers for named capabilities for at most an hour, audited (see `contextos_gateway::break_glass`). Unset: off."
+        },
         "change_windows": {
           "default": [],
           "description": "Freezes and recurring windows when some capabilities' calls are refused or need an approval of the exact action, decided on the server clock (see `contextos_gateway::change_windows`).",
@@ -1170,6 +1207,13 @@
         "public_key"
       ],
       "type": "object"
+    },
+    "Lift": {
+      "enum": [
+        "change_windows",
+        "circuit_breakers"
+      ],
+      "type": "string"
     },
     "LimitsConfig": {
       "additionalProperties": false,
@@ -2487,6 +2531,7 @@
         "approval_review": null,
         "approval_step_up": null,
         "approval_timeout": null,
+        "break_glass": null,
         "change_windows": [],
         "circuit_breakers": [],
         "completion_requires_scores": null,

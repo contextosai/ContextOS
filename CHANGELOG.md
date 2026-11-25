@@ -7,6 +7,13 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Break-glass: `[guards.break_glass]` and `POST /v1/break-glass` (new `break_glass`
+  scope, never held with `admit` or `dispatch`) lift change windows and open circuit
+  breakers, and nothing else, for named capabilities for at most an hour, with a
+  justification. Opening, closing and every call let through are audited
+  (`break_glass_opened`, `break_glass_closed`, `break_glass_used`); Tower reports each
+  grant as `break_glass_unreviewed` until a risk reviewer other than its opener records
+  a review (GUIDE §8).
 - Access reviews in Tower: `GET /api/access-review` and an Access review page list each
   agent's grants as used, unused or never used in a window, stale delegations, dormant
   agents in production, and waivers and reviews expiring within 30 days (CSV export);
@@ -131,6 +138,9 @@ minor versions may break APIs and every break is listed.
   revoker), and `UsageRefusal::Revoked` carries it.
 
 ### Fixed
+
+- Tower recovers unjournaled lifecycle-request changes at startup and in its periodic
+  sweep (the collection was missing from the recovery list).
 
 - Retrying an applied operation under a shared guarantee no longer appends another
   `shared_guarantee_settlement_requested` and `shared_guarantee_settled` pair each time;

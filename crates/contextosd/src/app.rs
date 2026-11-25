@@ -28,6 +28,7 @@
 //! | `POST /v1/runs/{run_id}/usage/claim` | `meter` | claim a model-call reservation for the one call a metering gateway forwards; returns what it covers |
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `GET/POST /v1/legal-holds`, `POST /v1/legal-holds/{hold_id}/release` | `control` | legal holds that keep runs from erasure ([`crate::privacy_api`]) |
+//! | `GET /v1/break-glass`, `POST /v1/break-glass`, `POST /v1/break-glass/{grant_id}/close` | `control` / `break_glass` | incident grants that lift change windows or open breakers ([`crate::break_glass_api`]) |
 //! | `POST /v1/subjects/runs`, `POST /v1/subjects/erase` | `control` | a data subject's runs, and erasing them (deletion requests) |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
@@ -3199,6 +3200,14 @@ where
             post(crate::privacy_api::release_hold::<S, L>),
         )
         .route("/v1/subjects/runs", post(crate::privacy_api::subject_runs::<S, L>))
+        .route(
+            "/v1/break-glass",
+            get(crate::break_glass_api::list::<S, L>).post(crate::break_glass_api::open::<S, L>),
+        )
+        .route(
+            "/v1/break-glass/{grant_id}/close",
+            post(crate::break_glass_api::close::<S, L>),
+        )
         .route("/v1/subjects/erase", post(crate::privacy_api::erase_subject::<S, L>))
         .route(
             "/v1/runs/{run_id}/usage/reserve",

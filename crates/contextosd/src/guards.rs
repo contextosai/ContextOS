@@ -91,6 +91,11 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::change_windows`]).
     #[serde(default)]
     pub change_windows: Vec<contextos_gateway::change_windows::ChangeWindow>,
+    /// Lets a `break_glass` credential lift change windows or open circuit breakers for
+    /// named capabilities for at most an hour, audited (see
+    /// [`contextos_gateway::break_glass`]). Unset: off.
+    #[serde(default)]
+    pub break_glass: Option<contextos_gateway::break_glass::BreakGlassPolicy>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -183,6 +188,7 @@ impl Default for GuardsConfig {
             environments: None,
             risk_tiers: None,
             change_windows: Vec::new(),
+            break_glass: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

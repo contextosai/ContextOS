@@ -182,6 +182,9 @@ impl Config {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
         contextos_gateway::change_windows::validate(&config.guards.change_windows).map_err(ConfigError::Invalid)?;
+        if let Some(bg) = &config.guards.break_glass {
+            bg.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(flow) = &config.guards.information_flow {
             flow.validate().map_err(ConfigError::Invalid)?;
         }
@@ -282,6 +285,17 @@ impl Config {
         {
             return Err(ConfigError::Invalid(format!(
                 "principal {} cannot both evaluate or meter and admit or dispatch",
+                key.principal_id
+            )));
+        }
+        // Whoever can lift guards in an incident does not also act under them.
+        if let Some(key) = self
+            .api_keys
+            .iter()
+            .find(|k| k.scopes.iter().any(|s| s == "break_glass") && runs(&k.principal_id))
+        {
+            return Err(ConfigError::Invalid(format!(
+                "principal {} cannot both open break-glass and admit or dispatch",
                 key.principal_id
             )));
         }
