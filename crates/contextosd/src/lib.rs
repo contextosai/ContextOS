@@ -44,6 +44,7 @@ pub mod pack_intents;
 pub mod pack_registry;
 pub mod privacy_api;
 pub mod protected_resource;
+pub mod quarantine_api;
 pub mod reconcile;
 pub mod release_evaluations_api;
 pub mod retention;

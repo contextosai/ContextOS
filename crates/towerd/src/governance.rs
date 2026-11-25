@@ -313,6 +313,32 @@ pub fn findings(fleet: &Fleet, views: &[AgentView], guardrails: &Value, waivers:
                 waiver: None,
             });
         }
+        for q in state.deployment["quarantined_tools"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(64)
+        {
+            let capability = q["capability_id"].as_str().unwrap_or("?");
+            out.push(Finding {
+                id: format!("tool_quarantined:{}:{capability}", state.id),
+                rule: "tool_quarantined".into(),
+                severity: "high",
+                agent: None,
+                source: Some(state.id.clone()),
+                title: format!("{capability} is quarantined in {}", state.id),
+                detail: format!(
+                    "Its upstream tool changed from the reviewed definition (since {}); calls are refused until it is \
+                     re-pinned or released, even if the provider changes it back.",
+                    q["since"].as_str().unwrap_or("?")
+                ),
+                remediation: "Review the upstream change. Re-pin the reviewed new definition (--pin-mcp-tools), or \
+                              release it with a reason (POST /v1/upstream/quarantine/release) if it was benign."
+                    .into(),
+                evidence: q.clone(),
+                waiver: None,
+            });
+        }
     }
     out.extend(crate::spend::findings(&fleet.spend, now_hour));
     out.extend(lifecycle::findings(fleet, views));
@@ -541,5 +567,16 @@ mod tests {
         let found = anomalies(&fleet);
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!((found[0].metric, found[0].value), ("refused", 30));
+    }
+
+    #[test]
+    fn a_quarantined_tool_is_a_source_finding() {
+        let mut fleet = Fleet::new(10, 48);
+        fleet.source("eu").deployment = json!({"quarantined_tools": [{"capability_id": "adp_payments.issue_refund",
+            "pinned": "sha256:aa", "observed": "sha256:bb", "since": "2026-11-26T10:00:00Z"}]});
+        let found = findings(&fleet, &[], &json!([]), &json!([]), "2026-11-26T11:00:00Z");
+        let q = found.iter().find(|f| f.rule == "tool_quarantined").expect("finding");
+        assert_eq!((q.severity, q.source.as_deref()), ("high", Some("eu")));
+        assert_eq!(q.evidence["observed"], "sha256:bb");
     }
 }

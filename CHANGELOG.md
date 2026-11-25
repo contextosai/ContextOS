@@ -7,6 +7,15 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Quarantine for drifted upstream tools: a capability whose pinned MCP tool drifted stays
+  refused (`upstream_tool_quarantined`) even if the tool changes back, on every replica
+  and across restarts, until it is re-pinned or released with a reason
+  (`POST /v1/upstream/quarantine/release`, `control`, audited). Listed in
+  `/v1/deployment`; Tower raises `tool_quarantined`.
+- **Breaking:** quarantine is on by default (`[guards] quarantine_drifted_tools`).
+  Migration: a deployment that relied on a drifted tool being served again when its
+  server rolled back now releases it explicitly, or sets
+  `quarantine_drifted_tools = false`.
 - Chargeback: Tower's spend groups by `business_unit`, `owner` and `tenant` too, and
   exports CSV (`GET /api/spend?format=csv`, Export CSV on Model spend); `ctx chargeback`
   builds the same rows offline from a verified export.

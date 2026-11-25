@@ -112,6 +112,8 @@ pub enum DocKind {
     BreakGlass,
     /// Evaluation results recorded on one agent release.
     ReleaseEvaluations,
+    /// Upstream tools quarantined after drift (deployment-wide).
+    ToolQuarantine,
 }
 
 impl DocKind {
@@ -162,6 +164,7 @@ impl DocKind {
             DocKind::SubjectIndex => "subject_index",
             DocKind::BreakGlass => "break_glass",
             DocKind::ReleaseEvaluations => "release_evaluations",
+            DocKind::ToolQuarantine => "tool_quarantine",
         }
     }
 }

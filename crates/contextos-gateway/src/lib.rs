@@ -78,6 +78,7 @@ pub mod step_up;
 pub mod task_authorization;
 pub mod tool_call_check;
 pub mod upstream_drift;
+pub mod upstream_quarantine;
 mod usage;
 pub mod usage_ceilings;
 mod usage_claim;
@@ -300,6 +301,8 @@ pub struct Gateway<S, L> {
     shared_guarantees: Vec<SharedGuarantee>,
     /// Capabilities refused because their upstream tool changed (see [`upstream_drift`]).
     drift: upstream_drift::DriftState,
+    /// Keep drifted tools refused until re-pinned or released (see [`upstream_quarantine`]).
+    quarantine_drifted: bool,
     /// Judges confirmed effects' output before the agent sees it (see [`result_screening`]).
     result_screening: Option<Arc<dyn result_screening::ResultScreeningProvider>>,
     /// Maps resource identifiers to canonical ids (see [`resource_identity`]).
@@ -573,6 +576,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             require_result_schemas: false,
             shared_guarantees: Vec::new(),
             drift: upstream_drift::DriftState::default(),
+            quarantine_drifted: true,
             result_screening: None,
             resource_identity: None,
             approval_step_up: None,
@@ -1190,6 +1194,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Some(reason) = self.drift.refusal(manifest) {
             let message = if reason == "upstream_tool_drifted" {
                 "The upstream tool changed since this capability was reviewed."
+            } else if reason == "upstream_tool_quarantined" {
+                "The upstream tool changed since this capability was reviewed and is quarantined until it is re-pinned or released."
             } else {
                 "The upstream tool has not been checked against its review yet; retry shortly."
             };

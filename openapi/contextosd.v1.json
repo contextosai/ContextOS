@@ -6824,6 +6824,84 @@
         ],
         "x-contextos-scope": "audit:read"
       }
+    },
+    "/v1/upstream/quarantine/release": {
+      "post": {
+        "operationId": "release_upstream_quarantine",
+        "summary": "Release a quarantined upstream tool",
+        "description": "Ends the quarantine of a capability whose pinned upstream tool drifted, after checking that the tool matches its pin again (`409 upstream_tool_still_drifted` otherwise; re-pin after review instead). Audited as `upstream_quarantine_released` before it takes effect.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "capability_id",
+                  "reason"
+                ],
+                "properties": {
+                  "capability_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The release record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {

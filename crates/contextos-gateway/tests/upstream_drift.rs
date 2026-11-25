@@ -1,6 +1,7 @@
 //! A capability pinned to its reviewed upstream tool refuses calls until it has been
 //! checked, and while the upstream definition differs; only a description change is
-//! reported without refusing.
+//! reported without refusing. Drift quarantines the capability until it is re-pinned
+//! or released, even if the tool changes back.
 
 mod support;
 
@@ -10,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use contextos_gateway::upstream_drift::{UpstreamStatus, description_digest, tool_digest};
 use contextos_gateway::*;
-use contextos_store::{MemoryLog, MemoryStore};
+use contextos_store::{AppendLog as _, MemoryLog, MemoryStore};
 use serde_json::{Value, json};
 use support::*;
 
@@ -42,8 +43,8 @@ fn reviewed() -> Value {
         "inputSchema": {"type": "object", "required": ["order_id"]}, "annotations": {"destructiveHint": true}})
 }
 
-fn pinned_gateway(h: &Harness, upstream: Arc<Upstream>) -> Gateway<MemoryStore, MemoryLog> {
-    let ports = Ports {
+fn pinned_gateway_ports(h: &Harness) -> Ports {
+    Ports {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SeqIds(AtomicU64::new(10_000))),
         authority: h.authority.clone(),
@@ -54,8 +55,11 @@ fn pinned_gateway(h: &Harness, upstream: Arc<Upstream>) -> Gateway<MemoryStore, 
         data_flow: None,
         boundary: None,
         memory: None,
-    };
-    let mut g = Gateway::new(h.store.clone(), h.audit.clone(), ports);
+    }
+}
+
+fn pinned_gateway(h: &Harness, upstream: Arc<Upstream>) -> Gateway<MemoryStore, MemoryLog> {
+    let mut g = Gateway::new(h.store.clone(), h.audit.clone(), pinned_gateway_ports(h));
     g.register_adapter("adp_payments", upstream);
     let mut m = manifest();
     m.upstream_tool_digest = tool_digest(&reviewed());
@@ -75,7 +79,9 @@ async fn a_changed_upstream_tool_is_refused_until_it_matches_its_pin_again() {
         inner: h.adapter.clone(),
         tools: Mutex::new(Some(vec![reviewed()])),
     });
-    let g = pinned_gateway(&h, upstream.clone());
+    let mut g = pinned_gateway(&h, upstream.clone());
+    // The earlier behaviour, kept with `quarantine_drifted_tools = false`.
+    g.set_quarantine_drifted_tools(false);
     assert_eq!(status(&g).await, UpstreamStatus::Matches);
 
     // The server widens the tool's input under the same name.
@@ -157,4 +163,94 @@ async fn a_reworded_description_is_reported_but_not_refused() {
         .await
         .unwrap();
     assert_eq!(out.report.status, "completed", "{:?}", out.report.reason_codes);
+}
+
+async fn release(
+    g: &Gateway<MemoryStore, MemoryLog>,
+    tenant: &str,
+) -> Result<Value, upstream_quarantine::QuarantineError> {
+    g.release_quarantine(tenant, "adp_payments.issue_refund", "reviewed: benign rollback", "ops")
+        .await
+}
+
+#[tokio::test]
+async fn a_drifted_tool_stays_quarantined_until_released_or_re_pinned() {
+    let h = harness("allow", Behavior::Confirm).await;
+    let upstream = Arc::new(Upstream {
+        inner: h.adapter.clone(),
+        tools: Mutex::new(Some(vec![reviewed()])),
+    });
+    let g = pinned_gateway(&h, upstream.clone());
+    assert_eq!(status(&g).await, UpstreamStatus::Matches);
+    let mut widened = reviewed();
+    widened["inputSchema"]["additionalProperties"] = json!(true);
+    *upstream.tools.lock().unwrap() = Some(vec![widened.clone()]);
+    assert_eq!(status(&g).await, UpstreamStatus::Drifted);
+    let tenant = h.admission.tenant_id.clone();
+    assert!(matches!(
+        release(&g, &tenant).await,
+        Err(upstream_quarantine::QuarantineError::StillDrifted)
+    ));
+
+    // The provider changes it back: still refused.
+    *upstream.tools.lock().unwrap() = Some(vec![reviewed()]);
+    assert_eq!(status(&g).await, UpstreamStatus::Quarantined);
+    let refused = g
+        .dispatch(&h.admission, &call("tc_1", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.report.reason_codes,
+        vec!["upstream_tool_quarantined".to_owned()]
+    );
+    assert_eq!(g.quarantined_tools().await.unwrap().len(), 1);
+
+    // A restarted replica on the same store keeps the quarantine.
+    let restarted = pinned_gateway(&h, upstream.clone());
+    assert_eq!(status(&restarted).await, UpstreamStatus::Quarantined);
+    let refused = restarted
+        .dispatch(&h.admission, &call("tc_2", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.report.reason_codes,
+        vec!["upstream_tool_quarantined".to_owned()]
+    );
+
+    // Released by an operator, audited, and served again.
+    let released = release(&g, &tenant).await.unwrap();
+    assert_eq!(released["reason"], "reviewed: benign rollback");
+    let audited: Vec<Value> = h
+        .audit
+        .log()
+        .range(&tenant, 1, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.body)
+        .filter(|e| e["kind"] == "upstream_quarantine_released")
+        .collect();
+    assert_eq!(audited.len(), 1);
+    assert_eq!(status(&g).await, UpstreamStatus::Matches);
+    let out = g
+        .dispatch(&h.admission, &call("tc_3", Some("refund_ord_881")))
+        .await
+        .unwrap();
+    assert_eq!(out.report.status, "completed", "{:?}", out.report.reason_codes);
+    assert!(matches!(
+        release(&g, &tenant).await,
+        Err(upstream_quarantine::QuarantineError::NotQuarantined)
+    ));
+
+    // Drift again, then a reviewed re-pin of the new definition: the old quarantine
+    // does not apply to the new pin.
+    *upstream.tools.lock().unwrap() = Some(vec![widened.clone()]);
+    assert_eq!(status(&g).await, UpstreamStatus::Drifted);
+    let mut repinned = Gateway::new(h.store.clone(), h.audit.clone(), pinned_gateway_ports(&h));
+    repinned.register_adapter("adp_payments", upstream.clone());
+    let mut m = manifest();
+    m.upstream_tool_digest = tool_digest(&widened);
+    repinned.pin_capability(m).unwrap();
+    assert_eq!(status(&repinned).await, UpstreamStatus::Matches);
+    assert_eq!(repinned.quarantined_tools().await.unwrap(), Vec::<Value>::new());
 }
