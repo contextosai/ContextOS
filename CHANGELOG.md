@@ -7,6 +7,10 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Compliance coverage: every control in `docs/COMPLIANCE.md` and `ctx evidence-pack` is
+  marked `covered`, `partial` (naming what is missing) or `organizational`; SOC 2 is in
+  the docs and NIST AI RMF in the pack (`--framework nist-ai-rmf`); the map cites this
+  release's events (quarantine releases, release evaluations, legal holds, break-glass).
 - Release assets (archives, SBOMs, wheels, the npm tarball) carry a keyless Sigstore
   bundle (`<asset>.sigstore.json`), each verified against the release workflow before
   the draft is created; [Verify a release](docs/VERIFY_RELEASE.md) shows all three

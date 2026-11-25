@@ -2819,7 +2819,8 @@ ctx evidence-pack --entries entries.json --keys keys.json \
     --framework soc2 --framework eu-ai-act --config-report check.txt --out pack/
 ```
 
-Frameworks are `soc2`, `iso42001`, `eu-ai-act` and `owasp-agentic`. The pack is
+Frameworks are `soc2`, `iso42001`, `eu-ai-act`, `owasp-agentic` and `nist-ai-rmf`. Each control
+states its coverage (`covered`, `partial` with what is missing, or `organizational`). The pack is
 built only from a chain that verifies, and it is deterministic: the same export and
 options give the same files.
 

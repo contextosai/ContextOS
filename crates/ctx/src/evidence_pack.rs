@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::Failure;
 
 /// The frameworks a pack can map to.
-pub(crate) const FRAMEWORKS: [&str; 4] = ["soc2", "iso42001", "eu-ai-act", "owasp-agentic"];
+pub(crate) const FRAMEWORKS: [&str; 5] = ["soc2", "iso42001", "eu-ai-act", "owasp-agentic", "nist-ai-rmf"];
 pub(crate) const PACK_VERSION: &str = "contextos.evidence_pack.v2";
 
 /// The control map: per framework, controls with the audit event kinds that evidence them.
@@ -133,7 +133,10 @@ fn coverage(period: &Value, verification: &Value, controls: &Value, config_repor
            kind occurred in the period: the control acted at least once. It does not show that every required \
            behavior of the control was tested, that the control is configured everywhere it should be, or that \
            it is effective. This pack is an audit export with a control index, not a test result, an \
-           assessment or a compliance finding.\n\n\
+           assessment or a compliance finding.\n\
+         - `Coverage` is how much of each control the runtime can evidence at all: `covered`, `partial` (what \
+           is missing is named) or `organizational` (outside the runtime). It is ContextOS's own mapping, not a \
+           certification, an attestation or an auditor's opinion.\n\n\
          ## What it does not cover\n\n\
          - Calls an agent made to a tool directly, with a credential that bypasses the gateway.\n\
          - Prompts, model outputs and tool content beyond what the entries record.\n\
@@ -153,7 +156,7 @@ fn coverage(period: &Value, verification: &Value, controls: &Value, config_repor
     for framework in controls["frameworks"].as_array().into_iter().flatten() {
         let _ = write!(
             md,
-            "\n## {}\n\n| Control | Status | Events in the period |\n|---|---|---|\n",
+            "\n## {}\n\n| Control | Coverage | Status | Events in the period |\n|---|---|---|---|\n",
             s(&framework["title"])
         );
         for c in framework["controls"].as_array().into_iter().flatten() {
@@ -168,11 +171,18 @@ fn coverage(period: &Value, verification: &Value, controls: &Value, config_repor
             } else {
                 observed.join(", ")
             };
+            // Coverage is what the runtime can show for the control at all; `partial`
+            // names what is missing, so a reviewer never reads it as complete.
+            let coverage = match c["missing"].as_str() {
+                Some(missing) => format!("{}: {missing}", s(&c["coverage"])),
+                None => s(&c["coverage"]),
+            };
             let _ = writeln!(
                 md,
-                "| {} {} | {} | {} |",
+                "| {} {} | {} | {} | {} |",
                 s(&c["id"]),
                 s(&c["title"]),
+                coverage,
                 s(&c["status"]).replace('_', " "),
                 detail
             );
@@ -242,4 +252,29 @@ pub(crate) fn build(options: &Options<'_>) -> Result<Value, Failure> {
     std::fs::write(&path, pretty(&manifest)).map_err(|e| io(&path, &e))?;
     Ok(json!({"written": out.display().to_string(), "verified": true,
         "frameworks": options.frameworks, "period": manifest["period"], "controls": manifest["controls"]}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every control states its coverage, and every partial or organizational one says
+    /// what is missing: the map never lets a reviewer read a gap as covered.
+    #[test]
+    fn every_control_states_its_coverage() {
+        let map = control_map();
+        for id in FRAMEWORKS {
+            let controls = map["frameworks"][id]["controls"].as_array().unwrap();
+            assert!(!controls.is_empty(), "{id}");
+            for c in controls {
+                let coverage = c["coverage"].as_str().unwrap_or_default();
+                assert!(
+                    ["covered", "partial", "organizational"].contains(&coverage),
+                    "{id} {}",
+                    c["id"]
+                );
+                assert_eq!(coverage != "covered", c["missing"].is_string(), "{id} {}", c["id"]);
+            }
+        }
+    }
 }

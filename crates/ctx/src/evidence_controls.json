@@ -11,7 +11,8 @@
       "run_admitted",
       "authorization_decision",
       "revocation_refusal"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "CC6.3",
@@ -23,7 +24,8 @@
       "revocation",
       "revocation_restored",
       "privilege_refusal"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "CC6.6",
@@ -34,7 +36,9 @@
       "environment_refusal",
       "data_flow_decision",
       "information_flow_decision"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Network perimeter, host hardening and the isolation boundary itself are the deployment's."
     },
     {
      "id": "CC6.8",
@@ -43,8 +47,11 @@
      "events": [
       "pack_loaded",
       "rollout_set",
-      "rollout_cleared"
-     ]
+      "rollout_cleared",
+      "upstream_quarantine_released"
+     ],
+     "coverage": "partial",
+     "missing": "Covers packs and tools the runtime loads; malware on hosts and in dependencies is the deployment's."
     },
     {
      "id": "CC7.2",
@@ -55,7 +62,9 @@
       "circuit_breaker_tripped",
       "repeated_effect_refusal",
       "shared_guarantee_refused"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Covers agent actions; infrastructure and host monitoring are the deployment's."
     },
     {
      "id": "CC7.3",
@@ -64,7 +73,9 @@
      "events": [
       "escalation_opened",
       "escalation_resolved"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Escalations reach a person; the triage process and its staffing are the deployer's."
     },
     {
      "id": "CC7.4",
@@ -73,8 +84,12 @@
      "events": [
       "revocation",
       "effect_reconciliation",
-      "compensation_requested"
-     ]
+      "compensation_requested",
+      "break_glass_opened",
+      "break_glass_closed"
+     ],
+     "coverage": "partial",
+     "missing": "Stops, holds and reconciles effects; the incident response process is the deployer's."
     },
     {
      "id": "CC8.1",
@@ -84,8 +99,11 @@
       "pack_loaded",
       "rollout_set",
       "conformance_assessed",
-      "task_authorization_amended"
-     ]
+      "task_authorization_amended",
+      "release_evaluation_recorded"
+     ],
+     "coverage": "partial",
+     "missing": "Covers packs, releases and configuration the runtime loads; change management of the deployment's own code is the deployer's."
     },
     {
      "id": "PI1.3",
@@ -97,14 +115,17 @@
       "effect_reconciliation",
       "shared_guarantee_settled",
       "usage_settled"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "CC1-CC5",
      "title": "Control environment, communication, risk assessment and monitoring of controls",
      "runtime": "Outside the runtime.",
      "events": [],
-     "note": "Organizational: policies, training, risk assessment and oversight are the deployer's."
+     "note": "Organizational: policies, training, risk assessment and oversight are the deployer's.",
+     "coverage": "organizational",
+     "missing": "Policies, training, risk assessment and oversight."
     }
    ]
   },
@@ -120,7 +141,9 @@
       "authorization_decision",
       "effect_observation",
       "run_lifecycle"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Records actions and decisions; model prompts and completions are not recorded by the runtime (keep them in the model gateway's logs if your obligations need them)."
     },
     {
      "id": "Art. 14(4)(a),(c)",
@@ -130,7 +153,9 @@
       "authorization_decision",
       "escalation_opened",
       "escalation_resolved"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Explains each runtime decision; interpreting the model's own reasoning is outside it."
     },
     {
      "id": "Art. 14(4)(b)",
@@ -142,7 +167,8 @@
       "approval_review_too_fast",
       "approval_step_up_refused",
       "approval_timed_out"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "Art. 14(4)(d)",
@@ -152,7 +178,8 @@
       "approval_redeemed",
       "compensation_requested",
       "effect_reconciliation"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "Art. 14(4)(e)",
@@ -162,7 +189,8 @@
       "revocation",
       "revocation_refusal",
       "circuit_breaker_tripped"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "Art. 15",
@@ -174,14 +202,18 @@
       "output_schema_violation",
       "action_monitored",
       "boundary_refusal"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Contains and screens what the model does; the model's own accuracy and robustness are the provider's."
     },
     {
      "id": "Art. 26",
      "title": "Deployer obligations",
      "runtime": "Logs kept, oversight assigned, operation monitored.",
      "events": [],
-     "note": "Deployment: log retention, assigned overseers and instructions for use are the deployer's; this pack is one of their logs."
+     "note": "Deployment: log retention, assigned overseers and instructions for use are the deployer's; this pack is one of their logs.",
+     "coverage": "organizational",
+     "missing": "Instructions for use, assigned overseers and log retention."
     }
    ]
   },
@@ -196,8 +228,12 @@
       "pack_loaded",
       "rollout_set",
       "rollout_cleared",
-      "conformance_assessed"
-     ]
+      "conformance_assessed",
+      "release_evaluation_recorded",
+      "release_evaluation_refusal"
+     ],
+     "coverage": "partial",
+     "missing": "Covers agent releases, packs and evaluation gates; model development and training are outside."
     },
     {
      "id": "A.7",
@@ -207,8 +243,13 @@
       "data_flow_decision",
       "information_flow_decision",
       "run_data_erased",
-      "memory_lifecycle"
-     ]
+      "memory_lifecycle",
+      "legal_hold_placed",
+      "legal_hold_released",
+      "subject_erasure"
+     ],
+     "coverage": "partial",
+     "missing": "Covers data in agent actions (categories, holds, erasure); training data is outside."
     },
     {
      "id": "A.9",
@@ -220,21 +261,27 @@
       "privilege_refusal",
       "task_authorization_amended",
       "approval_redeemed"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "A.10",
      "title": "Third-party relationships",
      "runtime": "Upstream tools are pinned by digest and drift is refused before dispatch.",
-     "events": [],
-     "note": "Configuration: upstream pins are checked at startup and on each call; attach the configuration report."
+     "events": [
+      "upstream_quarantine_released"
+     ],
+     "coverage": "partial",
+     "missing": "Pins and quarantines upstream tools; supplier assessment and contracts are the deployer's."
     },
     {
      "id": "A.2-A.5, A.8",
      "title": "Policies, organization, resources, impact assessment, information for interested parties",
      "runtime": "Outside the runtime.",
      "events": [],
-     "note": "Organizational: the deployer's management system."
+     "note": "Organizational: the deployer's management system.",
+     "coverage": "organizational",
+     "missing": "The deployer's management system."
     }
    ]
   },
@@ -248,7 +295,9 @@
      "events": [
       "information_flow_decision",
       "authorization_decision"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Cannot stop the model being hijacked; stops a hijacked agent's effects without approval."
     },
     {
      "id": "ASI02",
@@ -258,7 +307,8 @@
       "repeated_effect_refusal",
       "action_monitored",
       "authorization_decision"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "ASI03",
@@ -269,15 +319,20 @@
       "delegation_admitted",
       "revocation_refusal",
       "privilege_refusal"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "ASI04",
      "title": "Agentic supply chain",
      "runtime": "Digest-pinned capabilities and packs; upstream drift refused.",
      "events": [
-      "pack_loaded"
-     ]
+      "pack_loaded",
+      "upstream_quarantine_released",
+      "release_evaluation_refusal"
+     ],
+     "coverage": "partial",
+     "missing": "Covers packs, tools and agent releases; the agent framework's own dependencies are the deployment's."
     },
     {
      "id": "ASI05",
@@ -285,7 +340,9 @@
      "runtime": "Effects outside an active isolation boundary are refused.",
      "events": [
       "boundary_refusal"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Refuses effects outside a boundary; the sandbox is the deployment's."
     },
     {
      "id": "ASI06",
@@ -294,7 +351,9 @@
      "events": [
       "memory_lifecycle",
       "memory_lifecycle_not_applied"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Covers memories written through the memory port; retrieval stores outside it are not governed."
     },
     {
      "id": "ASI07",
@@ -303,7 +362,9 @@
      "events": [
       "delegation_admitted",
       "delegation_closed"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Covers delegation through the runtime; agent-to-agent channels outside it are not."
     },
     {
      "id": "ASI08",
@@ -313,7 +374,8 @@
       "shared_guarantee_refused",
       "circuit_breaker_tripped",
       "usage_refused"
-     ]
+     ],
+     "coverage": "covered"
     },
     {
      "id": "ASI09",
@@ -324,7 +386,9 @@
       "approval_review_too_fast",
       "approval_step_up_refused",
       "approval_timed_out"
-     ]
+     ],
+     "coverage": "partial",
+     "missing": "Binds and paces approvals; how approvers are trained and what their screens show is the deployer's."
     },
     {
      "id": "ASI10",
@@ -334,6 +398,62 @@
       "revocation",
       "circuit_breaker_tripped",
       "action_monitored"
+     ],
+     "coverage": "covered"
+    }
+   ]
+  },
+  "nist-ai-rmf": {
+   "title": "NIST AI Risk Management Framework 1.0 (AI 100-1) and the Generative AI Profile (AI 600-1)",
+   "controls": [
+    {
+     "id": "GOVERN",
+     "title": "Policies, accountability and oversight",
+     "coverage": "partial",
+     "missing": "Policies, roles and training are the organization's; the runtime enforces and records them.",
+     "runtime": "Signed, versioned packs; separation of duties between who admits, dispatches, approves and evaluates; access reviews and lifecycle approval in Tower; break-glass is time-boxed and reviewed.",
+     "events": [
+      "pack_loaded",
+      "break_glass_opened",
+      "break_glass_closed",
+      "revocation"
+     ]
+    },
+    {
+     "id": "MAP",
+     "title": "Context and risks of each AI system",
+     "coverage": "partial",
+     "missing": "Context mapping and impact assessment are the organization's; the runtime supplies the inventory and risk tiers they start from.",
+     "runtime": "Capability risk dimensions, agent risk tiers and data categories are declared; the inventory lists every agent, tool and model seen (Tower, ctx inventory).",
+     "events": [],
+     "note": "Configuration: attach ctx inventory and the configuration report."
+    },
+    {
+     "id": "MEASURE",
+     "title": "Evaluation and monitoring",
+     "coverage": "partial",
+     "missing": "Choosing what to measure and the evaluation suites themselves are the organization's.",
+     "runtime": "Evaluation results are recorded per agent release and gate admission; actions are monitored; approval decision times are recorded.",
+     "events": [
+      "release_evaluation_recorded",
+      "release_evaluation_refusal",
+      "action_monitored",
+      "approval_requested",
+      "approval_redeemed"
+     ]
+    },
+    {
+     "id": "MANAGE",
+     "title": "Responding to and recovering from risks",
+     "coverage": "covered",
+     "runtime": "Approvals, breakers, usage ceilings and the kill switch stop effects; unknown outcomes are held and reconciled; applied effects are compensated.",
+     "events": [
+      "revocation",
+      "circuit_breaker_tripped",
+      "usage_refused",
+      "escalation_resolved",
+      "effect_reconciliation",
+      "compensation_requested"
      ]
     }
    ]
