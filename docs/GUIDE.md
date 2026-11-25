@@ -2956,6 +2956,13 @@ business_unit = "Customer Operations"
   shared ceilings near their limit (read live from each runtime with the read-only
   key), policy drift, active waivers, unreviewed break-glass grants and whether every
   evidence chain verifies. Every number links to the finding, agent or page behind it.
+- **Incident cases.** From a finding, refusal, held effect or anomaly, an operator or
+  risk reviewer opens a case (`POST /api/cases`, the Cases page) with an owner, a status
+  (open, investigating, contained, resolved, closed), evidence linked by reference (a
+  finding, run, audit entry, agent or anomaly) and a timeline. Every change is in
+  Tower's signed journal; `GET /api/cases/{id}/report?format=md` exports a report that
+  says how to verify each linked item and journals its digest (`case_exported`), so a
+  report edited afterwards no longer matches. A closed case is final.
 - **Access reviews.** `GET /api/access-review?days=90` (and the Access review page,
   with CSV export) lists every grant an agent holds (capabilities pinned in its packs or
   surfaced to its runs) as used, unused in the window or never used; delegations to

@@ -100,6 +100,13 @@ effects*). Never re-run an effect to find out whether it happened.
 Policy escalations are listed at `GET /v1/escalations`; a growing list is a signal in
 itself. Resolve each with what was done (`POST /v1/escalations/{id}/resolve`).
 
+
+Track the incident as a case in Tower (Cases page, `POST /api/cases`): link the
+findings, runs and audit entries it involves, record each containment step as a note or
+status change, and export the report (`GET /api/cases/{id}/report?format=md`) for the
+post-incident review. The report names how to verify each linked item, and its digest
+is in Tower's signed journal.
+
 ## Alerts
 
 The Helm chart ships alerting rules (`prometheusRule.enabled`, or load
