@@ -45,7 +45,7 @@ fn row<'a>(body: &'a Value, kind: &str, id: &str) -> &'a Value {
 #[tokio::test]
 async fn evidence_and_declarations_become_one_inventory() {
     let rt = runtime(&traffic()).await;
-    let (base, _) = tower(&rt, "").await;
+    let (base, _) = tower(&rt, "[governance]\nlifecycle_approval = false").await;
     let (status, _) = call(&base, "GET", "/api/inventory", "nobody", None).await;
     assert_eq!(status, 401);
     let (status, _) = call(&base, "GET", "/api/inventory?kind=planet", "viewer", None).await;

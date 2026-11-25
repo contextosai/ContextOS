@@ -121,6 +121,9 @@ async fn tower(runtime: &str) -> String {
         [server]
         listen = "127.0.0.1:0"
         development = true
+        # Declares agents straight into a stage, as before lifecycle approval.
+        [governance]
+        lifecycle_approval = false
         [journal]
         signing_seed_env = "UNUSED"
         key_id = "tower-journal"

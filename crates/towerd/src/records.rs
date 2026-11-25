@@ -70,7 +70,8 @@ pub struct Declaration {
     pub purpose: String,
     /// `internal`, `customers` or `public`.
     pub users_served: String,
-    /// `proposed`, `pilot`, `production`, `deprecated` or `retired`.
+    /// `proposed`, `approved`, `pilot`, `production`, `deprecated`, `suspended` or
+    /// `retired` (see [`crate::ops::lifecycle`]).
     pub lifecycle: String,
     #[serde(default)]
     pub data_categories: Vec<String>,
@@ -86,7 +87,25 @@ pub struct Declaration {
     pub models: Vec<String>,
 }
 
-pub const LIFECYCLE: [&str; 5] = ["proposed", "pilot", "production", "deprecated", "retired"];
+pub const LIFECYCLE: [&str; 7] = [
+    "proposed",
+    "approved",
+    "pilot",
+    "production",
+    "deprecated",
+    "suspended",
+    "retired",
+];
+
+/// The lifecycle state a stage is in: `pilot`, `production` and `deprecated` are the
+/// stages of an `active` agent.
+#[must_use]
+pub fn lifecycle_state(stage: &str) -> &str {
+    match stage {
+        "pilot" | "production" | "deprecated" => "active",
+        other => other,
+    }
+}
 pub const USERS: [&str; 3] = ["internal", "customers", "public"];
 pub const RISK_TIERS: [&str; 4] = ["low", "limited", "high", "prohibited"];
 

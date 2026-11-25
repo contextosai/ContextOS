@@ -18,6 +18,7 @@ use crate::fleet::{AgentActivity, Fleet, Hour, hour_index};
 
 mod builtin;
 pub use builtin::builtin;
+mod lifecycle;
 use builtin::finding;
 
 pub const SEVERITIES: [&str; 4] = ["critical", "high", "medium", "low"];
@@ -311,6 +312,7 @@ pub fn findings(fleet: &Fleet, views: &[AgentView], guardrails: &Value, waivers:
         }
     }
     out.extend(crate::spend::findings(&fleet.spend, now_hour));
+    out.extend(lifecycle::findings(fleet, views));
     for f in &mut out {
         f.waiver = waivers
             .as_array()

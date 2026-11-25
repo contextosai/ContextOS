@@ -7,7 +7,8 @@
 //! | `GET /api/posture` | viewer | the organisation's governance posture |
 //! | `GET /api/agents` | viewer | the inventory |
 //! | `GET /api/agents/{key}` | viewer | one agent: facts, authority, findings, activity |
-//! | `PUT /api/agents/{key}/declaration` | owner (team) or risk | declare owner, purpose, lifecycle |
+//! | `PUT /api/agents/{key}/declaration` | owner (team) or risk | declare owner, purpose, risk tier, models (a new agent at `proposed`) |
+//! | `POST /api/agents/{key}/lifecycle`, `GET /api/lifecycle-requests`, `POST /api/lifecycle-requests/{id}/approve\|reject\|cancel` | owner or risk; approve and reject: risk, not the requester (approve: nor the owner) | lifecycle changes ([`crate::ops::lifecycle`]) |
 //! | `POST /api/agents/{key}/review` | risk (not the declarer) | record a risk review of the current authority |
 //! | `GET /api/findings` | viewer | findings, most severe first |
 //! | `GET /api/anomalies` | viewer | behaviour against each agent's own baseline |
@@ -246,7 +247,8 @@ async fn me<S, L>(State(t): State<Shared<S, L>>, headers: HeaderMap) -> ApiResul
     ok(
         json!({"principal_id": c.principal_id, "roles": c.roles, "teams": c.teams,
         "intelligence": t.model.as_ref().map(|m| m.name().to_owned()),
-        "two_person_restore": t.config.governance.two_person_restore}),
+        "two_person_restore": t.config.governance.two_person_restore,
+        "lifecycle_approval": t.config.governance.lifecycle_approval}),
     )
 }
 
@@ -524,6 +526,20 @@ async fn declare<S: DocumentStore, L: AppendLog>(
     declaration.check().map_err(ApiError::bad)?;
     let team_ok = |team: &str| c.teams.iter().any(|t| t == team);
     let owner_only = !c.has("risk");
+    let approval = t.config.governance.lifecycle_approval;
+    if approval
+        && !t
+            .records
+            .load("declarations")
+            .await?
+            .get(&key)
+            .is_some_and(Value::is_object)
+        && declaration.lifecycle != "proposed"
+    {
+        return Err(ApiError::bad(
+            "A new agent is declared as proposed; later stages are requested and approved (POST /api/agents/{key}/lifecycle).",
+        ));
+    }
     let now = wall_clock();
     let mut record = serde_json::to_value(&declaration).unwrap_or(Value::Null);
     record["declared_by"] = json!(c.principal_id);
@@ -539,11 +555,26 @@ async fn declare<S: DocumentStore, L: AppendLog>(
                 // Checked against the stored declaration on every attempt, so a
                 // concurrent transfer to another team is never overwritten.
                 let items = object(items);
-                let current_team = items.get(&key).and_then(|d| d["team"].as_str());
+                let current = items.get(&key);
+                let current_team = current.and_then(|d| d["team"].as_str());
                 if owner_only && (!team_ok(&declaration.team) || current_team.is_some_and(|ct| !team_ok(ct))) {
                     return Err(RecordError::Forbidden("Owners declare agents of their own teams."));
                 }
-                items.insert(key.clone(), stored.clone());
+                let mut stored = stored.clone();
+                if let Some(current) = current {
+                    if approval && current["lifecycle"] != stored["lifecycle"] {
+                        return Err(RecordError::Conflict(
+                            "the lifecycle stage changes only through an approved lifecycle request",
+                        ));
+                    }
+                    // A re-declaration keeps the record of the last approved change.
+                    for field in ["lifecycle_changed_at", "lifecycle_request"] {
+                        if current[field].is_string() && current["lifecycle"] == stored["lifecycle"] {
+                            stored[field] = current[field].clone();
+                        }
+                    }
+                }
+                items.insert(key.clone(), stored);
                 Ok(())
             },
         )

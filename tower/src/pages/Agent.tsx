@@ -7,6 +7,8 @@ import type { AgentDetail, Capability, Finding, RunSummary } from "../lib/types"
 import { openAction } from "../components/actions";
 import { Badge, Card, Empty, ErrorNote, HBars, JsonView, Kv, PageHead, ProfileBadge, SeverityBadge, Spark, Tabs } from "../components/ui";
 import { AgentSpend } from "../components/AgentSpend";
+import { Lifecycle } from "../components/Lifecycle";
+import { STAGES } from "../lib/lifecycle";
 
 type Tab = "authority" | "findings" | "activity" | "review";
 
@@ -115,7 +117,9 @@ function AgentActions({ d, agentKey }: { d: AgentDetail; agentKey: string }) {
               { name: "business_unit", label: "Business unit", initial: String(decl?.business_unit ?? "") },
               { name: "purpose", label: "Purpose", kind: "textarea", required: true, initial: String(decl?.purpose ?? ""), placeholder: "What it does, for whom, and what it must never do" },
               { name: "users_served", label: "Who it serves", kind: "select", options: [["internal", "Internal staff"], ["customers", "Customers"], ["public", "The public"]], initial: String(decl?.users_served ?? "internal") },
-              { name: "lifecycle", label: "Lifecycle stage", kind: "select", options: ["proposed", "pilot", "production", "deprecated", "retired"].map((l) => [l, l]), initial: String(decl?.lifecycle ?? "proposed") },
+              ...(decl || me?.lifecycle_approval
+                ? []
+                : [{ name: "lifecycle", label: "Lifecycle stage", kind: "select" as const, options: STAGES.map((l): [string, string] => [l, l]), initial: "proposed" }]),
               { name: "data_categories", label: "Data categories (comma-separated)", initial: lists(decl?.data_categories), placeholder: "orders, payments, customer contact" },
               { name: "regulatory_contexts", label: "Regulatory contexts (comma-separated)", initial: lists(decl?.regulatory_contexts), help: "finance, clinical, legal, employment, critical_infrastructure, eu_ai_act_high_risk raise the required profile" },
             ],
@@ -123,7 +127,8 @@ function AgentActions({ d, agentKey }: { d: AgentDetail; agentKey: string }) {
               const split = (x: unknown) => String(x ?? "").split(",").map((s) => s.trim()).filter(Boolean);
               return api(`/api/agents/${enc(agentKey)}/declaration`, {
                 method: "PUT",
-                body: { ...v, business_unit: v.business_unit || null, data_categories: split(v.data_categories), regulatory_contexts: split(v.regulatory_contexts) },
+                // An existing agent keeps its stage: it changes through a lifecycle request.
+                body: { ...v, lifecycle: decl?.lifecycle ?? v.lifecycle ?? "proposed", business_unit: v.business_unit || null, data_categories: split(v.data_categories), regulatory_contexts: split(v.regulatory_contexts) },
               });
             },
             invalidate: [["agent", agentKey], ["agents"], ["posture"]],
@@ -352,6 +357,7 @@ export function Findings({ findings, agentKey }: { findings: Finding[]; agentKey
 
 function Activity({ d }: { d: AgentDetail }) {
   const me = useMe().data;
+  const decl = d.facts.declaration as Record<string, string | string[]> | null;
   const [explained, setExplained] = useState<{ run: RunSummary; text: string } | null>(null);
   const explain = useMutation({
     mutationFn: (r: RunSummary) => api<{ explanation: string }>(`/api/runs/${enc(r.source)}/${enc(r.run_id)}/explain`, { method: "POST" }),
@@ -379,6 +385,7 @@ function Activity({ d }: { d: AgentDetail }) {
           />
         </Card>
       </div>
+      {decl && <Lifecycle agentKey={d.row.key} stage={String(decl.lifecycle)} owner={String(decl.owner)} declaredBy={String(decl.declared_by ?? "")} />}
       <AgentSpend agentKey={d.row.key} />
       {d.anomalies.length > 0 && (
         <div className="banner warn">

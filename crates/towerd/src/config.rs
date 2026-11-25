@@ -301,12 +301,18 @@ pub struct GovernanceConfig {
     /// a single operator's action, so containment is never slowed down.
     #[serde(default = "default_true")]
     pub two_person_restore: bool,
+    /// An agent's lifecycle stage changes only through a request that a risk reviewer
+    /// other than the requester (and the agent's owner) approves; a new declaration
+    /// starts at `proposed`. Off: a declaration sets any stage, as before 0.1.0-alpha.22.
+    #[serde(default = "default_true")]
+    pub lifecycle_approval: bool,
 }
 
 impl Default for GovernanceConfig {
     fn default() -> Self {
         Self {
             two_person_restore: true,
+            lifecycle_approval: true,
         }
     }
 }

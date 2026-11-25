@@ -14,6 +14,15 @@ minor versions may break APIs and every break is listed.
   It is derived from verified audit entries and declarations, not stored. `ctx
   inventory` lists the same rows offline from an audit export, and refuses an export
   that does not verify (GUIDE §11, docs/tower §4.11).
+- Agent lifecycle with approval in Tower: stages `proposed`, `approved`, `pilot`,
+  `production`, `deprecated`, `suspended`, `retired`. `POST /api/agents/{key}/lifecycle`
+  requests a move; a risk reviewer who is not the requester, owner or declarer approves
+  it (`approved` also needs a current approved review). Approving `suspended` or
+  `retired` revokes the agent on every runtime Tower holds a control key for; resuming
+  restores only the suspension's own revocation. Every step is in Tower's signed
+  journal, and the new finding `lifecycle_not_enforced` (critical) names a runtime whose
+  verified chain shows a suspended or retired agent not revoked. The agent page shows
+  the stage, the waiting request and past changes (docs/tower §4.7).
 - Agent declarations take an optional `risk_tier` (`low`, `limited`, `high`,
   `prohibited`) and `models` (the models the agent is declared to use).
 - Agent Failure Lab (`lab/`): a static page where a visitor picks one of five failures of
@@ -46,6 +55,12 @@ minor versions may break APIs and every break is listed.
 
 ### Changed
 
+- **Breaking (Tower):** with `[governance] lifecycle_approval` (on by default), a new
+  agent declaration must be `proposed`, and `PUT /api/agents/{key}/declaration` refuses
+  a changed `lifecycle` (409); stages change through lifecycle requests. Existing
+  declarations keep their stage. Scripts that declare agents straight into `pilot` or
+  `production` set `lifecycle_approval = false` while they move to requests.
+- `retired_but_running` also covers `suspended` agents.
 - Update dependencies: url 2.5.9 (fixes RUSTSEC-2026-0592, a stack overflow in
   `Url::origin()` on nested `blob:` URLs), bytes, clap, zeroize, jsonschema 0.62, toml,
   the Tower UI's react-router, react-query and vitest, the framework examples' AI SDK

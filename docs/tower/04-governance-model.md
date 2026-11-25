@@ -233,7 +233,8 @@ id across requests.
 | `oversight_possibly_vacuous` | low | at least 20 approvals redeemed, ≥ 99 % of requests approved, no escalations, no self-approval refusals | Sample them; encode routine ones as policy |
 | `agent_looping` | medium | the loop guard fired or repeated effects were withheld | Inspect the runs |
 | `ungoverned_or_dormant` | high | declared `production` but no governed run in 30 days | Route its tools through a runtime, or deprecate and revoke |
-| `retired_but_running` | high | declared `retired` or `deprecated` and ran in the last 24 hours | Revoke it fleet-wide, or fix the lifecycle |
+| `retired_but_running` | high | declared `retired`, `suspended` or `deprecated` and ran in the last 24 hours | Revoke it fleet-wide, or fix the lifecycle |
+| `lifecycle_not_enforced` | critical | declared `suspended` or `retired`, and the verified chain of a source it ran on shows no revocation of the agent | Give Tower a control key for that runtime and revoke the agent there |
 | `uncovered_model_usage` | high | in the last 7 days, measured model usage exceeded what the run's budget could still cover (§4.10) | Reserve each call's expected size; review the contract's budget ceilings |
 | `unmetered_model_spend` | medium | in the last 7 days, more than half of at least 10,000 charged model tokens were self-reported (§4.10) | Route model calls through a metering gateway (the ContextOS LiteLLM plugin) and reserve with `metered=True` |
 | `chain_broken` | critical | a source's chain failed verification | Treat as a security incident |
@@ -316,6 +317,21 @@ A guardrail is an organisation rule evaluated against every agent's facts:
   reaches its lease edge while recovery journals the same change can leave two
   entries with one `collection_seq` and the same `change_id`; verifiers must treat
   those as one change (duplicates, not a gap or a reordering).
+- **Lifecycle** (`crates/towerd/src/ops/lifecycle.rs`). Stages: `proposed` →
+  `approved` → active (`pilot`, `production`, `deprecated`) ⇄ `suspended`, and
+  `retired` from any stage, for good. With `[governance] lifecycle_approval` (the
+  default) a new declaration is `proposed` and the stage changes only by request
+  (`POST /api/agents/{key}/lifecycle`, owner of the team or risk, with a reason). A risk
+  reviewer who is neither the requester nor the agent's owner or declarer approves it;
+  moving to `approved` also needs a current approved review. The change applies only
+  from the stage the request was made in, so two requests cannot both apply. Approving
+  `suspended` or `retired` revokes the agent (`kind = agent`, reason marked
+  `[lifecycle suspension]`) on every runtime Tower holds a control key for; resuming a
+  suspended agent restores only revocations carrying that mark, read from the verified
+  chain, so an operator's own revocation stays. Journal: `lifecycle_requested`,
+  `lifecycle_approved` or `lifecycle_rejected`, `agent_lifecycle_changed`,
+  `lifecycle_enforced` (per-source results), `lifecycle_cancelled`, `lifecycle_failed`.
+  The fleet kill switch still revokes at once, without a request.
 - **Waiver** (`POST /api/waivers`, owner role): one rule, one agent, a reason of at least
   10 characters, 1 to 180 days. A risk reviewer who is not the requester approves or
   rejects it; approval sets `expires_at`. Expired waivers no longer apply and are shown
