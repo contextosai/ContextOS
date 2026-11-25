@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Global kill switch: a `global` revocation (target `*`) stops every tenant of the runtime
+  at once, set and restored only by principals in `[kill_switch] global_principals`
+  (with `control`). It is read alongside each tenant's revocations at admission,
+  dispatch and usage, and listed first for every tenant. GUIDE §8 documents the kill
+  switch at all four scopes: agent, tool, tenant, global.
 - X.509 SVID agent binding: with mutual TLS, `[server.tls] spiffe_agents` maps client
   certificates' SPIFFE IDs to agent ids and narrows each caller's agents to its
   certificate's, so `agent_binding = "required"` admits runs only as the workload the
@@ -124,6 +129,8 @@ minor versions may break APIs and every break is listed.
   declarations keep their stage. Scripts that declare agents straight into `pilot` or
   `production` set `lifecycle_approval = false` while they move to requests.
 - `retired_but_running` also covers `suspended` agents.
+- The OpenAPI document lists every revocation kind (`user` and `delegation` were
+  missing; `global` is new).
 - `POST /v1/runs/{id}/erase` answers `409 legal_hold` for a run under a legal hold; the
   Rust `ErasureError` gains `Held`, and the retention sweep's `Swept` a `held` count.
 - Rust API: `information_flow::RunLabels` has a `categories` field, and `FlowLabels`

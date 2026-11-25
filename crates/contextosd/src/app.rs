@@ -158,6 +158,8 @@ pub struct AppState<S, L> {
     pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// `[kill_switch] global_principals`: who may revoke every tenant at once.
+    pub global_kill_switch: Vec<String>,
     /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
     pub spiffe_agents: Option<std::collections::BTreeMap<String, String>>,
     /// Browser origins that may call the MCP endpoint.
@@ -2714,6 +2716,14 @@ where
             format!("Invalid revocation: {e}"),
         )
     })?;
+    // Stopping every tenant at once is for the principals the deployment names.
+    if change.kind == "global" && !state.global_kill_switch.iter().any(|p| p == &caller.principal_id) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "global_kill_switch_forbidden",
+            "Only principals in [kill_switch] global_principals may revoke or restore globally.",
+        ));
+    }
     match gateway
         .set_revocation(
             &caller.tenant_id,

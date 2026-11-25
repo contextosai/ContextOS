@@ -1085,6 +1085,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // the operation ledger read used by the duplicate fast path): fetch them at once.
         let operations_key = operation_ledger_key(admission, &operation_id);
         let revocations_key = revocations::revocations_key(&admission.tenant_id);
+        let global_revocations_key = revocations::global_key();
         let call_signature = loop_guard::signature(&manifest.capability_id, &binding["arguments"]);
         let loop_key = loop_guard::key(admission);
         let flow_key = information_flow::key(&admission.tenant_id, &admission.run_id);
@@ -1094,7 +1095,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             approval_material,
             existing_ledger,
             boundary,
-            revoked,
+            (revoked, global_revoked),
             loops,
             flow,
             breaker,
@@ -1107,7 +1108,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             self.ports.approvals.approval(admission, &action_digest),
             self.store.get(&operations_key),
             self.boundary_readiness(admission, &now),
-            self.store.get(&revocations_key),
+            async {
+                tokio::join!(
+                    self.store.get(&revocations_key),
+                    self.store.get(&global_revocations_key)
+                )
+            },
             async {
                 if self.loop_limit.is_some() || self.refuse_repeated_effects {
                     self.store.get(&loop_key).await
@@ -1128,12 +1134,15 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         // Kill switch: a revoked tenant, pack, agent, adapter or capability stops here,
         // before anything is reserved or claimed.
         let revoked = revoked?;
+        let global_revoked = global_revoked?;
         let mut targets = revocations::run_targets(admission);
         targets.extend([
             ("adapter", manifest.adapter_id.as_str()),
             ("capability", manifest.capability_id.as_str()),
         ]);
-        if let Some(revoked) = revocations::matched(revoked.as_ref().map(|r| &r.body), &targets) {
+        if let Some(revoked) = revocations::global_matched(global_revoked.as_ref().map(|g| &g.body))
+            .or_else(|| revocations::matched(revoked.as_ref().map(|r| &r.body), &targets))
+        {
             let body = json!({"run_id": admission.run_id, "operation_id": operation_id,
                 "reason_codes": [revoked.reason_code], "revoked_kind": revoked.kind, "revoked_by": revoked.by});
             self.record(&mut p, "revocation_refusal", body, &now).await?;
