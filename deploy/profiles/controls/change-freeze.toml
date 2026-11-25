@@ -1,0 +1,18 @@
+# Control pack: change freezes and out-of-hours windows.
+#
+# Decided on the server clock; keep it synchronised (docs/GUIDE.md, "Change freezes
+# and out-of-hours windows"). Replace the dates, hours and offset with yours.
+[[guards.change_windows]]
+name = "year-end freeze"
+capabilities = ["*"]
+from = "2026-12-20T00:00:00Z"
+until = "2027-01-04T00:00:00Z"
+
+[[guards.change_windows]]
+name = "refunds out of hours need approval"
+capabilities = ["adp_payments.issue_refund"]
+days = ["mon", "tue", "wed", "thu", "fri"]
+start = "20:00"
+end = "08:00"
+utc_offset = "+05:30"
+action = "approval"

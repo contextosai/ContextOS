@@ -1,0 +1,28 @@
+# Control pack: destructive actions (delete, send email, deploy, transfer).
+#
+# Classify every capability. Unclassified ones count as high and need an approval of
+# the exact action, so a newly added tool cannot act unreviewed. Replace the examples
+# with your capability ids (docs/GUIDE.md, "Risk tiers").
+[guards.risk_tiers]
+mode = "enforce"
+low = "allow"
+limited = "allow"
+high = "approval"
+unclassified = "high"
+[guards.risk_tiers.capabilities]
+"adp_orders.lookup" = "low"
+"adp_payments.issue_refund" = "high"
+# "adp_infra.delete_volume" = "prohibited"
+# "adp_mail.send_external" = "high"
+# "adp_infra.deploy" = "high"
+# "adp_treasury.transfer" = "high"
+
+# An agent whose calls keep being refused is probing or confused: revoke it until an
+# operator restores it.
+[[guards.circuit_breakers]]
+id = "refusal_storm"
+scope = "agent"
+count = "refusals"
+threshold = 20
+window_seconds = 60
+trip = "revoke"

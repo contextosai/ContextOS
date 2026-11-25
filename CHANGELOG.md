@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Control packs (`deploy/profiles/controls`): ready-made configuration snippets for spend
+  and rate limits, data egress, personal data, destructive actions, environment
+  separation, change freezes and human-in-the-loop approvals, each checked in CI to
+  start the quickstart configuration alone and together (GUIDE §6, "Ready-made control
+  packs").
 - Policy simulation: `ctx simulate --baseline --candidate --cases <files or dirs>`
   reads recorded cases (`GET /v1/runs/{id}/replay-case`) under both packs and reports
   each case's effect (unchanged, widens, narrows, mixed, regression) with counts of
