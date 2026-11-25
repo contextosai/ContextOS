@@ -119,6 +119,10 @@ minor versions may break APIs and every break is listed.
   and `FlowPolicy` gain optional fields; code that builds them with struct literals
   adds them (`Categories::default()`, or `..Default::default()`).
 
+- Update dependencies: url 2.5.9 (fixes RUSTSEC-2026-0592, a stack overflow in
+  `Url::origin()` on nested `blob:` URLs), bytes, clap, zeroize, jsonschema 0.62, toml,
+  the Tower UI's react-router, react-query and vitest, the framework examples' AI SDK
+  and Mastra, and the setup-uv and cargo-deny actions.
 - Align local, CI and container builds on Rust 1.100.0; update jsonwebtoken to 12 and
   jsonschema to 0.61.
 - Revocation refusals name who revoked the target: "The agent has been revoked by
