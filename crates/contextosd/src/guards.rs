@@ -81,6 +81,11 @@ pub struct GuardsConfig {
     /// observing, audited; see [`contextos_gateway::environment_guard`]). Unset: off.
     #[serde(default)]
     pub environments: Option<contextos_gateway::environment_guard::EnvironmentPolicy>,
+    /// What each capability's risk tier (`low`, `limited`, `high`, `prohibited`) needs:
+    /// allow, an approval of the exact action, or refusal; unclassified capabilities
+    /// count as `high` (see [`contextos_gateway::risk_tiers`]). Unset: off.
+    #[serde(default)]
+    pub risk_tiers: Option<contextos_gateway::risk_tiers::TierPolicy>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -171,6 +176,7 @@ impl Default for GuardsConfig {
             approval_step_up: None,
             information_flow: None,
             environments: None,
+            risk_tiers: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

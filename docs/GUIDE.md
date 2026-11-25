@@ -2030,6 +2030,37 @@ that is declared `read_only` or `reversible`, or approved below `destructive`, a
 `ctx init-tool` says so in the drafted review text. The name is a hint for the reviewer,
 never the decision.
 
+### Risk tiers
+
+Classify each capability `low`, `limited`, `high` or `prohibited`, and say once what
+each tier needs. A capability's tier is the riskier of its reviewed manifest's
+`"risk_tier"` and the deployment's own map, so configuration can raise a tier but
+never lower one:
+
+```toml
+[guards.risk_tiers]
+mode = "enforce"                    # observe: audit what it would do, refuse nothing
+low = "allow"                       # the defaults: allow, allow, approval
+limited = "allow"
+high = "approval"                   # an approval of the exact action
+unclassified = "high"               # the tier of a capability nobody classified
+[guards.risk_tiers.capabilities]
+"adp_orders.lookup" = "low"
+"adp_payments.issue_refund" = "high"
+"adp_crm.export_all_customers" = "prohibited"
+```
+
+`prohibited` is always refused (`risk_tier_prohibited`) and cannot be configured
+otherwise. `high = "approval"` composes an approval of the exact action into the
+call's decision (`risk_tier_approval_required`, obligation `approve_high_risk_action`),
+beside the pack's own gates; `"refuse"` refuses (`risk_tier_refused`). Every call a tier
+does not simply allow is audited as `risk_tier_decision` with the tier, where it came
+from (`manifest`, `configuration` or `unclassified`) and whether it was enforced. A
+capability nobody classified counts as `high`, so a newly added tool waits for an
+approval until someone classifies it. Classifying a capability that is not configured
+refuses startup. Owners record an agent's own tier in Tower's declaration
+(`risk_tier`); the runtime decides by the capability's.
+
 ### Starter profiles
 
 [`deploy/profiles`](../deploy/profiles) holds two configurations to start from.
