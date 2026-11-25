@@ -177,6 +177,9 @@ impl Config {
         if let Some(step_up) = &config.guards.approval_step_up {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
+        if let Some(tiers) = &config.guards.risk_tiers {
+            tiers.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(environments) = &config.guards.environments {
             environments.validate().map_err(ConfigError::Invalid)?;
         }

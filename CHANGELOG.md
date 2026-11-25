@@ -7,6 +7,12 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Risk tiers: `[guards.risk_tiers]` maps a capability's tier (`low`, `limited`, `high`,
+  `prohibited`) to allow, an approval of the exact action, or refusal. The tier is the
+  riskier of the manifest's new `"risk_tier"` and the configuration's `capabilities`
+  map; unclassified capabilities count as `high` (configurable), `prohibited` is always
+  refused, and `observe` mode audits without refusing. Calls a tier does not simply
+  allow are audited as `risk_tier_decision` (GUIDE §6, "Risk tiers"). Off unless set.
 - Inventory: `GET /api/inventory` in Tower and a new Inventory page list every agent,
   capability, adapter, model and owning team with first and last seen, environments,
   risk tier and whether it is declared, as JSON or CSV. Rows that ran undeclared (an

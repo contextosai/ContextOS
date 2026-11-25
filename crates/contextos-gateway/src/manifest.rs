@@ -197,6 +197,11 @@ pub struct CapabilityManifest {
     /// exempt: they are requested by naming the effect, not by an agent's call.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub evidence_required: bool,
+    /// The capability's risk tier (`low`, `limited`, `high`, `prohibited`), which
+    /// `[guards.risk_tiers]` maps to what a call needs (see [`crate::risk_tiers`]).
+    /// Omitted: classified by the deployment's configuration, or unclassified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_tier: Option<crate::risk_tiers::RiskTier>,
     pub recovery: Recovery,
     pub timeout_ms: u64,
     pub reservation: CallCost,

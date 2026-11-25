@@ -915,6 +915,18 @@
             "null"
           ]
         },
+        "risk_tiers": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TierPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What each capability's risk tier (`low`, `limited`, `high`, `prohibited`) needs: allow, an approval of the exact action, or refusal; unclassified capabilities count as `high` (see `contextos_gateway::risk_tiers`). Unset: off."
+        },
         "trust_supplied_memory": {
           "default": false,
           "description": "Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless.",
@@ -1615,6 +1627,15 @@
       ],
       "type": "object"
     },
+    "RiskTier": {
+      "enum": [
+        "low",
+        "limited",
+        "high",
+        "prohibited"
+      ],
+      "type": "string"
+    },
     "ScoreFloors": {
       "additionalProperties": false,
       "description": "Score floors for `GuardsConfig::completion_requires_scores`, each in 0..=1.",
@@ -1994,6 +2015,65 @@
       ],
       "type": "object"
     },
+    "TierAction": {
+      "description": "What a tier needs.",
+      "oneOf": [
+        {
+          "enum": [
+            "allow",
+            "refuse"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "approval",
+          "description": "An approval of the exact action, composed with the run's other policy.",
+          "type": "string"
+        }
+      ]
+    },
+    "TierMode": {
+      "enum": [
+        "enforce",
+        "observe"
+      ],
+      "type": "string"
+    },
+    "TierPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.risk_tiers]`.",
+      "properties": {
+        "capabilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RiskTier"
+          },
+          "description": "Capability id to tier, beside (and never below) the manifests' own tiers.",
+          "type": "object"
+        },
+        "high": {
+          "$ref": "#/$defs/TierAction",
+          "default": "approval"
+        },
+        "limited": {
+          "$ref": "#/$defs/TierAction",
+          "default": "allow"
+        },
+        "low": {
+          "$ref": "#/$defs/TierAction",
+          "default": "allow"
+        },
+        "mode": {
+          "$ref": "#/$defs/TierMode",
+          "default": "enforce"
+        },
+        "unclassified": {
+          "$ref": "#/$defs/RiskTier",
+          "default": "high",
+          "description": "The tier of a capability neither its manifest nor `capabilities` classifies."
+        }
+      },
+      "type": "object"
+    },
     "TimeoutPolicy": {
       "additionalProperties": false,
       "description": "`[guards.approval_timeout]`.",
@@ -2244,6 +2324,7 @@
         "require_tool_schemas": false,
         "require_user_role": null,
         "required_release_refs": null,
+        "risk_tiers": null,
         "trust_supplied_memory": false,
         "user_binding": null
       },

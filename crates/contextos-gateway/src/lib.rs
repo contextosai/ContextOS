@@ -65,6 +65,7 @@ pub mod resource_identity;
 pub mod result_screening;
 mod retired;
 mod revocations;
+pub mod risk_tiers;
 mod scores;
 mod shared_guarantees;
 mod shared_inspection;
@@ -304,6 +305,8 @@ pub struct Gateway<S, L> {
     /// The environment this gateway serves and how to tell a call's target (see
     /// [`environment_guard`]).
     environments: Option<environment_guard::EnvironmentPolicy>,
+    /// What each capability's risk tier needs (see [`risk_tiers`]).
+    risk_tiers: Option<risk_tiers::TierPolicy>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -559,6 +562,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             approval_step_up: None,
             information_flow: None,
             environments: None,
+            risk_tiers: None,
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -572,6 +576,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         guard_policy::guard_policy_ref(&json!({
             "information_flow": self.information_flow,
             "action_monitor": self.action_monitor.as_ref().map(|(_, policy)| policy),
+            "risk_tiers": self.risk_tiers,
         }))
     }
 
@@ -590,6 +595,11 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
     /// `policy` names (see [`environment_guard`]).
     pub fn set_environments(&mut self, policy: Option<environment_guard::EnvironmentPolicy>) {
         self.environments = policy;
+    }
+
+    /// Applies what each capability's risk tier needs (see [`risk_tiers`]).
+    pub fn set_risk_tiers(&mut self, policy: Option<risk_tiers::TierPolicy>) {
+        self.risk_tiers = policy;
     }
 
     /// Requires approvers' step-up for the approvals `policy` covers (see [`step_up`]).
@@ -1289,7 +1299,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let monitor_gate = self
             .monitor_guard(&mut p, admission, manifest, &operation_id, monitor?, &now)
             .await?;
-        for gate in [flow_gate, monitor_gate] {
+        let tier_gate = self
+            .tier_guard(&mut p, admission, manifest, &operation_id, &now)
+            .await?;
+        for gate in [tier_gate, flow_gate, monitor_gate] {
             match gate {
                 guard_policy::FlowGate::Pass => {}
                 guard_policy::FlowGate::Outcome(outcome, codes) => {
