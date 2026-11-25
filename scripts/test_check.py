@@ -26,7 +26,7 @@ class CheckScriptTests(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
             for name in ("support-refund", "shared-guarantees", "metering-proxy", "agent-loop", "peer-coordination",
-                         "compensation", "outcome-witness", "evaluation-loop", "why-not-a-row-lock", "postgres-drill", "replay", "replay-refunds", "failure-lab", "consequential-tools", "tower"):
+                         "compensation", "outcome-witness", "evaluation-loop", "why-not-a-row-lock", "postgres-drill", "replay", "replay-refunds", "failure-lab", "consequential-tools", "tower", "approval-relay"):
                 example = root / "examples" / name
                 example.mkdir(parents=True)
                 text = "#!/usr/bin/env bash\n"

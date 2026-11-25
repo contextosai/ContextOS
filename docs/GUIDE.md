@@ -2294,6 +2294,18 @@ a calibrated evaluation platform judges a candidate agent's tool calls, and
 clients post tool-call verdicts with `Client.evaluate_operation` (Python) and
 `client.evaluateOperation` (Node).
 
+### Approvals in Slack, Teams and e-mail
+
+The approval service (`[providers.approvals]`) is the deployment's: it decides who is
+asked and records their decision; the kernel verifies the decision against the exact
+action before anything runs. `examples/approval-relay` is a reference approval service
+that delivers each request to Slack, Microsoft Teams or e-mail, takes decisions back
+through signed callbacks (Slack signatures, Teams HMAC, signed expiring e-mail links),
+maps channel identities to approvers, escalates through tiers while a request is
+undecided, and lets an approver on leave delegate until a date. Its `trusted_observers`
+must be the ones the authority service vouches with. Run `./examples/approval-relay/run.sh`
+to watch a real gateway approve and deny a refund from Slack.
+
 ### Escalations
 
 When policy answers `escalate`, the call is blocked (`policy_escalation`, obligation
