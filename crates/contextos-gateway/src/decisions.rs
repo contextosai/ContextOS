@@ -138,6 +138,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         run_context: &Value,
         deps: &Value,
     ) -> Result<(), GatewayError> {
+        self.index_subjects(admission, request).await?;
         let key = DocKey::new(&admission.tenant_id, DocKind::ReplayCase, &admission.run_id);
         let case = json!({"name": admission.run_id, "request": request, "run_context": run_context,
             "deps": if deps.is_null() { json!({}) } else { deps.clone() }});

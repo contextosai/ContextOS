@@ -29,6 +29,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `pack_dirs` | array of string | `[]` | Directories whose JSON files (recursively; names starting with `.` skipped) are Context Packs, loaded at startup and re-read on reload (see `pack_registry`). |
 | `pack_reload_secs` | integer | `0` | Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only. |
 | `packs` | array of string | `[]` | Context Pack JSON files to load at startup. |
+| `privacy` | table | see below | Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`). |
 | `providers` | table | unset | Remote fact services; dispatch is disabled without them. |
 | `readiness` | table | unset | Opt-in profile holding consequential workflows to every safety mechanism they rely on (see `workflow_readiness`). Unset: not checked. |
 | `result_schemas` | array of tables | `[]` | Schemas delegated runs' results must meet, by the `output_schema_ref` a delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`. |
@@ -280,6 +281,14 @@ One `[[guards.circuit_breakers]]` rule.
 | `tenant_claim` | string | `"tenant_id"` | Claim path naming the tenant: a string, an array or an object keyed by name (Keycloak's `organization`). It must name exactly one of `tenants`. |
 | `tenant_map` | table of any | see below | Maps `tenant_claim` values (for example Keycloak organization aliases) to tenant ids. Empty: the claim value itself is the tenant id. |
 | `tenants` | array of string | required | Tenants this issuer may assert. A token naming any other tenant is rejected. |
+
+## `[privacy]`
+
+`[privacy]`: where run requests name their data subjects.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `subject_pointers` | array of string | unset | JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index. |
 
 ## `[[result_schemas]]`
 

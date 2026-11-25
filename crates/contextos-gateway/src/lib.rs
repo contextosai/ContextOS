@@ -60,6 +60,7 @@ mod outcome_sweep;
 pub mod outcomes;
 mod ownership;
 pub mod ports;
+pub mod privacy;
 pub mod privilege;
 mod reconcile;
 pub mod resource_identity;
@@ -310,6 +311,8 @@ pub struct Gateway<S, L> {
     risk_tiers: Option<risk_tiers::TierPolicy>,
     /// Times some capabilities are refused or need approval (see [`change_windows`]).
     change_windows: Vec<change_windows::ChangeWindow>,
+    /// JSON pointers to data-subject identifiers in run requests (see [`privacy`]).
+    subject_pointers: Vec<String>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -567,6 +570,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             environments: None,
             risk_tiers: None,
             change_windows: Vec::new(),
+            subject_pointers: Vec::new(),
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

@@ -41,6 +41,7 @@ pub mod outcome_witness;
 pub mod pack_binding;
 pub mod pack_intents;
 pub mod pack_registry;
+pub mod privacy_api;
 pub mod protected_resource;
 pub mod reconcile;
 pub mod retention;

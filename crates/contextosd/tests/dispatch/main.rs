@@ -37,6 +37,7 @@ mod operations;
 mod outcomes;
 mod ownership;
 mod pack_intents;
+mod privacy;
 mod risk_tiers;
 mod startup;
 mod task_authorization;

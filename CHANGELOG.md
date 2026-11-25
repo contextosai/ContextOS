@@ -7,6 +7,14 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Legal holds and deletion requests: `POST /v1/legal-holds` (runs, subjects or the whole
+  tenant) keeps runs' content from erasure and retention until released
+  (`POST /v1/legal-holds/{id}/release`); `[privacy] subject_pointers` indexes runs under
+  a digest of the people their requests name, and `POST /v1/subjects/runs` and
+  `POST /v1/subjects/erase` find and erase a person's finished, unheld runs. Subjects
+  travel in request bodies and are stored and audited only as digests
+  (`legal_hold_placed`, `legal_hold_released`, `subject_erasure`); the chain still
+  verifies (GUIDE §9).
 - Data categories and boundaries: manifests declare the regulated categories a tool's
   output may carry (`flow.output_categories`: `pii`, `phi`, `pci`, `secrets`) and an
   egress tool's `egress_vendor` and `egress_region`; runs track the categories they read.
@@ -93,6 +101,8 @@ minor versions may break APIs and every break is listed.
   declarations keep their stage. Scripts that declare agents straight into `pilot` or
   `production` set `lifecycle_approval = false` while they move to requests.
 - `retired_but_running` also covers `suspended` agents.
+- `POST /v1/runs/{id}/erase` answers `409 legal_hold` for a run under a legal hold; the
+  Rust `ErasureError` gains `Held`, and the retention sweep's `Swept` a `held` count.
 - Rust API: `information_flow::RunLabels` has a `categories` field, and `FlowLabels`
   and `FlowPolicy` gain optional fields; code that builds them with struct literals
   adds them (`Categories::default()`, or `..Default::default()`).
