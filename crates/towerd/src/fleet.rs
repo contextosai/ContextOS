@@ -93,6 +93,9 @@ pub struct AgentActivity {
     pub unresolved_untracked: u64,
     #[serde(skip)]
     pub hours: BTreeMap<i64, Hour>,
+    /// When each capability and model was first and last seen (see [`crate::inventory`]).
+    #[serde(skip)]
+    pub seen: crate::inventory::SeenMap,
 }
 
 impl AgentActivity {
@@ -474,6 +477,7 @@ impl Fleet {
                 let capability = s(&p["capability_id"]).unwrap_or("?").to_owned();
                 if let (Some(r), Some(k)) = (&run_id, &agent) {
                     if let Some(a) = self.agents.get_mut(k) {
+                        a.seen.saw("capability", &capability, at);
                         a.capabilities.entry(capability.clone()).or_default().attempted += 1;
                         a.hour(at).effects += 1;
                     }
@@ -539,6 +543,7 @@ impl Fleet {
                         a.repeated_effects += 1;
                     }
                     if let Some(c) = &capability {
+                        a.seen.saw("capability", c, at);
                         a.capabilities.entry(c.clone()).or_default().refused += 1;
                     }
                     let h = a.hour(at);
@@ -770,6 +775,7 @@ impl Fleet {
             );
             match r["artifact_type"].as_str() {
                 Some("model_profile") => {
+                    a.seen.saw("model", &id, &at);
                     a.models.insert(id);
                 }
                 Some("evaluator_suite") => {

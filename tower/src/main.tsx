@@ -8,6 +8,7 @@ import { Shell } from "./components/Shell";
 import { SignIn } from "./pages/SignIn";
 import { Posture } from "./pages/Posture";
 import { Agents } from "./pages/Agents";
+import { Inventory } from "./pages/Inventory";
 import { Agent } from "./pages/Agent";
 import { FindingsPage } from "./pages/FindingsPage";
 import { Activity } from "./pages/Activity";
@@ -40,6 +41,7 @@ const router = createBrowserRouter(
         { index: true, element: <Posture /> },
         { path: "agents", element: <Agents /> },
         { path: "agents/:key", element: <Agent /> },
+        { path: "inventory", element: <Inventory /> },
         { path: "findings", element: <FindingsPage /> },
         { path: "activity", element: <Activity /> },
         { path: "spend", element: <Spend /> },

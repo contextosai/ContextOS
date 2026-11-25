@@ -200,7 +200,7 @@ document of the quickstart agent in `examples/tower`, abridged only in the contr
 |---|---|---|
 | `agent.key` | string | Fleet-wide agent id |
 | `agent.models`, `agent.evaluators` | string[] | `id@version` of pinned release references |
-| `declared`, `declaration.*` | bool, object | Owner's statement (`owner`, `team`, `business_unit`, `purpose`, `users_served`, `lifecycle`, `data_categories`, `regulatory_contexts`, `declared_by`, `declared_at`) |
+| `declared`, `declaration.*` | bool, object | Owner's statement (`owner`, `team`, `business_unit`, `purpose`, `users_served`, `lifecycle`, `data_categories`, `regulatory_contexts`, `risk_tier`, `models`, `declared_by`, `declared_at`) |
 | `reviewed`, `review.*` | bool, object | `reviewed` is true only while an approval is unexpired and covers the whole graph at its approved risk. Last review: `decision`, `notes`, `conditions`, `capabilities`, `capability_risks`, `graph_digest`, `required_profile`, `reviewed_by`, `reviewed_at`, `expires_at` |
 | `review_expired` | bool | The last review approved the agent, but its validity has passed |
 | `capabilities[]` | object[] | The authority graph (§4.2) |
@@ -379,3 +379,24 @@ its usage is not evidence: self-reported spend is the reservation, an upper boun
 agent chose. `unmetered_model_spend` (§4.5) names agents whose spend is mostly
 self-reported, `uncovered_model_usage` those whose measured usage ran past their budget,
 and the `model_*` anomalies (§4.8) spend spikes against the agent's own week.
+
+## 4.11 Inventory
+
+`inventory.rs` turns the agent views into one list of rows, each an `agent`,
+`capability`, `adapter`, `model` or `owner` (team). Nothing is stored: rows are
+recomputed from the fleet model and the declarations, so they cannot disagree with the
+verified evidence.
+
+| Field | Meaning |
+|---|---|
+| `first_seen`, `last_seen` | Agents: first and last entry. Capabilities and adapters: first and last claim or refusal naming the capability. Models: first and last admission naming the release. Absent when never seen (a declared agent that has not run) |
+| `environments`, `sources` | Where it was seen; environments come from `[[sources]] environment` |
+| `risk_tier` | Agents: the declared tier. Others: the highest tier among the agents using it |
+| `owner_teams`, `agents` | Teams owning the agents that use it, and those agents (an agent row lists the agents it delegates to) |
+| `declared` | Agents: declared. Capabilities: pinned in a pack Tower knows the agent runs under, or surfaced to its runs at admission (a runtime surfaces only pinned capabilities). Adapters: one of their capabilities is. Models: listed in the agent's declared `models` (`id` matches any version). Owners: always |
+| `lifecycle` | Agents only |
+
+A row seen in traffic and not declared is a **shadow** row. Each agent tracks the
+sightings of at most 4,096 distinct capabilities and models; past that, new ones are
+still counted by the fleet model but have no first and last seen.
+

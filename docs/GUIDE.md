@@ -2374,6 +2374,22 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
 
+### List what an export shows
+
+`ctx inventory` lists the agents, capabilities, adapters, models and owning teams in a
+verified export, with first and last seen, using the same fold as Tower:
+
+```sh
+ctx inventory --entries entries.json --keys keys.json --environment production \
+    --declarations declarations.json --csv inventory.csv
+# {"verified_to": 1532, "shadow": 2, "items": [{"kind": "capability", "id": "crm.delete_customer", "declared": false, …}]}
+```
+
+An export that does not verify lists nothing (exit 1). An export holds no packs, so a
+capability counts as declared only when the runtime surfaced it to a run at admission
+(only pinned capabilities are surfaced); agents and models are declared by the
+optional declarations file (an object of agent key to declaration).
+
 ### Evidence packs for a review
 
 For a security or compliance review, build a folder the reviewer can check on their
@@ -2645,7 +2661,12 @@ business_unit = "Customer Operations"
 
 - **Inventory and accountability.** Agents are discovered from `run_admitted` (which
   agent ran under which pack, contract, controls and model); owners declare purpose,
-  users served, lifecycle and regulatory context. An undeclared agent is a finding.
+  users served, lifecycle, risk tier, models and regulatory context. An undeclared
+  agent is a finding. `GET /api/inventory` (and the Inventory page) lists every agent,
+  capability, adapter, model and owning team with first and last seen, environments,
+  risk tier and whether it is declared; rows that ran undeclared are *shadow* rows. It
+  is a view over verified evidence, not a registry; `ctx inventory` builds the same
+  rows offline from an audit export ([see below](#list-what-an-export-shows)).
 - **Required controls from what an agent can do.** Each agent's authority graph is the
   capabilities of its packs with their ActionRisk; the control profiles it needs follow
   from it (external effects need enterprise, irreversible or physical effects and

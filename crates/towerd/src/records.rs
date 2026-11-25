@@ -77,10 +77,18 @@ pub struct Declaration {
     /// e.g. `finance`, `clinical`, `employment`, `eu_ai_act_high_risk`.
     #[serde(default)]
     pub regulatory_contexts: Vec<String>,
+    /// `low`, `limited`, `high` or `prohibited`: the owner's risk classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_tier: Option<String>,
+    /// Models the agent is declared to use, as `id` (any version) or `id@version`.
+    /// A model seen in its runs and not listed is reported as undeclared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 pub const LIFECYCLE: [&str; 5] = ["proposed", "pilot", "production", "deprecated", "retired"];
 pub const USERS: [&str; 3] = ["internal", "customers", "public"];
+pub const RISK_TIERS: [&str; 4] = ["low", "limited", "high", "prohibited"];
 
 impl Declaration {
     pub fn check(&self) -> Result<(), String> {
@@ -96,6 +104,14 @@ impl Declaration {
         }
         if self.data_categories.len() > 32 || self.regulatory_contexts.len() > 32 {
             return Err("at most 32 data categories and regulatory contexts".into());
+        }
+        if let Some(tier) = &self.risk_tier
+            && !RISK_TIERS.contains(&tier.as_str())
+        {
+            return Err(format!("risk_tier must be one of {RISK_TIERS:?}"));
+        }
+        if self.models.len() > 64 || self.models.iter().any(|m| !sized(m, 256)) {
+            return Err("at most 64 declared models, each up to 256 bytes".into());
         }
         Ok(())
     }
