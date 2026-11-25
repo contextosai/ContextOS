@@ -26,6 +26,7 @@ pub(crate) struct Options<'a> {
     pub environment: Option<&'a str>,
     pub declarations: Option<&'a PathBuf>,
     pub csv: Option<&'a PathBuf>,
+    pub fail_on_shadow: bool,
 }
 
 pub(crate) fn build(o: &Options<'_>) -> Result<Value, Failure> {
@@ -63,9 +64,13 @@ pub(crate) fn build(o: &Options<'_>) -> Result<Value, Failure> {
         std::fs::write(path, csv(&items)).map_err(|e| Failure::Usage(format!("{}: {e}", path.display())))?;
     }
     let shadow = items.iter().filter(|i| !i.declared && i.last_seen.is_some()).count();
-    Ok(json!({
+    let report = json!({
         "verified_to": chain.last().map(|e| e.sequence),
         "items": items,
         "shadow": shadow,
-    }))
+    });
+    if o.fail_on_shadow && shadow > 0 {
+        return Err(Failure::Rejected(report));
+    }
+    Ok(report)
 }

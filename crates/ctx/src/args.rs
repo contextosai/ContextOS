@@ -148,6 +148,9 @@ pub enum Command {
         /// Also write the rows as CSV to this file.
         #[arg(long)]
         csv: Option<PathBuf>,
+        /// Exit 1 when any row was seen and is not declared (for CI).
+        #[arg(long)]
+        fail_on_shadow: bool,
     },
     /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
     /// into `ctx scorecard-gate` input, one case per run.

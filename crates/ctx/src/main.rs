@@ -224,6 +224,7 @@ fn run(command: Command) -> Result<Value, Failure> {
             environment,
             declarations,
             csv,
+            fail_on_shadow,
         } => inventory::build(&inventory::Options {
             entries: &entries,
             keys: &keys,
@@ -232,6 +233,7 @@ fn run(command: Command) -> Result<Value, Failure> {
             environment: environment.as_deref(),
             declarations: declarations.as_ref(),
             csv: csv.as_ref(),
+            fail_on_shadow,
         }),
         Command::TrajectoryGate {
             baseline,

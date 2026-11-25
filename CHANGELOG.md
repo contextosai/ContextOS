@@ -23,6 +23,10 @@ minor versions may break APIs and every break is listed.
   journal, and the new finding `lifecycle_not_enforced` (critical) names a runtime whose
   verified chain shows a suspended or retired agent not revoked. The agent page shows
   the stage, the waiting request and past changes (docs/tower §4.7).
+- Shadow findings in Tower: `shadow_tool` (an agent called tools pinned in no pack it
+  runs under) and `undeclared_model` (a run admitted on a model its declaration's
+  `models` do not list). `ctx inventory --fail-on-shadow` exits 1 when an export shows
+  any undeclared row.
 - Agent declarations take an optional `risk_tier` (`low`, `limited`, `high`,
   `prohibited`) and `models` (the models the agent is declared to use).
 - Agent Failure Lab (`lab/`): a static page where a visitor picks one of five failures of

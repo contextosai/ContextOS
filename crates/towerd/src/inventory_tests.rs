@@ -144,3 +144,34 @@ fn csv_quotes_and_neutralises_formulas() {
     assert!(line.starts_with("agent,'=cmd|' /C calc'!A0,false,"), "{line}");
     assert!(line.contains("\"a,b\""), "{line}");
 }
+
+#[test]
+fn shadow_tools_and_undeclared_models_are_findings() {
+    let fleet = fleet();
+    let declarations = json!({"acme/agt_support": {"owner": "ana", "team": "payments", "purpose": "refunds",
+        "users_served": "customers", "lifecycle": "production", "models": ["gpt-5"]}});
+    let v = views(&fleet, &declarations, &json!({}), "2026-10-21T11:00:00Z");
+    let found = crate::governance::builtin(&v[0], crate::fleet::hour_index("2026-10-21T11:00:00Z"));
+    let rule = |r: &str| {
+        found
+            .iter()
+            .find(|f| f.rule == r)
+            .unwrap_or_else(|| panic!("no {r}: {found:?}"))
+    };
+    assert_eq!(
+        rule("shadow_tool").evidence["capabilities"],
+        json!(["crm.delete_customer"])
+    );
+    assert_eq!(
+        rule("undeclared_model").evidence["models"],
+        json!(["claude-opus-5-5@1"])
+    );
+
+    // Without declared models there is nothing to compare: no finding.
+    let declarations = json!({"acme/agt_support": {"owner": "ana", "team": "payments", "purpose": "refunds",
+        "users_served": "customers", "lifecycle": "production"}});
+    let v = views(&fleet, &declarations, &json!({}), "2026-10-21T11:00:00Z");
+    let found = crate::governance::builtin(&v[0], crate::fleet::hour_index("2026-10-21T11:00:00Z"));
+    assert!(found.iter().all(|f| f.rule != "undeclared_model"));
+    assert!(found.iter().any(|f| f.rule == "shadow_tool"));
+}

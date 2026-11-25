@@ -2388,7 +2388,10 @@ ctx inventory --entries entries.json --keys keys.json --environment production \
 An export that does not verify lists nothing (exit 1). An export holds no packs, so a
 capability counts as declared only when the runtime surfaced it to a run at admission
 (only pinned capabilities are surfaced); agents and models are declared by the
-optional declarations file (an object of agent key to declaration).
+optional declarations file (an object of agent key to declaration). With
+`--fail-on-shadow` the command exits 1 when any row ran undeclared, so CI can hold a
+release until every agent, tool and model in the export is accounted for. In Tower,
+`shadow_tool` and `undeclared_model` findings name the agents behind shadow rows.
 
 ### Evidence packs for a review
 
