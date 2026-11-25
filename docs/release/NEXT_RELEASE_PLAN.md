@@ -1,6 +1,11 @@
 # Next release plan: 0.1.0-alpha.22
 
-Status: **approved by the maintainer on 2026-11-25** (see "Decisions").
+Status: **approved by the maintainer on 2026-11-25** (see "Decisions"). Themes A–E
+shipped in 0.1.0-alpha.22. Themes F–J are in review for alpha.23 (PRs #287 onward), except the
+items cut by the rule in "Order and cut line": the Failure Lab timeout scenario (F4),
+the ext_authz backend (J1), OPA/Cerbos policy import (J4) and the build-your-own-adapter
+conformance kit (J5's `ctx adapter-check`), which stay planned. GenAI token-usage metrics
+(part of J2) wait for meters to report input and output tokens separately.
 Written 2026-11-25 against main at `4fa23575` (alpha.21 plus the Failure Lab and its
 runtime follow-ups, unreleased).
 

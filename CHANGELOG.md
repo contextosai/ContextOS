@@ -5,6 +5,16 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.22 - 2026-11-26
+
+Twenty-second alpha: ContextOS governs an agent's lifecycle, not only its tool calls.
+An inventory with shadow findings and an approved lifecycle, risk tiers, change windows
+and policy simulation, data categories and legal holds, delegation paths, SPIFFE
+identities, access reviews and break-glass, the kill switch at four scopes, approval
+analytics and a reference approval relay, and release gates on upgrade and Quickstart.
+Tower's lifecycle approval is on by default; see the
+[release notes](docs/releases/v0.1.0-alpha.22.md) before upgrading.
+
 ### Added
 
 - Approval relay (`examples/approval-relay`): a reference approval service that delivers
@@ -145,7 +155,6 @@ minor versions may break APIs and every break is listed.
 - Rust API: `information_flow::RunLabels` has a `categories` field, and `FlowLabels`
   and `FlowPolicy` gain optional fields; code that builds them with struct literals
   adds them (`Categories::default()`, or `..Default::default()`).
-
 - Update dependencies: url 2.5.9 (fixes RUSTSEC-2026-0592, a stack overflow in
   `Url::origin()` on nested `blob:` URLs), bytes, clap, zeroize, jsonschema 0.62, toml,
   the Tower UI's react-router, react-query and vitest, the framework examples' AI SDK
@@ -161,7 +170,6 @@ minor versions may break APIs and every break is listed.
 
 - Tower recovers unjournaled lifecycle-request changes at startup and in its periodic
   sweep (the collection was missing from the recovery list).
-
 - Retrying an applied operation under a shared guarantee no longer appends another
   `shared_guarantee_settlement_requested` and `shared_guarantee_settled` pair each time;
   a settlement is audited once.
