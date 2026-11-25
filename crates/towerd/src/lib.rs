@@ -12,6 +12,7 @@ pub mod fleet;
 pub mod governance;
 pub mod inbox;
 pub mod intel;
+pub mod inventory;
 pub mod ops;
 pub mod pins;
 pub mod records;

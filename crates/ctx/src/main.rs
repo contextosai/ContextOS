@@ -13,6 +13,7 @@ mod evidence_pack;
 mod flow_presets;
 mod init_tool;
 mod inspect;
+mod inventory;
 mod pack_build;
 mod pack_tests;
 mod plan;
@@ -214,6 +215,23 @@ fn run(command: Command) -> Result<Value, Failure> {
             frameworks: &frameworks,
             config_report: config_report.as_ref(),
             out: &out,
+        }),
+        Command::Inventory {
+            entries,
+            keys,
+            continues,
+            source,
+            environment,
+            declarations,
+            csv,
+        } => inventory::build(&inventory::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            source: &source,
+            environment: environment.as_deref(),
+            declarations: declarations.as_ref(),
+            csv: csv.as_ref(),
         }),
         Command::TrajectoryGate {
             baseline,

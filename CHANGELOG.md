@@ -7,6 +7,15 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Inventory: `GET /api/inventory` in Tower and a new Inventory page list every agent,
+  capability, adapter, model and owning team with first and last seen, environments,
+  risk tier and whether it is declared, as JSON or CSV. Rows that ran undeclared (an
+  unpinned tool an agent tried, a model its declaration does not list) are shadow rows.
+  It is derived from verified audit entries and declarations, not stored. `ctx
+  inventory` lists the same rows offline from an audit export, and refuses an export
+  that does not verify (GUIDE §11, docs/tower §4.11).
+- Agent declarations take an optional `risk_tier` (`low`, `limited`, `high`,
+  `prohibited`) and `models` (the models the agent is declared to use).
 - Agent Failure Lab (`lab/`): a static page where a visitor picks one of five failures of
   a refund agent (a lost response and a redelivered ticket, a refund beyond the task, a
   split under the approval line, refunds past a daily limit, a loop) and compares what

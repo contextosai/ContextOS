@@ -14,6 +14,7 @@
 //! | `GET /api/runs` | viewer | recent runs across the fleet |
 //! | `GET /api/runs/{source}/{run}/evidence` | viewer | a run's evidence, fetched from its runtime (journalled) |
 //! | `GET /api/changes` | viewer | governance changes across the fleet |
+//! | `GET /api/inventory` | viewer | agents, capabilities, adapters, models and owners, declared or seen ([`crate::ops::inventory`]) |
 //! | `GET /api/spend`, `GET /api/agents/{key}/spend` | viewer | model spend, measured vs self-reported ([`crate::ops::spend`]) |
 //! | `GET /api/sources` | viewer | runtimes and their verification state |
 //! | `GET /api/sources/health` | viewer (key references: admin) | each source's collector state, lag and errors |
