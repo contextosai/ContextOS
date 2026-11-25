@@ -105,6 +105,15 @@ Every agent, capability, adapter, model and owning team, as
 rows as CSV (`text/csv`, sets joined with `;`, cells starting with `=`, `+`, `-` or `@`
 prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
 
+### `GET /api/access-review?days=&format=`, `POST /api/access-review/attest`
+
+`days` 7 to 365 (default 90). JSON: `grants` (agent, owner team, capability, adapter,
+packs, `status` `used`/`unused`/`never_used`, `last_used`), `stale_delegations`,
+`dormant_agents`, `expiring_waivers`, `expiring_reviews` (within 30 days), `summary`
+and `digest` (over the findings, not the time). `format=csv` returns the grants.
+`POST …/attest` (risk): `{"days", "digest", "notes"}`; 409 when the digest no longer
+matches the findings. Journal: `access_review_attested`.
+
 ### `GET /api/agents/{key}`
 
 `key` is URL-encoded (`tenant_acme_prod%2Fagt_support`). Returns `row`, `facts` (see
