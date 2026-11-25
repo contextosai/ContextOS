@@ -7,6 +7,12 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Release assets (archives, SBOMs, wheels, the npm tarball) carry a keyless Sigstore
+  bundle (`<asset>.sigstore.json`), each verified against the release workflow before
+  the draft is created; [Verify a release](docs/VERIFY_RELEASE.md) shows all three
+  checks. New `reproducibility` workflow (weekly, on tags) builds the binaries twice
+  from two paths and compares digests; new `advisories` workflow repeats the RustSec
+  and npm advisory checks daily on `main`.
 - Signed packs: `ctx pack-sign` writes a detached Ed25519 signature (`<pack>.sig`) over
   a pack's canonical digest; with `[pack_signing]` trusted keys, unsigned, forged or
   untrusted packs are not loaded (startup stops; reload refuses `signature_refused`),

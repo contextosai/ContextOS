@@ -67,7 +67,8 @@ See the [shared guarantees demo](examples/shared-guarantees/README.md) and
 
 Without Rust: download the archive for your platform from a
 [release](https://github.com/contextosai/ContextOS/releases), check it with
-`shasum -a 256 -c` and `gh attestation verify <archive> --repo contextosai/ContextOS`,
+`shasum -a 256 -c` and `gh attestation verify <archive> --repo contextosai/ContextOS`
+(or its Sigstore bundle with `cosign verify-blob`; see [Verify a release](docs/VERIFY_RELEASE.md)),
 unpack it and run the same script from its directory. The archive carries `ctx`,
 `contextosd`, `towerd`, the Tower UI and the examples below, so it needs only Python,
 Bash and curl. From the unpacked directory, with no environment variables to set:
