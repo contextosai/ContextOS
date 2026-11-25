@@ -49,6 +49,7 @@ export function Shell() {
       [
         { to: "/", label: "Posture", plane: "trust" },
         { to: "/agents", label: "Agents", plane: "intelligence" },
+        { to: "/inventory", label: "Inventory", plane: "intelligence" },
         { to: "/findings", label: "Findings", plane: "decision", count: critical },
         { to: "/activity", label: "Activity", plane: "action", count: posture?.anomalies },
         { to: "/spend", label: "Spend", plane: "action" },
@@ -175,6 +176,7 @@ function ThemeToggle() {
 const PAGES: [string, string][] = [
   ["Posture", "/"],
   ["Agents", "/agents"],
+  ["Inventory: agents, tools, models, owners", "/inventory"],
   ["Findings", "/findings"],
   ["Activity: anomalies, runs, changes", "/activity"],
   ["Guardrails", "/guardrails"],

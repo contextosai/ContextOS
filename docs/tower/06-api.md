@@ -97,6 +97,14 @@ Agent rows: `key`, `agent_id`, `agent_urn`, `owner`, `team`, `business_unit`,
 `required_profile`, `capabilities`, `external`, `irreversible`, `models`, `sources`,
 `runs`, `last_seen`, `findings` (counts per severity).
 
+### `GET /api/inventory?kind=&shadow=&format=`
+
+Every agent, capability, adapter, model and owning team, as
+[§4.11](04-governance-model.md#411-inventory) derives them. `kind` filters by kind,
+`shadow=true` keeps rows seen in traffic and not declared, `format=csv` returns the
+rows as CSV (`text/csv`, sets joined with `;`, cells starting with `=`, `+`, `-` or `@`
+prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
+
 ### `GET /api/agents/{key}`
 
 `key` is URL-encoded (`tenant_acme_prod%2Fagt_support`). Returns `row`, `facts` (see
@@ -213,10 +221,14 @@ t -X PUT "$TOWER/api/agents/tenant_acme_prod%2Fagt_support/declaration" -d '{
   "owner": "maya", "team": "support-ai", "business_unit": "Customer Operations",
   "purpose": "Refunds damaged deliveries up to the order amount; never without identity verification.",
   "users_served": "customers", "lifecycle": "production",
-  "data_categories": ["orders", "payments"], "regulatory_contexts": []
+  "data_categories": ["orders", "payments"], "regulatory_contexts": [],
+  "risk_tier": "high", "models": ["claude-opus-5-5"]
 }'
 ```
 
+`risk_tier` (optional): `low`, `limited`, `high`, `prohibited`. `models` (optional, up
+to 64): the models the agent is declared to use, as `id` (any version) or
+`id@version`; a model seen in its runs and not listed is a shadow row.
 `users_served`: `internal`, `customers`, `public`. `lifecycle`: `proposed`, `pilot`,
 `production`, `deprecated`, `retired`. An owner can only declare for teams in their
 `teams` and cannot move another team's agent. Journal: `agent_declared`.

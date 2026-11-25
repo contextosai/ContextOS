@@ -123,6 +123,32 @@ pub enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// List the agents, capabilities, adapters, models and owning teams an audit export
+    /// shows, with first and last seen and whether each is declared. Refused unless the
+    /// export verifies. The same rows as Tower's `GET /api/inventory`.
+    Inventory {
+        /// The audit export, as for `ctx audit-verify`.
+        #[arg(long)]
+        entries: PathBuf,
+        /// The published audit keys (`GET /v1/audit/keys`).
+        #[arg(long)]
+        keys: PathBuf,
+        /// The last entry of an earlier verified export this one continues.
+        #[arg(long)]
+        continues: Option<PathBuf>,
+        /// A name for the runtime the export came from.
+        #[arg(long, default_value = "export")]
+        source: String,
+        /// The runtime's environment (for example `production`).
+        #[arg(long)]
+        environment: Option<String>,
+        /// Owners' declarations: a JSON object of agent key to declaration.
+        #[arg(long)]
+        declarations: Option<PathBuf>,
+        /// Also write the rows as CSV to this file.
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
     /// Collect evaluator scorecards from run evidence bundles (`GET /v1/runs/{id}/evidence`)
     /// into `ctx scorecard-gate` input, one case per run.
     Scorecards {
