@@ -302,6 +302,27 @@ pub enum Command {
         #[arg(long, conflicts_with = "out")]
         check: Option<PathBuf>,
     },
+    /// Policy simulation: read recorded cases (`GET /v1/runs/{id}/replay-case`) under the
+    /// baseline and a candidate pack and report what would change: verdict transitions,
+    /// capabilities surfaced or withdrawn, rules that start or stop applying, cases that
+    /// stop compiling. Informational unless `--fail-on-widening`.
+    Simulate {
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+        /// Case files (one case, an array, or `{"cases": [...]}`) or directories of
+        /// `*.json` case files; repeat for several.
+        #[arg(long = "cases", required = true)]
+        cases: Vec<PathBuf>,
+        /// Also write a Markdown summary for reviewers to this file.
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Exit 1 when any case would widen (allow more), change in both directions, or
+        /// stop compiling.
+        #[arg(long)]
+        fail_on_widening: bool,
+    },
     /// Release gate: compare a candidate Context Pack with the baseline on replay
     /// cases; fails on unacknowledged widenings of capabilities, policy or evidence
     /// gates, and on cases the candidate cannot compile.

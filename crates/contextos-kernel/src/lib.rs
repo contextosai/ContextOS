@@ -26,6 +26,7 @@ pub mod reliability_gate;
 pub mod run_state;
 pub mod scorecard_gate;
 pub mod shared_exposure;
+pub mod simulation;
 mod support;
 
 pub use support::TransitionResult;

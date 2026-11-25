@@ -7,6 +7,11 @@ minor versions may break APIs and every break is listed.
 
 ### Added
 
+- Policy simulation: `ctx simulate --baseline --candidate --cases <files or dirs>`
+  reads recorded cases (`GET /v1/runs/{id}/replay-case`) under both packs and reports
+  each case's effect (unchanged, widens, narrows, mixed, regression) with counts of
+  verdict transitions, capabilities surfaced or withdrawn and rules that start or stop
+  applying; `--report` writes Markdown, `--fail-on-widening` fails CI (GUIDE §5).
 - Change windows: `[[guards.change_windows]]` refuses, or asks an approval of the exact
   action for, some capabilities' calls during a freeze (`from`/`until`) or a recurring
   window (`days`, `start`, `end`, fixed `utc_offset`), decided on the server clock and
