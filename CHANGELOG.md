@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+
+- Release evaluations: a rule can set `min_cases` (a pass over fewer cases does not
+  count) and `suite_versions` (only results of that suite version count), so a one-case
+  pass or an older suite cannot satisfy a gate. The guide states what the gate trusts:
+  the evaluator's results, and the admitter's `agent_release` ref. From the 26 November
+  independent review.
+
 ### Fixed
 
 - Usage ceilings: usage a metering gateway measured above a reservation now counts
