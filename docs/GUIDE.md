@@ -2412,6 +2412,8 @@ suites = ["safety_redteam"]
 [[guards.release_evaluations.rules]]
 agents = ["agt_support"]
 suites = ["refund_regression"]
+min_cases = 40                               # a pass over fewer cases does not count
+suite_versions = { refund_regression = "3" } # only results of this suite version count
 ```
 
 An independent evaluator (the `evaluate` scope) records each suite's result on the
@@ -2421,9 +2423,18 @@ case passed, and a `report_ref` to the full report), signed into the audit chain
 latest result of every required suite on exactly that release (same digest) passed;
 otherwise it is refused (`release_unevaluated` with the missing suites, or
 `agent_release_missing`) and the refusal audited (`release_evaluation_refusal`). A
-failure recorded after a pass stops the release again. Promotion is therefore a
-release that passed, not a person's say-so; `ctx reliability-gate` and the scorecard
-gates decide in CI whether to record a pass.
+failure recorded after a pass stops the release again. Without `min_cases` and
+`suite_versions`, any recorded pass of the suite id counts, even of one case or an
+older version; set both for suites that gate production. Where rules overlap, the
+highest `min_cases` applies. Promotion is therefore a release that passed, not a
+person's say-so; `ctx reliability-gate` and the scorecard gates decide in CI whether
+to record a pass.
+
+What this trusts: a result is the evaluator's signed statement (the runtime does not
+rerun suites), and the `agent_release` ref is asserted by whoever admits the run, so
+the runtime checks the evaluations of the release named, not that the code running is
+that release. Have the pipeline that deploys the artifact set the ref, and keep `admit`
+credentials with it.
 
 ### Require calibrated evaluators
 
@@ -2733,7 +2744,19 @@ each run under a digest of each identifier:
 ```toml
 [privacy]
 subject_pointers = ["/input/context/customer_id", "/input/context/email"]
+subject_key_env = "CONTEXTOS_SUBJECT_KEY"   # 64 hex characters; keeps digests unguessable
 ```
+
+Without a subject key, the digest is plain SHA-256 of the identifier: a pseudonym, not
+anonymous. Anyone with the audit chain can confirm a guessed account number or e-mail
+address by hashing it, and the digest is the same in every deployment. With
+`subject_key_env`, subjects are digested with HMAC-SHA256 under the key
+(`hmac-sha256:…`), which cannot be recomputed without it; keep the key with the
+deployment's other secrets, since losing it means a person's runs can no longer be
+found by their identifier. Set it before the first indexed run. On a deployment that
+already indexed runs, set `match_unkeyed_subjects = true` as well until those runs are
+erased or past retention: lookups, holds and erasure then also match their unkeyed
+digests, which holds keep in the store but never write to the audit chain.
 
 Then find and erase a person's runs. The identifier travels in the request body, never
 the path, so it stays out of access logs:

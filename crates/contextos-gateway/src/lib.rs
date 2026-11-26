@@ -320,6 +320,8 @@ pub struct Gateway<S, L> {
     change_windows: Vec<change_windows::ChangeWindow>,
     /// JSON pointers to data-subject identifiers in run requests (see [`privacy`]).
     subject_pointers: Vec<String>,
+    /// Key for subject digests (HMAC-SHA256), and whether unkeyed digests still match.
+    subject_key: Option<privacy::SubjectKey>,
     /// Who may lift which guards in an incident (see [`break_glass`]).
     break_glass: Option<break_glass::BreakGlassPolicy>,
     /// Which evaluation suites agent releases must pass (see [`release_evaluations`]).
@@ -585,6 +587,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             risk_tiers: None,
             change_windows: Vec::new(),
             subject_pointers: Vec::new(),
+            subject_key: None,
             break_glass: None,
             release_evaluations: None,
             usage_ceilings: Vec::new(),

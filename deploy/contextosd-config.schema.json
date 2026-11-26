@@ -722,6 +722,19 @@
           },
           "type": "array"
         },
+        "min_cases": {
+          "description": "A pass counts only with at least this many cases. 0: any.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "suite_versions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Suite versions that count, by suite id; a suite not listed counts at any version.",
+          "type": "object"
+        },
         "suites": {
           "description": "Suite ids that must have passed on the release.",
           "items": {
@@ -1659,6 +1672,17 @@
       "additionalProperties": false,
       "description": "`[privacy]`: where run requests name their data subjects.",
       "properties": {
+        "match_unkeyed_subjects": {
+          "description": "With a subject key set on a deployment that already indexed runs: also match their unkeyed digests in lookups, holds and erasure (holds then keep those digests in the store, never in the audit chain). Turn it off once those runs are erased or past retention.",
+          "type": "boolean"
+        },
+        "subject_key_env": {
+          "description": "Environment variable holding a 32-byte hex key: subjects are then digested with HMAC-SHA256 under it (`hmac-sha256:…`), so a digest cannot be recomputed from a guessed identifier without the key. Unset: plain SHA-256 (`sha256:…`), a pseudonym that low-entropy identifiers do not protect. Set it before the first indexed run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "subject_pointers": {
           "description": "JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index.",
           "items": {

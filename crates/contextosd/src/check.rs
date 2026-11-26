@@ -62,6 +62,9 @@ fn named_env(config: &Config) -> Vec<(&str, String)> {
             format!("webhook {}'s signing secret", hook.id),
         ));
     }
+    if let Some(var) = &config.privacy.subject_key_env {
+        vars.push((var.as_str(), "the subject key: 64 hex characters".into()));
+    }
     match &config.audit.kms {
         Some(kms) => vars.push((kms.token_env.as_str(), "the KMS token".into())),
         None => vars.push((

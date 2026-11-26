@@ -17,7 +17,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use contextos_gateway::privacy::{HoldRequest, PrivacyError, subject_digest};
+use contextos_gateway::privacy::{HoldRequest, PrivacyError};
 use contextos_store::{AppendLog, DocumentStore};
 use serde_json::json;
 
@@ -32,6 +32,19 @@ pub struct PrivacyConfig {
     /// each, for deletion requests and legal holds by subject. Empty: no subject index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subject_pointers: Vec<String>,
+    /// Environment variable holding a 32-byte hex key: subjects are then digested with
+    /// HMAC-SHA256 under it (`hmac-sha256:…`), so a digest cannot be recomputed from a
+    /// guessed identifier without the key. Unset: plain SHA-256 (`sha256:…`), a
+    /// pseudonym that low-entropy identifiers do not protect. Set it before the first
+    /// indexed run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_key_env: Option<String>,
+    /// With a subject key set on a deployment that already indexed runs: also match their
+    /// unkeyed digests in lookups, holds and erasure (holds then keep those digests in
+    /// the store, never in the audit chain). Turn it off once those runs are erased or
+    /// past retention.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub match_unkeyed_subjects: bool,
 }
 
 fn invalid(e: impl std::fmt::Display) -> ApiError {
@@ -139,10 +152,10 @@ where
         .subject_runs(&caller.tenant_id, &subject)
         .await
         .map_err(|e| privacy_error(e.into()))?;
-    Ok(
-        axum::Json(json!({"subject_digest": subject_digest(&subject), "runs": runs, "index_truncated": truncated}))
-            .into_response(),
+    Ok(axum::Json(
+        json!({"subject_digest": gateway.subject_digest_of(&subject), "runs": runs, "index_truncated": truncated}),
     )
+    .into_response())
 }
 
 #[derive(serde::Deserialize)]
