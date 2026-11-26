@@ -17,6 +17,9 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- GenAI metrics: `gen_ai_client_operation_duration_seconds` (the OpenTelemetry GenAI
+  conventions' `gen_ai.client.operation.duration` for `execute_tool`) by tool and error
+  type. Token usage in that shape is planned (meters report totals, not input/output).
 - SIEM formats for audit sinks: `format = "splunk_hec" | "datadog" | "elastic_bulk"`
   with the SIEM's credential in `token_env`; masking, ordering and retries unchanged;
   Elasticsearch deduplicates by `<tenant>:<sequence>` and a bulk reply with a failed

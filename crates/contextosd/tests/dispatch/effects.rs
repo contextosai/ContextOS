@@ -104,6 +104,17 @@ async fn admitted_run_dispatches_governed_effects() {
         metrics.contains(r#"contextos_admissions_total{pack="ctxpack.support@5.2.0"}"#),
         "{metrics}"
     );
+    // The same call in the OpenTelemetry GenAI conventions' shape.
+    assert!(
+        metrics.contains(
+            r#"gen_ai_client_operation_duration_seconds_count{gen_ai_operation_name="execute_tool",gen_ai_tool_name="adp_payments.issue_refund"} 1"#
+        ),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains(r#"gen_ai_tool_name="adp_payments.issue_refund",le="81.92"} 1"#),
+        "{metrics}"
+    );
 
     let missing = http
         .post(format!("{}/v1/runs/run_nope/tool-calls", w.base))

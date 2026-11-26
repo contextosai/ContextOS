@@ -38,3 +38,4 @@ come only from the replica leading the sweep.
 | `contextos_task_authorization_amendments_total` | counter | `change` | Amended task authorizations by change. |
 | `contextos_upstream_tool` | gauge | `capability`, `status` | Each pinned capability's upstream tool status (1 for the current one). |
 | `contextos_user_binding_mismatches_total` | counter | `reason` | Runs whose declared user their credential does not act for, by reason. |
+| `gen_ai_client_operation_duration_seconds` | histogram | `gen_ai_operation_name`, `gen_ai_tool_name`, `error_type` | Governed tool calls (gen_ai.client.operation.duration, execute_tool). |

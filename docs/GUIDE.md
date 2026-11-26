@@ -3040,6 +3040,12 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   (`contextos.stages = "fence=0.1 surface=0.2 bind=0.4 authorize=3.1 …"`). A refusal
   sets `error.type` to its first reason code; an infrastructure failure also sets the
   span's status to error.
+- **GenAI metrics:** `/metrics` exports `gen_ai_client_operation_duration_seconds`, the
+  conventions' `gen_ai.client.operation.duration` for `execute_tool`, with
+  `gen_ai_tool_name` (a pinned capability, or `unpinned`) and `error_type` (the status
+  of a call that did not complete), in the conventions' advised buckets. It covers REST
+  tool calls and continuations. `gen_ai.client.token.usage` is planned: it needs input
+  and output tokens separately, and metering gateways report a total today.
 - **Access log:** one JSON line per governed call on target `contextos::access`, with
   tenant, run, capability, tool call, operation, status, reason codes, stage, stage
   timings and duration. It follows `RUST_LOG`; `RUST_LOG=info,contextos::access=off`
