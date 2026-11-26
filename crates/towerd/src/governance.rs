@@ -18,6 +18,7 @@ use crate::fleet::{AgentActivity, Fleet, Hour, hour_index};
 
 mod builtin;
 pub use builtin::builtin;
+mod behaviour;
 pub mod break_glass;
 mod lifecycle;
 use builtin::finding;
@@ -268,6 +269,7 @@ pub fn findings(fleet: &Fleet, views: &[AgentView], guardrails: &Value, waivers:
     let mut out = Vec::new();
     for view in views {
         out.extend(builtin(view, now_hour));
+        out.extend(behaviour::flags(view, now_hour));
         let facts = facts(view);
         for rule in guardrails
             .as_array()
