@@ -592,6 +592,33 @@ least once, so drop duplicates by `(tenant_id, sequence)`. `kinds` filters what 
 the cursor still passes the rest. `contextos_audit_sink_batches_total{sink, outcome}`
 counts batches.
 
+To send straight to a SIEM's ingestion API, set `format` and the credential it takes;
+masking, ordering and retries are the same in every format:
+
+| `format` | `url` | `token_env` holds | Sent as |
+|---|---|---|---|
+| `contextos` (default) | your receiver | (none) | the batch above |
+| `splunk_hec` | `https://splunk:8088/services/collector/event` | an HEC token | one HEC event per entry (`time` from `emitted_at`, `sourcetype` `contextos:audit`) |
+| `datadog` | `https://http-intake.logs.datadoghq.com/api/v2/logs` (your site) | an API key | a log per entry, tagged `tenant`, `kind`, `sink` |
+| `elastic_bulk` | `https://es:9200/contextos-audit/_bulk` | an API key (`id:key`, base64) | `create` actions with `_id` `<tenant>:<sequence>` |
+
+```toml
+[[audit_sinks]]
+id = "splunk"
+url = "https://splunk.example.com:8088/services/collector/event"
+format = "splunk_hec"
+token_env = "CONTEXTOS_SPLUNK_HEC_TOKEN"
+secret_env = "CONTEXTOS_SIEM_SECRET"
+mask = ["email"]
+mask_key_env = "CONTEXTOS_SIEM_MASK_KEY"
+```
+
+The credential is sent only in its header and never logged. Elasticsearch drops a
+redelivered entry by its `_id`; a bulk reply with a failed item is not accepted, so the
+batch is sent again (items already created answer 409 and count as delivered). Splunk
+and Datadog may receive an entry twice after a retry; deduplicate on `tenant_id` and
+`sequence` in search.
+
 `mask` names payload fields: an entry starting with `/` is a JSON Pointer where `*`
 matches any member or index; any other entry is a member name masked wherever it
 occurs. A masked value becomes `masked:hmac-sha256:<hex>`, an HMAC of its canonical JSON
@@ -1455,6 +1482,16 @@ Copy the digests into the capability manifest, and review them like any other ch
   annotations.
 - **Drift.** While the upstream tool differs from its pin, or is gone, the capability
   refuses calls with `upstream_tool_drifted`, before anything is reserved or sent.
+- **Quarantine.** Once drifted, the capability stays refused
+  (`upstream_tool_quarantined`) even if the server changes the tool back, so a server
+  that alternates between definitions is never served between checks. The quarantine
+  is kept in the store (every replica, across restarts) and ends when you re-pin the
+  reviewed new definition, or when an operator (`control`) releases it with a reason:
+  `POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}`,
+  refused while the tool still differs and audited as `upstream_quarantine_released`.
+  `/v1/deployment` lists quarantined tools and Tower raises a `tool_quarantined`
+  finding. `[guards] quarantine_drifted_tools = false` restores serving a tool as soon
+  as it matches its pin again.
 - **Description changes.** A changed `upstream_description_digest` is reported but
   not refused, because agents see the manifest's description, not the server's.
 - **Before the first check.** Until a replica has checked a pinned tool once since it
@@ -1462,7 +1499,9 @@ Copy the digests into the capability manifest, and review them like any other ch
   never serves a tool nobody checked.
 - **Unreachable server.** After that, the last verdict stands.
 - **Metrics and alerts.** `contextos_upstream_tool{capability,status}` reports each
-  status. `ContextOSUpstreamToolDrifted`, `…DescriptionChanged` and
+  status (`matches`, `drifted`, `quarantined`, `description_changed`,
+  `unavailable`). `ContextOSUpstreamToolDrifted` (drifted or quarantined),
+  `…DescriptionChanged` and
   `…CheckUnavailable` alert on them.
 - **Enterprise profile.** Every effectful MCP capability must pin
   `upstream_tool_digest`. Elsewhere `--check-config` warns about each unpinned one.
@@ -1708,6 +1747,42 @@ routes them to it. With several replicas each reads its own copy of the director
 reload every replica (or wait one interval) before a rollout names a new version; until
 then a replica that has not loaded it answers `pack_not_found`. Write access to the
 directory is the authority to publish packs: give it to the release pipeline only.
+
+### Require signed packs
+
+A pack decides what agents may do, so a deployment can require that only packs your
+release process signed are loaded. Generate a signing key once and keep it where your
+release pipeline's secrets live:
+
+```sh
+export CONTEXTOS_PACK_SIGNING_SEED=$(openssl rand -hex 32)   # store it as a CI secret
+ctx pack-sign --public-key --kid release-2026
+# {"kid": "release-2026", "public_key": "…"}
+```
+
+Trust that key in the runtime:
+
+```toml
+[[pack_signing.trusted_keys]]
+kid = "release-2026"
+public_key = "…"
+```
+
+Sign each pack in the release pipeline, after its tests pass, and publish the
+signature next to it:
+
+```sh
+ctx pack-sign --pack packs/support/5.3.0.json --kid release-2026
+# writes packs/support/5.3.0.json.sig
+```
+
+`ctx pack-sign` signs the pack's canonical digest (the one the runtime binds its
+reference to), after checking it against context-pack.v2, and reads the seed only from
+the environment. With `[pack_signing]` set, a pack without a valid signature by a
+trusted key is not loaded: at startup the server stops, and a reload refuses that file
+(`signature_refused`: `pack_signature_missing`, `…_untrusted`, `…_invalid` or
+`…_other_content`) and loads the rest. `pack_loaded` records `signed_by`. To rotate,
+trust the new key alongside the old one, re-sign, then remove the old key.
 
 ### Simulate a pack change on recorded traffic
 
@@ -1961,6 +2036,57 @@ settles measured usage and LiteLLM's computed cost with retries off the response
 and fails closed. [`examples/metering-proxy`](../examples/metering-proxy) is a
 standard-library reference of the same contract for OpenAI Chat Completions and
 Responses and Anthropic Messages, streamed or not.
+
+### Usage ceilings across runs
+
+A run's budget caps one run. To cap an agent or the whole tenant across every run, add
+ceilings on model tokens or spend per window:
+
+```toml
+[[guards.usage_ceilings]]
+id = "support-tokens-hourly"
+resource = "tokens"          # or "cost_cents"
+per = "agent"                # or "tenant"
+agents = ["agt_support"]     # with per = "agent"; every agent when left out
+limit = 2_000_000
+window_seconds = 3600
+
+[[guards.usage_ceilings]]
+id = "tenant-spend-daily"
+resource = "cost_cents"
+per = "tenant"
+limit = 50_000
+window_seconds = 86400
+```
+
+Each model-call reservation holds its amount on every ceiling that covers the run
+before the run's own budget is reserved, using the same conserved ledger as shared
+guarantees on tool effects: a hold counts until it settles, so concurrent runs cannot
+pass a ceiling together. A reservation that would pass one is refused
+(`budget_exhausted` with `usage_ceiling_reached:<id>`, audited as `usage_refused`), and
+any holds it took are given back. Settling commits the hold at the reserved amount.
+Windows are fixed (aligned to the epoch); a hold never settled stays counted until its
+window ends. Replans are not model usage and are not capped here.
+
+### Allowed models
+
+List the models runs may use, for every agent and per agent:
+
+```toml
+[guards.models]
+allowed = ["claude-sonnet-5-5", "claude-opus-5-5@2026-10"]   # an id matches any version
+[guards.models.agents]
+agt_support = ["claude-sonnet-5-5"]                          # narrows, never widens
+```
+
+A run that pins a `model_profile` its agent may not use is refused at admission
+(`model_not_allowed`). A metering gateway that claims a reservation
+(`POST /v1/runs/{id}/usage/claim`, as the LiteLLM plugin does) must name the model; an
+unlisted or unnamed model is refused before the call goes out and audited as
+`usage_refused` with `model_not_allowed`, so a routed or fallen-back model is stopped
+where the call is made. A meter that does not claim through the runtime (the example
+metering proxy checks single use locally) is not stopped this way. Agent risk tiers live
+in Tower's declarations: give each tier's agents the list that tier allows.
 
 ### Checkpoint the orchestrator
 
@@ -2250,6 +2376,34 @@ same independence rule):
 - **Gates.** `ctx trials --criteria` fails a trial with an evaluation whose label is in
   `failing_labels` or whose score is under `evaluation_floor`, so tool-call verdicts
   count in the reliability gate.
+
+### Gate an agent release on evaluations
+
+Name each agent release in the run contract's `release_refs` as an `agent_release`
+artifact (`artifact_id`, `version`, `sha256`), and require the suites it must pass:
+
+```toml
+[guards]
+required_release_refs = ["model_profile", "evaluator_suite", "agent_release"]
+[guards.release_evaluations]
+[[guards.release_evaluations.rules]]
+agents = ["*"]
+suites = ["safety_redteam"]
+[[guards.release_evaluations.rules]]
+agents = ["agt_support"]
+suites = ["refund_regression"]
+```
+
+An independent evaluator (the `evaluate` scope) records each suite's result on the
+release with `POST /v1/agent-releases/evaluations` (`outcome` `passed` only when every
+case passed, and a `report_ref` to the full report), signed into the audit chain as
+`release_evaluation_recorded`. A run of a covered agent is admitted only when the
+latest result of every required suite on exactly that release (same digest) passed;
+otherwise it is refused (`release_unevaluated` with the missing suites, or
+`agent_release_missing`) and the refusal audited (`release_evaluation_refusal`). A
+failure recorded after a pass stops the release again. Promotion is therefore a
+release that passed, not a person's say-so; `ctx reliability-gate` and the scorecard
+gates decide in CI whether to record a pass.
 
 ### Require calibrated evaluators
 
@@ -2645,6 +2799,61 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
 
+### Hand an auditor one signed folder
+
+`ctx audit-pack` puts everything a review of a period needs in one folder, signs it, and
+includes a script that checks it without ContextOS installed:
+
+```sh
+export CONTEXTOS_AUDIT_PACK_SEED=$(cat /run/secrets/audit-pack-seed)   # 32 bytes, hex
+ctx audit-pack --entries entries.json --keys keys.json \
+    --framework soc2 --framework eu-ai-act \
+    --pack packs/support/5.3.0.json --config contextosd.toml \
+    --config-report check.txt --declarations declarations.json \
+    --kid audit-2026 --out audit-2026-q4/
+# {"manifest_sha256": "sha256:…", "public_key": "…", "files": 14, …}
+```
+
+| In the folder | What it is |
+|---|---|
+| `evidence/` | The evidence pack for the export (§11), including the export and keys |
+| `inventory.json`, `inventory.csv` | What the export shows: agents, tools, adapters, models |
+| `approvals.json` | Every approval event in the period |
+| `packs/`, `packs.json` | The packs in force, their canonical digests, and their signatures when present |
+| `config.json` | The configuration file's digest only (a configuration can name secret locations) |
+| `manifest.json`, `manifest.sig` | Every file's SHA-256, signed with Ed25519 |
+| `verify.py` | Checks the signature and every file with Python's standard library |
+
+Give the auditor the public key separately (it is printed when the pack is built), and
+they run:
+
+```sh
+python3 verify.py --public-key <key>
+# VERIFIED: manifest signed by audit-2026; 14 files match their digests
+```
+
+`verify.py` never trusts the key written in `manifest.sig`: anyone could re-sign a
+changed folder with their own key. It checks the folder, not the audit chain inside it;
+`ctx audit-verify --entries evidence/entries.json --keys evidence/keys.json` re-checks
+each entry. The pack is built only from an export that verifies.
+
+### Bill model spend from an export
+
+`ctx chargeback` groups the model spend in a verified export by `team` (default),
+`agent`, `business_unit`, `owner`, `tenant` or `model`, with Tower's fold, so the rows
+match Tower's `GET /api/spend` for the same entries:
+
+```sh
+ctx chargeback --entries entries.json --keys keys.json --declarations declarations.json \
+    --group business_unit --csv chargeback.csv
+# {"verified_to": 1532, "group": "business_unit", "totals": {…}, "rows": [{"key": "payments", "agents": 3, "usage": {…}}]}
+```
+
+Each row keeps verified usage (measured by a metering gateway), self-reported usage
+(charged as reserved, on the agent's word) and uncovered usage apart, so a bill can say
+how much of it is measured. An export that does not verify bills nothing (exit 1). The
+window is the whole export; export the period you bill.
+
 ### List what an export shows
 
 `ctx inventory` lists the agents, capabilities, adapters, models and owning teams in a
@@ -2675,7 +2884,8 @@ ctx evidence-pack --entries entries.json --keys keys.json \
     --framework soc2 --framework eu-ai-act --config-report check.txt --out pack/
 ```
 
-Frameworks are `soc2`, `iso42001`, `eu-ai-act` and `owasp-agentic`. The pack is
+Frameworks are `soc2`, `iso42001`, `eu-ai-act`, `owasp-agentic` and `nist-ai-rmf`. Each control
+states its coverage (`covered`, `partial` with what is missing, or `organizational`). The pack is
 built only from a chain that verifies, and it is deterministic: the same export and
 options give the same files.
 
@@ -2830,6 +3040,12 @@ Production refuses runs without `user.role` (see the threat model's residual ris
   (`contextos.stages = "fence=0.1 surface=0.2 bind=0.4 authorize=3.1 …"`). A refusal
   sets `error.type` to its first reason code; an infrastructure failure also sets the
   span's status to error.
+- **GenAI metrics:** `/metrics` exports `gen_ai_client_operation_duration_seconds`, the
+  conventions' `gen_ai.client.operation.duration` for `execute_tool`, with
+  `gen_ai_tool_name` (a pinned capability, or `unpinned`) and `error_type` (the status
+  of a call that did not complete), in the conventions' advised buckets. It covers REST
+  tool calls and continuations. `gen_ai.client.token.usage` is planned: it needs input
+  and output tokens separately, and metering gateways report a total today.
 - **Access log:** one JSON line per governed call on target `contextos::access`, with
   tenant, run, capability, tool call, operation, status, reason codes, stage, stage
   timings and duration. It follows `RUST_LOG`; `RUST_LOG=info,contextos::access=off`
@@ -2951,6 +3167,18 @@ business_unit = "Customer Operations"
   time-boxed and decided by someone other than the requester.
 - **Reviews and drift.** A risk review approves an agent's current authority; any
   capability added later is drift until reviewed again.
+- **Governance dashboard.** The Posture page (and `GET /api/dashboard`) shows effects
+  held on an unknown outcome, refusals by reason, approvals waiting for a person,
+  shared ceilings near their limit (read live from each runtime with the read-only
+  key), policy drift, active waivers, unreviewed break-glass grants and whether every
+  evidence chain verifies. Every number links to the finding, agent or page behind it.
+- **Incident cases.** From a finding, refusal, held effect or anomaly, an operator or
+  risk reviewer opens a case (`POST /api/cases`, the Cases page) with an owner, a status
+  (open, investigating, contained, resolved, closed), evidence linked by reference (a
+  finding, run, audit entry, agent or anomaly) and a timeline. Every change is in
+  Tower's signed journal; `GET /api/cases/{id}/report?format=md` exports a report that
+  says how to verify each linked item and journals its digest (`case_exported`), so a
+  report edited afterwards no longer matches. A closed case is final.
 - **Access reviews.** `GET /api/access-review?days=90` (and the Access review page,
   with CSV export) lists every grant an agent holds (capabilities pinned in its packs or
   surfaced to its runs) as used, unused in the window or never used; delegations to

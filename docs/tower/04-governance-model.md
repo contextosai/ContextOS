@@ -219,6 +219,9 @@ id across requests.
 
 | Rule | Severity | Fires when | Fix it gives |
 |---|---|---|---|
+| `new_tool_used` | medium | an agent with a week of history called a capability for the first time in the last day | Check the change was intended; review the agent, or waive with a reason |
+| `new_model_used` | medium | the same, for a model release | as above |
+| `unusual_hour` | low | runs in the last day at an hour of the day (UTC) the agent did not use in the previous two weeks | Check who started them; waive with a reason if the schedule changed |
 | `shadow_tool` | medium | the agent called capabilities pinned in no pack it runs under and never surfaced to its runs (the runtime refused them) | Find out why; pin and review the tool, or fix the agent |
 | `undeclared_model` | medium | the declaration lists `models` and a run was admitted on a model not among them (`id` matches any version) | Declare the model after review, or pin a declared one |
 | `undeclared_agent` | critical if the agent has external capabilities, else high | the agent has runs and no declaration | Declare owner, team, purpose, users, lifecycle |
@@ -341,6 +344,10 @@ A guardrail is an organisation rule evaluated against every agent's facts:
   as `expired`.
 
 ## 4.8 Anomalies
+
+Besides the rate baselines below, three behaviour flags report an agent doing something
+it has not done before (`new_tool_used`, `new_model_used`, `unusual_hour`; §4.5). Like
+every finding they ask a person to review; none blocks a call.
 
 For each agent, the latest hour of fleet activity (the most recent hour any agent was
 active, in chain time) is compared with the agent's own previous 168 hours:

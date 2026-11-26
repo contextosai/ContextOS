@@ -6660,6 +6660,248 @@
         ],
         "x-contextos-scope": "break_glass"
       }
+    },
+    "/v1/agent-releases/evaluations": {
+      "post": {
+        "operationId": "record_release_evaluation",
+        "summary": "Record an evaluation suite's result on an agent release",
+        "description": "An independent evaluator (the `evaluate` scope, never held with `admit` or `dispatch`) records one suite's result. `passed` needs every case passed. Audited as `release_evaluation_recorded`. With `[guards.release_evaluations]`, admission needs the latest result of each required suite on the run's `agent_release` to be `passed` (`release_unevaluated`, `agent_release_missing`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "release",
+                  "suite_id",
+                  "suite_version",
+                  "outcome",
+                  "cases_passed",
+                  "cases_total",
+                  "report_ref"
+                ],
+                "properties": {
+                  "release": {
+                    "type": "object",
+                    "description": "An `agent_release` artifact ref: artifact_type, artifact_id, version, sha256."
+                  },
+                  "suite_id": {
+                    "type": "string"
+                  },
+                  "suite_version": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "passed",
+                      "failed"
+                    ]
+                  },
+                  "cases_passed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cases_total": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "report_ref": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The recorded result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "evaluate"
+            ]
+          }
+        ],
+        "x-contextos-scope": "evaluate"
+      }
+    },
+    "/v1/agent-releases/evaluations/query": {
+      "post": {
+        "operationId": "query_release_evaluations",
+        "summary": "The results recorded on one agent release",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "release"
+                ],
+                "properties": {
+                  "release": {
+                    "type": "object",
+                    "description": "An `agent_release` artifact ref: artifact_type, artifact_id, version, sha256."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`release`, `results` oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "audit:read"
+            ]
+          }
+        ],
+        "x-contextos-scope": "audit:read"
+      }
+    },
+    "/v1/upstream/quarantine/release": {
+      "post": {
+        "operationId": "release_upstream_quarantine",
+        "summary": "Release a quarantined upstream tool",
+        "description": "Ends the quarantine of a capability whose pinned upstream tool drifted, after checking that the tool matches its pin again (`409 upstream_tool_still_drifted` otherwise; re-pin after review instead). Audited as `upstream_quarantine_released` before it takes effect.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "capability_id",
+                  "reason"
+                ],
+                "properties": {
+                  "capability_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The release record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "control"
+            ]
+          }
+        ],
+        "x-contextos-scope": "control"
+      }
     }
   },
   "components": {

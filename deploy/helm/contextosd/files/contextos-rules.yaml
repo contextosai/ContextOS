@@ -183,7 +183,7 @@ groups:
   - name: contextos.upstream
     rules:
       - alert: ContextOSUpstreamToolDrifted
-        expr: max by (capability) (contextos_upstream_tool{status="drifted"}) > 0
+        expr: max by (capability) (contextos_upstream_tool{status=~"drifted|quarantined"}) > 0
         labels:
           severity: critical
         annotations:
@@ -191,7 +191,8 @@ groups:
           description: >-
             The provider's definition of {{ $labels.capability }} no longer matches its reviewed
             pin (schemas or annotations changed, or the tool is gone). Every call is refused
-            with upstream_tool_drifted until the manifest is reviewed and re-pinned.
+            (upstream_tool_drifted, then upstream_tool_quarantined) until the manifest is reviewed
+            and re-pinned or the quarantine is released.
           runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamtooldrifted
 
       - alert: ContextOSUpstreamDescriptionChanged

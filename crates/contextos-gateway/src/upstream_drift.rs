@@ -13,7 +13,7 @@
 //! Once checked, an unreachable provider keeps the last verdict: its calls fail on
 //! their own, and refusing them for unavailability would hide which problem it is.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{AppendLog, DocumentStore};
@@ -51,6 +51,9 @@ pub enum UpstreamStatus {
     /// The provider could not be asked; the previous verdict stands (unverified if
     /// there is none).
     Unavailable,
+    /// The tool matches its pin again, but its capability is quarantined since it
+    /// drifted: calls stay refused until it is re-pinned or released.
+    Quarantined,
 }
 
 impl UpstreamStatus {
@@ -61,6 +64,7 @@ impl UpstreamStatus {
             Self::Drifted => "drifted",
             Self::DescriptionChanged => "description_changed",
             Self::Unavailable => "unavailable",
+            Self::Quarantined => "quarantined",
         }
     }
 }
@@ -68,12 +72,19 @@ impl UpstreamStatus {
 /// Each checked capability's verdict: whether it is refused for drift. A capability
 /// pinned with `upstream_tool_digest` and not yet here is unverified.
 #[derive(Debug, Default)]
-pub(crate) struct DriftState(std::sync::RwLock<HashMap<String, bool>>);
+pub(crate) struct DriftState(
+    std::sync::RwLock<HashMap<String, bool>>,
+    /// Capabilities quarantined (see [`crate::upstream_quarantine`]).
+    std::sync::RwLock<HashSet<String>>,
+);
 
 impl DriftState {
     /// The reason calls to this capability are refused, if they are.
     pub(crate) fn refusal(&self, manifest: &crate::CapabilityManifest) -> Option<&'static str> {
         manifest.upstream_tool_digest.as_ref()?;
+        if self.quarantined(&manifest.capability_id) {
+            return Some("upstream_tool_quarantined");
+        }
         // A poisoned lock is no verdict: refuse rather than serve unchecked.
         let Ok(verdicts) = self.0.read() else {
             return Some("upstream_tool_unverified");
@@ -87,6 +98,17 @@ impl DriftState {
 
     fn drifted(&self, capability_id: &str) -> bool {
         self.0.read().is_ok_and(|map| map.get(capability_id) == Some(&true))
+    }
+
+    /// Whether this capability is quarantined (a poisoned lock counts as quarantined).
+    pub(crate) fn quarantined(&self, capability_id: &str) -> bool {
+        self.1.read().map_or(true, |set| set.contains(capability_id))
+    }
+
+    pub(crate) fn set_quarantined(&self, capabilities: HashSet<String>) {
+        if let Ok(mut set) = self.1.write() {
+            *set = capabilities;
+        }
     }
 
     fn set(&self, capability_id: &str, drifted: bool) {
@@ -117,6 +139,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
         }
         let mut statuses = BTreeMap::new();
+        let mut observed = BTreeMap::new();
         for (adapter_id, manifests) in by_adapter {
             let listed = match self.adapters.get(adapter_id) {
                 Some(adapter) => adapter.upstream_tools().await,
@@ -138,6 +161,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             };
             for manifest in manifests {
                 let tool = tools.iter().find(|t| t["name"] == manifest.protocol_tool.as_str());
+                observed.insert(
+                    manifest.capability_id.clone(),
+                    crate::upstream_quarantine::observed(tool),
+                );
                 let schema_drift = manifest
                     .upstream_tool_digest
                     .as_ref()
@@ -165,6 +192,10 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 self.drift.set(&manifest.capability_id, refused);
                 statuses.insert(manifest.capability_id.clone(), status);
             }
+        }
+        if let Err(error) = self.sync_quarantine(&mut statuses, &observed).await {
+            // Quarantines already loaded stay in force; new drift is still refused above.
+            tracing::warn!(error = %error, "upstream quarantine could not be updated");
         }
         statuses
     }

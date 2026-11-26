@@ -104,3 +104,21 @@ export function can(me: Me | undefined, role: string): boolean {
     (role === "owner" && me.roles.includes("risk"))
   );
 }
+
+/** Downloads a file towerd renders, sent with this tab's token like every call. */
+export async function download(path: string, filename: string): Promise<void> {
+  const token = session.token();
+  const response = await fetch(path, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    credentials: "omit",
+    cache: "no-store",
+    referrerPolicy: "no-referrer",
+  });
+  if (!response.ok) throw new Error(`${filename} export failed (${response.status})`);
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

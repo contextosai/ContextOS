@@ -4,6 +4,7 @@ pub mod absence;
 pub mod agent_binding;
 pub mod app;
 pub mod attest;
+pub mod audit_sink_formats;
 pub mod audit_sinks;
 pub mod auth;
 pub mod break_glass_api;
@@ -44,7 +45,9 @@ pub mod pack_intents;
 pub mod pack_registry;
 pub mod privacy_api;
 pub mod protected_resource;
+pub mod quarantine_api;
 pub mod reconcile;
+pub mod release_evaluations_api;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;
@@ -325,6 +328,7 @@ where
         calibrated_evaluators: evaluator_calibration::load(config.guards.evaluator_calibration.as_ref())?.map(Arc::new),
         public_url: config.server.public_url.clone(),
         global_kill_switch: config.kill_switch.global_principals.clone(),
+        models: config.guards.models.clone(),
         spiffe_agents: config
             .server
             .tls

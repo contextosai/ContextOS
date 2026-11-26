@@ -96,6 +96,25 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::break_glass`]). Unset: off.
     #[serde(default)]
     pub break_glass: Option<contextos_gateway::break_glass::BreakGlassPolicy>,
+    /// Evaluation suites an agent release must have passed before its runs are
+    /// admitted (see [`contextos_gateway::release_evaluations`]). Unset: off.
+    #[serde(default)]
+    pub release_evaluations: Option<contextos_gateway::release_evaluations::ReleaseEvaluationPolicy>,
+    /// Which models runs may use, for every agent and per agent: checked against a run's
+    /// pinned `model_profile` at admission and the model a metering gateway reports when
+    /// it claims a call (see [`contextos_gateway::model_allowlist`]). Unset: any model.
+    #[serde(default)]
+    pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
+    /// Model tokens or spend per agent or tenant per window, shared by every run
+    /// (see [`contextos_gateway::usage_ceilings`]). Empty: none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_ceilings: Vec<contextos_gateway::usage_ceilings::UsageCeiling>,
+    /// Keep a capability whose pinned upstream tool drifted refused until it is
+    /// re-pinned or an operator releases it, even if the tool changes back
+    /// (see [`contextos_gateway::upstream_quarantine`]). `false` serves it again as soon
+    /// as it matches its pin.
+    #[serde(default = "quarantine_default")]
+    pub quarantine_drifted_tools: bool,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -189,6 +208,10 @@ impl Default for GuardsConfig {
             risk_tiers: None,
             change_windows: Vec::new(),
             break_glass: None,
+            release_evaluations: None,
+            models: None,
+            usage_ceilings: Vec::new(),
+            quarantine_drifted_tools: true,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -196,4 +219,8 @@ impl Default for GuardsConfig {
             evaluator_calibration: None,
         }
     }
+}
+
+fn quarantine_default() -> bool {
+    true
 }

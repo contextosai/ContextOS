@@ -255,6 +255,11 @@
           "minimum": 0,
           "type": "integer"
         },
+        "format": {
+          "$ref": "#/$defs/SinkFormat",
+          "default": "contextos",
+          "description": "The wire format: `contextos` (default), `splunk_hec`, `datadog` or `elastic_bulk` (see `audit_sink_formats`)."
+        },
         "id": {
           "description": "Sink id, used in metrics and delivery cursors.",
           "type": "string"
@@ -290,6 +295,13 @@
           "$ref": "#/$defs/Start",
           "default": "genesis",
           "description": "`genesis` (default): deliver each tenant's whole chain; `head`: from now on."
+        },
+        "token_env": {
+          "description": "Environment variable holding the SIEM's credential (HEC token, API key); required for every format but `contextos`. Sent only in its header, never logged.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "url": {
           "description": "HTTPS endpoint (HTTP only in development).",
@@ -484,6 +496,20 @@
           "type": "string"
         }
       ]
+    },
+    "CeilingResource": {
+      "enum": [
+        "tokens",
+        "cost_cents"
+      ],
+      "type": "string"
+    },
+    "CeilingScope": {
+      "enum": [
+        "agent",
+        "tenant"
+      ],
+      "type": "string"
     },
     "ChangeWindow": {
       "additionalProperties": false,
@@ -682,6 +708,31 @@
       },
       "required": [
         "current"
+      ],
+      "type": "object"
+    },
+    "EvaluationRule": {
+      "additionalProperties": false,
+      "description": "One `[[guards.release_evaluations.rules]]` entry.",
+      "properties": {
+        "agents": {
+          "description": "Agent ids the rule covers, or `\"*\"` for every agent.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "suites": {
+          "description": "Suite ids that must have passed on the release.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents",
+        "suites"
       ],
       "type": "object"
     },
@@ -1043,6 +1094,18 @@
           "minimum": 0,
           "type": "integer"
         },
+        "models": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which models runs may use, for every agent and per agent: checked against a run's pinned `model_profile` at admission and the model a metering gateway reports when it claims a call (see `contextos_gateway::model_allowlist`). Unset: any model."
+        },
         "pack_intents": {
           "anyOf": [
             {
@@ -1055,10 +1118,27 @@
           "default": null,
           "description": "Whether a run's intent must be one its Context Pack's rules name (`required`, `observe`, `off`; see `pack_intents`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise."
         },
+        "quarantine_drifted_tools": {
+          "default": true,
+          "description": "Keep a capability whose pinned upstream tool drifted refused until it is re-pinned or an operator releases it, even if the tool changes back (see `contextos_gateway::upstream_quarantine`). `false` serves it again as soon as it matches its pin.",
+          "type": "boolean"
+        },
         "refuse_repeated_effects": {
           "default": true,
           "description": "Refuse a new operation whose effect is identical (same capability and arguments) to one the run already applied, unless the capability is `repeatable`: `effect_repeated`. On by default.",
           "type": "boolean"
+        },
+        "release_evaluations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReleaseEvaluationPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Evaluation suites an agent release must have passed before its runs are admitted (see `contextos_gateway::release_evaluations`). Unset: off."
         },
         "require_completion_contracts": {
           "default": null,
@@ -1113,6 +1193,13 @@
           "default": false,
           "description": "Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless.",
           "type": "boolean"
+        },
+        "usage_ceilings": {
+          "description": "Model tokens or spend per agent or tenant per window, shared by every run (see `contextos_gateway::usage_ceilings`). Empty: none.",
+          "items": {
+            "$ref": "#/$defs/UsageCeiling"
+          },
+          "type": "array"
         },
         "user_binding": {
           "anyOf": [
@@ -1290,6 +1377,33 @@
           "type": "string"
         }
       ]
+    },
+    "ModelPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.models]`.",
+      "properties": {
+        "agents": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Agent id to the models that agent may use (also on `allowed`).",
+          "type": "object"
+        },
+        "allowed": {
+          "description": "Models any agent may use.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "type": "object"
     },
     "MonitorPolicy": {
       "additionalProperties": false,
@@ -1517,6 +1631,23 @@
       ],
       "type": "string"
     },
+    "PackSigning": {
+      "additionalProperties": false,
+      "description": "`[pack_signing]`: the keys trusted to sign packs.",
+      "properties": {
+        "trusted_keys": {
+          "description": "`[[pack_signing.trusted_keys]] kid = \"…\", public_key = \"<base64url ed25519>\"`.",
+          "items": {
+            "$ref": "#/$defs/TrustedPackKey"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trusted_keys"
+      ],
+      "type": "object"
+    },
     "PrivacyConfig": {
       "additionalProperties": false,
       "description": "`[privacy]`: where run requests name their data subjects.",
@@ -1680,6 +1811,22 @@
           "type": "string"
         }
       ]
+    },
+    "ReleaseEvaluationPolicy": {
+      "additionalProperties": false,
+      "description": "`[guards.release_evaluations]`.",
+      "properties": {
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/EvaluationRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "type": "object"
     },
     "RemoteProvider": {
       "additionalProperties": false,
@@ -2023,6 +2170,15 @@
         "unit"
       ],
       "type": "object"
+    },
+    "SinkFormat": {
+      "enum": [
+        "contextos",
+        "splunk_hec",
+        "datadog",
+        "elastic_bulk"
+      ],
+      "type": "string"
     },
     "Start": {
       "enum": [
@@ -2374,6 +2530,24 @@
       ],
       "type": "object"
     },
+    "TrustedPackKey": {
+      "additionalProperties": false,
+      "description": "One key trusted to sign packs.",
+      "properties": {
+        "kid": {
+          "type": "string"
+        },
+        "public_key": {
+          "description": "The Ed25519 public key, base64url without padding (`ctx pack-sign --public-key`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kid",
+        "public_key"
+      ],
+      "type": "object"
+    },
     "TrustedSigner": {
       "additionalProperties": false,
       "description": "A trusted principal and the Ed25519 key its attestations are signed with.",
@@ -2406,6 +2580,47 @@
           "type": "string"
         }
       ]
+    },
+    "UsageCeiling": {
+      "additionalProperties": false,
+      "description": "One `[[guards.usage_ceilings]]` entry.",
+      "properties": {
+        "agents": {
+          "description": "Agents it applies to (with `per = \"agent\"`); every agent when empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "per": {
+          "$ref": "#/$defs/CeilingScope"
+        },
+        "resource": {
+          "$ref": "#/$defs/CeilingResource"
+        },
+        "window_seconds": {
+          "description": "60 seconds to 31 days.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "resource",
+        "per",
+        "limit",
+        "window_seconds"
+      ],
+      "type": "object"
     },
     "UserBinding": {
       "enum": [
@@ -2562,8 +2777,11 @@
         "identical_tool_calls": 5,
         "information_flow": null,
         "model_call_min_tokens": 1000,
+        "models": null,
         "pack_intents": null,
+        "quarantine_drifted_tools": true,
         "refuse_repeated_effects": true,
+        "release_evaluations": null,
         "require_completion_contracts": null,
         "require_task_authorization": false,
         "require_tool_schemas": false,
@@ -2634,6 +2852,17 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "pack_signing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackSigning"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When set, every pack must carry a valid detached signature (`<file>.sig`) by one of these keys, or it is not loaded (see `contextos_audit::pack_signature`)."
     },
     "packs": {
       "default": [],

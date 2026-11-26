@@ -9,6 +9,8 @@ use crate::api::Shared;
 pub mod access_review;
 pub mod approvals;
 pub mod break_glass;
+pub mod cases;
+pub mod dashboard;
 pub mod inbox;
 pub mod inventory;
 pub mod lifecycle;
@@ -27,6 +29,8 @@ where
         .merge(access_review::routes())
         .merge(approvals::routes())
         .merge(break_glass::routes())
+        .merge(cases::routes())
+        .merge(dashboard::routes())
         .merge(inbox::routes())
         .merge(inventory::routes())
         .merge(lifecycle::routes())

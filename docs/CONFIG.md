@@ -29,6 +29,7 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | `oidc` | array of tables | `[]` | OIDC issuers whose JWTs authenticate callers. |
 | `pack_dirs` | array of string | `[]` | Directories whose JSON files (recursively; names starting with `.` skipped) are Context Packs, loaded at startup and re-read on reload (see `pack_registry`). |
 | `pack_reload_secs` | integer | `0` | Re-read `packs` and `pack_dirs` this often and add new pack versions; 0 (the default) reads them at startup and on `POST /v1/packs/reload` only. |
+| `pack_signing` | table | unset | When set, every pack must carry a valid detached signature (`<file>.sig`) by one of these keys, or it is not loaded (see `contextos_audit::pack_signature`). |
 | `packs` | array of string | `[]` | Context Pack JSON files to load at startup. |
 | `privacy` | table | see below | Data subjects named by run requests, for deletion requests and legal holds (see `contextos_gateway::privacy`). |
 | `providers` | table | unset | Remote fact services; dispatch is disabled without them. |
@@ -84,12 +85,14 @@ Unknown keys are refused. Tables written `[[name]]` repeat.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `batch` | integer | `100` | Entries per request. |
+| `format` | `"contextos"` \| `"splunk_hec"` \| `"datadog"` \| `"elastic_bulk"` | `"contextos"` | The wire format: `contextos` (default), `splunk_hec`, `datadog` or `elastic_bulk` (see `audit_sink_formats`). |
 | `id` | string | required | Sink id, used in metrics and delivery cursors. |
 | `kinds` | array of string | `[]` | Entry kinds to deliver; every kind when empty. |
 | `mask` | array of string | `[]` | Payload fields to mask (see the module documentation). |
 | `mask_key_env` | string | unset | Environment variable holding the masking key (at least 32 bytes); required with `mask`. |
 | `secret_env` | string | required | Environment variable holding the request signing secret (at least 32 bytes). |
 | `start` | `"genesis"` \| `"head"` | `"genesis"` | `genesis` (default): deliver each tenant's whole chain; `head`: from now on. |
+| `token_env` | string | unset | Environment variable holding the SIEM's credential (HEC token, API key); required for every format but `contextos`. Sent only in its header, never logged. |
 | `url` | string | required | HTTPS endpoint (HTTP only in development). |
 
 ## `[conformance]`
@@ -194,8 +197,11 @@ Guards on agent behaviour.
 | `identical_tool_calls` | integer | `5` | Identical tool calls (same capability and arguments, new operation) a run may make before the next is refused with `loop_detected`; 0 disables the guard. |
 | `information_flow` | table | unset | Track what each run's agent has read (integrity and classification labels from capabilities' `flow`) and gate its later effects and egress on it (see `contextos_gateway::information_flow`). Unset: off. |
 | `model_call_min_tokens` | integer | `1000` | Tokens every model-call reservation covers at least, so an executor cannot reserve (and self-settle) a model call for nothing. |
+| `models` | table | unset | Which models runs may use, for every agent and per agent: checked against a run's pinned `model_profile` at admission and the model a metering gateway reports when it claims a call (see `contextos_gateway::model_allowlist`). Unset: any model. |
 | `pack_intents` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's intent must be one its Context Pack's rules name (`required`, `observe`, `off`; see `pack_intents`). Unset: `required` with the `contextos.enterprise` profile, `observe` otherwise. |
+| `quarantine_drifted_tools` | boolean | `true` | Keep a capability whose pinned upstream tool drifted refused until it is re-pinned or an operator releases it, even if the tool changes back (see `contextos_gateway::upstream_quarantine`). `false` serves it again as soon as it matches its pin. |
 | `refuse_repeated_effects` | boolean | `true` | Refuse a new operation whose effect is identical (same capability and arguments) to one the run already applied, unless the capability is `repeatable`: `effect_repeated`. On by default. |
+| `release_evaluations` | table | unset | Evaluation suites an agent release must have passed before its runs are admitted (see `contextos_gateway::release_evaluations`). Unset: off. |
 | `require_completion_contracts` | boolean | unset | Refuse to start with an effectful MCP capability that declares no `recovery.completion`, so a finished result is confirmed by the state the tool reports, not by the absence of `isError`. Unset: on in production, off in development. (Effectful HTTP capabilities always need one.) |
 | `require_task_authorization` | boolean | `false` | Refuse runs that can apply effects unless they state what their principal authorized (`task_authorization`), so no effect relies on the agent's own reading of the request. |
 | `require_tool_schemas` | boolean | `false` | Refuse to start with a capability that lacks an `input_schema` or `output_schema`, so every call's arguments and results are checked against a reviewed shape (read-only tools too: their results carry most injected content). |
@@ -203,6 +209,7 @@ Guards on agent behaviour.
 | `required_release_refs` | array of string | unset | Release artifact types every run's execution contract must pin in `release_refs` (e.g. `["model_profile", "evaluator_suite"]`), so each decision records which model and evaluators produced it. Unset: `model_profile` and `evaluator_suite` in production, none in development; `[]` opts out explicitly. |
 | `risk_tiers` | table | unset | What each capability's risk tier (`low`, `limited`, `high`, `prohibited`) needs: allow, an approval of the exact action, or refusal; unclassified capabilities count as `high` (see `contextos_gateway::risk_tiers`). Unset: off. |
 | `trust_supplied_memory` | boolean | `false` | Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless. |
+| `usage_ceilings` | array of tables | unset | Model tokens or spend per agent or tenant per window, shared by every run (see `contextos_gateway::usage_ceilings`). Empty: none. |
 | `user_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared user must be the user its caller's delegated token acts for (`required`, `observe`, `off`; see `user_binding`). Unset: `observe`. |
 
 ### `[[guards.change_windows]]`
@@ -235,6 +242,19 @@ One `[[guards.circuit_breakers]]` rule.
 | `threshold` | integer | required | Events per window at which the breaker opens. |
 | `trip` | `"refuse"` \| `"revoke"` | `"refuse"` | What a trip does besides refusing. |
 | `window_seconds` | integer | `60` |  |
+
+### `[[guards.usage_ceilings]]`
+
+One `[[guards.usage_ceilings]]` entry.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `agents` | array of string | unset | Agents it applies to (with `per = "agent"`); every agent when empty. |
+| `id` | string | required |  |
+| `limit` | integer | required |  |
+| `per` | `"agent"` \| `"tenant"` | required |  |
+| `resource` | `"tokens"` \| `"cost_cents"` | required |  |
+| `window_seconds` | integer | required | 60 seconds to 31 days. |
 
 ## `[kill_switch]`
 

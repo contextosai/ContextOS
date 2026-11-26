@@ -74,6 +74,11 @@ pub struct Config {
     /// default) reads them at startup and on `POST /v1/packs/reload` only.
     #[serde(default)]
     pub pack_reload_secs: u64,
+    /// When set, every pack must carry a valid detached signature (`<file>.sig`) by
+    /// one of these keys, or it is not loaded (see
+    /// [`contextos_audit::pack_signature`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack_signing: Option<PackSigning>,
     /// Schemas delegated runs' results must meet, by the `output_schema_ref` a
     /// delegation names: `[[result_schemas]] ref = "schema://…", path = "…json"`.
     #[serde(default)]
@@ -185,6 +190,16 @@ impl Config {
             step_up.validate().map_err(ConfigError::Invalid)?;
         }
         contextos_gateway::change_windows::validate(&config.guards.change_windows).map_err(ConfigError::Invalid)?;
+        contextos_gateway::usage_ceilings::validate(&config.guards.usage_ceilings).map_err(ConfigError::Invalid)?;
+        if let Some(signing) = &config.pack_signing {
+            signing.keys().map_err(ConfigError::Invalid)?;
+        }
+        if let Some(models) = &config.guards.models {
+            models.validate().map_err(ConfigError::Invalid)?;
+        }
+        if let Some(re) = &config.guards.release_evaluations {
+            re.validate().map_err(ConfigError::Invalid)?;
+        }
         if let Some(bg) = &config.guards.break_glass {
             bg.validate().map_err(ConfigError::Invalid)?;
         }
@@ -423,4 +438,42 @@ pub struct KillSwitchConfig {
     /// no one, and the global kill switch is off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub global_principals: Vec<String>,
+}
+
+/// `[pack_signing]`: the keys trusted to sign packs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackSigning {
+    /// `[[pack_signing.trusted_keys]] kid = "…", public_key = "<base64url ed25519>"`.
+    pub trusted_keys: Vec<TrustedPackKey>,
+}
+
+/// One key trusted to sign packs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrustedPackKey {
+    pub kid: String,
+    /// The Ed25519 public key, base64url without padding (`ctx pack-sign --public-key`).
+    pub public_key: String,
+}
+
+impl PackSigning {
+    /// The trusted keys, decoded; an invalid set is a configuration error.
+    pub fn keys(&self) -> Result<Vec<(String, ed25519_dalek::VerifyingKey)>, String> {
+        if self.trusted_keys.is_empty() || self.trusted_keys.len() > 32 {
+            return Err("[pack_signing] trusts 1 to 32 keys".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        self.trusted_keys
+            .iter()
+            .map(|k| {
+                if k.kid.trim().is_empty() || !seen.insert(k.kid.as_str()) {
+                    return Err("[pack_signing] each trusted key has a unique kid".to_owned());
+                }
+                contextos_audit::pack_signature::decode_public_key(&k.public_key)
+                    .map(|key| (k.kid.clone(), key))
+                    .ok_or_else(|| format!("[pack_signing] key {}: not a base64url ed25519 public key", k.kid))
+            })
+            .collect()
+    }
 }

@@ -40,6 +40,7 @@ mod outcomes;
 mod ownership;
 mod pack_intents;
 mod privacy;
+mod release_evaluations;
 mod risk_tiers;
 mod startup;
 mod task_authorization;

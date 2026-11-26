@@ -110,6 +110,10 @@ pub enum DocKind {
     SubjectIndex,
     /// The tenant's break-glass grants.
     BreakGlass,
+    /// Evaluation results recorded on one agent release.
+    ReleaseEvaluations,
+    /// Upstream tools quarantined after drift (deployment-wide).
+    ToolQuarantine,
 }
 
 impl DocKind {
@@ -159,6 +163,8 @@ impl DocKind {
             DocKind::LegalHolds => "legal_holds",
             DocKind::SubjectIndex => "subject_index",
             DocKind::BreakGlass => "break_glass",
+            DocKind::ReleaseEvaluations => "release_evaluations",
+            DocKind::ToolQuarantine => "tool_quarantine",
         }
     }
 }

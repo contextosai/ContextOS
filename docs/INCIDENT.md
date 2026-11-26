@@ -100,6 +100,13 @@ effects*). Never re-run an effect to find out whether it happened.
 Policy escalations are listed at `GET /v1/escalations`; a growing list is a signal in
 itself. Resolve each with what was done (`POST /v1/escalations/{id}/resolve`).
 
+
+Track the incident as a case in Tower (Cases page, `POST /api/cases`): link the
+findings, runs and audit entries it involves, record each containment step as a note or
+status change, and export the report (`GET /api/cases/{id}/report?format=md`) for the
+post-incident review. The report names how to verify each linked item, and its digest
+is in Tower's signed journal.
+
 ## Alerts
 
 The Helm chart ships alerting rules (`prometheusRule.enabled`, or load
@@ -227,6 +234,14 @@ change is expected, review the new definition, print its digests with
 `contextosd --pin-mcp-tools <config>`, and update the manifest through your normal
 review. Replicas pick it up when they restart with the new manifest. If it is not
 expected, treat the provider as compromised: revoke the adapter (*The kill switch*).
+
+The capability is also quarantined (status `quarantined`, refusal
+`upstream_tool_quarantined`): it stays refused if the server changes the tool back,
+because a server that alternates between definitions can serve the changed one between
+checks. Re-pinning ends the quarantine. If the server rolled back and you have confirmed
+the change was benign, release it with a reason:
+`POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}` (`control`;
+refused while the tool still differs; audited).
 
 ### ContextOSUpstreamDescriptionChanged
 

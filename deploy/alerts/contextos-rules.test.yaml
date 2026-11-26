@@ -275,7 +275,7 @@ tests:
               capability: adp_payments.issue_refund
             exp_annotations:
               summary: 'The upstream tool behind adp_payments.issue_refund changed; calls are refused.'
-              description: The provider's definition of adp_payments.issue_refund no longer matches its reviewed pin (schemas or annotations changed, or the tool is gone). Every call is refused with upstream_tool_drifted until the manifest is reviewed and re-pinned.
+              description: The provider's definition of adp_payments.issue_refund no longer matches its reviewed pin (schemas or annotations changed, or the tool is gone). Every call is refused (upstream_tool_drifted, then upstream_tool_quarantined) until the manifest is reviewed and re-pinned or the quarantine is released.
               runbook_url: https://github.com/contextosai/ContextOS/blob/main/docs/INCIDENT.md#contextosupstreamtooldrifted
       - eval_time: 5m
         alertname: ContextOSUpstreamDescriptionChanged

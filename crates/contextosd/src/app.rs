@@ -29,6 +29,7 @@
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `GET/POST /v1/legal-holds`, `POST /v1/legal-holds/{hold_id}/release` | `control` | legal holds that keep runs from erasure ([`crate::privacy_api`]) |
 //! | `GET /v1/break-glass`, `POST /v1/break-glass`, `POST /v1/break-glass/{grant_id}/close` | `control` / `break_glass` | incident grants that lift change windows or open breakers ([`crate::break_glass_api`]) |
+//! | `POST /v1/agent-releases/evaluations`, `…/query` | `evaluate` / `audit:read` | evaluation results on agent releases ([`crate::release_evaluations_api`]) |
 //! | `POST /v1/subjects/runs`, `POST /v1/subjects/erase` | `control` | a data subject's runs, and erasing them (deletion requests) |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
@@ -113,6 +114,8 @@ pub struct LoadedPack {
     /// Canonical digest of the pack document: one reference, one content.
     pub sha256: String,
     pub compiler: ContextPackCompiler,
+    /// The trusted key that signed it, when `[pack_signing]` is set.
+    pub signed_by: Option<String>,
 }
 
 pub struct AppState<S, L> {
@@ -158,6 +161,8 @@ pub struct AppState<S, L> {
     pub calibrated_evaluators: Option<Arc<std::collections::BTreeSet<String>>>,
     /// `[server] public_url`, for protected resource metadata.
     pub public_url: Option<String>,
+    /// `[guards.models]`: which models runs may use.
+    pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
     /// `[kill_switch] global_principals`: who may revoke every tenant at once.
     pub global_kill_switch: Vec<String>,
     /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
@@ -392,6 +397,45 @@ where
             "The execution contract must pin these release artifacts in release_refs ([guards] required_release_refs).",
         )
         .with_detail(json!({"artifact_types": unpinned})));
+    }
+    // Pinned models the deployment does not allow for this agent are refused.
+    if let Some(models) = &state.models {
+        let agent_id = run_context_value["agent"]["agent_id"].as_str().unwrap_or_default();
+        let refused = models.refused_profiles(agent_id, pinned.map_or(&[][..], Vec::as_slice));
+        if !refused.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "model_not_allowed",
+                "The run pins a model this agent may not use ([guards.models]).",
+            )
+            .with_detail(json!({"models": refused})));
+        }
+    }
+    // An agent release runs only after the suites the deployment requires passed on it.
+    if let Ok(gateway) = dispatch_gateway(&state) {
+        let agent_id = run_context_value["agent"]["agent_id"].as_str().unwrap_or_default();
+        let refs = pinned.cloned().unwrap_or_default();
+        match gateway
+            .release_evaluation_refusal(&caller.tenant_id, agent_id, &refs)
+            .await
+        {
+            Ok(None) => {}
+            Ok(Some((reason, missing))) => {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    if reason == "agent_release_missing" { "agent_release_missing" } else { "release_unevaluated" },
+                    "This agent release has not passed the evaluation suites the deployment requires ([guards.release_evaluations]).",
+                )
+                .with_detail(json!({"missing_suites": missing})));
+            }
+            Err(_) => {
+                return Err(ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "store_unavailable",
+                    "The store is unavailable.",
+                ));
+            }
+        }
     }
     // A delegated child takes its deadline and budget from the envelope.
     let delegation = input.get("delegation").filter(|d| !d.is_null());
@@ -827,6 +871,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    let started = std::time::Instant::now();
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
         ApiError::new(
@@ -863,6 +908,9 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state
+        .metrics
+        .tool_execution(capability, &outcome.report.status, started.elapsed().as_secs_f64());
     state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
@@ -966,6 +1014,7 @@ where
     S: DocumentStore + 'static,
     L: AppendLog + 'static,
 {
+    let started = std::time::Instant::now();
     let caller = authorize(&state, &headers, Some("dispatch"))?;
     let _dispatch_slot = state.limits.dispatch_permit(&caller.tenant_id).ok_or_else(|| {
         ApiError::new(
@@ -1009,6 +1058,9 @@ where
     state
         .metrics
         .dispatch_outcome(capability, &outcome.report.status, &outcome.report.reason_codes);
+    state
+        .metrics
+        .tool_execution(capability, &outcome.report.status, started.elapsed().as_secs_f64());
     state.metrics.approval(capability, outcome.report.approval.as_ref());
     Ok(axum::Json(json!({"result": outcome.result, "report": outcome.report})).into_response())
 }
@@ -2857,7 +2909,11 @@ async fn audit_entries<S, L: AppendLog>(
 /// The caller's identity and what this deployment enforces (see
 /// [`crate::deployment_summary`]): any authenticated caller, so a console can show
 /// which actions the caller's scopes allow before offering them.
-async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
     let caller = authorize(&state, &headers, None)?;
     let loaded = state.packs.snapshot();
     let mut packs: Vec<&str> = loaded
@@ -2871,6 +2927,10 @@ async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: Hea
         json!({"tenant_id": caller.tenant_id, "principal_id": caller.principal_id, "scopes": caller.scopes});
     body["packs"] = json!(packs);
     body["replicas"] = json!(state.limits.replicas());
+    // Quarantined upstream tools, for consoles (Tower raises `tool_quarantined`).
+    if let Ok(gateway) = dispatch_gateway(&state) {
+        body["quarantined_tools"] = json!(gateway.quarantined_tools().await.unwrap_or_default());
+    }
     Ok(axum::Json(body).into_response())
 }
 
@@ -3213,6 +3273,18 @@ where
         )
         .route("/v1/subjects/runs", post(crate::privacy_api::subject_runs::<S, L>))
         .route(
+            "/v1/upstream/quarantine/release",
+            post(crate::quarantine_api::release::<S, L>),
+        )
+        .route(
+            "/v1/agent-releases/evaluations",
+            post(crate::release_evaluations_api::record::<S, L>),
+        )
+        .route(
+            "/v1/agent-releases/evaluations/query",
+            post(crate::release_evaluations_api::query::<S, L>),
+        )
+        .route(
             "/v1/break-glass",
             get(crate::break_glass_api::list::<S, L>).post(crate::break_glass_api::open::<S, L>),
         )
@@ -3321,6 +3393,7 @@ pub fn load_pack(text: &str) -> Result<(String, LoadedPack), String> {
             tenant_id,
             sha256,
             compiler,
+            signed_by: None,
         },
     ))
 }

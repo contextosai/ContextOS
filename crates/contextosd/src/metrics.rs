@@ -15,6 +15,19 @@ const BUCKETS_MS: [f64; 12] = [
 
 /// Upper bounds (seconds) of approval decision times.
 const DECISION_BUCKETS: [f64; 6] = [10.0, 30.0, 60.0, 300.0, 1800.0, 3600.0];
+/// The OpenTelemetry GenAI conventions' advised buckets for
+/// `gen_ai.client.operation.duration`, in seconds.
+pub const GEN_AI_DURATION_BUCKETS: [f64; 14] = [
+    0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+];
+
+/// One tool's governed-call durations, in seconds.
+#[derive(Debug, Default)]
+struct Seconds {
+    counts: [u64; GEN_AI_DURATION_BUCKETS.len()],
+    sum: f64,
+    count: u64,
+}
 
 #[derive(Debug)]
 struct Histogram<const N: usize = { BUCKETS_MS.len() }> {
@@ -50,6 +63,8 @@ pub struct Metrics {
     approvals_redeemed: Counter,
     /// Decision seconds of redeemed approvals, by [`DECISION_BUCKETS`].
     approval_decisions: Mutex<Histogram<{ DECISION_BUCKETS.len() }>>,
+    /// Governed tool calls' durations by tool and error type (GenAI conventions).
+    tool_durations: Mutex<BTreeMap<(String, String), Seconds>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     audit_sinks: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
@@ -101,6 +116,28 @@ impl Metrics {
             for reason in reasons {
                 bump(&self.refusals, reason.clone());
             }
+        }
+    }
+
+    /// Records a governed tool call's duration as the OpenTelemetry GenAI conventions'
+    /// `gen_ai.client.operation.duration` for `execute_tool`: `error_type` is empty for
+    /// a completed call, otherwise its status (`blocked`, `failed`, …). Tools are
+    /// pinned capabilities (or `unpinned`), so the labels stay bounded.
+    pub fn tool_execution(&self, capability: &str, status: &str, seconds: f64) {
+        let error = if matches!(status, "completed" | "ok") {
+            ""
+        } else {
+            status
+        };
+        if let Ok(mut map) = self.tool_durations.lock() {
+            let h = map.entry((capability.to_owned(), error.to_owned())).or_default();
+            for (i, bound) in GEN_AI_DURATION_BUCKETS.iter().enumerate() {
+                if seconds <= *bound {
+                    h.counts[i] += 1;
+                }
+            }
+            h.sum += seconds;
+            h.count += 1;
         }
     }
 
@@ -238,6 +275,41 @@ impl Metrics {
                 let _ = writeln!(
                     out,
                     "contextos_dispatch_outcomes_total{{capability=\"{capability}\",status=\"{status}\"}} {n}"
+                );
+            }
+        }
+        out.push_str(
+            "# HELP gen_ai_client_operation_duration_seconds Governed tool calls (gen_ai.client.operation.duration, execute_tool).\n",
+        );
+        out.push_str("# TYPE gen_ai_client_operation_duration_seconds histogram\n");
+        if let Ok(map) = self.tool_durations.lock() {
+            for ((tool, error), h) in map.iter() {
+                let labels = if error.is_empty() {
+                    format!("gen_ai_operation_name=\"execute_tool\",gen_ai_tool_name=\"{tool}\"")
+                } else {
+                    format!("gen_ai_operation_name=\"execute_tool\",gen_ai_tool_name=\"{tool}\",error_type=\"{error}\"")
+                };
+                for (i, bound) in GEN_AI_DURATION_BUCKETS.iter().enumerate() {
+                    let _ = writeln!(
+                        out,
+                        "gen_ai_client_operation_duration_seconds_bucket{{{labels},le=\"{bound}\"}} {}",
+                        h.counts[i]
+                    );
+                }
+                let _ = writeln!(
+                    out,
+                    "gen_ai_client_operation_duration_seconds_bucket{{{labels},le=\"+Inf\"}} {}",
+                    h.count
+                );
+                let _ = writeln!(
+                    out,
+                    "gen_ai_client_operation_duration_seconds_sum{{{labels}}} {}",
+                    h.sum
+                );
+                let _ = writeln!(
+                    out,
+                    "gen_ai_client_operation_duration_seconds_count{{{labels}}} {}",
+                    h.count
                 );
             }
         }

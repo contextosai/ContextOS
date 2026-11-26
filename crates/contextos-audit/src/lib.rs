@@ -3,6 +3,7 @@
 
 pub mod chain;
 pub mod decision;
+pub mod pack_signature;
 
 pub use chain::{
     AuditEntry, AuditSigner, ChainError, ChainHead, KeyRing, Link, RemoteSigner, UnsignedLink, assemble_entry, link,

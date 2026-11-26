@@ -217,7 +217,7 @@ export interface SpendPoint {
   refused: number;
 }
 
-export type SpendGroup = "agent" | "team" | "model";
+export type SpendGroup = "agent" | "team" | "business_unit" | "owner" | "tenant" | "model";
 
 export interface SpendRow {
   key: string;

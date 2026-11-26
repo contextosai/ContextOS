@@ -8,13 +8,16 @@ use std::process::ExitCode;
 
 mod args;
 mod attest;
+mod audit_pack;
 mod audit_verify;
+mod chargeback;
 mod evidence_pack;
 mod flow_presets;
 mod init_tool;
 mod inspect;
 mod inventory;
 mod pack_build;
+mod pack_sign;
 mod pack_tests;
 mod plan;
 mod reliability;
@@ -249,6 +252,46 @@ fn run(command: Command) -> Result<Value, Failure> {
             csv: csv.as_ref(),
             fail_on_shadow,
         }),
+        Command::AuditPack {
+            entries,
+            keys,
+            continues,
+            framework,
+            pack,
+            config,
+            config_report,
+            declarations,
+            seed_env,
+            kid,
+            out,
+        } => audit_pack::build(&audit_pack::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            frameworks: &framework,
+            packs: &pack,
+            config: config.as_ref(),
+            config_report: config_report.as_ref(),
+            declarations: declarations.as_ref(),
+            seed_env: &seed_env,
+            kid: &kid,
+            out: &out,
+        }),
+        Command::Chargeback {
+            entries,
+            keys,
+            continues,
+            declarations,
+            group,
+            csv,
+        } => chargeback::build(&chargeback::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            declarations: declarations.as_ref(),
+            group: &group,
+            csv: csv.as_ref(),
+        }),
         Command::TrajectoryGate {
             baseline,
             candidate,
@@ -444,6 +487,16 @@ fn run(command: Command) -> Result<Value, Failure> {
             Ok(draft)
         }
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
+        Command::PackSign {
+            pack,
+            seed_env,
+            kid,
+            public_key,
+        } => match pack {
+            Some(pack) if !public_key => pack_sign::sign_pack(&pack, &seed_env, &kid),
+            None if public_key => pack_sign::trusted_key(&seed_env, &kid),
+            _ => Err(Failure::Usage("give --pack to sign, or --public-key alone".into())),
+        },
         Command::Attest { claims, seed_env, kid } => {
             let seed = std::env::var(&seed_env).map_err(|_| Failure::Usage(format!("{seed_env} is not set")))?;
             attest::attest(&read(&claims)?, &seed, &kid).map_err(Failure::Usage)

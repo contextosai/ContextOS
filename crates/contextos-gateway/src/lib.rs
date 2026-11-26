@@ -55,6 +55,7 @@ mod loop_guard;
 pub mod manifest;
 pub mod manifest_review;
 mod memory;
+pub mod model_allowlist;
 mod observe;
 pub mod outcome_fence;
 mod outcome_sweep;
@@ -64,6 +65,7 @@ pub mod ports;
 pub mod privacy;
 pub mod privilege;
 mod reconcile;
+pub mod release_evaluations;
 pub mod resource_identity;
 pub mod result_screening;
 mod retired;
@@ -76,7 +78,9 @@ pub mod step_up;
 pub mod task_authorization;
 pub mod tool_call_check;
 pub mod upstream_drift;
+pub mod upstream_quarantine;
 mod usage;
+pub mod usage_ceilings;
 mod usage_claim;
 
 use std::collections::{HashMap, HashSet};
@@ -297,6 +301,8 @@ pub struct Gateway<S, L> {
     shared_guarantees: Vec<SharedGuarantee>,
     /// Capabilities refused because their upstream tool changed (see [`upstream_drift`]).
     drift: upstream_drift::DriftState,
+    /// Keep drifted tools refused until re-pinned or released (see [`upstream_quarantine`]).
+    quarantine_drifted: bool,
     /// Judges confirmed effects' output before the agent sees it (see [`result_screening`]).
     result_screening: Option<Arc<dyn result_screening::ResultScreeningProvider>>,
     /// Maps resource identifiers to canonical ids (see [`resource_identity`]).
@@ -316,6 +322,10 @@ pub struct Gateway<S, L> {
     subject_pointers: Vec<String>,
     /// Who may lift which guards in an incident (see [`break_glass`]).
     break_glass: Option<break_glass::BreakGlassPolicy>,
+    /// Which evaluation suites agent releases must pass (see [`release_evaluations`]).
+    release_evaluations: Option<release_evaluations::ReleaseEvaluationPolicy>,
+    /// Model usage ceilings per agent or tenant per window (see [`usage_ceilings`]).
+    usage_ceilings: Vec<usage_ceilings::UsageCeiling>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -566,6 +576,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             require_result_schemas: false,
             shared_guarantees: Vec::new(),
             drift: upstream_drift::DriftState::default(),
+            quarantine_drifted: true,
             result_screening: None,
             resource_identity: None,
             approval_step_up: None,
@@ -575,6 +586,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             change_windows: Vec::new(),
             subject_pointers: Vec::new(),
             break_glass: None,
+            release_evaluations: None,
+            usage_ceilings: Vec::new(),
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -1181,6 +1194,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if let Some(reason) = self.drift.refusal(manifest) {
             let message = if reason == "upstream_tool_drifted" {
                 "The upstream tool changed since this capability was reviewed."
+            } else if reason == "upstream_tool_quarantined" {
+                "The upstream tool changed since this capability was reviewed and is quarantined until it is re-pinned or released."
             } else {
                 "The upstream tool has not been checked against its review yet; retry shortly."
             };

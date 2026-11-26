@@ -48,7 +48,8 @@ pub(crate) fn build(o: &Options<'_>) -> Result<Value, Failure> {
         }
         None => json!({}),
     };
-    let mut fleet = Fleet::new(1, 24);
+    // Every run in the export, so each entry is attributed to its run's agent.
+    let mut fleet = Fleet::new(towerd::fleet::OFFLINE_RUNS, 24);
     for entry in &chain {
         fleet.apply(o.source, entry);
     }
