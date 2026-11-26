@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+
+- Subject index: a subject named by about 10,000 runs made every further run naming it
+  fail admission (`503 store_unavailable`), because the index outgrew the store's
+  document bound. The index now grows in pages of 5,000 runs (up to 1,000,000), and each
+  run records its own subjects' digests, so a hold by subject covers every run about the
+  subject, even one past a truncated index. A run indexed before this release that a
+  truncated index does not list counts as held. From the 26 November independent review.
+
 ## 0.1.0-alpha.23 - 2026-11-26
 
 Twenty-third alpha: the rest of the governance platform. A governance dashboard,

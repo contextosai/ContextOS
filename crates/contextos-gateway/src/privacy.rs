@@ -4,7 +4,9 @@
 //! such as `/input/context/customer_id`), each admitted run is indexed under the
 //! subjects its request names. The index is keyed by a digest of the identifier and
 //! never stores the identifier itself; it is how a deletion request finds every run
-//! about one person.
+//! about one person. The index grows in pages of [`RUNS_PER_PAGE`] runs, up to
+//! [`MAX_RUNS_PER_SUBJECT`]. Each run also records the digests of its own subjects, so a
+//! hold by subject covers a run however large its subject's index is.
 //!
 //! **Legal holds.** A hold names runs, subjects or the whole tenant. While a hold
 //! covers a run, nothing erases its content: neither an operator's erasure nor the
@@ -27,9 +29,15 @@ use crate::{Gateway, GatewayError};
 
 /// Holds kept per tenant at most (placed and released).
 pub const MAX_HOLDS: usize = 1024;
+/// Runs per page of a subject's index: well inside a stored document's bound on values
+/// (`canonical::MAX_VALUES`) and bytes, for run ids of any permitted length.
+pub const RUNS_PER_PAGE: usize = 5_000;
+/// Pages per subject at most.
+pub const MAX_SUBJECT_PAGES: usize = 200;
 /// Runs indexed per subject at most; older runs stay indexed, newer ones beyond the
-/// bound are not (and are reported by the index's `truncated`).
-pub const MAX_RUNS_PER_SUBJECT: usize = 10_000;
+/// bound are not (and are reported by the index's `truncated`). A hold by subject
+/// still covers them through each run's own subject record.
+pub const MAX_RUNS_PER_SUBJECT: usize = RUNS_PER_PAGE * MAX_SUBJECT_PAGES;
 /// Subject pointers at most.
 pub const MAX_POINTERS: usize = 16;
 
@@ -43,8 +51,27 @@ fn holds_key(tenant_id: &str) -> DocKey {
     DocKey::new(tenant_id, DocKind::LegalHolds, "legal_holds")
 }
 
-fn subject_key(tenant_id: &str, digest: &str) -> DocKey {
-    DocKey::new(tenant_id, DocKind::SubjectIndex, digest)
+/// One page of a subject's index; page 0 keeps the key used before pages existed.
+fn page_key(tenant_id: &str, digest: &str, page: usize) -> DocKey {
+    let id = if page == 0 {
+        digest.to_owned()
+    } else {
+        format!("{digest}/p{page}")
+    };
+    DocKey::new(tenant_id, DocKind::SubjectIndex, id)
+}
+
+/// The digests of one run's subjects. Digests start with their algorithm, so a
+/// `run:` id never collides with an index page.
+fn run_subjects_key(tenant_id: &str, run_id: &str) -> DocKey {
+    DocKey::new(tenant_id, DocKind::SubjectIndex, format!("run:{run_id}"))
+}
+
+fn run_list(body: &Value) -> Vec<String> {
+    body["runs"]
+        .as_array()
+        .map(|r| r.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,22 +138,48 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         self.subject_pointers = pointers;
     }
 
-    /// Adds the run to the index of each subject its request names.
+    /// Records the run's subjects, and adds it to the index of each.
     pub(crate) async fn index_subjects(&self, admission: &RunAdmission, request: &Value) -> Result<(), GatewayError> {
-        for subject in subjects_in(request, &self.subject_pointers) {
-            let key = subject_key(&admission.tenant_id, &subject_digest(&subject));
+        let digests: Vec<String> = subjects_in(request, &self.subject_pointers)
+            .iter()
+            .map(|s| subject_digest(s))
+            .collect();
+        if digests.is_empty() {
+            return Ok(());
+        }
+        let record = run_subjects_key(&admission.tenant_id, &admission.run_id);
+        match self.store.create(&record, &json!({"subject_digests": digests})).await {
+            Ok(_) => {}
+            Err(e) if e.is_conflict() => {}
+            Err(e) => return Err(e.into()),
+        }
+        for digest in &digests {
+            self.add_to_index(&admission.tenant_id, digest, &admission.run_id)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Appends `run_id` to the first page of `digest`'s index with room, unless a page
+    /// already lists it. When every page is full the last one is marked `truncated`.
+    async fn add_to_index(&self, tenant_id: &str, digest: &str, run_id: &str) -> Result<(), GatewayError> {
+        'pages: for page in 0..MAX_SUBJECT_PAGES {
+            let key = page_key(tenant_id, digest, page);
             for _ in 0..32 {
                 let current = self.store.get(&key).await?;
                 let mut body = current.as_ref().map_or_else(|| json!({"runs": []}), |c| c.body.clone());
-                let runs = body["runs"].as_array().cloned().unwrap_or_default();
-                if runs.iter().any(|r| r == admission.run_id.as_str()) {
-                    break;
+                let mut runs = run_list(&body);
+                if runs.iter().any(|r| r == run_id) {
+                    return Ok(());
                 }
-                if runs.len() >= MAX_RUNS_PER_SUBJECT {
-                    body["truncated"] = json!(true);
+                if runs.len() >= RUNS_PER_PAGE {
+                    if page + 1 == MAX_SUBJECT_PAGES && body["truncated"] != true {
+                        body["truncated"] = json!(true);
+                    } else {
+                        continue 'pages;
+                    }
                 } else {
-                    let mut runs = runs;
-                    runs.push(json!(admission.run_id));
+                    runs.push(run_id.to_owned());
                     body["runs"] = json!(runs);
                 }
                 let written = match &current {
@@ -134,27 +187,39 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     Some(c) => self.store.compare_and_swap(&key, c.revision, &body).await.map(|_| ()),
                 };
                 match written {
-                    Ok(()) => break,
+                    Ok(()) => return Ok(()),
                     Err(e) if e.is_conflict() => {}
                     Err(e) => return Err(e.into()),
                 }
             }
+            // Contended: the run's own subject record still lets holds cover it.
+            tracing::warn!("subject index contended; run not added to it");
+            return Ok(());
         }
         Ok(())
     }
 
+    /// The runs indexed under a subject digest, and whether the index was truncated.
+    async fn digest_runs(&self, tenant_id: &str, digest: &str) -> Result<(Vec<String>, bool), GatewayError> {
+        let (mut runs, mut truncated) = (Vec::new(), false);
+        for page in 0..MAX_SUBJECT_PAGES {
+            let Some(doc) = self.store.get(&page_key(tenant_id, digest, page)).await? else {
+                break;
+            };
+            let listed = run_list(&doc.body);
+            truncated |= doc.body["truncated"] == true;
+            let full = listed.len() >= RUNS_PER_PAGE;
+            runs.extend(listed);
+            if !full {
+                break;
+            }
+        }
+        Ok((runs, truncated))
+    }
+
     /// The runs indexed under `subject`, and whether the index was truncated.
     pub async fn subject_runs(&self, tenant_id: &str, subject: &str) -> Result<(Vec<String>, bool), GatewayError> {
-        let doc = self
-            .store
-            .get(&subject_key(tenant_id, &subject_digest(subject)))
-            .await?;
-        let body = doc.map_or(Value::Null, |d| d.body);
-        let runs = body["runs"]
-            .as_array()
-            .map(|r| r.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
-            .unwrap_or_default();
-        Ok((runs, body["truncated"] == true))
+        self.digest_runs(tenant_id, &subject_digest(subject)).await
     }
 
     /// The tenant's holds, placed and released.
@@ -169,37 +234,79 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// The active hold covering the run, if any.
     pub(crate) async fn held_by(&self, admission: &RunAdmission) -> Result<Option<String>, GatewayError> {
-        for hold in self
+        let holds: Vec<Value> = self
             .legal_holds(&admission.tenant_id)
             .await?
-            .iter()
-            .filter(|h| active(h))
-        {
-            let id = hold["hold_id"].as_str().unwrap_or_default().to_owned();
-            if hold["tenant_wide"] == true
+            .into_iter()
+            .filter(active)
+            .collect();
+        let id = |hold: &Value| hold["hold_id"].as_str().unwrap_or_default().to_owned();
+        if let Some(hold) = holds.iter().find(|hold| {
+            hold["tenant_wide"] == true
                 || hold["run_ids"]
                     .as_array()
                     .is_some_and(|r| r.iter().any(|x| x == admission.run_id.as_str()))
-            {
-                return Ok(Some(id));
-            }
-            for digest in hold["subject_digests"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-            {
-                let runs = self.store.get(&subject_key(&admission.tenant_id, digest)).await?;
-                if runs.is_some_and(|d| {
-                    d.body["runs"]
+        }) {
+            return Ok(Some(id(hold)));
+        }
+        let by_subject: Vec<(&Value, Vec<&str>)> = holds
+            .iter()
+            .map(|h| {
+                (
+                    h,
+                    h["subject_digests"]
                         .as_array()
-                        .is_some_and(|r| r.iter().any(|x| x == admission.run_id.as_str()))
-                }) {
-                    return Ok(Some(id));
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect(),
+                )
+            })
+            .filter(|(_, digests): &(&Value, Vec<&str>)| !digests.is_empty())
+            .collect();
+        if by_subject.is_empty() {
+            return Ok(None);
+        }
+        let record = self.run_subjects(admission).await?;
+        for (hold, digests) in by_subject {
+            for digest in digests {
+                if self.run_has_subject(admission, digest, record.as_deref()).await? {
+                    return Ok(Some(id(hold)));
                 }
             }
         }
         Ok(None)
+    }
+
+    /// The digests the run recorded for its subjects; `None` for a run admitted before
+    /// runs kept that record (or before subject pointers were configured).
+    async fn run_subjects(&self, admission: &RunAdmission) -> Result<Option<Vec<String>>, GatewayError> {
+        let doc = self
+            .store
+            .get(&run_subjects_key(&admission.tenant_id, &admission.run_id))
+            .await?;
+        Ok(doc.map(|d| {
+            d.body["subject_digests"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default()
+        }))
+    }
+
+    /// Whether a hold on `digest` covers the run. A run with its own subject record is
+    /// covered exactly. One indexed before runs kept that record is looked up in the
+    /// index, and counts as covered when that index is truncated: it cannot be ruled out.
+    async fn run_has_subject(
+        &self,
+        admission: &RunAdmission,
+        digest: &str,
+        record: Option<&[String]>,
+    ) -> Result<bool, GatewayError> {
+        if let Some(digests) = record {
+            return Ok(digests.iter().any(|d| d == digest));
+        }
+        let (runs, truncated) = self.digest_runs(&admission.tenant_id, digest).await?;
+        Ok(truncated || runs.iter().any(|r| r == admission.run_id.as_str()))
     }
 
     /// Places a hold (audited `legal_hold_placed`).
