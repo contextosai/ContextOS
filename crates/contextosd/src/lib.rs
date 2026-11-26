@@ -45,6 +45,7 @@ pub mod pack_registry;
 pub mod privacy_api;
 pub mod protected_resource;
 pub mod reconcile;
+pub mod release_evaluations_api;
 pub mod retention;
 pub mod rollout;
 pub mod runtime;

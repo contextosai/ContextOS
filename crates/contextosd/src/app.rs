@@ -29,6 +29,7 @@
 //! | `POST /v1/runs/{run_id}/usage/settle` | `meter` or `dispatch` | settle it: measured by a meter, or the whole reservation if self-reported |
 //! | `GET/POST /v1/legal-holds`, `POST /v1/legal-holds/{hold_id}/release` | `control` | legal holds that keep runs from erasure ([`crate::privacy_api`]) |
 //! | `GET /v1/break-glass`, `POST /v1/break-glass`, `POST /v1/break-glass/{grant_id}/close` | `control` / `break_glass` | incident grants that lift change windows or open breakers ([`crate::break_glass_api`]) |
+//! | `POST /v1/agent-releases/evaluations`, `…/query` | `evaluate` / `audit:read` | evaluation results on agent releases ([`crate::release_evaluations_api`]) |
 //! | `POST /v1/subjects/runs`, `POST /v1/subjects/erase` | `control` | a data subject's runs, and erasing them (deletion requests) |
 //! | `POST /v1/runs/{run_id}/erase` | `control` | erase a finished run's personal content (replay case, compiled context), leaving audited tombstones |
 //! | `GET /v1/rollouts` | `control` | the tenant's staged rollouts |
@@ -392,6 +393,32 @@ where
             "The execution contract must pin these release artifacts in release_refs ([guards] required_release_refs).",
         )
         .with_detail(json!({"artifact_types": unpinned})));
+    }
+    // An agent release runs only after the suites the deployment requires passed on it.
+    if let Ok(gateway) = dispatch_gateway(&state) {
+        let agent_id = run_context_value["agent"]["agent_id"].as_str().unwrap_or_default();
+        let refs = pinned.cloned().unwrap_or_default();
+        match gateway
+            .release_evaluation_refusal(&caller.tenant_id, agent_id, &refs)
+            .await
+        {
+            Ok(None) => {}
+            Ok(Some((reason, missing))) => {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    if reason == "agent_release_missing" { "agent_release_missing" } else { "release_unevaluated" },
+                    "This agent release has not passed the evaluation suites the deployment requires ([guards.release_evaluations]).",
+                )
+                .with_detail(json!({"missing_suites": missing})));
+            }
+            Err(_) => {
+                return Err(ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "store_unavailable",
+                    "The store is unavailable.",
+                ));
+            }
+        }
     }
     // A delegated child takes its deadline and budget from the envelope.
     let delegation = input.get("delegation").filter(|d| !d.is_null());
@@ -3212,6 +3239,14 @@ where
             post(crate::privacy_api::release_hold::<S, L>),
         )
         .route("/v1/subjects/runs", post(crate::privacy_api::subject_runs::<S, L>))
+        .route(
+            "/v1/agent-releases/evaluations",
+            post(crate::release_evaluations_api::record::<S, L>),
+        )
+        .route(
+            "/v1/agent-releases/evaluations/query",
+            post(crate::release_evaluations_api::query::<S, L>),
+        )
         .route(
             "/v1/break-glass",
             get(crate::break_glass_api::list::<S, L>).post(crate::break_glass_api::open::<S, L>),

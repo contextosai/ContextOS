@@ -2251,6 +2251,34 @@ same independence rule):
   `failing_labels` or whose score is under `evaluation_floor`, so tool-call verdicts
   count in the reliability gate.
 
+### Gate an agent release on evaluations
+
+Name each agent release in the run contract's `release_refs` as an `agent_release`
+artifact (`artifact_id`, `version`, `sha256`), and require the suites it must pass:
+
+```toml
+[guards]
+required_release_refs = ["model_profile", "evaluator_suite", "agent_release"]
+[guards.release_evaluations]
+[[guards.release_evaluations.rules]]
+agents = ["*"]
+suites = ["safety_redteam"]
+[[guards.release_evaluations.rules]]
+agents = ["agt_support"]
+suites = ["refund_regression"]
+```
+
+An independent evaluator (the `evaluate` scope) records each suite's result on the
+release with `POST /v1/agent-releases/evaluations` (`outcome` `passed` only when every
+case passed, and a `report_ref` to the full report), signed into the audit chain as
+`release_evaluation_recorded`. A run of a covered agent is admitted only when the
+latest result of every required suite on exactly that release (same digest) passed;
+otherwise it is refused (`release_unevaluated` with the missing suites, or
+`agent_release_missing`) and the refusal audited (`release_evaluation_refusal`). A
+failure recorded after a pass stops the release again. Promotion is therefore a
+release that passed, not a person's say-so; `ctx reliability-gate` and the scorecard
+gates decide in CI whether to record a pass.
+
 ### Require calibrated evaluators
 
 A judge's score holds a run or releases a pack only if the judge agrees with people.

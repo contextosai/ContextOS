@@ -96,6 +96,10 @@ pub struct GuardsConfig {
     /// [`contextos_gateway::break_glass`]). Unset: off.
     #[serde(default)]
     pub break_glass: Option<contextos_gateway::break_glass::BreakGlassPolicy>,
+    /// Evaluation suites an agent release must have passed before its runs are
+    /// admitted (see [`contextos_gateway::release_evaluations`]). Unset: off.
+    #[serde(default)]
+    pub release_evaluations: Option<contextos_gateway::release_evaluations::ReleaseEvaluationPolicy>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -189,6 +193,7 @@ impl Default for GuardsConfig {
             risk_tiers: None,
             change_windows: Vec::new(),
             break_glass: None,
+            release_evaluations: None,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
