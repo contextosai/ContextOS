@@ -2716,7 +2716,10 @@ curl -X POST "$CONTEXTOS/v1/subjects/erase" -H "Authorization: Bearer $OPS_TOKEN
 Each finished run is erased as above (tombstones, a `run_data_erased` entry); runs under
 a hold and runs still active are listed and left, and the request itself is audited as
 `subject_erasure` with the subject's digest. Only runs admitted after the pointers were
-configured are indexed. The audit chain is never rewritten: it verifies after any
+configured are indexed, so configure them before the first run whose data you may need
+to hold or erase. A subject's index grows in pages of 5,000 runs up to 1,000,000; past
+that, erasure reports `index_truncated`. Each run also records its own subjects' digests,
+so a hold by subject covers every run about that subject however large its index is. The audit chain is never rewritten: it verifies after any
 erasure (`GET /v1/audit/verify`, `ctx audit-verify`). What the runtime cannot erase is
 what it never held as content: personal data a deployment writes into decision outputs,
 rationales or audit-visible arguments stays in signed records, so keep it out of them.
