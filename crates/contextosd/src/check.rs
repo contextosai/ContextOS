@@ -154,6 +154,9 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
         mode => format!("agent binding: {}", mode.as_str()),
     });
     report.push(format!("user binding: {}", crate::user_binding::mode(&config).as_str()));
+    if let Some(warning) = quarantine_release_warning(&config) {
+        report.push(warning);
+    }
     report.push(match crate::pack_intents::mode(&config) {
         crate::pack_intents::PackIntents::Off => {
             "warning: pack intents are off: intent-scoped rules restrict only runs that declare their intent".into()
@@ -266,4 +269,17 @@ pub fn check_config(path: &Path) -> Result<Vec<String>, String> {
     std::net::TcpListener::bind(listen).map_err(|e| format!("cannot listen on {listen}: {e}"))?;
     report.push(format!("{listen} is free"));
     Ok(report)
+}
+
+/// A quarantine protects every tenant, so a deployment that may serve several (API keys
+/// in more than one tenant, or OIDC issuers naming tenants) should say who lifts it.
+fn quarantine_release_warning(config: &Config) -> Option<String> {
+    let tenants: std::collections::BTreeSet<&str> = config.api_keys.iter().map(|k| k.tenant_id.as_str()).collect();
+    (config.guards.quarantine_drifted_tools
+        && config.guards.quarantine_releasers.is_empty()
+        && (tenants.len() > 1 || !config.oidc.is_empty()))
+    .then(|| {
+        "warning: several tenants and no [guards] quarantine_releasers: any tenant's control principal can release a quarantine that protects every tenant"
+            .into()
+    })
 }

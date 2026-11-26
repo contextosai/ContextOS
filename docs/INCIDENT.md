@@ -240,8 +240,9 @@ The capability is also quarantined (status `quarantined`, refusal
 because a server that alternates between definitions can serve the changed one between
 checks. Re-pinning ends the quarantine. If the server rolled back and you have confirmed
 the change was benign, release it with a reason:
-`POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}` (`control`;
-refused while the tool still differs; audited).
+`POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}` (`control`,
+and listed in `[guards] quarantine_releasers` when that is set; refused while the tool
+still differs; audited).
 
 ### ContextOSUpstreamDescriptionChanged
 

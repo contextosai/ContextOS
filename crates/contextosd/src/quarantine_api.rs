@@ -3,7 +3,10 @@
 //!
 //! | Route | Scope |
 //! |---|---|
-//! | `POST /v1/upstream/quarantine/release` | `control` (`{"capability_id", "reason"}`) |
+//! | `POST /v1/upstream/quarantine/release` | `control` (`{"capability_id", "reason"}`), and listed in `[guards] quarantine_releasers` when that is set |
+//!
+//! A quarantine is deployment-wide: it protects every tenant the runtime serves, so a
+//! multi-tenant deployment names the principals that may lift it.
 
 use std::sync::Arc;
 
@@ -33,6 +36,13 @@ where
     L: AppendLog + 'static,
 {
     let caller = authorize(&state, &headers, Some("control"))?;
+    if !may_release(&state.quarantine_releasers, &caller.principal_id) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "quarantine_release_forbidden",
+            "Only principals in [guards] quarantine_releasers may release a quarantine.",
+        ));
+    }
     let gateway = dispatch_gateway(&state)?;
     let request: Release = serde_json::from_value(parse_body(&state, &bytes)?)
         .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "request_invalid", e.to_string()))?;
@@ -67,4 +77,10 @@ where
             "The store or audit log is unavailable.",
         )),
     }
+}
+
+/// Whether `principal` may release a quarantine: anyone with `control` when no
+/// releasers are named, otherwise only those named.
+fn may_release(releasers: &[String], principal: &str) -> bool {
+    releasers.is_empty() || releasers.iter().any(|p| p == principal)
 }
