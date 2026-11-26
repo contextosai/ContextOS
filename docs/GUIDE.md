@@ -2098,8 +2098,12 @@ A run that pins a `model_profile` its agent may not use is refused at admission
 unlisted or unnamed model is refused before the call goes out and audited as
 `usage_refused` with `model_not_allowed`, so a routed or fallen-back model is stopped
 where the call is made. A meter that does not claim through the runtime (the example
-metering proxy checks single use locally) is not stopped this way. Agent risk tiers live
-in Tower's declarations: give each tier's agents the list that tier allows.
+metering proxy checks single use locally) is not stopped this way. The list is only as
+strong as the source of the model name: for an agent whose model calls do not go through
+a metering gateway, the model is what the run pins or reports, so the list is advisory
+for it. Route model traffic through a metering gateway where the list must hold. Agent
+risk tiers live in Tower's declarations: give each tier's agents the list that tier
+allows.
 
 ### Checkpoint the orchestrator
 
@@ -2313,7 +2317,10 @@ obligation `approve_during_change_window`). Refusal wins when several windows ap
 The gateway decides on its own clock (the kernel has none), and each
 `change_window_decision` audit entry records the windows, whether each was enforced
 and `decided_at`. Keep the server clock synchronised (NTP); a window naming a
-capability that is not configured refuses startup.
+capability that is not configured refuses startup. `utc_offset` is fixed: in a zone
+with daylight saving, a window shifts by an hour for part of the year. Write one window
+per offset with `from` and `until` covering each period, or choose hours that tolerate
+the shift; time-zone names are not supported yet.
 
 ### Starter profiles
 
@@ -2651,6 +2658,11 @@ refused at the route). Opening and closing are audited (`break_glass_opened`,
 `break_glass_unreviewed` (high) until a risk reviewer other than its opener records a
 review (`POST /api/break-glass/review`).
 
+Opening and closing need no second person: break-glass is for when waiting would do
+harm, so the check is after the fact (the audit entries and Tower's review), not
+before. Keep the `break_glass` credential with few people, and separate from those who
+review grants.
+
 ## 9. Erase personal content
 
 A run's user-provided content lives in its replay case (the original request), its
@@ -2705,6 +2717,13 @@ tenant), `POST /v1/runs/{id}/erase` answers `409 legal_hold` and retention skips
 Placing and releasing are audited (`legal_hold_placed`, `legal_hold_released`) with a
 reason of at least 10 characters; subjects are kept and audited as digests, and a
 released hold stays listed (`GET /v1/legal-holds`).
+
+Placing a hold, releasing it and erasing runs all need `control`, and nothing requires
+a second person: one principal can release a hold and then erase what it covered. Each
+step is audited with its principal and reason, so the chain shows it afterwards. Where
+counsel must control holds, give `control` for holds and erasure to a separate
+credential held by the people accountable for them, and review `legal_hold_released`
+and `run_data_erased` entries.
 
 ### Deletion requests by data subject
 
@@ -2804,6 +2823,13 @@ ctx audit-verify --entries entries.json --keys keys.json
 Every entry's payload digest, record hash and Ed25519 signature are checked, and the
 chain's linkage from genesis: an edited, deleted, reordered or foreign-signed entry
 fails (exit 1). Pin the published keys out of band (they change only on rotation).
+
+Changes that take effect through the store are audited before they are written, so an
+action is never in force without its entry. The converse does not hold: when a write
+loses a race (two operators placing the same hold, a store failure after the entry),
+an entry such as `legal_hold_placed` or `break_glass_opened` can exist for a change
+that was never stored. The store is what is in force; read it (`GET /v1/legal-holds`,
+`GET /v1/break-glass`) rather than inferring state from entries alone.
 
 Large chains verify incrementally: keep the last entry of each verified export, then
 check only what was appended since (`GET /v1/audit/entries?from=<last_sequence + 1>`):

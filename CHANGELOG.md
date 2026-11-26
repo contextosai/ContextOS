@@ -5,6 +5,15 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Documentation
+
+- The guide states what four controls trust and do not enforce, from the 26 November
+  independent review: model allow-lists are advisory for agents whose calls do not go
+  through a metering gateway; break-glass and legal holds need no second person (the
+  check is the audit and Tower's review, so keep those credentials apart); change
+  windows shift with daylight saving; and an audit entry can exist for a hold or grant
+  whose store write lost a race, so read state from the store.
+
 ### Added
 
 - `[guards] quarantine_releasers`: the principals that may release a quarantined
