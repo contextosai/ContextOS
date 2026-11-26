@@ -5,6 +5,84 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+## 0.1.0-alpha.23 - 2026-11-26
+
+Twenty-third alpha: the rest of the governance platform. A governance dashboard,
+incident cases, behaviour flags and evaluation-gated releases; model allow-lists, usage
+ceilings across runs and chargeback; quarantine for drifted tools, signed packs and
+Sigstore-signed release assets; compliance coverage per control and `ctx audit-pack`;
+SIEM formats for audit sinks and GenAI metrics. Quarantine is on by default; see the
+[release notes](docs/releases/v0.1.0-alpha.23.md) before upgrading.
+
+### Added
+
+- Governance dashboard in Tower: the Posture page and `GET /api/dashboard` show held
+  effects, refusals by reason, approvals waiting, shared ceilings near their limit (read
+  live from each runtime), policy drift, active waivers, unreviewed break-glass grants
+  and evidence-chain health.
+- Incident cases in Tower: open a case from a finding, refusal, held effect or anomaly,
+  link evidence by reference, keep a timeline, move it through open, investigating,
+  contained, resolved and closed with an owner, and export a Markdown or JSON report
+  whose digest is journalled (`GET /api/cases/{id}/report`).
+- Behaviour flags in Tower: `new_tool_used`, `new_model_used` and `unusual_hour`
+  findings for an agent with a week of history doing something it has not done before.
+  They ask for a review and never block.
+- Evaluation-gated releases: `POST /v1/agent-releases/evaluations` (evaluator) records a
+  suite's result on an `agent_release`, signed; with `[guards.release_evaluations]`, runs
+  of a covered agent are admitted only when the latest result of every required suite on
+  that exact release passed (`release_unevaluated`, `agent_release_missing`).
+- Model allow-lists: `[guards.models]` lists the models every agent, and each agent,
+  may use; a pinned `model_profile` outside it is refused at admission and a metering
+  gateway's claim for an unlisted or unnamed model is refused before the call
+  (`model_not_allowed`, audited as `usage_refused`).
+- Usage ceilings across runs: `[[guards.usage_ceilings]]` caps model tokens or spend per
+  agent or tenant per window, held on the shared-guarantee ledger before each call so
+  concurrent runs cannot pass a ceiling together (`usage_ceiling_reached:<id>`).
+- Chargeback: Tower's spend groups by `business_unit`, `owner` and `tenant` too, and
+  exports CSV (`GET /api/spend?format=csv`, Export CSV on Model spend); `ctx chargeback`
+  builds the same rows offline from a verified export.
+- Quarantine for drifted upstream tools: a capability whose pinned MCP tool drifted stays
+  refused (`upstream_tool_quarantined`) even if the tool changes back, on every replica
+  and across restarts, until it is re-pinned or released with a reason
+  (`POST /v1/upstream/quarantine/release`, `control`, audited). Listed in
+  `/v1/deployment`; Tower raises `tool_quarantined`.
+- **Breaking:** quarantine is on by default (`[guards] quarantine_drifted_tools`).
+  Migration: a deployment that relied on a drifted tool being served again when its
+  server rolled back now releases it explicitly, or sets
+  `quarantine_drifted_tools = false`.
+- Signed packs: `ctx pack-sign` writes a detached Ed25519 signature (`<pack>.sig`) over
+  a pack's canonical digest; with `[pack_signing]` trusted keys, unsigned, forged or
+  untrusted packs are not loaded (startup stops; reload refuses `signature_refused`),
+  and `pack_loaded` records `signed_by`.
+- Release assets (archives, SBOMs, wheels, the npm tarball) carry a keyless Sigstore
+  bundle (`<asset>.sigstore.json`), each verified against the release workflow before
+  the draft is created; [Verify a release](docs/VERIFY_RELEASE.md) shows all three
+  checks. New `reproducibility` workflow (weekly, on tags) builds the binaries twice
+  from two paths and compares digests; new `advisories` workflow repeats the RustSec
+  and npm advisory checks daily on `main`.
+- Compliance coverage: every control in `docs/COMPLIANCE.md` and `ctx evidence-pack` is
+  marked `covered`, `partial` (naming what is missing) or `organizational`; SOC 2 is in
+  the docs and NIST AI RMF in the pack (`--framework nist-ai-rmf`); the map cites this
+  release's events (quarantine releases, release evaluations, legal holds, break-glass).
+- `ctx audit-pack`: one signed folder for an auditor (evidence pack, inventory,
+  approvals, packs in force, the configuration's digest), with a manifest signed with
+  Ed25519 and a standalone `verify.py` that checks it with Python's standard library.
+- SIEM formats for audit sinks: `format = "splunk_hec" | "datadog" | "elastic_bulk"`
+  with the SIEM's credential in `token_env`; masking, ordering and retries unchanged;
+  Elasticsearch deduplicates by `<tenant>:<sequence>` and a bulk reply with a failed
+  item is retried.
+- GenAI metrics: `gen_ai_client_operation_duration_seconds` (the OpenTelemetry GenAI
+  conventions' `gen_ai.client.operation.duration` for `execute_tool`) by tool and error
+  type. Token usage in that shape is planned (meters report totals, not input/output).
+- `docs/integrations/BUILD_AN_ADAPTER.md`: integrating a framework that has no guide,
+  with a checklist and four scenarios to run (refusal, approval pause, duplicate
+  delivery, lost response).
+
+### Fixed
+
+- `ctx inventory` attributed only the export's last run to its agent: activity of
+  earlier runs was dropped. Every run in an export is now kept while folding.
+
 ## 0.1.0-alpha.22 - 2026-11-26
 
 Twenty-second alpha: ContextOS governs an agent's lifecycle, not only its tool calls.
@@ -17,67 +95,6 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
-- `docs/integrations/BUILD_AN_ADAPTER.md`: integrating a framework that has no guide,
-  with a checklist and four scenarios to run (refusal, approval pause, duplicate
-  delivery, lost response).
-- GenAI metrics: `gen_ai_client_operation_duration_seconds` (the OpenTelemetry GenAI
-  conventions' `gen_ai.client.operation.duration` for `execute_tool`) by tool and error
-  type. Token usage in that shape is planned (meters report totals, not input/output).
-- SIEM formats for audit sinks: `format = "splunk_hec" | "datadog" | "elastic_bulk"`
-  with the SIEM's credential in `token_env`; masking, ordering and retries unchanged;
-  Elasticsearch deduplicates by `<tenant>:<sequence>` and a bulk reply with a failed
-  item is retried.
-- `ctx audit-pack`: one signed folder for an auditor (evidence pack, inventory,
-  approvals, packs in force, the configuration's digest), with a manifest signed with
-  Ed25519 and a standalone `verify.py` that checks it with Python's standard library.
-- Compliance coverage: every control in `docs/COMPLIANCE.md` and `ctx evidence-pack` is
-  marked `covered`, `partial` (naming what is missing) or `organizational`; SOC 2 is in
-  the docs and NIST AI RMF in the pack (`--framework nist-ai-rmf`); the map cites this
-  release's events (quarantine releases, release evaluations, legal holds, break-glass).
-- Release assets (archives, SBOMs, wheels, the npm tarball) carry a keyless Sigstore
-  bundle (`<asset>.sigstore.json`), each verified against the release workflow before
-  the draft is created; [Verify a release](docs/VERIFY_RELEASE.md) shows all three
-  checks. New `reproducibility` workflow (weekly, on tags) builds the binaries twice
-  from two paths and compares digests; new `advisories` workflow repeats the RustSec
-  and npm advisory checks daily on `main`.
-- Signed packs: `ctx pack-sign` writes a detached Ed25519 signature (`<pack>.sig`) over
-  a pack's canonical digest; with `[pack_signing]` trusted keys, unsigned, forged or
-  untrusted packs are not loaded (startup stops; reload refuses `signature_refused`),
-  and `pack_loaded` records `signed_by`.
-- Quarantine for drifted upstream tools: a capability whose pinned MCP tool drifted stays
-  refused (`upstream_tool_quarantined`) even if the tool changes back, on every replica
-  and across restarts, until it is re-pinned or released with a reason
-  (`POST /v1/upstream/quarantine/release`, `control`, audited). Listed in
-  `/v1/deployment`; Tower raises `tool_quarantined`.
-- **Breaking:** quarantine is on by default (`[guards] quarantine_drifted_tools`).
-  Migration: a deployment that relied on a drifted tool being served again when its
-  server rolled back now releases it explicitly, or sets
-  `quarantine_drifted_tools = false`.
-- Chargeback: Tower's spend groups by `business_unit`, `owner` and `tenant` too, and
-  exports CSV (`GET /api/spend?format=csv`, Export CSV on Model spend); `ctx chargeback`
-  builds the same rows offline from a verified export.
-- Usage ceilings across runs: `[[guards.usage_ceilings]]` caps model tokens or spend per
-  agent or tenant per window, held on the shared-guarantee ledger before each call so
-  concurrent runs cannot pass a ceiling together (`usage_ceiling_reached:<id>`).
-- Model allow-lists: `[guards.models]` lists the models every agent, and each agent,
-  may use; a pinned `model_profile` outside it is refused at admission and a metering
-  gateway's claim for an unlisted or unnamed model is refused before the call
-  (`model_not_allowed`, audited as `usage_refused`).
-- Evaluation-gated releases: `POST /v1/agent-releases/evaluations` (evaluator) records a
-  suite's result on an `agent_release`, signed; with `[guards.release_evaluations]`, runs
-  of a covered agent are admitted only when the latest result of every required suite on
-  that exact release passed (`release_unevaluated`, `agent_release_missing`).
-- Behaviour flags in Tower: `new_tool_used`, `new_model_used` and `unusual_hour`
-  findings for an agent with a week of history doing something it has not done before.
-  They ask for a review and never block.
-- Incident cases in Tower: open a case from a finding, refusal, held effect or anomaly,
-  link evidence by reference, keep a timeline, move it through open, investigating,
-  contained, resolved and closed with an owner, and export a Markdown or JSON report
-  whose digest is journalled (`GET /api/cases/{id}/report`).
-- Governance dashboard in Tower: the Posture page and `GET /api/dashboard` show held
-  effects, refusals by reason, approvals waiting, shared ceilings near their limit (read
-  live from each runtime), policy drift, active waivers, unreviewed break-glass grants
-  and evidence-chain health.
 - Approval relay (`examples/approval-relay`): a reference approval service that delivers
   requests to Slack, Microsoft Teams and e-mail, takes decisions back through signed
   callbacks, maps channel identities to approvers, escalates through tiers while a
@@ -228,9 +245,6 @@ Tower's lifecycle approval is on by default; see the
   revoker), and `UsageRefusal::Revoked` carries it.
 
 ### Fixed
-
-- `ctx inventory` attributed only the export's last run to its agent: activity of
-  earlier runs was dropped. Every run in an export is now kept while folding.
 
 - Tower recovers unjournaled lifecycle-request changes at startup and in its periodic
   sweep (the collection was missing from the recovery list).
