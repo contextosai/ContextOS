@@ -1,0 +1,58 @@
+name: reproducibility
+# Builds the release binaries twice, from two checkout paths, and compares digests.
+# Not a required check: a difference is reported in the summary and fails this run.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-twice:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: first
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: elsewhere/second
+      - name: Build from each path
+        run: |
+          set -euo pipefail
+          # The commit time, so embedded timestamps do not depend on when this ran.
+          SOURCE_DATE_EPOCH=$(git -C first log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          for dir in first elsewhere/second; do
+            (
+              cd "$dir"
+              src=$(pwd)
+              RUSTFLAGS="--remap-path-prefix=$src=/build --remap-path-prefix=$HOME=/home" \
+                cargo build --locked --release -p contextosd -p ctx -p towerd
+            )
+          done
+      - name: Compare
+        run: |
+          set -euo pipefail
+          status=0
+          {
+            echo "| Binary | First build | Second build | Same |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for bin in contextosd ctx towerd; do
+            a=$(sha256sum "first/target/release/$bin" | cut -d' ' -f1)
+            b=$(sha256sum "elsewhere/second/target/release/$bin" | cut -d' ' -f1)
+            same=yes
+            if [ "$a" != "$b" ]; then same=no; status=1; fi
+            echo "| \`$bin\` | \`${a:0:16}…\` | \`${b:0:16}…\` | $same |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          if [ "$status" != 0 ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The builds differ. Compare them with diffoscope to find what depends on the path or time." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"

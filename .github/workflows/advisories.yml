@@ -1,0 +1,33 @@
+name: advisories
+# Pull requests already check advisories (ci.yml). This repeats the check daily on main,
+# so an advisory published after a merge is seen without waiting for the next change.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The RustSec database, as `cargo audit` reads it.
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
+        with:
+          command: check advisories
+  node:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: tower, args: "--omit=dev" }
+          - { dir: conformance, args: "" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - run: npm audit ${{ matrix.args }} --audit-level=high
+        working-directory: ${{ matrix.dir }}
