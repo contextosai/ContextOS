@@ -7,7 +7,7 @@ release workflow. None of them needs a key from us.
 ## Archives, SBOMs and packages
 
 ```sh
-tag=v0.1.0-alpha.23
+tag=v0.1.0-alpha.24
 asset=contextos-$tag-aarch64-apple-darwin.tar.gz
 
 # 1. The checksum published next to it.
