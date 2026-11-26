@@ -76,6 +76,13 @@ The first release is `v0.1.0-alpha.1`; it is a prerelease, with evolving APIs an
 storage formats. The client packages go to npm from 0.1.0-alpha.12 and to PyPI from
 0.1.0-alpha.13 (below); crates.io stays unpublished.
 
+Two CI jobs gate every release. `upgrade` runs the previous release's binaries on
+PostgreSQL with that release's packs, then this build on the same database, and checks
+the chain verifies online and offline (`scripts/upgrade_check.py`); `quickstart` runs
+README's Quickstart as written on fresh Linux and macOS runners within ten minutes
+(`scripts/quickstart_from_readme.py`). After publishing a release, set the `upgrade`
+job's `PREVIOUS_RELEASE` to it.
+
 Merge the preparation PR, obtain green CI for the exact commit to be tagged, and
 create an annotated `v<workspace version>` tag at that commit. Pushing the tag runs
 `.github/workflows/release.yml`. It validates the version and notes, builds and tests
