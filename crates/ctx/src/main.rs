@@ -16,6 +16,7 @@ mod init_tool;
 mod inspect;
 mod inventory;
 mod pack_build;
+mod pack_sign;
 mod pack_tests;
 mod plan;
 mod reliability;
@@ -460,6 +461,16 @@ fn run(command: Command) -> Result<Value, Failure> {
             Ok(draft)
         }
         Command::Profiles => Ok(serde_json::to_value(&*STANDARD_PROFILE_REGISTRY).unwrap_or(Value::Null)),
+        Command::PackSign {
+            pack,
+            seed_env,
+            kid,
+            public_key,
+        } => match pack {
+            Some(pack) if !public_key => pack_sign::sign_pack(&pack, &seed_env, &kid),
+            None if public_key => pack_sign::trusted_key(&seed_env, &kid),
+            _ => Err(Failure::Usage("give --pack to sign, or --public-key alone".into())),
+        },
         Command::Attest { claims, seed_env, kid } => {
             let seed = std::env::var(&seed_env).map_err(|_| Failure::Usage(format!("{seed_env} is not set")))?;
             attest::attest(&read(&claims)?, &seed, &kid).map_err(Failure::Usage)

@@ -64,6 +64,8 @@ pub struct PackIdentity<'a> {
     pub tenant_id: &'a str,
     pub sha256: &'a str,
     pub source: &'a str,
+    /// The trusted key that signed the pack, when packs must be signed.
+    pub signed_by: Option<&'a str>,
 }
 
 fn key(pack: &PackIdentity<'_>) -> DocKey {
@@ -143,7 +145,10 @@ where
             Err(error) if error.is_conflict() => continue,
             Err(error) => return Err(unrecorded(&error)),
         };
-        let entry = json!({"pack_ref": pack.pack_ref, "sha256": pack.sha256, "source": pack.source});
+        let mut entry = json!({"pack_ref": pack.pack_ref, "sha256": pack.sha256, "source": pack.source});
+        if let Some(kid) = pack.signed_by {
+            entry["signed_by"] = json!(kid);
+        }
         if let Err(error) = audit.append(pack.tenant_id, "pack_loaded", entry, now).await {
             // Whether the entry landed is unknown; expire the claim so the next load
             // looks for it at once instead of waiting out the lease.
@@ -234,6 +239,7 @@ mod tests {
             tenant_id: "tenant_a",
             sha256,
             source: "startup",
+            signed_by: None,
         }
     }
 

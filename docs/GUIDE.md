@@ -1721,6 +1721,42 @@ reload every replica (or wait one interval) before a rollout names a new version
 then a replica that has not loaded it answers `pack_not_found`. Write access to the
 directory is the authority to publish packs: give it to the release pipeline only.
 
+### Require signed packs
+
+A pack decides what agents may do, so a deployment can require that only packs your
+release process signed are loaded. Generate a signing key once and keep it where your
+release pipeline's secrets live:
+
+```sh
+export CONTEXTOS_PACK_SIGNING_SEED=$(openssl rand -hex 32)   # store it as a CI secret
+ctx pack-sign --public-key --kid release-2026
+# {"kid": "release-2026", "public_key": "…"}
+```
+
+Trust that key in the runtime:
+
+```toml
+[[pack_signing.trusted_keys]]
+kid = "release-2026"
+public_key = "…"
+```
+
+Sign each pack in the release pipeline, after its tests pass, and publish the
+signature next to it:
+
+```sh
+ctx pack-sign --pack packs/support/5.3.0.json --kid release-2026
+# writes packs/support/5.3.0.json.sig
+```
+
+`ctx pack-sign` signs the pack's canonical digest (the one the runtime binds its
+reference to), after checking it against context-pack.v2, and reads the seed only from
+the environment. With `[pack_signing]` set, a pack without a valid signature by a
+trusted key is not loaded: at startup the server stops, and a reload refuses that file
+(`signature_refused`: `pack_signature_missing`, `…_untrusted`, `…_invalid` or
+`…_other_content`) and loads the rest. `pack_loaded` records `signed_by`. To rotate,
+trust the new key alongside the old one, re-sign, then remove the old key.
+
 ### Simulate a pack change on recorded traffic
 
 Before rolling out, read what a candidate would decide differently on runs you have

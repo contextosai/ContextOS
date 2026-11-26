@@ -71,6 +71,23 @@ pub enum Command {
     Profiles,
     /// Hash an API key for the server configuration (reads the key from stdin).
     HashKey,
+    /// Sign a Context Pack for deployments that require signed packs (`[pack_signing]`):
+    /// writes `<pack>.sig` and prints the trusted-key entry to configure. With
+    /// `--public-key` alone, prints only that entry.
+    PackSign {
+        /// The pack file to sign.
+        #[arg(long)]
+        pack: Option<PathBuf>,
+        /// Environment variable holding the 32-byte signing seed, hex encoded
+        /// (`openssl rand -hex 32`). Never pass the seed itself on the command line.
+        #[arg(long, default_value = "CONTEXTOS_PACK_SIGNING_SEED")]
+        seed_env: String,
+        /// The key id the runtime trusts it under.
+        #[arg(long)]
+        kid: String,
+        #[arg(long)]
+        public_key: bool,
+    },
     /// Sign claims as an evidence issuer or outcome witness (for building and testing
     /// one): prints `{attestation, jwks}`, the compact EdDSA JWS and the JWK Set to
     /// configure in `[[evidence_issuers]]`.
