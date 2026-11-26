@@ -6,7 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
-
+- `[privacy] subject_key_env`: digest data subjects with HMAC-SHA256 under a deployment
+  key (`hmac-sha256:…`) instead of plain SHA-256, so a guessed account number or e-mail
+  address cannot be confirmed against the audit chain. `match_unkeyed_subjects` keeps
+  runs indexed before the key findable while migrating, without writing their unkeyed
+  digests to the audit chain. The guide now calls the unkeyed digest a pseudonym. From
+  the 26 November independent review.
 - `[guards] quarantine_releasers`: the principals that may release a quarantined
   upstream tool. A quarantine protects every tenant the runtime serves, so with this set
   another tenant's `control` principal gets `403 quarantine_release_forbidden`;

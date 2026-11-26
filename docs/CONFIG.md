@@ -319,6 +319,8 @@ One `[[guards.usage_ceilings]]` entry.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `match_unkeyed_subjects` | boolean | unset | With a subject key set on a deployment that already indexed runs: also match their unkeyed digests in lookups, holds and erasure (holds then keep those digests in the store, never in the audit chain). Turn it off once those runs are erased or past retention. |
+| `subject_key_env` | string | unset | Environment variable holding a 32-byte hex key: subjects are then digested with HMAC-SHA256 under it (`hmac-sha256:…`), so a digest cannot be recomputed from a guessed identifier without the key. Unset: plain SHA-256 (`sha256:…`), a pseudonym that low-entropy identifiers do not protect. Set it before the first indexed run. |
 | `subject_pointers` | array of string | unset | JSON pointers into a run's request to the identifiers of the people it is about (for example `/input/context/customer_id`). Runs are indexed under a digest of each, for deletion requests and legal holds by subject. Empty: no subject index. |
 
 ## `[[result_schemas]]`

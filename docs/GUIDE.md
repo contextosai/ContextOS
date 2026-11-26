@@ -2714,7 +2714,19 @@ each run under a digest of each identifier:
 ```toml
 [privacy]
 subject_pointers = ["/input/context/customer_id", "/input/context/email"]
+subject_key_env = "CONTEXTOS_SUBJECT_KEY"   # 64 hex characters; keeps digests unguessable
 ```
+
+Without a subject key, the digest is plain SHA-256 of the identifier: a pseudonym, not
+anonymous. Anyone with the audit chain can confirm a guessed account number or e-mail
+address by hashing it, and the digest is the same in every deployment. With
+`subject_key_env`, subjects are digested with HMAC-SHA256 under the key
+(`hmac-sha256:…`), which cannot be recomputed without it; keep the key with the
+deployment's other secrets, since losing it means a person's runs can no longer be
+found by their identifier. Set it before the first indexed run. On a deployment that
+already indexed runs, set `match_unkeyed_subjects = true` as well until those runs are
+erased or past retention: lookups, holds and erasure then also match their unkeyed
+digests, which holds keep in the store but never write to the audit chain.
 
 Then find and erase a person's runs. The identifier travels in the request body, never
 the path, so it stays out of access logs:
