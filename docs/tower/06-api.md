@@ -105,6 +105,18 @@ Every agent, capability, adapter, model and owning team, as
 rows as CSV (`text/csv`, sets joined with `;`, cells starting with `=`, `+`, `-` or `@`
 prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
 
+### `GET /api/dashboard`
+
+The governance dashboard (viewer): `held_effects` (`total`, top `agents`), `denials`
+(`total`, top `by_reason`), `approvals_backlog` (`waiting`, top `by_capability`: requested
+minus redeemed, denied and timed out, an estimate from audit events), `waivers.active`,
+`policy_drift` (open drift, pack-version conflict and lifecycle-enforcement findings),
+`break_glass_unreviewed`, `evidence` (`sources`, `broken`, per-chain `behind`), and
+`ceilings`: per source and shared guarantee, read live with the source's `audit:read` key
+(`GET /v1/guarantees`, `…/holds`), the resources holding capacity and the fullest one's
+share of its limit, fullest first (`unavailable` when a runtime does not answer within
+five seconds).
+
 ### `GET /api/access-review?days=&format=`, `POST /api/access-review/attest`
 
 `days` 7 to 365 (default 90). JSON: `grants` (agent, owner team, capability, adapter,
