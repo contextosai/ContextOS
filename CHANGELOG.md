@@ -5,6 +5,17 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Fixed
+
+- Usage ceilings: usage a metering gateway measured above a reservation now counts
+  against every covering ceiling (even past its limit, which then refuses for the rest
+  of the window), so a caller reserving too little cannot pass a ceiling. Ceiling
+  ledgers are compacted as calls settle: a window with more than 1,024 model calls was
+  refused as `usage_ceiling_reached` once its receipts filled. A store failure part-way
+  through holding releases the holds already taken. The guide states that fixed windows
+  let a burst across a boundary reach twice the limit. From the 26 November independent
+  review.
+
 ## 0.1.0-alpha.23 - 2026-11-26
 
 Twenty-third alpha: the rest of the governance platform. A governance dashboard,

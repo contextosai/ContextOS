@@ -332,6 +332,37 @@ async fn a_usage_ceiling_is_shared_by_every_run_of_an_agent() {
 }
 
 #[tokio::test]
+async fn measured_usage_above_a_reservation_counts_against_the_ceiling() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.usage_ceilings = serde_json::from_value(json!([{"id": "agent-tokens", "resource": "tokens",
+            "per": "agent", "limit": 5000, "window_seconds": 3600}]))
+        .unwrap();
+    })
+    .await;
+    let first = admitted(&w, "run_under_a").await;
+    let second = admitted(&w, "run_under_b").await;
+    // The caller reserves 100 tokens; the metering gateway measures 6,000.
+    let small = first
+        .reserve(json!({"kind": "model_call", "tokens": 100, "cost_cents": 1}))
+        .await;
+    let (status, body) = first
+        .post("meter-key", "settle", json!({"reservation_id": small, "tokens": 6000}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    // The measured 6,000 count, not the 100 reserved: the agent is past its ceiling,
+    // in every run, for the rest of the window.
+    let (status, body) = second
+        .post(
+            "acme-key",
+            "reserve",
+            json!({"kind": "model_call", "tokens": 100, "cost_cents": 1}),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["detail"], json!(["usage_ceiling_reached:agent-tokens"]));
+}
+
+#[tokio::test]
 async fn concurrent_runs_never_pass_a_usage_ceiling_together() {
     let w = world_with(&ALL_CONTROLS, 1, |c| {
         c.guards.usage_ceilings = serde_json::from_value(json!([{"id": "tenant-spend", "resource": "cost_cents",

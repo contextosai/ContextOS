@@ -148,7 +148,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         }
         if let Err(refused) = self.reserve_allocation(admission, &reservation_id, &allocation).await {
-            let _ = self.settle_ceilings(admission, &reservation_id, "released").await;
+            let _ = self.settle_ceilings(admission, &reservation_id, "released", None).await;
             return Err(refused);
         }
         Ok(reservation_id)
@@ -244,7 +244,8 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let settled = self
             .settle_allocated(admission, reservation_id, &allocated, measured, reporter)
             .await?;
-        self.settle_ceilings(admission, reservation_id, "committed").await?;
+        self.settle_ceilings(admission, reservation_id, "committed", measured)
+            .await?;
         let measured = measured
             .map(|(tokens, cost_cents)| json!({"tokens": tokens, "cost_units": cost_cents.saturating_mul(100)}));
         self.audit
