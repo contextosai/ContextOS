@@ -234,3 +234,16 @@ fn dollars_round_up_to_the_cent() {
     assert_eq!(dollars(1), "$0.01");
     assert_eq!(dollars(12_345), "$1.24");
 }
+
+#[test]
+fn chargeback_groups_by_tenant_without_guessing_a_split() {
+    let mut fleet = Fleet::new(10, 48);
+    admitted(&mut fleet, "r1", "bot");
+    fleet.apply("eu", &settled(3, "r1", true, Some("gpt-x"), 1_000, 2_000));
+    let rows = crate::chargeback::rows(&fleet, &json!({}), i64::MIN, i64::MAX, "tenant").unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_ne!(rows[0]["key"], crate::chargeback::SEVERAL_TENANTS);
+    let model = crate::chargeback::rows(&fleet, &json!({}), i64::MIN, i64::MAX, "model").unwrap();
+    assert_eq!(model[0]["usage"]["self_reported_tokens"], 0);
+    assert!(crate::chargeback::rows(&fleet, &json!({}), 0, 1, "planet").is_err());
+}

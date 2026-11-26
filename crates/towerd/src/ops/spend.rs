@@ -4,27 +4,28 @@
 //!
 //! | Route | Role | Purpose |
 //! |---|---|---|
-//! | `GET /api/spend?hours=24\|168\|720&group=agent\|team\|model` | viewer | totals, ranked rows, series and refusals over a window |
+//! | `GET /api/spend?hours=24\|168\|720&group=agent\|team\|business_unit\|owner\|tenant\|model&format=json\|csv` | viewer | totals, ranked rows, series and refusals over a window; `format=csv` the rows for chargeback (see [`crate::chargeback`]) |
 //! | `GET /api/agents/{key}/spend?hours=…` | viewer | one agent's spend: window, models, refusals, series |
 
 use std::collections::BTreeMap;
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, header};
+use axum::response::IntoResponse;
 use axum::routing::get;
 use contextos_store::{AppendLog, DocumentStore};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::api::{ApiError, ApiResult, Shared, caller, ok};
+use crate::chargeback::{self, active, rank, rows, usage_json};
 use crate::collector::wall_clock;
 use crate::fleet::hour_index;
-use crate::spend::{AgentSpend, ModelUsage, Usage};
+use crate::spend::{AgentSpend, Usage};
 
 /// Rows returned at most; the rest are summarised in the totals.
 const MAX_ROWS: usize = 500;
-const UNDECLARED_TEAM: &str = "(undeclared)";
 
 pub fn routes<S, L>() -> Router<Shared<S, L>>
 where
@@ -43,6 +44,8 @@ struct SpendQuery {
     hours: Option<i64>,
     #[serde(default)]
     group: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
 }
 
 /// The window's hours `[from, to)` ending with the current hour, and its bucket size.
@@ -53,12 +56,6 @@ fn window(hours: Option<i64>) -> Result<(i64, i64, i64), ApiError> {
     }
     let to = hour_index(&wall_clock()) + 1;
     Ok((to - hours, to, if hours > 168 { 24 } else { 1 }))
-}
-
-fn usage_json(u: &Usage) -> Value {
-    let mut v = serde_json::to_value(u).unwrap_or_default();
-    v["unsettled_claims"] = json!(u.unsettled_claims());
-    v
 }
 
 /// Hourly (or daily) totals over the window, zeros filled in.
@@ -82,20 +79,6 @@ fn series<'a>(spends: impl Iterator<Item = &'a AgentSpend>, from: i64, to: i64, 
         .collect()
 }
 
-fn rank(rows: &mut [Value]) {
-    rows.sort_by(|a, b| {
-        let key = |v: &Value| {
-            (
-                v["usage"]["cost_units"].as_u64().unwrap_or(0),
-                v["usage"]["tokens"].as_u64().unwrap_or(0),
-            )
-        };
-        key(b)
-            .cmp(&key(a))
-            .then_with(|| a["key"].as_str().cmp(&b["key"].as_str()))
-    });
-}
-
 async fn spend<S: DocumentStore, L: AppendLog>(
     State(t): State<Shared<S, L>>,
     headers: HeaderMap,
@@ -104,72 +87,31 @@ async fn spend<S: DocumentStore, L: AppendLog>(
     caller(&t, &headers, "viewer")?;
     let (from, to, bucket) = window(q.hours)?;
     let group = q.group.as_deref().unwrap_or("agent");
-    if !matches!(group, "agent" | "team" | "model") {
-        return Err(ApiError::bad("group must be agent, team or model"));
-    }
     let declarations = t.records.load("declarations").await?;
     let fleet = t.fleet.read().await;
-    let team = |key: &str| {
-        declarations[key]["team"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .unwrap_or(UNDECLARED_TEAM)
-            .to_owned()
-    };
-
+    let mut rows = rows(&fleet, &declarations, from, to, group).map_err(|e| ApiError::bad(&e))?;
+    if q.format.as_deref() == Some("csv") {
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+                (header::CONTENT_DISPOSITION, "attachment; filename=\"chargeback.csv\""),
+            ],
+            chargeback::csv(group, &rows),
+        )
+            .into_response());
+    }
+    if q.format.as_deref().is_some_and(|f| f != "json") {
+        return Err(ApiError::bad("format must be json or csv"));
+    }
+    let by_agent = active(&fleet, from, to);
     let mut totals = Usage::default();
     let mut refusals: BTreeMap<String, u64> = BTreeMap::new();
-    let mut by_agent: Vec<(&String, &AgentSpend, Usage)> = Vec::new();
-    for (key, s) in &fleet.spend {
-        let u = s.window(from, to);
-        if u == Usage::default() {
-            continue;
-        }
-        totals.add(&u);
+    for (_, s, u) in &by_agent {
+        totals.add(u);
         for (r, n) in s.refusals_in(from, to) {
             *refusals.entry(r).or_default() += n;
         }
-        by_agent.push((key, s, u));
     }
-
-    let mut rows: Vec<Value> = match group {
-        "agent" => by_agent
-            .iter()
-            .map(|(key, s, u)| {
-                let a = fleet.agents.get(*key);
-                json!({"key": key, "agent_id": a.map(|a| a.agent_id.clone()), "team": team(key),
-                    "owner": declarations[key.as_str()]["owner"], "usage": usage_json(u),
-                    "models": s.models_in(from, to).into_keys().collect::<Vec<_>>()})
-            })
-            .collect(),
-        "team" => {
-            let mut teams: BTreeMap<String, (Usage, u64)> = BTreeMap::new();
-            for (key, _, u) in &by_agent {
-                let entry = teams.entry(team(key)).or_default();
-                entry.0.add(u);
-                entry.1 += 1;
-            }
-            teams
-                .into_iter()
-                .map(|(key, (u, agents))| json!({"key": key, "agents": agents, "usage": usage_json(&u)}))
-                .collect()
-        }
-        _ => {
-            let mut models: BTreeMap<String, (ModelUsage, u64)> = BTreeMap::new();
-            for (_, s, _) in &by_agent {
-                for (model, m) in s.models_in(from, to) {
-                    let entry = models.entry(model).or_default();
-                    entry.0.add(&m);
-                    entry.1 += 1;
-                }
-            }
-            models
-                .into_iter()
-                .map(|(key, (m, agents))| json!({"key": key, "agents": agents, "usage": m}))
-                .collect()
-        }
-    };
-    rank(&mut rows);
     let total_rows = rows.len();
     rows.truncate(MAX_ROWS);
     let series = series(by_agent.iter().map(|(_, s, _)| *s), from, to, bucket);

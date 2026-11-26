@@ -2724,6 +2724,23 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
 
+### Bill model spend from an export
+
+`ctx chargeback` groups the model spend in a verified export by `team` (default),
+`agent`, `business_unit`, `owner`, `tenant` or `model`, with Tower's fold, so the rows
+match Tower's `GET /api/spend` for the same entries:
+
+```sh
+ctx chargeback --entries entries.json --keys keys.json --declarations declarations.json \
+    --group business_unit --csv chargeback.csv
+# {"verified_to": 1532, "group": "business_unit", "totals": {…}, "rows": [{"key": "payments", "agents": 3, "usage": {…}}]}
+```
+
+Each row keeps verified usage (measured by a metering gateway), self-reported usage
+(charged as reserved, on the agent's word) and uncovered usage apart, so a bill can say
+how much of it is measured. An export that does not verify bills nothing (exit 1). The
+window is the whole export; export the period you bill.
+
 ### List what an export shows
 
 `ctx inventory` lists the agents, capabilities, adapters, models and owning teams in a

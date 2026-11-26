@@ -123,6 +123,29 @@ pub enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Model spend in an audit export, grouped by agent, team, business_unit, owner,
+    /// tenant or model, keeping verified, self-reported and uncovered usage apart.
+    /// Refused unless the export verifies. The same rows as Tower's `GET /api/spend`.
+    Chargeback {
+        /// The audit export, as for `ctx audit-verify`.
+        #[arg(long)]
+        entries: PathBuf,
+        /// The published audit keys (`GET /v1/audit/keys`).
+        #[arg(long)]
+        keys: PathBuf,
+        /// The last entry of an earlier verified export this one continues.
+        #[arg(long)]
+        continues: Option<PathBuf>,
+        /// Tower's declarations (agent key to declaration), for teams and owners.
+        #[arg(long)]
+        declarations: Option<PathBuf>,
+        /// agent, team, business_unit, owner, tenant or model.
+        #[arg(long, default_value = "team")]
+        group: String,
+        /// Also write the rows as CSV here.
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
     /// List the agents, capabilities, adapters, models and owning teams an audit export
     /// shows, with first and last seen and whether each is declared. Refused unless the
     /// export verifies. The same rows as Tower's `GET /api/inventory`.
