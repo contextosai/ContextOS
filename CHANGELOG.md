@@ -5,23 +5,23 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
-### Documentation
+## 0.1.0-alpha.24 - 2026-11-26
 
-- The guide states what four controls trust and do not enforce, from the 26 November
-  independent review: model allow-lists are advisory for agents whose calls do not go
-  through a metering gateway; break-glass and legal holds need no second person (the
-  check is the audit and Tower's review, so keep those credentials apart); change
-  windows shift with daylight saving; and an audit entry can exist for a hold or grant
-  whose store write lost a race, so read state from the store.
+Twenty-fourth alpha: fixes from an independent review of alpha.20 to alpha.23. Usage
+ceilings now count metered usage above a reservation; legal holds and erasure by data
+subject cover every indexed run, and a frequent subject no longer fails admission;
+quarantine release can be limited to named principals; subjects can be digested with
+a deployment key; release evaluations can require a case count and a suite version.
+See the [release notes](docs/releases/v0.1.0-alpha.24.md) before upgrading.
 
 ### Added
+
 - `[privacy] subject_key_env`: digest data subjects with HMAC-SHA256 under a deployment
   key (`hmac-sha256:…`) instead of plain SHA-256, so a guessed account number or e-mail
   address cannot be confirmed against the audit chain. `match_unkeyed_subjects` keeps
   runs indexed before the key findable while migrating, without writing their unkeyed
   digests to the audit chain. The guide now calls the unkeyed digest a pseudonym. From
   the 26 November independent review.
-
 - Release evaluations: a rule can set `min_cases` (a pass over fewer cases does not
   count) and `suite_versions` (only results of that suite version count), so a one-case
   pass or an older suite cannot satisfy a gate. The guide states what the gate trusts:
@@ -53,6 +53,15 @@ minor versions may break APIs and every break is listed.
   run records its own subjects' digests, so a hold by subject covers every run about the
   subject, even one past a truncated index. A run indexed before this release that a
   truncated index does not list counts as held. From the 26 November independent review.
+
+### Documentation
+
+- The guide states what four controls trust and do not enforce, from the 26 November
+  independent review: model allow-lists are advisory for agents whose calls do not go
+  through a metering gateway; break-glass and legal holds need no second person (the
+  check is the audit and Tower's review, so keep those credentials apart); change
+  windows shift with daylight saving; and an audit entry can exist for a hold or grant
+  whose store write lost a race, so read state from the store.
 
 ## 0.1.0-alpha.23 - 2026-11-26
 
