@@ -205,6 +205,7 @@ Guards on agent behaviour.
 | `required_release_refs` | array of string | unset | Release artifact types every run's execution contract must pin in `release_refs` (e.g. `["model_profile", "evaluator_suite"]`), so each decision records which model and evaluators produced it. Unset: `model_profile` and `evaluator_suite` in production, none in development; `[]` opts out explicitly. |
 | `risk_tiers` | table | unset | What each capability's risk tier (`low`, `limited`, `high`, `prohibited`) needs: allow, an approval of the exact action, or refusal; unclassified capabilities count as `high` (see `contextos_gateway::risk_tiers`). Unset: off. |
 | `trust_supplied_memory` | boolean | `false` | Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless. |
+| `usage_ceilings` | array of tables | unset | Model tokens or spend per agent or tenant per window, shared by every run (see `contextos_gateway::usage_ceilings`). Empty: none. |
 | `user_binding` | `"required"` \| `"observe"` \| `"off"` | unset | Whether a run's declared user must be the user its caller's delegated token acts for (`required`, `observe`, `off`; see `user_binding`). Unset: `observe`. |
 
 ### `[[guards.change_windows]]`
@@ -237,6 +238,19 @@ One `[[guards.circuit_breakers]]` rule.
 | `threshold` | integer | required | Events per window at which the breaker opens. |
 | `trip` | `"refuse"` \| `"revoke"` | `"refuse"` | What a trip does besides refusing. |
 | `window_seconds` | integer | `60` |  |
+
+### `[[guards.usage_ceilings]]`
+
+One `[[guards.usage_ceilings]]` entry.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `agents` | array of string | unset | Agents it applies to (with `per = "agent"`); every agent when empty. |
+| `id` | string | required |  |
+| `limit` | integer | required |  |
+| `per` | `"agent"` \| `"tenant"` | required |  |
+| `resource` | `"tokens"` \| `"cost_cents"` | required |  |
+| `window_seconds` | integer | required | 60 seconds to 31 days. |
 
 ## `[kill_switch]`
 

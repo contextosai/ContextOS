@@ -485,6 +485,20 @@
         }
       ]
     },
+    "CeilingResource": {
+      "enum": [
+        "tokens",
+        "cost_cents"
+      ],
+      "type": "string"
+    },
+    "CeilingScope": {
+      "enum": [
+        "agent",
+        "tenant"
+      ],
+      "type": "string"
+    },
     "ChangeWindow": {
       "additionalProperties": false,
       "description": "One `[[guards.change_windows]]` entry.",
@@ -1162,6 +1176,13 @@
           "default": false,
           "description": "Admit recalled memory (`deps.promoted_memory`) that no memory-governance service can verify. Without `[providers.memory]`, production refuses such memory unless this is set; with it, every item is verified against promoted state regardless.",
           "type": "boolean"
+        },
+        "usage_ceilings": {
+          "description": "Model tokens or spend per agent or tenant per window, shared by every run (see `contextos_gateway::usage_ceilings`). Empty: none.",
+          "items": {
+            "$ref": "#/$defs/UsageCeiling"
+          },
+          "type": "array"
         },
         "user_binding": {
           "anyOf": [
@@ -2498,6 +2519,47 @@
           "type": "string"
         }
       ]
+    },
+    "UsageCeiling": {
+      "additionalProperties": false,
+      "description": "One `[[guards.usage_ceilings]]` entry.",
+      "properties": {
+        "agents": {
+          "description": "Agents it applies to (with `per = \"agent\"`); every agent when empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "per": {
+          "$ref": "#/$defs/CeilingScope"
+        },
+        "resource": {
+          "$ref": "#/$defs/CeilingResource"
+        },
+        "window_seconds": {
+          "description": "60 seconds to 31 days.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "resource",
+        "per",
+        "limit",
+        "window_seconds"
+      ],
+      "type": "object"
     },
     "UserBinding": {
       "enum": [

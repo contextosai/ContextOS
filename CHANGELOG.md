@@ -17,6 +17,9 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- Usage ceilings across runs: `[[guards.usage_ceilings]]` caps model tokens or spend per
+  agent or tenant per window, held on the shared-guarantee ledger before each call so
+  concurrent runs cannot pass a ceiling together (`usage_ceiling_reached:<id>`).
 - Model allow-lists: `[guards.models]` lists the models every agent, and each agent,
   may use; a pinned `model_profile` outside it is refused at admission and a metering
   gateway's claim for an unlisted or unnamed model is refused before the call

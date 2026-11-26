@@ -79,6 +79,7 @@ pub mod task_authorization;
 pub mod tool_call_check;
 pub mod upstream_drift;
 mod usage;
+pub mod usage_ceilings;
 mod usage_claim;
 
 use std::collections::{HashMap, HashSet};
@@ -320,6 +321,8 @@ pub struct Gateway<S, L> {
     break_glass: Option<break_glass::BreakGlassPolicy>,
     /// Which evaluation suites agent releases must pass (see [`release_evaluations`]).
     release_evaluations: Option<release_evaluations::ReleaseEvaluationPolicy>,
+    /// Model usage ceilings per agent or tenant per window (see [`usage_ceilings`]).
+    usage_ceilings: Vec<usage_ceilings::UsageCeiling>,
     /// Rate-based stops across runs (see [`circuit_breakers`]).
     breakers: Vec<circuit_breakers::BreakerRule>,
     /// Scores consequential calls before they are sent (see [`action_monitor`]).
@@ -580,6 +583,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             subject_pointers: Vec::new(),
             break_glass: None,
             release_evaluations: None,
+            usage_ceilings: Vec::new(),
             breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

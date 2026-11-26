@@ -136,7 +136,21 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             UsageKind::Replan => json!({"tokens": 0, "tool_calls": 0, "replans": 1, "cost_units": 0}),
         };
         let reservation_id = format!("{PREFIX}{}", self.ports.ids.new_id("usage"));
-        self.reserve_allocation(admission, &reservation_id, &allocation).await?;
+        if kind == UsageKind::ModelCall {
+            // Shared ceilings first: a run's own budget is not reserved for a call the
+            // agent's or tenant's ceiling refuses.
+            self.hold_ceilings(
+                admission,
+                &reservation_id,
+                tokens.max(self.model_call_floor),
+                cost_cents,
+            )
+            .await?;
+        }
+        if let Err(refused) = self.reserve_allocation(admission, &reservation_id, &allocation).await {
+            let _ = self.settle_ceilings(admission, &reservation_id, "released").await;
+            return Err(refused);
+        }
         Ok(reservation_id)
     }
 
@@ -230,6 +244,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let settled = self
             .settle_allocated(admission, reservation_id, &allocated, measured, reporter)
             .await?;
+        self.settle_ceilings(admission, reservation_id, "committed").await?;
         let measured = measured
             .map(|(tokens, cost_cents)| json!({"tokens": tokens, "cost_units": cost_cents.saturating_mul(100)}));
         self.audit
