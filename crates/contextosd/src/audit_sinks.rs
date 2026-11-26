@@ -70,6 +70,14 @@ pub struct AuditSinkConfig {
     /// `genesis` (default): deliver each tenant's whole chain; `head`: from now on.
     #[serde(default)]
     pub start: Start,
+    /// The wire format: `contextos` (default), `splunk_hec`, `datadog` or
+    /// `elastic_bulk` (see [`crate::audit_sink_formats`]).
+    #[serde(default)]
+    pub format: crate::audit_sink_formats::SinkFormat,
+    /// Environment variable holding the SIEM's credential (HEC token, API key); required
+    /// for every format but `contextos`. Sent only in its header, never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
@@ -110,6 +118,9 @@ pub fn check(config: &Config) -> Result<(), String> {
             return Err(format!(
                 "audit sink {id}: at most {MAX_MASKS} non-empty mask entries, none the whole payload"
             ));
+        }
+        if sink.format.needs_token() && sink.token_env.as_deref().is_none_or(str::is_empty) {
+            return Err(format!("audit sink {id}: format {:?} needs token_env", sink.format));
         }
         if !sink.mask.is_empty() && sink.mask_key_env.as_deref().is_none_or(str::is_empty) {
             return Err(format!("audit sink {id}: mask needs mask_key_env"));
@@ -228,6 +239,8 @@ pub fn delivered(entry: &Value, masker: &Masker) -> Value {
 pub struct Sink {
     pub config: AuditSinkConfig,
     secret: ring::hmac::Key,
+    /// The SIEM credential, for formats that take one (never in `Debug`).
+    token: Option<String>,
     masker: Masker,
 }
 
@@ -243,12 +256,29 @@ impl Sink {
     /// # Errors
     /// When a secret is shorter than 32 bytes.
     pub fn new(config: AuditSinkConfig, secret: &[u8], mask_key: Option<&[u8]>) -> Result<Self, String> {
+        Self::with_token(config, secret, mask_key, None)
+    }
+
+    /// As [`Sink::new`], with the SIEM credential its format needs.
+    ///
+    /// # Errors
+    /// When a secret is shorter than 32 bytes, or the format needs a token and has none.
+    pub fn with_token(
+        config: AuditSinkConfig,
+        secret: &[u8],
+        mask_key: Option<&[u8]>,
+        token: Option<String>,
+    ) -> Result<Self, String> {
         if secret.len() < 32 {
             return Err(format!("{} must hold at least 32 bytes", config.secret_env));
+        }
+        if config.format.needs_token() && token.as_deref().is_none_or(|t| t.trim().is_empty()) {
+            return Err(format!("audit sink {}: {:?} needs its token", config.id, config.format));
         }
         let masker = Masker::new(&config.mask, mask_key).map_err(|e| format!("audit sink {}: {e}", config.id))?;
         Ok(Self {
             secret: ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret),
+            token,
             masker,
             config,
         })
@@ -264,7 +294,13 @@ pub fn sinks(config: &Config) -> Result<Vec<Sink>, String> {
         .map(|sink| {
             let secret = env(&sink.secret_env)?;
             let mask_key = sink.mask_key_env.as_deref().map(env).transpose()?;
-            Sink::new(sink.clone(), secret.as_bytes(), mask_key.as_deref().map(str::as_bytes))
+            let token = sink.token_env.as_deref().map(env).transpose()?;
+            Sink::with_token(
+                sink.clone(),
+                secret.as_bytes(),
+                mask_key.as_deref().map(str::as_bytes),
+                token,
+            )
         })
         .collect()
 }
@@ -386,9 +422,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Exporter<S, L> {
             .map(|r| delivered(&r.body, &sink.masker))
             .collect();
         if !entries.is_empty() {
-            let body = json!({"sink": sink.config.id, "tenant_id": tenant, "from_sequence": next,
-                "to_sequence": last, "entries": entries});
-            if !self.post(sink, &body).await {
+            if !self.post(sink, tenant, next, last, &entries).await {
                 self.metrics.audit_sink(&sink.config.id, "failed");
                 let backoff = self.backoff.entry(state).or_default();
                 backoff.failures = backoff.failures.saturating_add(1);
@@ -406,18 +440,29 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Exporter<S, L> {
         Ok(full)
     }
 
-    async fn post(&self, sink: &Sink, body: &Value) -> bool {
-        let bytes = serde_json::to_vec(body).unwrap_or_default();
+    async fn post(&self, sink: &Sink, tenant: &str, from: u64, to: u64, entries: &[Value]) -> bool {
+        let format = sink.config.format;
+        let (content_type, bytes) = format.encode(&sink.config.id, tenant, from, to, entries);
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let sent = self
+        let mut request = self
             .client
             .post(&sink.config.url)
-            .header("content-type", "application/json")
-            .header("contextos-signature", signature(&sink.secret, timestamp, &bytes))
-            .body(bytes)
-            .send()
-            .await;
-        sent.is_ok_and(|r| r.status().is_success())
+            .header("content-type", content_type)
+            .header("contextos-signature", signature(&sink.secret, timestamp, &bytes));
+        if let Some((name, value)) = sink.token.as_deref().and_then(|t| format.auth_header(t)) {
+            request = request.header(name, value);
+        }
+        let Ok(response) = request.body(bytes).send().await else {
+            return false;
+        };
+        let status = response.status().as_u16();
+        // Only a bulk reply is read; it is bounded by what the receiver sends.
+        let body = if format == crate::audit_sink_formats::SinkFormat::ElasticBulk {
+            response.bytes().await.map(|b| b.to_vec()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        format.accepted(status, &body)
     }
 }
 
