@@ -165,6 +165,8 @@ pub struct AppState<S, L> {
     pub models: Option<contextos_gateway::model_allowlist::ModelPolicy>,
     /// `[kill_switch] global_principals`: who may revoke every tenant at once.
     pub global_kill_switch: Vec<String>,
+    /// `[guards] quarantine_releasers`: who may release a quarantine (empty: any `control`).
+    pub quarantine_releasers: Vec<String>,
     /// `[server.tls] spiffe_agents` (see [`crate::svid`]).
     pub spiffe_agents: Option<std::collections::BTreeMap<String, String>>,
     /// Browser origins that may call the MCP endpoint.

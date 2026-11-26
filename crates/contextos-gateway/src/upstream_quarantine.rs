@@ -82,6 +82,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         if !self.quarantine_drifted {
             return Ok(());
         }
+        let mut synced = false;
         for _ in 0..8 {
             let (revision, stored) = self.quarantine_doc().await?;
             let mut tools = self.current(stored.clone());
@@ -104,6 +105,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             }
             if tools == stored {
                 self.drift.set_quarantined(tools.keys().cloned().collect());
+                synced = true;
                 break;
             }
             let body = json!({"tools": tools});
@@ -114,11 +116,27 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             match written {
                 Ok(()) => {
                     self.drift.set_quarantined(tools.keys().cloned().collect());
+                    synced = true;
                     break;
                 }
                 Err(e) if e.is_conflict() => {}
                 Err(e) => return Err(e.into()),
             }
+        }
+        if !synced {
+            // Other replicas kept winning the write. Refuse what the store holds now and
+            // what this check found drifted; the next check writes it.
+            tracing::warn!("quarantine not written after repeated conflicts; refusing locally until the next check");
+            let (_, stored) = self.quarantine_doc().await?;
+            let mut refused: std::collections::HashSet<String> = self.current(stored).into_keys().collect();
+            refused.extend(
+                statuses
+                    .iter()
+                    .filter(|(_, s)| **s == UpstreamStatus::Drifted)
+                    .map(|(c, _)| c.clone()),
+            );
+            refused.extend(self.drift.quarantined_set());
+            self.drift.set_quarantined(refused);
         }
         for (capability, status) in statuses.iter_mut() {
             if self.drift.quarantined(capability) && *status != UpstreamStatus::Drifted {

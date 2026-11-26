@@ -115,6 +115,12 @@ pub struct GuardsConfig {
     /// as it matches its pin.
     #[serde(default = "quarantine_default")]
     pub quarantine_drifted_tools: bool,
+    /// Principals (each also needing `control`) that may release a quarantine through
+    /// `POST /v1/upstream/quarantine/release`. A quarantine protects every tenant of the
+    /// runtime, so a deployment serving more than one tenant should name its own
+    /// operators here. Empty: any `control` principal (a single-tenant deployment).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quarantine_releasers: Vec<String>,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -212,6 +218,7 @@ impl Default for GuardsConfig {
             models: None,
             usage_ceilings: Vec::new(),
             quarantine_drifted_tools: true,
+            quarantine_releasers: Vec::new(),
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,

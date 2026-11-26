@@ -89,3 +89,40 @@ async fn a_global_revocation_stops_every_tenant_until_restored() {
     let call = dispatch(&w, "run_before", &refund("run_before", "r2", "ord_882", "cus_77", 100)).await;
     assert_eq!(call["report"]["status"], "completed", "{call}");
 }
+
+#[tokio::test]
+async fn only_named_releasers_may_lift_a_quarantine() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.quarantine_releasers = vec!["svc_oncall".into()];
+        c.api_keys.push(ApiKey {
+            key_sha256: hash_api_key("other-tenant-key"),
+            tenant_id: "tenant_other".into(),
+            principal_id: "svc_other_ops".into(),
+            scopes: vec!["control".into()],
+            agent_ids: None,
+        });
+    })
+    .await;
+    let release = json!({"capability_id": "adp_payments.issue_refund", "reason": "reviewed: benign rollback"});
+    // Another tenant's operator holds `control` but is not named: the quarantine
+    // protects every tenant, so it is not theirs to lift.
+    let (status, body) = post(
+        &w,
+        "/v1/upstream/quarantine/release",
+        "other-tenant-key",
+        release.clone(),
+    )
+    .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (403, Some("quarantine_release_forbidden")),
+        "{body}"
+    );
+    // A named releaser gets through to the quarantine check itself.
+    let (status, body) = post(&w, "/v1/upstream/quarantine/release", "ops-key", release).await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (404, Some("not_quarantined")),
+        "{body}"
+    );
+}

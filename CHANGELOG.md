@@ -5,6 +5,21 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Added
+
+- `[guards] quarantine_releasers`: the principals that may release a quarantined
+  upstream tool. A quarantine protects every tenant the runtime serves, so with this set
+  another tenant's `control` principal gets `403 quarantine_release_forbidden`;
+  `--check-config` warns when several tenants are configured without it. From the
+  26 November independent review.
+
+### Fixed
+
+- A replica that could not write a new quarantine after repeated store conflicts kept
+  serving the drifted tool until its next check; it now refuses it locally meanwhile.
+- Break-glass grants compared their expiry with the clock as strings; they are now
+  compared as times, and an expiry that is not a contract time counts as expired.
+
 ### Fixed
 
 - Subject index: a subject named by about 10,000 runs made every further run naming it

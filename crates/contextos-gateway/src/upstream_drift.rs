@@ -105,6 +105,10 @@ impl DriftState {
         self.1.read().map_or(true, |set| set.contains(capability_id))
     }
 
+    pub(crate) fn quarantined_set(&self) -> HashSet<String> {
+        self.1.read().map(|set| set.clone()).unwrap_or_default()
+    }
+
     pub(crate) fn set_quarantined(&self, capabilities: HashSet<String>) {
         if let Ok(mut set) = self.1.write() {
             *set = capabilities;

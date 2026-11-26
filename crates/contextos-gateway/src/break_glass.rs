@@ -14,6 +14,7 @@
 //! lifted, so the post-incident review sees each one. Tower reports every grant until a
 //! risk reviewer records its review.
 
+use contextos_contract::validation::compare_contract_times;
 use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -106,7 +107,11 @@ fn key(tenant_id: &str) -> DocKey {
 }
 
 fn open_at(grant: &Value, now: &str) -> bool {
-    grant["closed_at"].is_null() && grant["expires_at"].as_str().is_some_and(|e| e > now)
+    // Compared as times, not strings, so a differently formatted timestamp still counts.
+    grant["closed_at"].is_null()
+        && grant["expires_at"]
+            .as_str()
+            .is_some_and(|e| compare_contract_times(e, now) == Some(std::cmp::Ordering::Greater))
 }
 
 impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
@@ -280,5 +285,26 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                         .is_some_and(|l| l.iter().any(|x| x == lift.as_str()))
             })
             .and_then(|g| g["grant_id"].as_str().map(str::to_owned)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_grant_is_open_until_its_expiry_compared_as_a_time() {
+        let grant = |expires: &str| json!({"closed_at": null, "expires_at": expires});
+        let now = "2026-11-26T10:00:00Z";
+        // As strings, ".5Z" sorts before "Z": the grant would look expired.
+        assert!(open_at(&grant("2026-11-26T10:00:00.5Z"), now));
+        assert!(open_at(&grant("2026-11-26T10:00:01Z"), now));
+        // An expiry that is not a contract time counts as closed (fail closed).
+        assert!(!open_at(&grant("2026-11-26T11:30:00+01:00"), now));
+        assert!(!open_at(&grant("tomorrow"), now));
+        assert!(!open_at(&grant(now), now));
+        let mut closed = grant("2026-11-26T11:00:00Z");
+        closed["closed_at"] = json!(now);
+        assert!(!open_at(&closed, now));
     }
 }

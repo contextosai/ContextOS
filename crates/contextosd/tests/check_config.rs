@@ -297,3 +297,30 @@ fn every_control_pack_starts_the_quickstart_alone_and_together() {
     let (ok, text) = check(&with_controls("check-controls-all.toml", &together), Some(&seed));
     assert!(ok, "{text}");
 }
+
+#[test]
+fn several_tenants_without_quarantine_releasers_are_warned() {
+    let other_tenant = format!(
+        "\n[[api_keys]]\nkey_sha256 = \"sha256:{}\"\ntenant_id = \"tenant_other\"\nprincipal_id = \"svc_other_ops\"\nscopes = [\"control\"]\n",
+        "cd".repeat(32)
+    );
+    let warning = "warning: several tenants and no [guards] quarantine_releasers";
+    let one = config("check-quarantine-one.toml", "127.0.0.1:0");
+    let (ok, text) = check(&one, Some(&"11".repeat(32)));
+    assert!(ok && !text.contains(warning), "{text}");
+
+    let several = config("check-quarantine-several.toml", "127.0.0.1:0");
+    let base = std::fs::read_to_string(&several).unwrap();
+    std::fs::write(&several, format!("{base}{other_tenant}")).unwrap();
+    let (ok, text) = check(&several, Some(&"11".repeat(32)));
+    assert!(ok && text.contains(warning), "{text}");
+
+    let named = config("check-quarantine-named.toml", "127.0.0.1:0");
+    let named_text = format!(
+        "{}{other_tenant}\n[guards]\nquarantine_releasers = [\"svc_oncall\"]\n",
+        std::fs::read_to_string(&named).unwrap()
+    );
+    std::fs::write(&named, named_text).unwrap();
+    let (ok, text) = check(&named, Some(&"11".repeat(32)));
+    assert!(ok && !text.contains(warning), "{text}");
+}
