@@ -2772,6 +2772,44 @@ ctx audit-verify --entries new.json --keys keys.json --continues last-verified-e
 The new entries must continue that head exactly (next sequence, linked hash, same
 tenant), so a rewritten or truncated history cannot pass as a continuation.
 
+### Hand an auditor one signed folder
+
+`ctx audit-pack` puts everything a review of a period needs in one folder, signs it, and
+includes a script that checks it without ContextOS installed:
+
+```sh
+export CONTEXTOS_AUDIT_PACK_SEED=$(cat /run/secrets/audit-pack-seed)   # 32 bytes, hex
+ctx audit-pack --entries entries.json --keys keys.json \
+    --framework soc2 --framework eu-ai-act \
+    --pack packs/support/5.3.0.json --config contextosd.toml \
+    --config-report check.txt --declarations declarations.json \
+    --kid audit-2026 --out audit-2026-q4/
+# {"manifest_sha256": "sha256:…", "public_key": "…", "files": 14, …}
+```
+
+| In the folder | What it is |
+|---|---|
+| `evidence/` | The evidence pack for the export (§11), including the export and keys |
+| `inventory.json`, `inventory.csv` | What the export shows: agents, tools, adapters, models |
+| `approvals.json` | Every approval event in the period |
+| `packs/`, `packs.json` | The packs in force, their canonical digests, and their signatures when present |
+| `config.json` | The configuration file's digest only (a configuration can name secret locations) |
+| `manifest.json`, `manifest.sig` | Every file's SHA-256, signed with Ed25519 |
+| `verify.py` | Checks the signature and every file with Python's standard library |
+
+Give the auditor the public key separately (it is printed when the pack is built), and
+they run:
+
+```sh
+python3 verify.py --public-key <key>
+# VERIFIED: manifest signed by audit-2026; 14 files match their digests
+```
+
+`verify.py` never trusts the key written in `manifest.sig`: anyone could re-sign a
+changed folder with their own key. It checks the folder, not the audit chain inside it;
+`ctx audit-verify --entries evidence/entries.json --keys evidence/keys.json` re-checks
+each entry. The pack is built only from an export that verifies.
+
 ### Bill model spend from an export
 
 `ctx chargeback` groups the model spend in a verified export by `team` (default),

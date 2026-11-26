@@ -140,6 +140,44 @@ pub enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// One signed folder for an auditor: the evidence pack, inventory, approvals, packs
+    /// in force, the configuration's digest, a signed manifest and a standalone
+    /// `verify.py`. Refused unless the export verifies.
+    AuditPack {
+        /// The audit export, as for `ctx audit-verify`.
+        #[arg(long)]
+        entries: PathBuf,
+        /// The published audit keys (`GET /v1/audit/keys`).
+        #[arg(long)]
+        keys: PathBuf,
+        /// The last entry of an earlier verified export this one continues.
+        #[arg(long)]
+        continues: Option<PathBuf>,
+        /// soc2, iso42001, eu-ai-act, owasp-agentic or nist-ai-rmf; repeat for several.
+        #[arg(long, required = true)]
+        framework: Vec<String>,
+        /// A pack in force in the period (its `.sig` is included when present); repeat.
+        #[arg(long)]
+        pack: Vec<PathBuf>,
+        /// The server configuration: only its digest is included.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// `contextosd --check-config` output, included as supplied.
+        #[arg(long)]
+        config_report: Option<PathBuf>,
+        /// Tower's declarations (agent key to declaration), for the inventory.
+        #[arg(long)]
+        declarations: Option<PathBuf>,
+        /// Environment variable holding the 32-byte manifest signing seed, hex encoded.
+        #[arg(long, default_value = "CONTEXTOS_AUDIT_PACK_SEED")]
+        seed_env: String,
+        /// The key id the auditor knows the signing key by.
+        #[arg(long)]
+        kid: String,
+        /// The folder to write; it must not exist or be empty.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Model spend in an audit export, grouped by agent, team, business_unit, owner,
     /// tenant or model, keeping verified, self-reported and uncovered usage apart.
     /// Refused unless the export verifies. The same rows as Tower's `GET /api/spend`.

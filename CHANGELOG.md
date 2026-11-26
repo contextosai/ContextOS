@@ -17,6 +17,9 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- `ctx audit-pack`: one signed folder for an auditor (evidence pack, inventory,
+  approvals, packs in force, the configuration's digest), with a manifest signed with
+  Ed25519 and a standalone `verify.py` that checks it with Python's standard library.
 - Compliance coverage: every control in `docs/COMPLIANCE.md` and `ctx evidence-pack` is
   marked `covered`, `partial` (naming what is missing) or `organizational`; SOC 2 is in
   the docs and NIST AI RMF in the pack (`--framework nist-ai-rmf`); the map cites this
