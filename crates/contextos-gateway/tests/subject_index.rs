@@ -130,3 +130,51 @@ async fn a_run_without_a_subject_record_is_not_held_by_a_complete_index_that_omi
             .is_ok()
     );
 }
+
+#[tokio::test]
+async fn a_subject_key_keeps_unkeyed_digests_out_of_the_audit_chain() {
+    use contextos_gateway::privacy::keyed_subject_digest;
+    use contextos_store::AppendLog;
+    let mut h = harness("allow", Behavior::Confirm).await;
+    h.gateway
+        .set_subject_pointers(vec!["/input/context/customer_id".into()]);
+    // A run indexed before the deployment set a subject key.
+    let request = json!({"input": {"context": {"customer_id": "cus_77"}}});
+    h.gateway
+        .remember_replay_case(&h.admission, &request, &json!({}), &json!({}))
+        .await
+        .unwrap();
+
+    // Keyed, without matching unkeyed digests: the older run is not found.
+    let key = [7; 32];
+    h.gateway.set_subject_key(Some(key), false);
+    assert_eq!(
+        h.gateway.subject_digest_of("cus_77"),
+        keyed_subject_digest(&key, "cus_77")
+    );
+    assert_eq!(
+        h.gateway.subject_runs(TENANT, "cus_77").await.unwrap().0,
+        Vec::<String>::new()
+    );
+
+    // While migrating, lookups and holds also match the unkeyed digest.
+    h.gateway.set_subject_key(Some(key), true);
+    let (runs, _) = h.gateway.subject_runs(TENANT, "cus_77").await.unwrap();
+    assert_eq!(runs, vec![h.admission.run_id.clone()]);
+    h.gateway
+        .place_hold(TENANT, &hold("lh_key", "cus_77"), "legal")
+        .await
+        .unwrap();
+    let refused = h.gateway.erase_run(&h.admission, "dpo", "retention sweep").await;
+    assert!(
+        matches!(refused, Err(ErasureError::Held(ref id)) if id == "lh_key"),
+        "{refused:?}"
+    );
+
+    // The audit chain carries the keyed digest only.
+    let entries = h.audit.log().range(TENANT, 1, 1000).await.unwrap();
+    let placed = entries.iter().find(|e| e.body["kind"] == "legal_hold_placed").unwrap();
+    let text = placed.body.to_string();
+    assert!(text.contains(&keyed_subject_digest(&key, "cus_77")), "{text}");
+    assert!(!text.contains(&subject_digest("cus_77")), "{text}");
+}

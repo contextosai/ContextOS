@@ -69,6 +69,8 @@ pub struct DispatchSetup {
     pub risk_tiers: Option<contextos_gateway::risk_tiers::TierPolicy>,
     /// `[privacy] subject_pointers`.
     pub subject_pointers: Vec<String>,
+    /// `[privacy] subject_key_env`, read, with `match_unkeyed_subjects`.
+    pub subject_key: Option<([u8; 32], bool)>,
     /// `[guards.break_glass]`.
     pub break_glass: Option<contextos_gateway::break_glass::BreakGlassPolicy>,
     /// `[guards.release_evaluations]`.
@@ -141,6 +143,9 @@ where
     gateway.set_risk_tiers(setup.risk_tiers);
     gateway.set_change_windows(setup.change_windows);
     gateway.set_subject_pointers(setup.subject_pointers);
+    if let Some((key, match_unkeyed)) = setup.subject_key {
+        gateway.set_subject_key(Some(key), match_unkeyed);
+    }
     gateway.set_break_glass(setup.break_glass);
     gateway.set_release_evaluations(setup.release_evaluations);
     gateway.set_usage_ceilings(setup.usage_ceilings);
@@ -483,6 +488,7 @@ pub fn dispatch_setup_from_config(config: &crate::Config) -> Result<Option<Dispa
         risk_tiers: config.guards.risk_tiers.clone(),
         change_windows: config.guards.change_windows.clone(),
         subject_pointers: config.privacy.subject_pointers.clone(),
+        subject_key: subject_key(config)?.map(|key| (key, config.privacy.match_unkeyed_subjects)),
         break_glass: config.guards.break_glass.clone(),
         release_evaluations: config.guards.release_evaluations.clone(),
         usage_ceilings: config.guards.usage_ceilings.clone(),
@@ -543,4 +549,15 @@ pub fn unbounded_capabilities(setup: &DispatchSetup) -> Vec<String> {
         }
     }
     notes
+}
+
+/// `[privacy] subject_key_env`: 32 bytes, hex.
+fn subject_key(config: &crate::Config) -> Result<Option<[u8; 32]>, String> {
+    let Some(var) = &config.privacy.subject_key_env else {
+        return Ok(None);
+    };
+    let text = std::env::var(var).map_err(|_| format!("{var} is not set (the subject key: 64 hex characters)"))?;
+    let bytes = hex::decode(text.trim()).map_err(|_| format!("{var} must be hex"))?;
+    let key: [u8; 32] = bytes.try_into().map_err(|_| format!("{var} must hold 32 bytes"))?;
+    Ok(Some(key))
 }

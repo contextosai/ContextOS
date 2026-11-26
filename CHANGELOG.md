@@ -6,6 +6,12 @@ minor versions may break APIs and every break is listed.
 ## Unreleased
 
 ### Added
+- `[privacy] subject_key_env`: digest data subjects with HMAC-SHA256 under a deployment
+  key (`hmac-sha256:…`) instead of plain SHA-256, so a guessed account number or e-mail
+  address cannot be confirmed against the audit chain. `match_unkeyed_subjects` keeps
+  runs indexed before the key findable while migrating, without writing their unkeyed
+  digests to the audit chain. The guide now calls the unkeyed digest a pseudonym. From
+  the 26 November independent review.
 
 - Release evaluations: a rule can set `min_cases` (a pass over fewer cases does not
   count) and `suite_versions` (only results of that suite version count), so a one-case

@@ -2,8 +2,9 @@
 //!
 //! **Subjects.** With `[privacy] subject_pointers` (JSON pointers into a run's request,
 //! such as `/input/context/customer_id`), each admitted run is indexed under the
-//! subjects its request names. The index is keyed by a digest of the identifier and
-//! never stores the identifier itself; it is how a deletion request finds every run
+//! subjects its request names. The index is keyed by a digest of the identifier (a
+//! pseudonym: keyed with HMAC under `[privacy] subject_key_env`, plain SHA-256
+//! otherwise) and never stores the identifier itself; it is how a deletion request finds every run
 //! about one person. The index grows in pages of [`RUNS_PER_PAGE`] runs, up to
 //! [`MAX_RUNS_PER_SUBJECT`]. Each run also records the digests of its own subjects, so a
 //! hold by subject covers a run however large its subject's index is.
@@ -41,10 +42,55 @@ pub const MAX_RUNS_PER_SUBJECT: usize = RUNS_PER_PAGE * MAX_SUBJECT_PAGES;
 /// Subject pointers at most.
 pub const MAX_POINTERS: usize = 16;
 
-/// The digest a subject identifier is indexed and audited under.
+/// The unkeyed digest of a subject identifier: plain SHA-256, used when no subject key
+/// is configured. A pseudonym, not anonymous: a low-entropy identifier (an account
+/// number, an e-mail address) can be found by hashing guesses.
 #[must_use]
 pub fn subject_digest(subject: &str) -> String {
     sha256_canonical(&json!({"subject": subject})).unwrap_or_default()
+}
+
+/// The deployment's subject key, and whether unkeyed digests still match while
+/// migrating to it.
+#[derive(Clone, Copy)]
+pub struct SubjectKey {
+    key: [u8; 32],
+    match_unkeyed: bool,
+}
+
+impl std::fmt::Debug for SubjectKey {
+    // Never prints the key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubjectKey")
+            .field("match_unkeyed", &self.match_unkeyed)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Separates subject digests from any other use of the key.
+const SUBJECT_DOMAIN: &[u8] = b"contextos-subject-v1:";
+
+/// The keyed digest of a subject identifier: HMAC-SHA256 under the deployment's subject
+/// key, so it cannot be recomputed, or linked across deployments, without the key.
+#[must_use]
+pub fn keyed_subject_digest(key: &[u8; 32], subject: &str) -> String {
+    let mut message = SUBJECT_DOMAIN.to_vec();
+    message.extend_from_slice(subject.as_bytes());
+    format!("hmac-sha256:{}", hex::encode(hmac_sha256(key, &message)))
+}
+
+/// HMAC-SHA256 (RFC 2104) with a 32-byte key.
+fn hmac_sha256(key: &[u8; 32], message: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut block = [0u8; 64];
+    block[..32].copy_from_slice(key);
+    let pad = |byte: u8| block.iter().map(|k| k ^ byte).collect::<Vec<u8>>();
+    let inner = Sha256::new().chain_update(pad(0x36)).chain_update(message).finalize();
+    Sha256::new()
+        .chain_update(pad(0x5c))
+        .chain_update(inner)
+        .finalize()
+        .into()
 }
 
 fn holds_key(tenant_id: &str) -> DocKey {
@@ -138,11 +184,33 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         self.subject_pointers = pointers;
     }
 
+    /// Digests subjects with HMAC-SHA256 under `key`. With `match_unkeyed`, lookups,
+    /// holds and erasure also match the unkeyed digests of runs indexed before the key
+    /// was set (holds then keep those digests in the store, never in the audit chain).
+    pub fn set_subject_key(&mut self, key: Option<[u8; 32]>, match_unkeyed: bool) {
+        self.subject_key = key.map(|key| SubjectKey { key, match_unkeyed });
+    }
+
+    /// The digest this deployment indexes and audits `subject` under.
+    #[must_use]
+    pub fn subject_digest_of(&self, subject: &str) -> String {
+        self.subject_key
+            .as_ref()
+            .map_or_else(|| subject_digest(subject), |k| keyed_subject_digest(&k.key, subject))
+    }
+
+    /// The unkeyed digest still matched for `subject`, while migrating to a key.
+    fn legacy_digest_of(&self, subject: &str) -> Option<String> {
+        self.subject_key
+            .is_some_and(|k| k.match_unkeyed)
+            .then(|| subject_digest(subject))
+    }
+
     /// Records the run's subjects, and adds it to the index of each.
     pub(crate) async fn index_subjects(&self, admission: &RunAdmission, request: &Value) -> Result<(), GatewayError> {
         let digests: Vec<String> = subjects_in(request, &self.subject_pointers)
             .iter()
-            .map(|s| subject_digest(s))
+            .map(|s| self.subject_digest_of(s))
             .collect();
         if digests.is_empty() {
             return Ok(());
@@ -219,7 +287,13 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
 
     /// The runs indexed under `subject`, and whether the index was truncated.
     pub async fn subject_runs(&self, tenant_id: &str, subject: &str) -> Result<(Vec<String>, bool), GatewayError> {
-        self.digest_runs(tenant_id, &subject_digest(subject)).await
+        let (mut runs, mut truncated) = self.digest_runs(tenant_id, &self.subject_digest_of(subject)).await?;
+        if let Some(legacy) = self.legacy_digest_of(subject) {
+            let (older, cut) = self.digest_runs(tenant_id, &legacy).await?;
+            runs.extend(older.into_iter().filter(|r| !runs.contains(r)).collect::<Vec<_>>());
+            truncated |= cut;
+        }
+        Ok((runs, truncated))
     }
 
     /// The tenant's holds, placed and released.
@@ -254,10 +328,9 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .map(|h| {
                 (
                     h,
-                    h["subject_digests"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
+                    ["subject_digests", "legacy_subject_digests"]
+                        .iter()
+                        .flat_map(|k| h[*k].as_array().into_iter().flatten())
                         .filter_map(Value::as_str)
                         .collect(),
                 )
@@ -333,7 +406,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             ));
         }
         let now = self.now();
-        let digests: Vec<String> = request.subjects.iter().map(|s| subject_digest(s)).collect();
+        let digests: Vec<String> = request.subjects.iter().map(|s| self.subject_digest_of(s)).collect();
+        let legacy: Vec<String> = request
+            .subjects
+            .iter()
+            .filter_map(|s| self.legacy_digest_of(s))
+            .collect();
         let hold = json!({"hold_id": request.hold_id, "reason": request.reason, "run_ids": request.run_ids,
             "subject_digests": digests, "tenant_wide": request.tenant_wide, "placed_by": by, "placed_at": now,
             "released_at": null});
@@ -359,7 +437,12 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                     .map_err(GatewayError::from)?;
                 audited = true;
             }
-            holds.push(hold.clone());
+            // Unkeyed digests, while migrating, are kept in the store only.
+            let mut stored = hold.clone();
+            if !legacy.is_empty() {
+                stored["legacy_subject_digests"] = json!(legacy);
+            }
+            holds.push(stored);
             let body = json!({"holds": holds});
             let written = match &current {
                 None => self.store.create(&key, &body).await.map(|_| ()),
@@ -468,7 +551,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 Err(ErasureError::Gateway(e)) => return Err(e.into()),
             }
         }
-        let summary = json!({"subject_digest": subject_digest(subject), "runs": runs.len(), "erased": erased,
+        let summary = json!({"subject_digest": self.subject_digest_of(subject), "runs": runs.len(), "erased": erased,
             "held": held, "active": active_runs, "missing": missing, "index_truncated": truncated,
             "requested_by": by, "reason": reason});
         self.audit
@@ -500,6 +583,29 @@ mod tests {
         );
         assert!(validate_pointers(&pointers).is_ok());
         assert!(validate_pointers(&["input/x".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn hmac_matches_rfc_4231() {
+        // RFC 4231 test case 4: a 25-byte key, zero-padded here to 32 bytes, gives the
+        // same MAC because HMAC pads keys shorter than a block with zeros.
+        let mut key = [0u8; 32];
+        for (i, k) in key.iter_mut().take(25).enumerate() {
+            *k = u8::try_from(i + 1).unwrap();
+        }
+        assert_eq!(
+            hex::encode(hmac_sha256(&key, &[0xcd; 50])),
+            "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b"
+        );
+    }
+
+    #[test]
+    fn a_keyed_digest_depends_on_the_key() {
+        let a = keyed_subject_digest(&[1; 32], "cus_77");
+        assert!(a.starts_with("hmac-sha256:") && !a.contains("cus_77"));
+        assert_eq!(a, keyed_subject_digest(&[1; 32], "cus_77"));
+        assert_ne!(a, keyed_subject_digest(&[2; 32], "cus_77"));
+        assert_ne!(a, subject_digest("cus_77"));
     }
 
     #[test]
