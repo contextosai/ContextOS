@@ -2069,9 +2069,17 @@ before the run's own budget is reserved, using the same conserved ledger as shar
 guarantees on tool effects: a hold counts until it settles, so concurrent runs cannot
 pass a ceiling together. A reservation that would pass one is refused
 (`budget_exhausted` with `usage_ceiling_reached:<id>`, audited as `usage_refused`), and
-any holds it took are given back. Settling commits the hold at the reserved amount.
-Windows are fixed (aligned to the epoch); a hold never settled stays counted until its
-window ends. Replans are not model usage and are not capped here.
+any holds it took are given back, as they are when the store fails part-way. Settling
+commits the hold at the reserved amount. Usage a metering gateway measures above the
+reservation is added to every covering ceiling as well, even past its limit, since the
+call has happened; the ceiling then refuses reservations for the rest of its window.
+Self-reported usage is charged at the reservation, so for ceilings that must hold
+against callers who reserve too little, route model calls through a metering gateway.
+
+Windows are fixed (aligned to the epoch), not sliding: a burst that straddles a window
+boundary can use up to twice the limit within one window's length, so choose the limit
+with that in mind. A hold never settled stays counted until its window ends. Replans
+are not model usage and are not capped here.
 
 ### Allowed models
 
