@@ -105,6 +105,18 @@ Every agent, capability, adapter, model and owning team, as
 rows as CSV (`text/csv`, sets joined with `;`, cells starting with `=`, `+`, `-` or `@`
 prefixed with `'`). JSON: `items`, `shadow` (count), `generated_at`.
 
+### Incident cases
+
+`GET /api/cases?status=` (viewer) lists cases newest first, without timelines;
+`POST /api/cases` (operator or risk): `title`, `severity` (critical, high, medium, low),
+`summary`, `links`; `GET /api/cases/{id}`; `POST …/{id}/notes` (`text`), `…/{id}/links`
+(`kind`: finding, run, audit_entry, agent or anomaly; `ref`; optional `source`, `note`;
+nothing else, so no payload is copied in), `…/{id}/status` (`status`, optional `owner`,
+`reason`); `GET …/{id}/report?format=json|md` journals `case_exported` with the report's
+digest. Up to 500 timeline entries and links per case; a closed case refuses changes
+(409). Journal: `case_opened`, `case_noted`, `case_linked`, `case_status_changed`,
+`case_exported`.
+
 ### `GET /api/dashboard`
 
 The governance dashboard (viewer): `held_effects` (`total`, top `agents`), `denials`

@@ -10,6 +10,7 @@ import { Posture } from "./pages/Posture";
 import { Agents } from "./pages/Agents";
 import { Inventory } from "./pages/Inventory";
 import { AccessReview } from "./pages/AccessReview";
+import { Cases } from "./pages/Cases";
 import { Agent } from "./pages/Agent";
 import { FindingsPage } from "./pages/FindingsPage";
 import { Activity } from "./pages/Activity";
@@ -44,6 +45,7 @@ const router = createBrowserRouter(
         { path: "agents/:key", element: <Agent /> },
         { path: "inventory", element: <Inventory /> },
         { path: "access-review", element: <AccessReview /> },
+        { path: "cases", element: <Cases /> },
         { path: "findings", element: <FindingsPage /> },
         { path: "activity", element: <Activity /> },
         { path: "spend", element: <Spend /> },

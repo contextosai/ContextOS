@@ -17,6 +17,10 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- Incident cases in Tower: open a case from a finding, refusal, held effect or anomaly,
+  link evidence by reference, keep a timeline, move it through open, investigating,
+  contained, resolved and closed with an owner, and export a Markdown or JSON report
+  whose digest is journalled (`GET /api/cases/{id}/report`).
 - Governance dashboard in Tower: the Posture page and `GET /api/dashboard` show held
   effects, refusals by reason, approvals waiting, shared ceilings near their limit (read
   live from each runtime), policy drift, active waivers, unreviewed break-glass grants
