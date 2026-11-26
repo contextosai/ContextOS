@@ -11,6 +11,16 @@
 //! (`release_unevaluated`, or `agent_release_missing`) and the refusal audited
 //! (`release_evaluation_refusal`). A failed result recorded later than a pass stops the
 //! release again.
+//!
+//! A rule can set a floor on what counts: `min_cases` (a pass over fewer cases does
+//! not satisfy it) and `suite_versions` (only results of that suite version count, so
+//! an older or easier suite cannot stand in for the one reviewed).
+//!
+//! **Trust.** A recorded result is the evaluator's statement, signed into the chain;
+//! the runtime does not rerun suites. The `agent_release` ref is asserted by whoever
+//! admits the run; the runtime checks the evaluations of the release named, not that
+//! the code running is that release. Have the deployment pipeline that ships the
+//! artifact set the ref, and keep admission credentials with that pipeline.
 
 use contextos_contract::canonical::sha256_canonical;
 use contextos_store::{AppendLog, DocKey, DocKind, DocumentStore};
@@ -25,13 +35,46 @@ pub const MAX_RESULTS: usize = 256;
 pub const MAX_RULES: usize = 64;
 
 /// One `[[guards.release_evaluations.rules]]` entry.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EvaluationRule {
     /// Agent ids the rule covers, or `"*"` for every agent.
     pub agents: Vec<String>,
     /// Suite ids that must have passed on the release.
     pub suites: Vec<String>,
+    /// A pass counts only with at least this many cases. 0: any.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub min_cases: u64,
+    /// Suite versions that count, by suite id; a suite not listed counts at any version.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub suite_versions: std::collections::BTreeMap<String, String>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+/// What a suite's result must meet to count, from every rule covering an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SuiteRequirement {
+    pub suite_id: String,
+    pub min_cases: u64,
+    pub version: Option<String>,
+}
+
+impl SuiteRequirement {
+    /// Whether the latest result that counts for this requirement passed.
+    fn met_by(&self, results: &[Value]) -> bool {
+        results
+            .iter()
+            .rev()
+            .filter(|r| r["suite_id"] == self.suite_id.as_str())
+            .find(|r| self.version.as_deref().is_none_or(|v| r["suite_version"] == v))
+            .is_some_and(|latest| {
+                latest["outcome"] == "passed" && latest["cases_total"].as_u64().unwrap_or(0) >= self.min_cases
+            })
+    }
 }
 
 /// `[guards.release_evaluations]`.
@@ -49,21 +92,57 @@ impl ReleaseEvaluationPolicy {
         if self.rules.iter().any(|r| r.agents.is_empty() || r.suites.is_empty()) {
             return Err("each release-evaluation rule names agents and suites".into());
         }
+        let mut pins = std::collections::BTreeMap::new();
+        for rule in &self.rules {
+            if let Some(suite) = rule.suite_versions.keys().find(|s| !rule.suites.contains(s)) {
+                return Err(format!("suite_versions names {suite}, which the rule does not require"));
+            }
+            for (suite, version) in &rule.suite_versions {
+                if version.trim().is_empty() || version.len() > 64 {
+                    return Err(format!("suite_versions.{suite}: a version of 1 to 64 bytes"));
+                }
+                if pins
+                    .insert(suite.as_str(), version.as_str())
+                    .is_some_and(|other| other != version)
+                {
+                    return Err(format!("suite {suite} is pinned to two versions"));
+                }
+            }
+        }
         Ok(())
     }
 
     /// The suites `agent_id`'s releases must have passed.
     #[must_use]
     pub fn suites_for(&self, agent_id: &str) -> Vec<String> {
-        let mut out: Vec<String> = self
+        self.requirements_for(agent_id)
+            .into_iter()
+            .map(|r| r.suite_id)
+            .collect()
+    }
+
+    /// What each suite's result must meet for `agent_id`: the highest `min_cases` and
+    /// the pinned version of every rule covering it.
+    #[must_use]
+    pub fn requirements_for(&self, agent_id: &str) -> Vec<SuiteRequirement> {
+        let mut out: std::collections::BTreeMap<&str, SuiteRequirement> = std::collections::BTreeMap::new();
+        for rule in self
             .rules
             .iter()
             .filter(|r| r.agents.iter().any(|a| a == "*" || a == agent_id))
-            .flat_map(|r| r.suites.iter().cloned())
-            .collect();
-        out.sort();
-        out.dedup();
-        out
+        {
+            for suite in &rule.suites {
+                let req = out.entry(suite.as_str()).or_insert_with(|| SuiteRequirement {
+                    suite_id: suite.clone(),
+                    ..SuiteRequirement::default()
+                });
+                req.min_cases = req.min_cases.max(rule.min_cases);
+                if let Some(v) = rule.suite_versions.get(suite) {
+                    req.version = Some(v.clone());
+                }
+            }
+        }
+        out.into_values().collect()
     }
 }
 
@@ -204,25 +283,22 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         let Some(policy) = &self.release_evaluations else {
             return Ok(None);
         };
-        let required = policy.suites_for(agent_id);
+        let required = policy.requirements_for(agent_id);
         if required.is_empty() {
             return Ok(None);
         }
         let release = release_refs.iter().find(|r| r["artifact_type"] == "agent_release");
         let refusal = match release {
-            None => Some(("agent_release_missing".to_owned(), required.clone())),
+            None => Some((
+                "agent_release_missing".to_owned(),
+                required.iter().map(|r| r.suite_id.clone()).collect(),
+            )),
             Some(release) => {
                 let results = self.release_evaluations(tenant, release).await?;
                 let missing: Vec<String> = required
                     .iter()
-                    .filter(|suite| {
-                        results
-                            .iter()
-                            .rev()
-                            .find(|r| r["suite_id"] == suite.as_str())
-                            .is_none_or(|latest| latest["outcome"] != "passed")
-                    })
-                    .cloned()
+                    .filter(|req| !req.met_by(&results))
+                    .map(|req| req.suite_id.clone())
                     .collect();
                 (!missing.is_empty()).then(|| ("release_unevaluated".to_owned(), missing))
             }
@@ -249,10 +325,12 @@ mod tests {
                 EvaluationRule {
                     agents: vec!["*".into()],
                     suites: vec!["safety".into()],
+                    ..EvaluationRule::default()
                 },
                 EvaluationRule {
                     agents: vec!["agt_support".into()],
                     suites: vec!["refund_regression".into(), "safety".into()],
+                    ..EvaluationRule::default()
                 },
             ],
         };
@@ -260,5 +338,45 @@ mod tests {
         assert_eq!(p.suites_for("agt_support"), ["refund_regression", "safety"]);
         assert_eq!(p.suites_for("agt_other"), ["safety"]);
         assert!(ReleaseEvaluationPolicy { rules: vec![] }.validate().is_err());
+    }
+
+    fn policy(v: Value) -> ReleaseEvaluationPolicy {
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn result(version: &str, outcome: &str, total: u64) -> Value {
+        json!({"suite_id": "safety", "suite_version": version, "outcome": outcome, "cases_total": total})
+    }
+
+    #[test]
+    fn a_pass_counts_only_at_the_pinned_version_and_case_floor() {
+        let p = policy(json!({"rules": [
+            {"agents": ["*"], "suites": ["safety"], "min_cases": 20},
+            {"agents": ["agt_support"], "suites": ["safety"], "min_cases": 50, "suite_versions": {"safety": "3"}}]}));
+        p.validate().unwrap();
+        let support = &p.requirements_for("agt_support")[0];
+        assert_eq!((support.min_cases, support.version.as_deref()), (50, Some("3")));
+        let other = &p.requirements_for("agt_other")[0];
+        assert_eq!((other.min_cases, other.version.as_deref()), (20, None));
+
+        // A one-case pass satisfies nothing with a floor.
+        assert!(!other.met_by(&[result("3", "passed", 1)]));
+        assert!(other.met_by(&[result("3", "passed", 20)]));
+        // Only the pinned version counts: a later pass of another version does not
+        // stand in, and a later failure of the pinned version stops it again.
+        assert!(!support.met_by(&[result("2", "passed", 80)]));
+        assert!(support.met_by(&[result("3", "passed", 80), result("2", "failed", 80)]));
+        assert!(!support.met_by(&[result("3", "passed", 80), result("3", "failed", 80)]));
+    }
+
+    #[test]
+    fn suite_pins_are_validated() {
+        let two = policy(json!({"rules": [
+            {"agents": ["a"], "suites": ["safety"], "suite_versions": {"safety": "3"}},
+            {"agents": ["b"], "suites": ["safety"], "suite_versions": {"safety": "4"}}]}));
+        assert!(two.validate().unwrap_err().contains("two versions"));
+        let unlisted = policy(json!({"rules": [
+            {"agents": ["a"], "suites": ["safety"], "suite_versions": {"other": "1"}}]}));
+        assert!(unlisted.validate().is_err());
     }
 }

@@ -45,6 +45,7 @@ async fn a_release_runs_only_after_its_required_suites_pass() {
             rules: vec![EvaluationRule {
                 agents: vec!["agt_support".into()],
                 suites: vec!["refund_regression".into()],
+                ..EvaluationRule::default()
             }],
         });
     })
@@ -122,9 +123,59 @@ async fn other_agents_and_unconfigured_deployments_are_not_gated() {
             rules: vec![EvaluationRule {
                 agents: vec!["agt_other".into()],
                 suites: vec!["safety".into()],
+                ..EvaluationRule::default()
             }],
         });
     })
     .await;
     assert_eq!(try_admit(&w, "run_free", false).await.0, 201);
+}
+
+fn suite_result(version: &str, passed: u64, total: u64) -> Value {
+    json!({"release": release(), "suite_id": "refund_regression", "suite_version": version, "outcome": "passed",
+        "cases_passed": passed, "cases_total": total, "report_ref": "evals://refund_regression/run"})
+}
+
+#[tokio::test]
+async fn a_pass_counts_only_at_the_pinned_version_and_case_floor() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.release_evaluations = Some(
+            serde_json::from_value(
+                json!({"rules": [{"agents": ["agt_support"], "suites": ["refund_regression"],
+                "min_cases": 30, "suite_versions": {"refund_regression": "3"}}]}),
+            )
+            .unwrap(),
+        );
+    })
+    .await;
+    // A one-case pass, and a full pass of an older suite version, do not count.
+    for (version, total) in [("3", 1), ("2", 40)] {
+        let (status, body) = post(
+            &w,
+            "/v1/agent-releases/evaluations",
+            "judge-key",
+            suite_result(version, total, total),
+        )
+        .await;
+        assert_eq!(status, 201, "{body}");
+        let (status, body) = try_admit(&w, &format!("run_floor_{version}"), true).await;
+        assert_eq!(
+            (status, body["error"]["code"].as_str()),
+            (403, Some("release_unevaluated")),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        post(
+            &w,
+            "/v1/agent-releases/evaluations",
+            "judge-key",
+            suite_result("3", 40, 40)
+        )
+        .await
+        .0,
+        201
+    );
+    let (status, body) = try_admit(&w, "run_floor_ok", true).await;
+    assert_eq!(status, 201, "{body}");
 }
