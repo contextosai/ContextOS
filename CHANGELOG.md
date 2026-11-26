@@ -17,6 +17,9 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- `docs/integrations/BUILD_AN_ADAPTER.md`: integrating a framework that has no guide,
+  with a checklist and four scenarios to run (refusal, approval pause, duplicate
+  delivery, lost response).
 - GenAI metrics: `gen_ai_client_operation_duration_seconds` (the OpenTelemetry GenAI
   conventions' `gen_ai.client.operation.duration` for `execute_tool`) by tool and error
   type. Token usage in that shape is planned (meters report totals, not input/output).
