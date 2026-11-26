@@ -81,7 +81,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U contextos" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      PREVIOUS_RELEASE: v0.1.0-alpha.21
+      PREVIOUS_RELEASE: v0.1.0-alpha.22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
