@@ -326,6 +326,7 @@ where
         calibrated_evaluators: evaluator_calibration::load(config.guards.evaluator_calibration.as_ref())?.map(Arc::new),
         public_url: config.server.public_url.clone(),
         global_kill_switch: config.kill_switch.global_principals.clone(),
+        models: config.guards.models.clone(),
         spiffe_agents: config
             .server
             .tls

@@ -1962,6 +1962,26 @@ and fails closed. [`examples/metering-proxy`](../examples/metering-proxy) is a
 standard-library reference of the same contract for OpenAI Chat Completions and
 Responses and Anthropic Messages, streamed or not.
 
+### Allowed models
+
+List the models runs may use, for every agent and per agent:
+
+```toml
+[guards.models]
+allowed = ["claude-sonnet-5-5", "claude-opus-5-5@2026-10"]   # an id matches any version
+[guards.models.agents]
+agt_support = ["claude-sonnet-5-5"]                          # narrows, never widens
+```
+
+A run that pins a `model_profile` its agent may not use is refused at admission
+(`model_not_allowed`). A metering gateway that claims a reservation
+(`POST /v1/runs/{id}/usage/claim`, as the LiteLLM plugin does) must name the model; an
+unlisted or unnamed model is refused before the call goes out and audited as
+`usage_refused` with `model_not_allowed`, so a routed or fallen-back model is stopped
+where the call is made. A meter that does not claim through the runtime (the example
+metering proxy checks single use locally) is not stopped this way. Agent risk tiers live
+in Tower's declarations: give each tier's agents the list that tier allows.
+
 ### Checkpoint the orchestrator
 
 Save the orchestrator's own state (plan, step pointer, last verdict) after every Critic

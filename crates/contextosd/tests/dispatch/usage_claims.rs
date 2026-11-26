@@ -241,3 +241,55 @@ async fn refused_reservations_are_audited() {
             "reason_codes": ["revoked"]})
     );
 }
+
+#[tokio::test]
+async fn only_allowed_models_are_pinned_or_called() {
+    let w = world_with(&ALL_CONTROLS, 1, |c| {
+        c.guards.models = Some(
+            serde_json::from_value(json!({"allowed": ["gpt-test", "claude-sonnet-5-5"],
+            "agents": {"agt_support": ["gpt-test"]}}))
+            .unwrap(),
+        );
+    })
+    .await;
+    // A run pinning a model its agent may not use is refused at admission.
+    let mut pinned = run_body("run_pinned", 1200);
+    pinned["contract"]["release_refs"].as_array_mut().unwrap().push(
+        json!({"artifact_type": "model_profile", "artifact_id": "claude-sonnet-5-5", "version": "1",
+            "sha256": format!("sha256:{}", "cd".repeat(32))}),
+    );
+    let refused = admit(&w, &pinned).await;
+    assert_eq!(refused.status(), 403);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["code"], "model_not_allowed");
+
+    let calls = admitted(&w, "run_models").await;
+    let reservation = calls
+        .reserve(json!({"kind": "model_call", "tokens": 2000, "cost_cents": 3}))
+        .await;
+    for model in [json!("claude-sonnet-5-5"), Value::Null] {
+        let (status, body) = calls
+            .post(
+                "meter-key",
+                "claim",
+                json!({"reservation_id": reservation, "model": model}),
+            )
+            .await;
+        assert_eq!(
+            (status, body["error"]["code"].as_str()),
+            (403, Some("model_not_allowed")),
+            "{model}: {body}"
+        );
+    }
+    let refusals = calls.audit("usage_refused").await;
+    assert_eq!(refusals.len(), 2);
+    assert_eq!(refusals[0]["reason_codes"], json!(["model_not_allowed"]));
+    let (status, body) = calls
+        .post(
+            "meter-key",
+            "claim",
+            json!({"reservation_id": reservation, "model": "gpt-test@2026-11"}),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+}

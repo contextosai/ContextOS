@@ -195,6 +195,24 @@ where
     let request: ClaimUsage = serde_json::from_value(parse_body(&state, &body)?).map_err(|e| invalid("claim", e))?;
     let model = model_name(request.model)?;
     let admission = metered_admission(&state, &caller, &run_id).await?;
+    // The call goes out only to a model the deployment allows this agent.
+    if let Some(models) = &state.models {
+        let agent_id = admission.actor["principal_id"].as_str().unwrap_or_default();
+        let allowed = model.as_deref().is_some_and(|m| models.allows(agent_id, m));
+        if !allowed {
+            let body = json!({"run_id": admission.run_id, "reservation_id": request.reservation_id, "kind": "model_call",
+                "model": model, "reporter": caller.principal_id, "reason_codes": ["model_not_allowed"]});
+            let _ = state
+                .audit
+                .append(&admission.tenant_id, "usage_refused", body, &gateway.now())
+                .await;
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "model_not_allowed",
+                "This model is not allowed for the run's agent ([guards.models]); a claim must name an allowed model.",
+            ));
+        }
+    }
     let claimed = gateway
         .claim_usage(
             &admission,

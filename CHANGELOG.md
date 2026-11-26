@@ -17,6 +17,10 @@ Tower's lifecycle approval is on by default; see the
 
 ### Added
 
+- Model allow-lists: `[guards.models]` lists the models every agent, and each agent,
+  may use; a pinned `model_profile` outside it is refused at admission and a metering
+  gateway's claim for an unlisted or unnamed model is refused before the call
+  (`model_not_allowed`, audited as `usage_refused`).
 - Evaluation-gated releases: `POST /v1/agent-releases/evaluations` (evaluator) records a
   suite's result on an `agent_release`, signed; with `[guards.release_evaluations]`, runs
   of a covered agent are admitted only when the latest result of every required suite on
