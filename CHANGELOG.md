@@ -19,9 +19,6 @@ minor versions may break APIs and every break is listed.
   serving the drifted tool until its next check; it now refuses it locally meanwhile.
 - Break-glass grants compared their expiry with the clock as strings; they are now
   compared as times, and an expiry that is not a contract time counts as expired.
-
-### Fixed
-
 - Usage ceilings: usage a metering gateway measured above a reservation now counts
   against every covering ceiling (even past its limit, which then refuses for the rest
   of the window), so a caller reserving too little cannot pass a ceiling. Ceiling
