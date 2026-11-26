@@ -1123,6 +1123,13 @@
           "description": "Keep a capability whose pinned upstream tool drifted refused until it is re-pinned or an operator releases it, even if the tool changes back (see `contextos_gateway::upstream_quarantine`). `false` serves it again as soon as it matches its pin.",
           "type": "boolean"
         },
+        "quarantine_releasers": {
+          "description": "Principals (each also needing `control`) that may release a quarantine through `POST /v1/upstream/quarantine/release`. A quarantine protects every tenant of the runtime, so a deployment serving more than one tenant should name its own operators here. Empty: any `control` principal (a single-tenant deployment).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "refuse_repeated_effects": {
           "default": true,
           "description": "Refuse a new operation whose effect is identical (same capability and arguments) to one the run already applied, unless the capability is `repeatable`: `effect_repeated`. On by default.",

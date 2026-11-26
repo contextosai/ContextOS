@@ -6829,7 +6829,7 @@
       "post": {
         "operationId": "release_upstream_quarantine",
         "summary": "Release a quarantined upstream tool",
-        "description": "Ends the quarantine of a capability whose pinned upstream tool drifted, after checking that the tool matches its pin again (`409 upstream_tool_still_drifted` otherwise; re-pin after review instead). Audited as `upstream_quarantine_released` before it takes effect.",
+        "description": "Ends the quarantine of a capability whose pinned upstream tool drifted, after checking that the tool matches its pin again (`409 upstream_tool_still_drifted` otherwise; re-pin after review instead). Audited as `upstream_quarantine_released` before it takes effect. With `[guards] quarantine_releasers` set, only the principals it names may release (`403 quarantine_release_forbidden`).",
         "requestBody": {
           "required": true,
           "content": {

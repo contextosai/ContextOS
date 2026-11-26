@@ -1489,7 +1489,12 @@ Copy the digests into the capability manifest, and review them like any other ch
   reviewed new definition, or when an operator (`control`) releases it with a reason:
   `POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}`,
   refused while the tool still differs and audited as `upstream_quarantine_released`.
-  `/v1/deployment` lists quarantined tools and Tower raises a `tool_quarantined`
+  A quarantine protects every tenant the runtime serves, so a deployment with more
+  than one tenant names who may lift it: `[guards] quarantine_releasers =
+  ["svc_platform_oncall"]` (others get `403 quarantine_release_forbidden`;
+  `--check-config` warns when several tenants are configured without it). A replica
+  that cannot write a new quarantine after repeated conflicts still refuses the tool
+  locally until its next check writes it. `/v1/deployment` lists quarantined tools and Tower raises a `tool_quarantined`
   finding. `[guards] quarantine_drifted_tools = false` restores serving a tool as soon
   as it matches its pin again.
 - **Description changes.** A changed `upstream_description_digest` is reported but
