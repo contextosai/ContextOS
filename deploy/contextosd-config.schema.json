@@ -722,6 +722,19 @@
           },
           "type": "array"
         },
+        "min_cases": {
+          "description": "A pass counts only with at least this many cases. 0: any.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "suite_versions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Suite versions that count, by suite id; a suite not listed counts at any version.",
+          "type": "object"
+        },
         "suites": {
           "description": "Suite ids that must have passed on the release.",
           "items": {
