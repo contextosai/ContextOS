@@ -5,7 +5,7 @@ members = ["crates/*"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.21"
+version = "0.1.0-alpha.22"
 edition = "2024"
 rust-version = "1.90"
 repository = "https://github.com/contextosai/ContextOS"
@@ -60,7 +60,7 @@ mimalloc = { version = "0.1", default-features = false }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
-jsonschema = { version = "0.61", default-features = false }
+jsonschema = { version = "0.62", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
