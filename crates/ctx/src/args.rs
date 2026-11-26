@@ -130,7 +130,7 @@ pub enum Command {
         /// The last entry of an earlier verified export this one continues.
         #[arg(long)]
         continues: Option<PathBuf>,
-        /// soc2, iso42001, eu-ai-act or owasp-agentic; repeat for several.
+        /// soc2, iso42001, eu-ai-act, owasp-agentic or nist-ai-rmf; repeat for several.
         #[arg(long = "framework", required = true)]
         frameworks: Vec<String>,
         /// Output of `contextosd --check-config` for the deployment, included as supplied.

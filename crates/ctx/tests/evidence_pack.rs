@@ -82,6 +82,8 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
         "eu-ai-act",
         "--framework",
         "soc2",
+        "--framework",
+        "nist-ai-rmf",
         "--config-report",
         &report,
         "--out",
@@ -132,12 +134,25 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
     assert_eq!(oversight["observed"]["approval_review_too_fast"], 0);
     assert_eq!(find("eu-ai-act", "Art. 14(4)(e)")["status"], "no_events_in_period");
     assert_eq!(find("soc2", "CC1-CC5")["status"], "outside_audit");
+    // Coverage is stated per control, and a partial one names what is missing.
+    assert_eq!(find("soc2", "CC6.1")["coverage"], "covered");
+    let record_keeping = find("eu-ai-act", "Art. 12");
+    assert_eq!(record_keeping["coverage"], "partial");
+    assert!(record_keeping["missing"].as_str().unwrap().contains("prompts"));
+    assert_eq!(find("soc2", "CC1-CC5")["coverage"], "organizational");
+    assert_eq!(find("nist-ai-rmf", "MANAGE")["coverage"], "covered");
 
     let coverage = String::from_utf8(read("coverage.md")).unwrap();
     assert!(coverage.contains("## What it does not cover"), "{coverage}");
     assert!(coverage.contains("bypasses the gateway"), "{coverage}");
     // The pack never claims a control was tested or met.
     assert!(coverage.contains("not a test result"), "{coverage}");
+    assert!(coverage.contains("not a certification"), "{coverage}");
+    assert!(coverage.contains("| Control | Coverage | Status |"), "{coverage}");
+    assert!(
+        coverage.contains("partial: Records actions and decisions"),
+        "{coverage}"
+    );
     assert!(!coverage.contains("| evidenced |"), "{coverage}");
     assert!(coverage.contains("config-report.json"), "{coverage}");
 
@@ -145,7 +160,7 @@ fn a_verified_export_becomes_a_pack_that_checks_itself() {
     let again = work.join("pack2");
     let mut args2 = args;
     let again_text = again.display().to_string();
-    args2[12] = &again_text;
+    args2[14] = &again_text;
     assert_eq!(ctx(&args2).0, 0);
     for name in ["manifest.json", "controls.json", "coverage.md"] {
         assert_eq!(read(name), std::fs::read(again.join(name)).unwrap(), "{name}");
@@ -213,7 +228,7 @@ fn the_control_map_cites_only_events_the_runtime_emits() {
         serde_json::from_str(&std::fs::read_to_string(root.join("crates/ctx/src/evidence_controls.json")).unwrap())
             .unwrap();
     let frameworks = map["frameworks"].as_object().unwrap();
-    assert_eq!(frameworks.len(), 4);
+    assert_eq!(frameworks.len(), 5);
     for (name, framework) in frameworks {
         for control in framework["controls"].as_array().unwrap() {
             for kind in control["events"].as_array().unwrap() {
