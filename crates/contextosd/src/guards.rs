@@ -109,6 +109,12 @@ pub struct GuardsConfig {
     /// (see [`contextos_gateway::usage_ceilings`]). Empty: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub usage_ceilings: Vec<contextos_gateway::usage_ceilings::UsageCeiling>,
+    /// Keep a capability whose pinned upstream tool drifted refused until it is
+    /// re-pinned or an operator releases it, even if the tool changes back
+    /// (see [`contextos_gateway::upstream_quarantine`]). `false` serves it again as soon
+    /// as it matches its pin.
+    #[serde(default = "quarantine_default")]
+    pub quarantine_drifted_tools: bool,
     /// Rate-based stops across runs: too many effects or refusals per agent, principal
     /// or tenant in a window refuse further calls, and can revoke the target (see
     /// [`contextos_gateway::circuit_breakers`]).
@@ -205,6 +211,7 @@ impl Default for GuardsConfig {
             release_evaluations: None,
             models: None,
             usage_ceilings: Vec::new(),
+            quarantine_drifted_tools: true,
             circuit_breakers: Vec::new(),
             action_monitor: None,
             approval_review: None,
@@ -212,4 +219,8 @@ impl Default for GuardsConfig {
             evaluator_calibration: None,
         }
     }
+}
+
+fn quarantine_default() -> bool {
+    true
 }

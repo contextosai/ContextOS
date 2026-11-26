@@ -1455,6 +1455,16 @@ Copy the digests into the capability manifest, and review them like any other ch
   annotations.
 - **Drift.** While the upstream tool differs from its pin, or is gone, the capability
   refuses calls with `upstream_tool_drifted`, before anything is reserved or sent.
+- **Quarantine.** Once drifted, the capability stays refused
+  (`upstream_tool_quarantined`) even if the server changes the tool back, so a server
+  that alternates between definitions is never served between checks. The quarantine
+  is kept in the store (every replica, across restarts) and ends when you re-pin the
+  reviewed new definition, or when an operator (`control`) releases it with a reason:
+  `POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}`,
+  refused while the tool still differs and audited as `upstream_quarantine_released`.
+  `/v1/deployment` lists quarantined tools and Tower raises a `tool_quarantined`
+  finding. `[guards] quarantine_drifted_tools = false` restores serving a tool as soon
+  as it matches its pin again.
 - **Description changes.** A changed `upstream_description_digest` is reported but
   not refused, because agents see the manifest's description, not the server's.
 - **Before the first check.** Until a replica has checked a pinned tool once since it
@@ -1462,7 +1472,9 @@ Copy the digests into the capability manifest, and review them like any other ch
   never serves a tool nobody checked.
 - **Unreachable server.** After that, the last verdict stands.
 - **Metrics and alerts.** `contextos_upstream_tool{capability,status}` reports each
-  status. `ContextOSUpstreamToolDrifted`, `…DescriptionChanged` and
+  status (`matches`, `drifted`, `quarantined`, `description_changed`,
+  `unavailable`). `ContextOSUpstreamToolDrifted` (drifted or quarantined),
+  `…DescriptionChanged` and
   `…CheckUnavailable` alert on them.
 - **Enterprise profile.** Every effectful MCP capability must pin
   `upstream_tool_digest`. Elsewhere `--check-config` warns about each unpinned one.

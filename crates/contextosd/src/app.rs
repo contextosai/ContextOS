@@ -2899,7 +2899,11 @@ async fn audit_entries<S, L: AppendLog>(
 /// The caller's identity and what this deployment enforces (see
 /// [`crate::deployment_summary`]): any authenticated caller, so a console can show
 /// which actions the caller's scopes allow before offering them.
-async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult {
+async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
     let caller = authorize(&state, &headers, None)?;
     let loaded = state.packs.snapshot();
     let mut packs: Vec<&str> = loaded
@@ -2913,6 +2917,10 @@ async fn deployment<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: Hea
         json!({"tenant_id": caller.tenant_id, "principal_id": caller.principal_id, "scopes": caller.scopes});
     body["packs"] = json!(packs);
     body["replicas"] = json!(state.limits.replicas());
+    // Quarantined upstream tools, for consoles (Tower raises `tool_quarantined`).
+    if let Ok(gateway) = dispatch_gateway(&state) {
+        body["quarantined_tools"] = json!(gateway.quarantined_tools().await.unwrap_or_default());
+    }
     Ok(axum::Json(body).into_response())
 }
 
@@ -3254,6 +3262,10 @@ where
             post(crate::privacy_api::release_hold::<S, L>),
         )
         .route("/v1/subjects/runs", post(crate::privacy_api::subject_runs::<S, L>))
+        .route(
+            "/v1/upstream/quarantine/release",
+            post(crate::quarantine_api::release::<S, L>),
+        )
         .route(
             "/v1/agent-releases/evaluations",
             post(crate::release_evaluations_api::record::<S, L>),

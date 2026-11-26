@@ -235,6 +235,14 @@ change is expected, review the new definition, print its digests with
 review. Replicas pick it up when they restart with the new manifest. If it is not
 expected, treat the provider as compromised: revoke the adapter (*The kill switch*).
 
+The capability is also quarantined (status `quarantined`, refusal
+`upstream_tool_quarantined`): it stays refused if the server changes the tool back,
+because a server that alternates between definitions can serve the changed one between
+checks. Re-pinning ends the quarantine. If the server rolled back and you have confirmed
+the change was benign, release it with a reason:
+`POST /v1/upstream/quarantine/release {"capability_id": "…", "reason": "…"}` (`control`;
+refused while the tool still differs; audited).
+
 ### ContextOSUpstreamDescriptionChanged
 
 Only the upstream tool's description changed. Agents never see it (they get the
