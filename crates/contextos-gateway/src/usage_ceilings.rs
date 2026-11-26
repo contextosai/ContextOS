@@ -10,13 +10,22 @@
 //! the holds already taken are released and the reservation is refused
 //! (`usage_ceiling_reached:<id>`). Settling the reservation commits its holds.
 //!
-//! Two simplifications, both on the safe side: a hold is committed at the reserved
-//! amount (a call that used less still counts as reserved), and a hold never settled
-//! (an executor that crashed) stays held until its window ends, since each window is a
-//! fresh ledger.
+//! Settling commits the holds at the reserved amount: a call that used less still
+//! counts as reserved. Usage a metering gateway measured above the reservation is added
+//! to every covering ceiling as well, even past its limit (the call has happened), and
+//! the ceiling then refuses reservations for the rest of its window; so a caller that
+//! reserves too little cannot pass a ceiling with measured calls. Self-reported usage
+//! is charged at the reservation only.
+//!
+//! Known limits: windows are fixed (`unix time / window_seconds`), not sliding, so a
+//! burst that straddles a window boundary can use up to twice the limit within one
+//! window's length; and a hold never settled (an executor that crashed) stays held
+//! until its window ends, since each window is a fresh ledger. Settled receipts are
+//! compacted as later calls settle, so a window may hold any number of calls.
 
 use contextos_kernel::shared_exposure::{
-    ExposureBinding, ExposureClaim, empty_exposure, reserve_exposure, settle_exposure,
+    ExposureBinding, ExposureClaim, ExposureImport, compact_exposure, empty_exposure, import_exposure,
+    reserve_exposure, settle_exposure,
 };
 use contextos_store::{AppendLog, Commit, DocKey, DocKind, DocumentStore, transact};
 use serde::{Deserialize, Serialize};
@@ -157,56 +166,78 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             if amount == 0 {
                 continue;
             }
-            let (key, binding) = ceiling.ledger(admission, &now)?;
-            let claim = claim_for(amount)?;
-            match self.store.create(&key, &empty_exposure(&binding)).await {
-                Ok(_) => {}
-                Err(e) if e.is_conflict() => {}
-                Err(e) => return Err(GatewayError::from(e).into()),
+            let attempt = async {
+                let (key, binding) = ceiling.ledger(admission, &now)?;
+                let claim = claim_for(amount)?;
+                self.ensure_ledger(&key, &binding).await?;
+                let commit = transact(self.store.as_ref(), &key, |state| {
+                    reserve_exposure(state, &binding, &claim)
+                })
+                .await?;
+                Ok::<_, GatewayError>((commit, key, binding, claim))
             }
-            let commit = transact(self.store.as_ref(), &key, |state| {
-                reserve_exposure(state, &binding, &claim)
-            })
-            .await
-            .map_err(GatewayError::from)?;
-            if let Commit::Rejected { .. } = commit {
-                for (key, binding, claim) in &held {
-                    let _ = transact(self.store.as_ref(), key, |state| {
-                        settle_exposure(state, binding, claim, "released")
-                    })
-                    .await;
+            .await;
+            let refusal = match attempt {
+                Ok((Commit::Rejected { .. }, ..)) => {
+                    UsageRefusal::Budget(vec![format!("usage_ceiling_reached:{}", ceiling.id)])
                 }
-                return Err(UsageRefusal::Budget(vec![format!(
-                    "usage_ceiling_reached:{}",
-                    ceiling.id
-                )]));
-            }
-            held.push((key, binding, claim));
+                Ok((_, key, binding, claim)) => {
+                    held.push((key, binding, claim));
+                    continue;
+                }
+                Err(e) => e.into(),
+            };
+            // Neither a refusal nor a store failure leaves earlier holds behind.
+            self.release_holds(&held).await;
+            return Err(refusal);
         }
         if !held.is_empty() {
             let record = json!({"holds": held.iter().map(|(key, binding, claim)| json!({"key": key.id, "binding": binding, "claim": claim})).collect::<Vec<_>>()});
-            self.store
-                .create(&holds_key(admission, reservation_id)?, &record)
-                .await
-                .map_err(GatewayError::from)?;
+            if let Err(e) = self.store.create(&holds_key(admission, reservation_id)?, &record).await {
+                self.release_holds(&held).await;
+                return Err(GatewayError::from(e).into());
+            }
         }
         Ok(())
     }
 
-    /// Commits (or, with `released`, gives back) a reservation's holds.
+    async fn ensure_ledger(&self, key: &DocKey, binding: &ExposureBinding) -> Result<(), GatewayError> {
+        match self.store.create(key, &empty_exposure(binding)).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.is_conflict() => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn release_holds(&self, held: &[(DocKey, ExposureBinding, ExposureClaim)]) {
+        for (key, binding, claim) in held {
+            let _ = transact(self.store.as_ref(), key, |state| {
+                settle_exposure(state, binding, claim, "released")
+            })
+            .await;
+        }
+    }
+
+    /// Commits (or, with `released`, gives back) a reservation's holds. `measured`
+    /// is usage a metering gateway verified; what it exceeds the holds by is added to
+    /// each covering ceiling, even past its limit.
     pub(crate) async fn settle_ceilings(
         &self,
         admission: &RunAdmission,
         reservation_id: &str,
         outcome: &str,
+        measured: Option<(u64, u64)>,
     ) -> Result<(), GatewayError> {
         if self.usage_ceilings.is_empty() {
             return Ok(());
         }
-        let Some(record) = self.store.get(&holds_key(admission, reservation_id)?).await? else {
-            return Ok(());
-        };
-        for hold in record.body["holds"].as_array().into_iter().flatten() {
+        let now = self.now();
+        let record = self.store.get(&holds_key(admission, reservation_id)?).await?;
+        let mut settled: Vec<(String, DocKey, ExposureBinding, u64)> = Vec::new();
+        for hold in record
+            .iter()
+            .flat_map(|r| r.body["holds"].as_array().cloned().unwrap_or_default())
+        {
             let (Ok(binding), Ok(claim)) = (
                 serde_json::from_value::<ExposureBinding>(hold["binding"].clone()),
                 serde_json::from_value::<ExposureClaim>(hold["claim"].clone()),
@@ -222,6 +253,87 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
                 settle_exposure(state, &binding, &claim, outcome)
             })
             .await?;
+            // Archive receipts settled earlier, so a window never fills with them.
+            transact(self.store.as_ref(), &key, |state| {
+                compact_exposure(state, &binding, &now, 0)
+            })
+            .await?;
+            settled.push((binding.guarantee_id.clone(), key, binding, claim.amount));
+        }
+        let Some((tokens, cost_cents)) = measured.filter(|_| outcome == "committed") else {
+            return Ok(());
+        };
+        let agent = admission.actor["principal_id"].as_str().unwrap_or_default().to_owned();
+        for ceiling in self.usage_ceilings.iter().filter(|c| c.covers(&agent)) {
+            let used = match ceiling.resource {
+                CeilingResource::Tokens => tokens,
+                CeilingResource::CostCents => cost_cents,
+            };
+            let id = format!("usage:{}", ceiling.id);
+            let held = settled.iter().find(|(g, ..)| *g == id);
+            let over = used.saturating_sub(held.map_or(0, |(.., amount)| *amount));
+            if over == 0 {
+                continue;
+            }
+            // The window the hold was in, or the current one when nothing was held.
+            let (key, binding) = match held {
+                Some((_, key, binding, _)) => (key.clone(), binding.clone()),
+                None => ceiling.ledger(admission, &now)?,
+            };
+            self.ensure_ledger(&key, &binding).await?;
+            self.add_overage(admission, reservation_id, &key, &binding, used, over)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Adds measured usage above the holds to a ceiling: as a committed receipt while it
+    /// fits (compacted like any other), otherwise as a one-way import that may pass the
+    /// limit, after which the ceiling refuses reservations until its window ends.
+    async fn add_overage(
+        &self,
+        admission: &RunAdmission,
+        reservation_id: &str,
+        key: &DocKey,
+        binding: &ExposureBinding,
+        used: u64,
+        over: u64,
+    ) -> Result<(), GatewayError> {
+        let id = hash(&json!([admission.run_id, reservation_id, "overage"]))?;
+        let claim = ExposureClaim {
+            reservation_id: id.clone(),
+            action_digest: hash(&json!([admission.run_id, reservation_id, used]))?,
+            attempt_id: id.clone(),
+            amount: over,
+        };
+        let reserved = transact(self.store.as_ref(), key, |state| {
+            reserve_exposure(state, binding, &claim)
+        })
+        .await?;
+        if let Commit::Rejected { reason_codes } = &reserved
+            && reason_codes.iter().any(|r| r == "shared_guarantee_already_committed")
+        {
+            return Ok(());
+        }
+        if !matches!(reserved, Commit::Rejected { .. }) {
+            transact(self.store.as_ref(), key, |state| {
+                settle_exposure(state, binding, &claim, "committed")
+            })
+            .await?;
+            return Ok(());
+        }
+        let import = ExposureImport {
+            import_id: id,
+            amount: over,
+            row_digest: hash(&json!({"run_id": admission.run_id, "reservation_id": reservation_id,
+                "measured": used, "over": over}))?,
+        };
+        let imported = transact(self.store.as_ref(), key, |state| {
+            import_exposure(state, binding, &import)
+        })
+        .await?;
+        if let Commit::Rejected { reason_codes } = imported {
+            tracing::warn!(guarantee = %binding.guarantee_id, reasons = ?reason_codes, "measured overage not added to a usage ceiling");
         }
         Ok(())
     }
