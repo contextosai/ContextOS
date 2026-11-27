@@ -3353,6 +3353,7 @@ where
             "/v1/runs/{run_id}/operations/{operation_id}/attest-absence",
             post(crate::absence::attest_absence::<S, L>),
         )
+        .route("/v1/ext-authz", post(crate::ext_authz::check::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), shed::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(

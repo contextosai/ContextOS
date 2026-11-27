@@ -22,6 +22,7 @@ pub mod evidence_issuers;
 pub mod evidence_subjects;
 pub mod exposure;
 pub mod exposure_import;
+pub mod ext_authz;
 pub mod feedback;
 pub mod findings;
 pub mod governance_sweep;

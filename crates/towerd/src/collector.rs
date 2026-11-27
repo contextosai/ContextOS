@@ -99,11 +99,17 @@ pub async fn sync_pinned(
             }
         };
         if page.entries.is_empty() {
-            // Caught up without reaching the pinned entry: the history now ends before it.
+            // Caught up without reaching the pinned entry, or resumed from a checkpoint
+            // whose verified anchor is now past the runtime's head: history was truncated.
             if let Some(p) = pin.as_ref()
                 && anchor.as_ref().is_none_or(|a| a.sequence < p.sequence)
             {
                 return broken(fleet, &id, p.sequence, "history_truncated").await;
+            }
+            if let (Some(a), Some(head)) = (anchor.as_ref(), page.head)
+                && head < a.sequence
+            {
+                return broken(fleet, &id, a.sequence, "history_truncated").await;
             }
             let mut f = fleet.write().await;
             let state = f.source(&id);

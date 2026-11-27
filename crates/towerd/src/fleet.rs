@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use contextos_audit::AuditEntry;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub type AgentKey = String;
@@ -25,7 +25,7 @@ pub type AgentKey = String;
 pub const OFFLINE_RUNS: usize = 1 << 20;
 
 /// Outcomes of an agent's governed effects for one capability.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Counts {
     pub attempted: u64,
     pub applied: u64,
@@ -38,7 +38,7 @@ pub struct Counts {
 }
 
 /// One hour of one agent's activity.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Hour {
     pub runs: u64,
     pub effects: u64,
@@ -136,7 +136,7 @@ impl AgentActivity {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunSummary {
     pub source: String,
     pub run_id: String,
@@ -159,7 +159,7 @@ pub struct RunSummary {
 }
 
 /// A change to how the fleet is governed, from any runtime's chain.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Change {
     pub source: String,
     pub sequence: u64,
@@ -170,7 +170,7 @@ pub struct Change {
 }
 
 /// A revocation in force, as the source's audit chain records it.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Revoked {
     pub kind: String,
     pub target: String,
@@ -200,6 +200,10 @@ pub struct SourceState {
     /// Break-glass grants opened on this source (the newest [`MAX_BREAK_GLASS`]), with
     /// the calls each let through.
     pub break_glass: Vec<Value>,
+    /// Verified audit event counts by `entry.kind` (bounded by the runtime's event kinds),
+    /// feeding live compliance readiness views ([`crate::compliance`]).
+    #[serde(skip)]
+    pub event_counts: BTreeMap<String, u64>,
     #[serde(skip)]
     pub deployment: Value,
     #[serde(skip)]
@@ -210,11 +214,11 @@ pub struct SourceState {
     pub anchor: Option<AuditEntry>,
 }
 
-#[derive(Debug)]
-struct Open {
-    run: String,
-    operation: String,
-    capability: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Open {
+    pub(crate) run: String,
+    pub(crate) operation: String,
+    pub(crate) capability: String,
 }
 
 #[derive(Debug)]
@@ -225,12 +229,12 @@ pub struct Fleet {
     pub spend: BTreeMap<AgentKey, crate::spend::AgentSpend>,
     /// Approval quality per capability and approver (see [`crate::approvals`]).
     pub approvals: crate::approvals::Approvals,
-    runs: HashMap<(String, String), RunSummary>,
-    order: VecDeque<(String, String)>,
-    traces: HashMap<(String, String), String>,
-    attempts: HashMap<(String, String), Open>,
+    pub(crate) runs: HashMap<(String, String), RunSummary>,
+    pub(crate) order: VecDeque<(String, String)>,
+    pub(crate) traces: HashMap<(String, String), String>,
+    pub(crate) attempts: HashMap<(String, String), Open>,
     /// `attempts` keys, oldest first.
-    attempt_order: VecDeque<(String, String)>,
+    pub(crate) attempt_order: VecDeque<(String, String)>,
     pub changes: VecDeque<Change>,
     recent_runs: usize,
     hours: usize,
@@ -241,7 +245,7 @@ pub struct Fleet {
     max_agents: usize,
     max_fleet_agents: usize,
     /// Agents created per `(source, tenant)`, for the per-tenant bound.
-    agents_per_tenant: HashMap<(String, String), usize>,
+    pub(crate) agents_per_tenant: HashMap<(String, String), usize>,
 }
 
 const MAX_CHANGES: usize = 2_000;
@@ -397,6 +401,7 @@ impl Fleet {
             state.tenant_id.get_or_insert_with(|| entry.tenant_id.clone());
             state.verified_to = entry.sequence;
             state.head = state.head.max(entry.sequence);
+            *state.event_counts.entry(entry.kind.clone()).or_default() += 1;
         }
         let run_id = s(&p["run_id"]).map(str::to_owned);
         let agent = run_id.as_deref().and_then(|r| self.agent_of(source, r));

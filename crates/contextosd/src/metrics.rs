@@ -20,11 +20,36 @@ const DECISION_BUCKETS: [f64; 6] = [10.0, 30.0, 60.0, 300.0, 1800.0, 3600.0];
 pub const GEN_AI_DURATION_BUCKETS: [f64; 14] = [
     0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
 ];
+/// The OpenTelemetry GenAI conventions' advised buckets for `gen_ai.client.token.usage`.
+pub const GEN_AI_TOKEN_BUCKETS: [f64; 14] = [
+    1.0,
+    4.0,
+    16.0,
+    64.0,
+    256.0,
+    1024.0,
+    4096.0,
+    16_384.0,
+    65_536.0,
+    262_144.0,
+    1_048_576.0,
+    4_194_304.0,
+    16_777_216.0,
+    67_108_864.0,
+];
 
 /// One tool's governed-call durations, in seconds.
 #[derive(Debug, Default)]
 struct Seconds {
     counts: [u64; GEN_AI_DURATION_BUCKETS.len()],
+    sum: f64,
+    count: u64,
+}
+
+/// Metered token usage counts per model and token type (input / output).
+#[derive(Debug, Default)]
+struct TokenHist {
+    counts: [u64; GEN_AI_TOKEN_BUCKETS.len()],
     sum: f64,
     count: u64,
 }
@@ -65,6 +90,8 @@ pub struct Metrics {
     approval_decisions: Mutex<Histogram<{ DECISION_BUCKETS.len() }>>,
     /// Governed tool calls' durations by tool and error type (GenAI conventions).
     tool_durations: Mutex<BTreeMap<(String, String), Seconds>>,
+    /// Metered token usage by bounded model label and token type (`input` | `output`).
+    token_usage: Mutex<BTreeMap<(String, &'static str), TokenHist>>,
     notifications: Mutex<BTreeMap<(String, String), u64>>,
     audit_sinks: Mutex<BTreeMap<(String, String), u64>>,
     /// Gauges from the leader's last full governance sweep (see `governance_sweep`).
@@ -137,6 +164,30 @@ impl Metrics {
                 }
             }
             h.sum += seconds;
+            h.count += 1;
+        }
+    }
+
+    /// Records metered input and/or output token counts as the OpenTelemetry GenAI
+    /// conventions' `gen_ai.client.token.usage`. `model` must come from configuration
+    /// (`[guards.models]`) or `"unpinned"` so label cardinality stays bounded (T72).
+    #[allow(clippy::cast_precision_loss)]
+    pub fn token_usage(&self, model: &str, input_tokens: Option<u64>, output_tokens: Option<u64>) {
+        let Ok(mut map) = self.token_usage.lock() else {
+            return;
+        };
+        for (token_type, value) in [("input", input_tokens), ("output", output_tokens)] {
+            let Some(tokens) = value else {
+                continue;
+            };
+            let v = tokens as f64;
+            let h = map.entry((model.to_owned(), token_type)).or_default();
+            for (i, bound) in GEN_AI_TOKEN_BUCKETS.iter().enumerate() {
+                if v <= *bound {
+                    h.counts[i] += 1;
+                }
+            }
+            h.sum += v;
             h.count += 1;
         }
     }
@@ -311,6 +362,31 @@ impl Metrics {
                     "gen_ai_client_operation_duration_seconds_count{{{labels}}} {}",
                     h.count
                 );
+            }
+        }
+        out.push_str(
+            "# HELP gen_ai_client_token_usage Metered model token usage (gen_ai.client.token.usage) by model and token type.\n",
+        );
+        out.push_str("# TYPE gen_ai_client_token_usage histogram\n");
+        if let Ok(map) = self.token_usage.lock() {
+            for ((model, token_type), h) in map.iter() {
+                let labels = format!(
+                    "gen_ai_operation_name=\"chat\",gen_ai_request_model=\"{model}\",gen_ai_token_type=\"{token_type}\""
+                );
+                for (i, bound) in GEN_AI_TOKEN_BUCKETS.iter().enumerate() {
+                    let _ = writeln!(
+                        out,
+                        "gen_ai_client_token_usage_bucket{{{labels},le=\"{bound}\"}} {}",
+                        h.counts[i]
+                    );
+                }
+                let _ = writeln!(
+                    out,
+                    "gen_ai_client_token_usage_bucket{{{labels},le=\"+Inf\"}} {}",
+                    h.count
+                );
+                let _ = writeln!(out, "gen_ai_client_token_usage_sum{{{labels}}} {}", h.sum);
+                let _ = writeln!(out, "gen_ai_client_token_usage_count{{{labels}}} {}", h.count);
             }
         }
         out.push_str("# HELP contextos_notifications_total Escalation notification attempts by webhook and outcome.\n");

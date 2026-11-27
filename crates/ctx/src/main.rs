@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod adapter_check;
 mod args;
 mod attest;
 mod audit_pack;
@@ -13,6 +14,8 @@ mod audit_verify;
 mod chargeback;
 mod evidence_pack;
 mod flow_presets;
+mod import_cerbos;
+mod import_policy;
 mod init_tool;
 mod inspect;
 mod inventory;
@@ -232,6 +235,36 @@ fn run(command: Command) -> Result<Value, Failure> {
             cases: &cases,
             report: report.as_ref(),
             fail_on_widening,
+        }),
+        Command::ImportPolicy {
+            format,
+            input,
+            pack_id,
+            pack_version,
+            tenant,
+            out,
+            tests_out,
+        } => import_policy::run(&import_policy::Options {
+            format: &format,
+            input: &input,
+            pack_id: &pack_id,
+            pack_version: &pack_version,
+            tenant: &tenant,
+            out: out.as_ref(),
+            tests_out: tests_out.as_ref(),
+        }),
+        Command::AdapterCheck {
+            entries,
+            keys,
+            continues,
+            scenarios,
+            markdown,
+        } => adapter_check::run(&adapter_check::Options {
+            entries: &entries,
+            keys: &keys,
+            continues: continues.as_ref(),
+            scenarios: &scenarios,
+            markdown: markdown.as_ref(),
         }),
         Command::Inventory {
             entries,

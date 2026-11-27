@@ -488,10 +488,30 @@ class Run:
         """Reserves budget for a `model_call` or a `replan`; returns the reservation id."""
         return self._post("/usage/reserve", {"kind": kind, "tokens": tokens, "cost_cents": cost_cents})["reservation_id"]
 
-    def settle_usage(self, reservation_id: str) -> dict:
+    def settle_usage(
+        self,
+        reservation_id: str,
+        *,
+        tokens: Optional[int] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        cost_cents: Optional[int] = None,
+        model: Optional[str] = None,
+    ) -> dict:
         """Settles a reservation as the executor: the whole reservation is charged. Pass
         the reservation id to your metering gateway instead to settle measured usage."""
-        return self._post("/usage/settle", {"reservation_id": reservation_id})
+        body: Dict[str, Any] = {"reservation_id": reservation_id}
+        if tokens is not None:
+            body["tokens"] = tokens
+        if input_tokens is not None:
+            body["input_tokens"] = input_tokens
+        if output_tokens is not None:
+            body["output_tokens"] = output_tokens
+        if cost_cents is not None:
+            body["cost_cents"] = cost_cents
+        if model is not None:
+            body["model"] = model
+        return self._post("/usage/settle", body)
 
     def metering_headers(self, reservation_id: str) -> Dict[str, str]:
         """Headers for a model request that a metering LLM gateway settles with the

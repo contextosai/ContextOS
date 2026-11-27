@@ -32,6 +32,13 @@ pub enum UsageKind {
     Replan,
 }
 
+/// Optional input/output token split reported by a metering gateway on settlement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenBreakdown {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum UsageRefusal {
     #[error("the budget cannot fit this reservation: {0:?}")]
@@ -237,6 +244,28 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
         reporter: &str,
         model: Option<&str>,
     ) -> Result<Value, UsageRefusal> {
+        self.settle_usage_with_breakdown(
+            admission,
+            reservation_id,
+            measured,
+            TokenBreakdown::default(),
+            reporter,
+            model,
+        )
+        .await
+    }
+
+    /// As [`Gateway::settle_usage`], also recording metered `input_tokens` and
+    /// `output_tokens` in the `usage_settled` audit entry when reported.
+    pub async fn settle_usage_with_breakdown(
+        &self,
+        admission: &RunAdmission,
+        reservation_id: &str,
+        measured: Option<(u64, u64)>,
+        breakdown: TokenBreakdown,
+        reporter: &str,
+        model: Option<&str>,
+    ) -> Result<Value, UsageRefusal> {
         let allocated = self.open_reservation(admission, reservation_id).await?;
         if measured.is_some() {
             self.require_claimant(admission, reservation_id, reporter).await?;
@@ -246,8 +275,16 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Gateway<S, L> {
             .await?;
         self.settle_ceilings(admission, reservation_id, "committed", measured)
             .await?;
-        let measured = measured
-            .map(|(tokens, cost_cents)| json!({"tokens": tokens, "cost_units": cost_cents.saturating_mul(100)}));
+        let measured = measured.map(|(tokens, cost_cents)| {
+            let mut m = json!({"tokens": tokens, "cost_units": cost_cents.saturating_mul(100)});
+            if let Some(input) = breakdown.input_tokens {
+                m["input_tokens"] = json!(input);
+            }
+            if let Some(output) = breakdown.output_tokens {
+                m["output_tokens"] = json!(output);
+            }
+            m
+        });
         self.audit
             .append(
                 &admission.tenant_id,

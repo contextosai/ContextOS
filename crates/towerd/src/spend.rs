@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 
 use contextos_audit::AuditEntry;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::fleet::hour_index;
@@ -43,7 +43,7 @@ pub const FINDING_HOURS: i64 = 24 * 7;
 pub const UNMETERED_FLOOR_TOKENS: u64 = 10_000;
 
 /// Usage in one hour (or summed over a window).
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Usage {
     /// Model calls settled (replans are not model calls).
     pub calls: u64,
@@ -91,7 +91,7 @@ impl Usage {
 }
 
 /// One model's usage in one hour.
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelUsage {
     pub calls: u64,
     pub tokens: u64,
@@ -109,7 +109,7 @@ impl ModelUsage {
 }
 
 /// One agent's model spend.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSpend {
     /// Since Tower started reading (not bounded by the window).
     pub total: Usage,

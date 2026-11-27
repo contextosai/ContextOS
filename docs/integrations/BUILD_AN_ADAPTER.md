@@ -56,5 +56,14 @@ When all four behave as expected, add the integration to the table in
 - Do not budget in a hook that swallows exceptions; budget where a refusal stops the
   call.
 
-A conformance command that drives these four scenarios against an integration
-automatically (`ctx adapter-check`) is planned, not built.
+Verify the four scenarios automatically from your test run's signed audit export with
+`ctx adapter-check`:
+
+```sh
+ctx adapter-check --entries entries.json --keys keys.json --markdown adapter-report.md
+```
+
+`ctx adapter-check` verifies the audit chain offline against `keys.json` first and exits
+`0` only when all four scenarios (`refusal`, `approval_pause`, `duplicate_delivery`,
+`lost_response`) have verified evidence without invariant violations (use `--scenario` to
+check a subset).

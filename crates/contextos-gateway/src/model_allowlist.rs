@@ -52,6 +52,17 @@ impl ModelPolicy {
         matches(&self.allowed, model) && self.agents.get(agent_id).is_none_or(|own| matches(own, model))
     }
 
+    /// Returns the configured allow-list label matching `model`, for bounded metric
+    /// cardinality (threat T72). Never returns a caller-supplied string outside `allowed`.
+    #[must_use]
+    pub fn matched_label(&self, model: &str) -> Option<&str> {
+        let id = model.split_once('@').map_or(model, |(id, _)| id);
+        self.allowed
+            .iter()
+            .find(|entry| entry.as_str() == model || entry.as_str() == id)
+            .map(String::as_str)
+    }
+
     /// The pinned `model_profile` refs among `release_refs` this agent may not use.
     #[must_use]
     pub fn refused_profiles(&self, agent_id: &str, release_refs: &[Value]) -> Vec<String> {

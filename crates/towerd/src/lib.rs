@@ -7,7 +7,9 @@ pub mod approvals;
 pub mod authority;
 pub mod callers;
 pub mod chargeback;
+pub mod checkpoint;
 pub mod collector;
+pub mod compliance;
 pub mod config;
 pub mod console;
 pub mod dashboard;
@@ -44,6 +46,9 @@ pub struct Tower<S, L> {
     /// This replica's view of the sources managed from the console.
     pub source_admin: sources_admin::State,
     pub records: records::Records<S, L>,
+    /// Persisted fleet checkpoints for fast tamper-safe collector restarts.
+    pub checkpoints: Arc<checkpoint::StoreCheckpoints<S>>,
+    pins: Arc<dyn pins::Pins>,
     pub model: Option<Arc<dyn intel::Model>>,
     pub callers: api::Callers,
     /// Single sign-on with the organization's identity provider (`[sso]`).
@@ -107,6 +112,7 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
         let public = base64_key(&signer);
         let journal_keys = json!({"keys": [{"kid": signer.kid(), "alg": "ed25519", "public_key": public}]});
         let pins: Arc<dyn pins::Pins> = Arc::new(pins::StorePins::new(store.clone()));
+        let checkpoints = Arc::new(checkpoint::StoreCheckpoints::new(store.clone()));
         let journal = Arc::new(AuditWriter::new(log, signer));
         let mut fleet = fleet::Fleet::new(config.collector.recent_runs, config.collector.hours);
         for s in &config.sources {
@@ -118,14 +124,55 @@ impl<S: DocumentStore + 'static, L: AppendLog + 'static> Tower<S, L> {
             sso,
             fleet: Arc::new(RwLock::new(fleet)),
             sources: registry::Registry::new(sources.into_iter().map(|s| (s, registry::Origin::Config)))
-                .with_pins(pins),
+                .with_pins(pins.clone()),
             source_admin: sources_admin::State::default(),
             records: records::Records::new(store, journal),
+            checkpoints,
+            pins,
             model,
             console,
             journal_keys,
             config,
         })
+    }
+
+    /// Restores the last checksummed fleet checkpoint from the store (if any) before
+    /// starting collectors so restarts continue from the verified anchor instead of
+    /// re-verifying every chain from genesis.
+    pub async fn restore_checkpoint(&self) {
+        let mut fleet = self.fleet.write().await;
+        match self.checkpoints.restore(&mut fleet, self.pins.as_ref()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(sources = n, "restored persisted collector checkpoint"),
+            Err(error) => tracing::warn!(%error, "could not restore collector checkpoint; rebuilding from genesis"),
+        }
+    }
+
+    /// Periodically persists the verified fleet checkpoint whenever new entries have
+    /// been folded in.
+    pub fn spawn_checkpoint_saver(self: &Arc<Self>) {
+        let tower = self.clone();
+        tokio::spawn(async move {
+            let mut last_saved = 0u64;
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let rev = tower.fleet.read().await.revision;
+                if rev == last_saved {
+                    continue;
+                }
+                let saved = {
+                    let fleet = tower.fleet.read().await;
+                    tower.checkpoints.save(&fleet).await
+                };
+                match saved {
+                    Ok(true) => last_saved = rev,
+                    Ok(false) => {}
+                    Err(error) => tracing::warn!(%error, "could not persist collector checkpoint"),
+                }
+            }
+        });
     }
 
     /// Journals, once per publish lease, any change a crashed writer left committed but
