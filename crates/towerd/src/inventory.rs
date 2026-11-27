@@ -14,20 +14,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::governance::AgentView;
 
 /// When an item was first and last seen in an agent's runs.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Seen {
     pub first: String,
     pub last: String,
 }
 
 /// First and last sightings per `kind:id` (`capability:…`, `model:…`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SeenMap(BTreeMap<String, Seen>);
 
 /// Distinct items tracked per agent; past it, sightings of new items are dropped (their

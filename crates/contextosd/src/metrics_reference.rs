@@ -15,6 +15,7 @@ pub fn full_exposition() -> String {
     metrics.observe("/v1/runs/{run_id}/dispatch", 200, Duration::from_millis(3));
     metrics.dispatch_outcome("x.y", "blocked", &["shared_guarantee_saturated".into()]);
     metrics.tool_execution("x.y", "blocked", 0.05);
+    metrics.token_usage("claude-sonnet-5-5", Some(512), Some(128));
     metrics.approval("x.y", Some(&contextos_gateway::ApprovalNote::Requested));
     metrics.approval(
         "x.y",

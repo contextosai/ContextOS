@@ -110,6 +110,10 @@ class Proxy:
                 return None
         tokens = (usage.input or 0) + (usage.output or 0)
         body = {"reservation_id": reservation, "tokens": tokens}
+        if usage.input is not None:
+            body["input_tokens"] = usage.input
+        if usage.output is not None:
+            body["output_tokens"] = usage.output
         if self.price:
             body["cost_cents"] = math.ceil(((usage.input or 0) * self.price[0] + (usage.output or 0) * self.price[1])
                                            / 1_000_000)

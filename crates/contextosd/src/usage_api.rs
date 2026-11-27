@@ -13,7 +13,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use contextos_gateway::{RunAdmission, UsageKind, UsageRefusal};
+use contextos_gateway::{RunAdmission, TokenBreakdown, UsageKind, UsageRefusal};
 use contextos_store::{AppendLog, DocumentStore};
 use serde_json::json;
 
@@ -57,6 +57,10 @@ struct SettleUsage {
     reservation_id: String,
     #[serde(default)]
     tokens: u64,
+    #[serde(default)]
+    input_tokens: Option<u64>,
+    #[serde(default)]
+    output_tokens: Option<u64>,
     #[serde(default)]
     cost_cents: u64,
     #[serde(default)]
@@ -253,6 +257,7 @@ where
     let gateway = dispatch_gateway(&state)?;
     let request: SettleUsage =
         serde_json::from_value(parse_body(&state, &body)?).map_err(|e| invalid("settlement", e))?;
+    let (effective_tokens, breakdown) = resolve_token_breakdown(&request)?;
     let model = model_name(request.model)?;
     let admission = if metered {
         metered_admission(&state, &caller, &run_id).await?
@@ -261,16 +266,79 @@ where
         require_owner(gateway, &admission, &headers).await?;
         admission
     };
-    let measured = metered.then_some((request.tokens, request.cost_cents));
+    let measured = metered.then_some((effective_tokens, request.cost_cents));
     let settled = gateway
-        .settle_usage(
+        .settle_usage_with_breakdown(
             &admission,
             &request.reservation_id,
             measured,
+            if metered { breakdown } else { TokenBreakdown::default() },
             &caller.principal_id,
             model.as_deref(),
         )
         .await
         .map_err(usage_error)?;
+    if metered {
+        let model_label = model
+            .as_deref()
+            .and_then(|m| state.models.as_ref().and_then(|p| p.matched_label(m)))
+            .unwrap_or("unpinned");
+        state
+            .metrics
+            .token_usage(model_label, breakdown.input_tokens, breakdown.output_tokens);
+    }
     Ok(axum::Json(settled).into_response())
+}
+
+fn resolve_token_breakdown(request: &SettleUsage) -> Result<(u64, TokenBreakdown), ApiError> {
+    let breakdown = TokenBreakdown {
+        input_tokens: request.input_tokens,
+        output_tokens: request.output_tokens,
+    };
+    if breakdown.input_tokens.is_none() && breakdown.output_tokens.is_none() {
+        return Ok((request.tokens, breakdown));
+    }
+    let split_sum = breakdown
+        .input_tokens
+        .unwrap_or(0)
+        .checked_add(breakdown.output_tokens.unwrap_or(0))
+        .ok_or_else(|| usage_error(UsageRefusal::Invalid))?;
+    if request.tokens == 0 {
+        return Ok((split_sum, breakdown));
+    }
+    if split_sum > request.tokens {
+        return Err(usage_error(UsageRefusal::Invalid));
+    }
+    Ok((request.tokens, breakdown))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_breakdown_derives_total_or_validates_split() {
+        let derived = SettleUsage {
+            reservation_id: "usage:1".into(),
+            tokens: 0,
+            input_tokens: Some(400),
+            output_tokens: Some(120),
+            cost_cents: 5,
+            model: Some("claude-sonnet-5-5".into()),
+        };
+        let (total, breakdown) = resolve_token_breakdown(&derived).unwrap();
+        assert_eq!(total, 520);
+        assert_eq!(breakdown.input_tokens, Some(400));
+        assert_eq!(breakdown.output_tokens, Some(120));
+
+        let mismatched = SettleUsage {
+            reservation_id: "usage:2".into(),
+            tokens: 100,
+            input_tokens: Some(80),
+            output_tokens: Some(50),
+            cost_cents: 0,
+            model: None,
+        };
+        assert!(resolve_token_breakdown(&mismatched).is_err());
+    }
 }

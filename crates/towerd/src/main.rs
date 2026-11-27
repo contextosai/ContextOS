@@ -70,6 +70,8 @@ async fn main() {
             let tower = Arc::new(
                 Tower::build(config, store.clone(), (*store).clone(), signer, model).unwrap_or_else(|e| fail(e)),
             );
+            tower.restore_checkpoint().await;
+            tower.spawn_checkpoint_saver();
             towerd::sources_admin::spawn(&tower);
             tower.spawn_journal_recovery();
             tower.spawn_sso();

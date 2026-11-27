@@ -24,6 +24,7 @@ mod evidence;
 mod executors;
 mod exposure;
 mod exposure_import;
+mod ext_authz;
 mod findings;
 mod global_kill_switch;
 mod harness;

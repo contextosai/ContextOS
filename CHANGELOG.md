@@ -16,6 +16,34 @@ See the [release notes](docs/releases/v0.1.0-alpha.24.md) before upgrading.
 
 ### Added
 
+- Envoy and `agentgateway` HTTP `ext_authz` backend (`POST /v1/ext-authz`): adapts
+  Envoy-compatible HTTP `ext_authz` checks (ContextOS tool-call envelopes, MCP JSON-RPC
+  `tools/call` bodies, or raw JSON arguments with `ContextOS-Capability`) to
+  `check_tool_call`, returning `200 OK` on `allow` and `403 Forbidden` otherwise with
+  `X-ContextOS-Check-Only: true`, `X-ContextOS-Verdict`, `X-ContextOS-Action-Digest`, and
+  `X-ContextOS-Not-Evaluated` (threat T73).
+- OpenTelemetry GenAI token-usage metrics and metered token split: `POST
+  /v1/runs/{id}/usage/settle` accepts optional `input_tokens` and `output_tokens`
+  (validated against `tokens` and recorded in `usage_settled`), exported as
+  `gen_ai_client_token_usage` (`gen_ai.client.token.usage`) with bounded labels
+  `gen_ai_operation_name`, `gen_ai_token_type` (`input`/`output`), and configured
+  `gen_ai_request_model` (or `unpinned`). Updated `examples/metering-proxy` and the
+  Python and TypeScript clients.
+- OPA and Cerbos policy importer (`ctx import-policy`): translates a documented,
+  deterministic subset of OPA JSON decision tables and Cerbos `api.cerbos.dev/v1`
+  `resourcePolicy` documents into schema-validated, fail-closed `context-pack.v2` packs
+  with deny-precedence bundles, default-deny fallback, and an optional starter `ctx test`
+  suite (`--tests-out`), failing closed on unsupported Rego/CEL constructs (threat T74).
+- Automated adapter conformance verifier (`ctx adapter-check`): verifies a signed audit
+  export offline against the four mandatory framework integration scenarios (`refusal`,
+  `approval_pause`, `duplicate_delivery`, `lost_response`) with optional Markdown report
+  export for CI (threat T75).
+- Tower live compliance readiness console and persisted collector checkpoints:
+  `GET /api/compliance`, `GET /api/compliance/report` (Markdown/JSON export journalled as
+  `compliance_report_exported`), and the Tower UI Compliance page map live verified audit
+  events across SOC 2, EU AI Act, ISO/IEC 42001, NIST AI RMF, and OWASP Agentic without
+  claiming certification; `towerd` also persists checksummed fleet checkpoints checked
+  against pinned anchors so restarts resume from the last verified entry (threat T76).
 - `[privacy] subject_key_env`: digest data subjects with HMAC-SHA256 under a deployment
   key (`hmac-sha256:…`) instead of plain SHA-256, so a guessed account number or e-mail
   address cannot be confirmed against the audit chain. `match_unkeyed_subjects` keeps

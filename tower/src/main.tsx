@@ -11,6 +11,7 @@ import { Agents } from "./pages/Agents";
 import { Inventory } from "./pages/Inventory";
 import { AccessReview } from "./pages/AccessReview";
 import { Cases } from "./pages/Cases";
+import { Compliance } from "./pages/Compliance";
 import { Agent } from "./pages/Agent";
 import { FindingsPage } from "./pages/FindingsPage";
 import { Activity } from "./pages/Activity";
@@ -45,6 +46,7 @@ const router = createBrowserRouter(
         { path: "agents/:key", element: <Agent /> },
         { path: "inventory", element: <Inventory /> },
         { path: "access-review", element: <AccessReview /> },
+        { path: "compliance", element: <Compliance /> },
         { path: "cases", element: <Cases /> },
         { path: "findings", element: <FindingsPage /> },
         { path: "activity", element: <Activity /> },

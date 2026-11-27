@@ -177,9 +177,12 @@ the number of agents and active guardrails, not with traffic.
   journal. Each runs its own collectors and builds its own fleet model; counts can differ
   briefly between replicas while they catch up. Journal appends are serialised by the
   store (a replica that loses the race retries).
-- **Restart.** The fleet model is rebuilt by verifying every source's chain from
-  genesis. For long chains this takes time proportional to chain length; persisting
-  collector anchors and aggregates is the next increment (see Limits).
+- **Restart.** Tower periodically persists a checksummed fleet checkpoint (with each
+  source's verified audit anchor) in its store. On restart, Tower verifies the checkpoint
+  digest and checks every restored anchor against its pinned anchor before resuming each
+  collector from the next entry (catching any history truncation or rewrite); if no valid
+  checkpoint exists or the fleet exceeds the checkpoint size cap, it falls back to
+  verifying every source's chain from genesis.
 - **Console-managed sources.** Additions, pauses, retries, key reloads and removals
   are records in the store; each replica applies them when it next converges (at most
   `reconcile_ms`), and immediately on the replica that took the request. A replica that

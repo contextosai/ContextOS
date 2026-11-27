@@ -517,8 +517,14 @@ export class Run {
    * Settles a reservation as the executor: the whole reservation is charged. Pass the
    * id to your metering gateway instead to settle measured usage.
    */
-  settleUsage(reservationId) {
-    return this.#post("/usage/settle", { reservation_id: reservationId });
+  settleUsage(reservationId, options = {}) {
+    const body = { reservation_id: reservationId };
+    if (options.tokens !== undefined) body.tokens = options.tokens;
+    if (options.inputTokens !== undefined) body.input_tokens = options.inputTokens;
+    if (options.outputTokens !== undefined) body.output_tokens = options.outputTokens;
+    if (options.costCents !== undefined) body.cost_cents = options.costCents;
+    if (options.model !== undefined) body.model = options.model;
+    return this.#post("/usage/settle", body);
   }
 
   /** Headers for a model request that a metering LLM gateway settles with the usage it

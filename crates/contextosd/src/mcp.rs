@@ -71,7 +71,7 @@ const MAX_TOOL_NAME: usize = 64;
 /// model APIs accept is its own name; otherwise characters outside `[A-Za-z0-9_-]`
 /// become `_`. A name that would collide with another capability's, or exceed 64
 /// characters, ends in 8 hex digits of the id's digest, so each names one capability.
-fn tool_names<'a>(capability_ids: impl IntoIterator<Item = &'a String>) -> BTreeMap<String, String> {
+pub(crate) fn tool_names<'a>(capability_ids: impl IntoIterator<Item = &'a String>) -> BTreeMap<String, String> {
     let mut ids: Vec<&String> = capability_ids.into_iter().collect();
     ids.sort();
     ids.dedup();

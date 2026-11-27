@@ -287,7 +287,10 @@ export declare class Run {
   notices(options?: { limit?: number }): Promise<NoticeView & { root_run_id: string }>;
   ackNotices(through: number): Promise<NoticeView>;
   reserveUsage(kind: "model_call" | "replan", options?: { tokens?: number; costCents?: number }): Promise<string>;
-  settleUsage(reservationId: string): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
+  settleUsage(
+    reservationId: string,
+    options?: { tokens?: number; inputTokens?: number; outputTokens?: number; costCents?: number; model?: string },
+  ): Promise<{ reservation_id: string; charged: Record<string, number>; verified: boolean }>;
   /** Headers for a model request that a metering LLM gateway settles with the usage it measures. */
   meteringHeaders(reservationId: string): Record<string, string>;
   /**

@@ -420,4 +420,51 @@ pub enum Command {
         #[arg(long)]
         feedback: Option<PathBuf>,
     },
+    /// Import a documented subset of OPA JSON decision tables or Cerbos resourcePolicy
+    /// documents into a schema-validated, fail-closed Context Pack (`context-pack.v2`).
+    /// Unsupported constructs fail closed rather than being silently dropped.
+    ImportPolicy {
+        /// `opa` (JSON decision table) or `cerbos` (`api.cerbos.dev/v1` resourcePolicy JSON).
+        #[arg(long)]
+        format: String,
+        /// Policy file to import.
+        #[arg(long)]
+        input: PathBuf,
+        /// `pack_meta.pack_id` for the generated pack.
+        #[arg(long)]
+        pack_id: String,
+        /// `pack_meta.pack_version` for the generated pack.
+        #[arg(long, default_value = "1.0.0")]
+        pack_version: String,
+        /// `pack_meta.tenant.tenant_id` for the generated pack.
+        #[arg(long, default_value = "tenant_imported")]
+        tenant: String,
+        /// Write the generated Context Pack JSON to this file (otherwise printed in output).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Optional path to write a starter `ctx test` suite covering the imported rules.
+        #[arg(long)]
+        tests_out: Option<PathBuf>,
+    },
+    /// Verify from a signed audit export that a custom framework adapter satisfies the
+    /// four mandatory scenarios in `docs/integrations/BUILD_AN_ADAPTER.md` (`refusal`,
+    /// `approval_pause`, `duplicate_delivery`, `lost_response`). Refuses unverified exports.
+    AdapterCheck {
+        /// The audit export, as for `ctx audit-verify`.
+        #[arg(long)]
+        entries: PathBuf,
+        /// The published audit keys (`GET /v1/audit/keys`).
+        #[arg(long)]
+        keys: PathBuf,
+        /// The last entry of an earlier verified export this one continues.
+        #[arg(long)]
+        continues: Option<PathBuf>,
+        /// Check only specific scenarios (`refusal`, `approval_pause`, `duplicate_delivery`,
+        /// `lost_response`); repeat for several. Defaults to all four.
+        #[arg(long = "scenario")]
+        scenarios: Vec<String>,
+        /// Optional path to write a Markdown conformance table.
+        #[arg(long)]
+        markdown: Option<PathBuf>,
+    },
 }

@@ -28,7 +28,7 @@
 use std::collections::BTreeMap;
 
 use contextos_audit::AuditEntry;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Upper bounds (seconds, inclusive) of the decision-time buckets; the last bucket is
 /// everything slower.
@@ -39,7 +39,7 @@ pub const MAX_KEYS: usize = 256;
 pub const OTHER: &str = "(other)";
 
 /// How approvals of one capability, or by one approver, were decided.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Stats {
     pub requested: u64,
     pub redeemed: u64,
@@ -73,7 +73,7 @@ impl Stats {
 }
 
 /// The fleet's approval quality.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Approvals {
     pub capabilities: BTreeMap<String, Stats>,
     pub approvers: BTreeMap<String, Stats>,

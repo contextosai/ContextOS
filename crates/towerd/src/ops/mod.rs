@@ -10,6 +10,7 @@ pub mod access_review;
 pub mod approvals;
 pub mod break_glass;
 pub mod cases;
+pub mod compliance;
 pub mod dashboard;
 pub mod inbox;
 pub mod inventory;
@@ -30,6 +31,7 @@ where
         .merge(approvals::routes())
         .merge(break_glass::routes())
         .merge(cases::routes())
+        .merge(compliance::routes())
         .merge(dashboard::routes())
         .merge(inbox::routes())
         .merge(inventory::routes())
