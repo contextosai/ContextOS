@@ -85,6 +85,19 @@ async fn ext_authz_allows_and_forbids_envelopes_mcp_and_raw_arguments() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.headers().get("x-contextos-verdict").unwrap(), "allow");
+
+    // 5. Envoy `path_prefix` appends the original path; the check ignores it.
+    let resp = client
+        .post(format!("{}/v1/ext-authz/mcp/tools", w.base))
+        .bearer_auth("acme-key")
+        .header("ContextOS-Run-Id", "run_ext_ok")
+        .json(&mcp_call)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers().get("x-contextos-verdict").unwrap(), "allow");
+    assert_eq!(resp.headers().get("x-contextos-check-only").unwrap(), "true");
 }
 
 #[tokio::test]

@@ -197,6 +197,11 @@ pub async fn reconcile<S: DocumentStore, L: AppendLog>(t: &Tower<S, L>) -> Resul
             tracing::info!(source = %id, "console source removed");
         }
     }
+    // Drop fleet state of sources no longer registered (removed in the console, or
+    // restored from a checkpoint after being removed while this replica was down).
+    let registered: std::collections::BTreeSet<String> =
+        t.sources.listed().iter().map(|l| l.source.id().to_owned()).collect();
+    t.fleet.write().await.sources.retain(|id, _| registered.contains(id));
     let mut applied = admin.read().applied.clone();
     applied.retain(|id, _| t.sources.get(id).is_some());
     for listed in t.sources.listed() {

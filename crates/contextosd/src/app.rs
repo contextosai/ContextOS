@@ -3354,6 +3354,7 @@ where
             post(crate::absence::attest_absence::<S, L>),
         )
         .route("/v1/ext-authz", post(crate::ext_authz::check::<S, L>))
+        .route("/v1/ext-authz/{*path}", post(crate::ext_authz::check_prefixed::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), shed::<S, L>))
         .layer(middleware::from_fn_with_state(state.clone(), observe::<S, L>))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(

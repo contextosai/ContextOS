@@ -81,7 +81,7 @@ export function Compliance() {
   const exportReport = (format: "markdown" | "json") => {
     setExportError(null);
     const ext = format === "markdown" ? "md" : "json";
-    download(`/api/compliance/report?framework=${enc(framework)}&format=${format}`, `contextos-compliance-${framework}.${ext}`).catch(
+    download("/api/compliance/report", `contextos-compliance-${framework}.${ext}`, { framework, format }).catch(
       setExportError,
     );
   };
