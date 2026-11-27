@@ -4,18 +4,22 @@
 //! | Route | Role | Purpose |
 //! |---|---|---|
 //! | `GET /api/compliance` | viewer | live control coverage and verified event counts per framework |
-//! | `GET /api/compliance/report` | viewer | exportable Markdown or JSON report whose digest is journalled |
+//! | `POST /api/compliance/report` | viewer | exportable Markdown or JSON report whose digest is journalled |
+//!
+//! The export is a `POST` because it appends to Tower's journal; a `GET` stays free of
+//! side effects (prefetchers, link scanners and retries never journal an export).
 
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use contextos_store::{AppendLog, DocumentStore};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::{ApiError, ApiResult, Shared, caller, ok, snapshot};
+use crate::api::{ApiError, ApiResult, Shared, body, caller, ok, snapshot};
 use crate::collector::wall_clock;
 use crate::compliance::{FRAMEWORKS, evaluate, markdown};
 
@@ -26,7 +30,7 @@ where
 {
     Router::new()
         .route("/api/compliance", get(view::<S, L>))
-        .route("/api/compliance/report", get(report::<S, L>))
+        .route("/api/compliance/report", post(report::<S, L>))
 }
 
 #[derive(Deserialize)]
@@ -38,7 +42,7 @@ struct ComplianceQuery {
     source: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReportQuery {
     #[serde(default)]
@@ -87,9 +91,14 @@ async fn view<S: DocumentStore, L: AppendLog>(
 async fn report<S: DocumentStore, L: AppendLog>(
     State(t): State<Shared<S, L>>,
     headers: HeaderMap,
-    Query(q): Query<ReportQuery>,
+    bytes: Bytes,
 ) -> ApiResult {
     let c = caller(&t, &headers, "viewer")?;
+    let q: ReportQuery = if bytes.is_empty() {
+        ReportQuery::default()
+    } else {
+        body(&bytes)?
+    };
     let selected = select_frameworks(q.framework.as_deref())?;
     let snap = snapshot(&t).await?;
     let report = {

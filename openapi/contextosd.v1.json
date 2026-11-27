@@ -858,6 +858,106 @@
         "x-contextos-scope": "dispatch"
       }
     },
+    "/v1/ext-authz/{path}": {
+      "post": {
+        "operationId": "ext_authz_check_prefixed",
+        "summary": "Envoy ext_authz check backend with the original request path appended",
+        "description": "As `POST /v1/ext-authz`, for Envoy HTTP `ext_authz` services configured with `path_prefix: /v1/ext-authz`, which append the original request path. The appended path is ignored; the decision depends only on the run, capability and arguments.",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The original request path Envoy appended (may contain `/`); ignored."
+          },
+          {
+            "name": "ContextOS-Run-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The admitted run id owned by the authenticated principal."
+          },
+          {
+            "name": "ContextOS-Capability",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional capability id or MCP tool name when the body carries raw arguments."
+          },
+          {
+            "name": "ContextOS-Executor-Generation",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Optional: when given, a stale executor is refused as its dispatch would be."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Allowed by advisory policy check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "dispatch"
+            ]
+          }
+        ],
+        "x-contextos-scope": "dispatch"
+      }
+    },
     "/v1/runs/{run_id}/tool-calls/check": {
       "post": {
         "operationId": "check_tool_call",

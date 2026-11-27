@@ -5,10 +5,13 @@
 //! Safety invariants:
 //! - Every saved checkpoint carries an RFC 8785 canonical SHA-256 digest over its body;
 //!   any corrupt, truncated, or schema-mismatched checkpoint is discarded and rebuilt
-//!   from genesis against the pinned anchors in [`crate::pins`].
-//! - Before restoring, each source's checkpointed anchor is checked against its pin in
-//!   [`crate::pins`]. If any anchor disagrees with its pin, the checkpoint is refused
-//!   so genesis verification detects the rewrite.
+//!   from genesis against the pinned anchors in [`crate::pins`]. The digest is not
+//!   keyed: it detects corruption, not an editor with write access to Tower's store,
+//!   which is trusted for the checkpoint's aggregates as it is for pins and records.
+//! - Each source's checkpointed anchor must sit at or behind its pin in [`crate::pins`]
+//!   (and match it when on it), or the whole checkpoint is refused. The collector then
+//!   re-links the anchor to the pinned chain entry by signed entry, so an anchor that is
+//!   not a real entry of that chain breaks the source instead of skipping verification.
 //! - On resumption, [`crate::collector::sync_pinned`] verifies every new page directly
 //!   against the restored anchor (`prev_hash`, `sequence`, Ed25519 signature) and marks
 //!   the source `history_truncated` if the runtime's head is behind the anchor.
@@ -288,6 +291,17 @@ fn apply_snapshot(fleet: &mut Fleet, snap: FleetSnapshot) {
     fleet.agents_per_tenant = snap.agents_per_tenant.into_iter().collect();
 }
 
+/// Whether a checkpointed `anchor` may be resumed from: it must sit at or behind the
+/// source's pin, and match it when it sits on it. An anchor behind the pin is then
+/// re-linked by the collector, entry by signed entry, until the pin is reached, so an
+/// anchor that is not a real entry of the pinned chain breaks the source instead of
+/// being trusted. An anchor past its pin (or with no pin) cannot be checked that way.
+fn anchor_is_pinned(anchor: &AuditEntry, pin: Option<&crate::pins::Pin>) -> bool {
+    pin.is_some_and(|p| {
+        anchor.sequence < p.sequence || (anchor.sequence == p.sequence && anchor.record_hash == p.record_hash)
+    })
+}
+
 /// Persists and restores checksummed fleet checkpoints in a [`DocumentStore`].
 #[derive(Debug)]
 pub struct StoreCheckpoints<S> {
@@ -364,17 +378,21 @@ impl<S: DocumentStore + 'static> StoreCheckpoints<S> {
             return Ok(0);
         };
         for src in &snap.sources {
-            if let Some(anchor) = &src.anchor
-                && let Some(pin) = pins.get(&src.id).await?
-                && anchor.sequence == pin.sequence
-                && anchor.record_hash != pin.record_hash
-            {
-                tracing::warn!(source = %src.id, "checkpoint anchor disagrees with pin; rebuilding from genesis");
+            let Some(anchor) = &src.anchor else {
+                continue;
+            };
+            if !anchor_is_pinned(anchor, pins.get(&src.id).await?.as_ref()) {
+                tracing::warn!(source = %src.id, "checkpoint anchor is not covered by its pin; rebuilding from genesis");
                 return Ok(0);
             }
         }
         let restored_sources = snap.sources.iter().filter(|s| s.anchor.is_some()).count();
+        let known: Vec<String> = fleet.sources.keys().cloned().collect();
         apply_snapshot(fleet, snap);
+        // Sources configured now but absent from the checkpoint start from genesis.
+        for id in known {
+            fleet.source(&id);
+        }
         Ok(restored_sources)
     }
 }
@@ -423,6 +441,30 @@ mod tests {
         assert_eq!(restored.source("eu").verified_to, 1);
         assert_eq!(restored.source("eu").event_counts.get("run_admitted"), Some(&1));
         assert_eq!(restored.agents.len(), 1);
+
+        // A source configured now but absent from the checkpoint is kept.
+        let mut configured = Fleet::new(100, 48);
+        configured.source("us");
+        assert_eq!(cp.restore(&mut configured, &pins).await.unwrap(), 1);
+        assert!(configured.sources.contains_key("us"));
+
+        // An anchor past its pin cannot be re-linked to it -> refused.
+        let e2 = writer
+            .append(
+                "tenant_a",
+                "run_completed",
+                json!({"run_id": "r1"}),
+                "2026-11-27T10:01:00Z",
+            )
+            .await
+            .unwrap();
+        fleet.apply("eu", &e2);
+        fleet.source("eu").anchor = Some(e2.clone());
+        fleet.revision += 1;
+        assert!(cp.save(&fleet).await.unwrap());
+        let mut ahead = Fleet::new(100, 48);
+        assert_eq!(cp.restore(&mut ahead, &pins).await.unwrap(), 0);
+        assert!(ahead.agents.is_empty());
 
         // Corrupt the stored checkpoint body -> restore safely refuses it.
         let key = checkpoint_key();

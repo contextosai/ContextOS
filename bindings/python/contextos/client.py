@@ -34,8 +34,6 @@ safe, but deciding to retry is the caller's.
 """
 
 import contextlib
-import functools
-import inspect
 import json
 import time
 import urllib.error
@@ -43,7 +41,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import warnings
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from .errors import (_HTTP_ERRORS, _OUTCOMES, BudgetExhausted, ContextOSHTTPError, IncompatibleServer, ToolBlocked,
                      ToolFailed, ToolOutcome, ToolPaused, ToolRejected, VersionMismatchWarning, _pause_kind)
@@ -569,47 +567,6 @@ class Run:
         return self.client.request("GET", self._path("/evidence"))
 
 
-def governed_tool(run: Run, capability_id: str, *, approval_mode: str = "read_only",
-                  idempotency_key: Optional[Callable[..., str]] = None,
-                  evidence_refs: Optional[List[str]] = None,
-                  tool_call_id: Optional[Callable[..., str]] = None) -> Callable[[Callable[..., Any]], Callable[..., dict]]:
-    """Turns a tool's signature into a governed call: arguments are bound by name and
-    sent through the gateway; the decorated body never runs locally.
-
-    ``idempotency_key`` derives the operation key from the call's arguments, so a
-    retried agent step maps to the same operation and cannot apply twice.
-    ``tool_call_id`` derives the call's id the same way, so a DecisionRecord can cite it.
-    With an ``AsyncRun`` (``contextos.aio``) the governed function is a coroutine.
-    """
-
-    def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
-        signature = inspect.signature(function)
-
-        def dispatch(args: Any, kwargs: Any) -> Any:
-            bound = signature.bind(*args, **kwargs)
-            bound.apply_defaults()
-            arguments = dict(bound.arguments)
-            key = idempotency_key(**arguments) if idempotency_key else None
-            call_id = tool_call_id(**arguments) if tool_call_id else None
-            return run.call_tool(capability_id, arguments, approval_mode=approval_mode, idempotency_key=key,
-                                 evidence_refs=evidence_refs, tool_call_id=call_id)
-
-        if inspect.iscoroutinefunction(run.call_tool):
-            @functools.wraps(function)
-            async def call_async(*args: Any, **kwargs: Any) -> dict:
-                return await dispatch(args, kwargs)
-
-            return call_async
-
-        @functools.wraps(function)
-        def call(*args: Any, **kwargs: Any) -> dict:
-            return dispatch(args, kwargs)
-
-        return call
-
-    return wrap
-
-
 def _outcome(response: dict) -> dict:
     result, report = response["result"], response["report"]
     status = result.get("status")
@@ -629,3 +586,6 @@ def _quote(segment: str) -> str:
     if segment in ("", ".", ".."):
         raise ValueError(f"invalid path segment {segment!r}")
     return urllib.parse.quote(segment, safe="")
+
+
+from .governed import governed_tool  # noqa: E402,F401 (re-exported)

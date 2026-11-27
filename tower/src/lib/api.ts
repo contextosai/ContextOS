@@ -105,11 +105,16 @@ export function can(me: Me | undefined, role: string): boolean {
   );
 }
 
-/** Downloads a file towerd renders, sent with this tab's token like every call. */
-export async function download(path: string, filename: string): Promise<void> {
+/** Downloads a file towerd renders, sent with this tab's token like every call. With
+ * `body`, the file is requested with a JSON `POST` (exports that towerd journals). */
+export async function download(path: string, filename: string, body?: unknown): Promise<void> {
   const token = session.token();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  if (body !== undefined) headers["content-type"] = "application/json";
   const response = await fetch(path, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
+    method: body === undefined ? "GET" : "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers,
     credentials: "omit",
     cache: "no-store",
     referrerPolicy: "no-referrer",

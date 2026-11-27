@@ -32,7 +32,7 @@ fn served() -> BTreeSet<(String, String)> {
                     routes.insert((method.to_owned(), format!("/v1/runs/{{run_id}}/{action}")));
                 }
             } else {
-                routes.insert((method.to_owned(), path.to_owned()));
+                routes.insert((method.to_owned(), path.replace("{*", "{")));
             }
         }
     }

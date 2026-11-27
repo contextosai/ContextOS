@@ -156,7 +156,13 @@ fn parse_opa(raw: Value) -> Result<(String, Vec<ImportedRule>), String> {
             1 => clauses.remove(0),
             _ => json!({"and": clauses}),
         };
-        let _ = rule.priority;
+        if rule.priority.is_some() {
+            return Err(format!(
+                "OPA rule `{}`: `priority` is not supported; ContextOS always gives deny rules \
+                 precedence over require_approval and allow rules, so remove it",
+                rule.id
+            ));
+        }
         imported.push(ImportedRule {
             rule_id: rule.id.clone(),
             intent: rule.intent,
@@ -563,5 +569,14 @@ mod tests {
             "rules": [{"id": "R1", "effect": "allow"}]
         });
         assert!(parse_opa(fail_open).is_err());
+
+        // A rule ordering ContextOS would not honour is refused, not silently dropped.
+        let ordered = json!({
+            "package": "payments.refunds",
+            "default_allow": false,
+            "rules": [{"id": "R1", "effect": "allow", "priority": 5}]
+        });
+        let error = parse_opa(ordered).unwrap_err();
+        assert!(error.contains("priority"), "{error}");
     }
 }

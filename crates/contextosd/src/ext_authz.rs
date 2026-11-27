@@ -224,6 +224,18 @@ fn safe_header(value: &str) -> Option<HeaderValue> {
     HeaderValue::from_str(value).ok()
 }
 
+/// `POST /v1/ext-authz/{*path}`: Envoy's HTTP `ext_authz` service appends the original
+/// request path to its configured `path_prefix`, so a prefix of `/v1/ext-authz` reaches
+/// this route. The appended path is ignored: the check is decided by the run, the
+/// capability and the arguments, never by the upstream URL.
+pub async fn check_prefixed<S, L>(state: State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
+where
+    S: DocumentStore + 'static,
+    L: AppendLog + 'static,
+{
+    check(state, headers, body).await
+}
+
 pub async fn check<S, L>(State(state): State<Arc<AppState<S, L>>>, headers: HeaderMap, body: Bytes) -> ApiResult
 where
     S: DocumentStore + 'static,
