@@ -5,6 +5,14 @@ minor versions may break APIs and every break is listed.
 
 ## Unreleased
 
+### Documentation
+
+- [Use cases](docs/USE_CASES.md) maps the runtime's controls onto cloud and SRE,
+  finance and ERP, regulated data, and coding fleets, each linked to the guide section
+  that configures it. The README, `llms.txt` and the Agent Failure Lab say where the
+  refund examples generalise; the lab adds a table mapping its five failures onto
+  those four workloads.
+
 ## 0.1.0-alpha.24 - 2026-11-26
 
 Twenty-fourth alpha: fixes from an independent review of alpha.20 to alpha.23. Usage

@@ -230,6 +230,21 @@ details pre {
   overflow-x: auto; white-space: pre; margin: 0;
 }
 
+/* Not only refunds: the five failures mapped onto four workloads. */
+.domains {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1.25rem; display: grid; gap: 0.9rem;
+}
+.domains h2 { font-size: var(--step-1); }
+.domains .aside { color: var(--muted); font-size: 0.95rem; max-width: 52rem; }
+.domains code { font-family: var(--mono); font-size: 0.85em; background: var(--code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.table-scroll { overflow-x: auto; }
+.map { width: 100%; min-width: 40rem; border-collapse: collapse; font-size: 0.9rem; }
+.map caption { text-align: left; color: var(--muted); padding-bottom: 0.5rem; caption-side: top; }
+.map th, .map td { text-align: left; padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.map thead th { font-size: var(--step--1); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.map tbody th { font-weight: 600; }
+
 .colophon { color: var(--muted); font-size: var(--step--1); display: grid; gap: 0.35rem; max-width: 52rem; }
 
 
