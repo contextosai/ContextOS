@@ -14,7 +14,12 @@ observability stack; place consequential tools behind the ContextOS gateway, or
 [replay your recorded tool calls](examples/replay) through it first to see what it
 would have done.
 
-Two agents can each be authorized to refund INR 800 while the order's shared ceiling
+The tools differ by team, the failures do not: a cluster change during a freeze, a
+duplicate vendor payout after a lost response, a patient record mailed out after a
+prompt injection, a fleet of coding subagents past its model budget. ContextOS applies
+the same gateway to each; see [where it applies](#where-it-applies).
+
+For example, two agents can each be authorized to refund INR 800 while the order's shared ceiling
 is INR 1,000. ContextOS reserves capacity atomically across their independent runs,
 so only one effect reaches the provider. A pending effect continues to consume its
 reservation until reconciled. New run IDs and server replicas do not reset capacity
@@ -32,6 +37,19 @@ chosen opportunity, competing approaches and unvalidated assumptions.
 
 > Status: alpha. APIs and storage formats are evolving; hardening and performance work continue. The current version is [v0.1.0-alpha.24](docs/releases/v0.1.0-alpha.24.md). Evaluate the runtime against your workflow before production use. See [docs/PLAN.md](docs/PLAN.md), the [security policy](SECURITY.md), and [deployment guidance](docs/GUIDE.md).
 
+## Where it applies
+
+| Workload | Without a boundary | Enforced by ContextOS |
+|---|---|---|
+| Cloud, infrastructure and SRE | Changes during a freeze, a retried failover whose first attempt landed, an MCP tool that changed overnight | Change windows, time-boxed break-glass with after-the-fact review, environment guard, unknown outcomes held, upstream tool pins with quarantine, kill switch |
+| Finance, payments and ERP | Agents that each stay under their limit and together exceed the business one, duplicate payouts, rubber-stamped approvals | Shared ceilings across runs and replicas, intent keys, provider reconciliation, approvals bound to the exact action, review floors and approval analytics |
+| Regulated data, privacy and compliance | Personal, health or card data sent out after a prompt injection, undeclared tools and models, audits without proof | Information-flow boundaries per data category, `ctx inventory --fail-on-shadow`, legal holds, erasure by data subject, `ctx audit-pack` verified offline |
+| Autonomous coding and engineering fleets | Subagents past their model budget, delegated agents with more scope than the task, releases on one lucky run | Usage ceilings with metered overage and `ctx chargeback`, SPIFFE and delegated identity, GitHub tool presets, `ctx simulate`, `ctx reliability-gate` |
+
+[Use cases](docs/USE_CASES.md) links each control to the guide section that configures
+it. The examples below use a synthetic payment provider because money makes the
+failures easy to read; nothing in the runtime is specific to payments.
+
 ## See it fail first
 
 The [Agent Failure Lab](lab) needs nothing installed: pick one of five ways a refund
@@ -41,7 +59,10 @@ past a daily limit, a loop) and step through it with and without a gateway, incl
 the fairest baseline for each (idempotency keys, a check in the tool). It replays a
 recorded run of the real gateway; open `lab/index.html` from a checkout. To ask the same
 question of your own agent, [replay its refund calls](examples/replay-refunds) through a
-local gateway.
+local gateway. The five mechanics (a lost response, over-reach beyond the task, an
+approval split around, a limit spread across runs, a loop) are the same for a cluster
+operator, a payables agent, a records agent or a coding fleet; the lab shows how each
+maps.
 
 ## Quickstart
 
@@ -59,7 +80,9 @@ The script builds the server and CLI, checks this machine can run them, and star
 synthetic services on loopback addresses. It races two agents against one order
 ceiling, loses a provider response and shows its reservation held, blocks a further
 effect, then resolves the held effects by provider query and by an operator citing the
-provider's ledger. Each step prints `limit / committed / held / available`. The audit
+provider's ledger. Each step prints `limit / committed / held / available`. The provider is synthetic
+money so the ceiling is legible; the same reservation holds any configured numeric
+resource, such as instances provisioned, ERP postings or vendor spend. The audit
 log, keys and balances stay in `receipts/shared-guarantees/` with the command to verify
 them yourself.
 See the [shared guarantees demo](examples/shared-guarantees/README.md) and
@@ -218,6 +241,7 @@ Agent skills live in [`skills/`](skills/README.md): [pack authoring](skills/cont
 
 ## Start
 
+- See which controls apply to cloud and SRE, finance and ERP, regulated data, and coding fleets: [docs/USE_CASES.md](docs/USE_CASES.md)
 - Coordinate two agents against one business ceiling: [examples/shared-guarantees](examples/shared-guarantees/README.md) (`./examples/shared-guarantees/run.sh`)
 - Follow the original authorization quickstart: [examples/support-refund](examples/support-refund/README.md) (`./examples/support-refund/run.sh`)
 - A full governed agent loop (plan, delegate, act, decide): [examples/agent-loop](examples/agent-loop/README.md)

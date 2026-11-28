@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agent Failure Lab</title>
-<meta name="description" content="Five ways an agent with a refund tool moves money it should not, stepped through with and without a ContextOS gateway. Replayed from a recorded run of the real gateway.">
+<meta name="description" content="Five ways an agent with a refund tool moves money it should not, stepped through with and without a ContextOS gateway, and how the same failures reach cloud, finance, regulated-data and coding agents. Replayed from a recorded run of the real gateway.">
 <link rel="stylesheet" href="lab.css">
 </head>
 <body>
@@ -36,6 +36,40 @@
     <section class="ending" id="ending" hidden></section>
 
     <section class="tally" id="tally" aria-labelledby="tally-title"></section>
+
+    <section class="domains" aria-labelledby="domains-title">
+      <h2 id="domains-title">Not only refunds</h2>
+      <p class="aside">Money makes these failures easy to read. The same five happen to any agent whose tools act on a
+        system it cannot take back, and the same gateway controls stop them.</p>
+      <div class="table-scroll">
+      <table class="map">
+        <caption>Each recorded failure, as it shows up in four kinds of work</caption>
+        <thead>
+          <tr><th scope="col">Failure</th><th scope="col">Cloud and SRE</th><th scope="col">Finance and ERP</th>
+            <th scope="col">Regulated data</th><th scope="col">Coding fleets</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Lost response, then a retry</th><td>A failover retried after the first one landed</td>
+            <td>A vendor payout sent twice</td><td>An export repeated to a second recipient</td>
+            <td>A release tagged and published twice</td></tr>
+          <tr><th scope="row">Beyond what was asked</th><td>A whole node pool drained to fix one pod</td>
+            <td>A credit note above the disputed amount</td><td>A full record sent where a summary was asked</td>
+            <td>A force-push where a branch was asked</td></tr>
+          <tr><th scope="row">Splitting around an approval</th><td>One change applied as several under the review line</td>
+            <td>An invoice paid in parts below the sign-off limit</td><td>One bulk export as many small ones</td>
+            <td>One risky migration as several small commits</td></tr>
+          <tr><th scope="row">A limit spread across runs</th><td>Instances provisioned past a quota by parallel runs</td>
+            <td>Spend past a budget by several agents</td><td>Records read past a daily cap</td>
+            <td>Model spend past a budget by subagents</td></tr>
+          <tr><th scope="row">A loop</th><td>A restart loop on a failing service</td><td>Repeated journal postings</td>
+            <td>Repeated lookups of one person</td><td>A fix-and-retry loop on a red build</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="aside">Also in the gateway for these workloads: change windows and break-glass, upstream tool pins with
+        quarantine, information-flow boundaries per data category, shadow inventory, usage ceilings across runs, and
+        release gates on reliability. The repository's <code>docs/USE_CASES.md</code> links each one to its configuration.</p>
+    </section>
   </main>
 
   <footer class="colophon" id="colophon"></footer>

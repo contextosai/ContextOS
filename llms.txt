@@ -2,6 +2,8 @@
 
 > Shared business limits for AI agents. ContextOS is a Rust runtime that governs what agents may do: it compiles Context Packs (policy, tools, decisions, evidence) into bounded context, enforces authorization, approvals and shared resource limits before a tool acts, and records signed, hash-chained evidence of every effect. Agents keep their own framework; consequential tools sit behind the ContextOS gateway (`contextosd`, HTTP), with an offline CLI (`ctx`) and Python, Node and in-process bindings. Status: alpha.
 
+It applies to any tool an agent cannot take back. Four workloads it is configured for: cloud, infrastructure and SRE (change windows, break-glass, environment guard, upstream MCP tool pins with quarantine, kill switch); finance, payments and ERP (shared ceilings across runs, intent keys, reconciliation of unknown outcomes, approvals bound to the exact action); regulated data, privacy and compliance (information-flow boundaries for `pii`, `phi`, `pci` and `secrets`, `ctx inventory --fail-on-shadow`, legal holds, erasure by data subject, `ctx audit-pack`); and autonomous coding fleets (usage ceilings with metered overage, `ctx chargeback`, SPIFFE and delegated identity, `ctx simulate`, `ctx reliability-gate`). The examples use a synthetic payment provider; nothing in the runtime is specific to payments.
+
 Key facts for agents working with this repository or a ContextOS deployment:
 
 - A Context Pack (`context-pack.v2`) is the governed contract for one tenant. Policy rules are JsonLogic; no applying rule means deny; the highest-priority applying rules decide. A pack reference (`pack_id@pack_version`) names one content forever: its digest is bound in the store at first load, and a later load with other content is refused.
@@ -13,6 +15,7 @@ Key facts for agents working with this repository or a ContextOS deployment:
 
 - [Guide](https://github.com/contextosai/ContextOS/blob/main/docs/GUIDE.md): deploying and operating the runtime, every API area, pack testing, plans, rule libraries, rollouts, audit sinks
 - [Glossary](https://github.com/contextosai/ContextOS/blob/main/docs/GLOSSARY.md): the terms runs, packs, effects and decisions use
+- [Use cases](https://github.com/contextosai/ContextOS/blob/main/docs/USE_CASES.md): the controls for cloud and SRE, finance and ERP, regulated data, and coding fleets, each linked to its guide section
 - [Scope](https://github.com/contextosai/ContextOS/blob/main/docs/SCOPE.md): what ContextOS does not govern
 - [Shared business guarantees](https://github.com/contextosai/ContextOS/blob/main/docs/SHARED_GUARANTEES.md): conserved limits across independent runs and replicas
 - [Why not a database transaction?](https://github.com/contextosai/ContextOS/blob/main/docs/WHY_NOT_A_TRANSACTION.md): why effects on external systems need reservations and reconciliation
@@ -46,7 +49,7 @@ Key facts for agents working with this repository or a ContextOS deployment:
 - [Shared guarantees](https://github.com/contextosai/ContextOS/tree/main/examples/shared-guarantees): two agents against one shared ceiling
 - [Replay](https://github.com/contextosai/ContextOS/blob/main/examples/replay/README.md): recorded tool-call traffic replayed through a gateway, with a report of what it would have refused, held or sent for approval
 - [Refund replay](https://github.com/contextosai/ContextOS/blob/main/examples/replay-refunds/README.md): an agent's own refund tool calls replayed through a local gateway, reported in money
-- [Agent Failure Lab](https://github.com/contextosai/ContextOS/blob/main/lab/README.md): a static page replaying five recorded refund-agent failures (lost response, over-reach, split approval, daily limit, loop) with and without a gateway
+- [Agent Failure Lab](https://github.com/contextosai/ContextOS/blob/main/lab/README.md): a static page replaying five recorded refund-agent failures (lost response, over-reach, split approval, daily limit, loop) with and without a gateway, and how each maps to cloud, finance, regulated-data and coding agents
 - [Consequential tools](https://github.com/contextosai/ContextOS/blob/main/examples/consequential-tools/README.md): a staging gateway with the starter guards refusing a production refund, a repeat from another run and spend past a daily cap, on replayed traffic
 - [Evaluation loop](https://github.com/contextosai/ContextOS/blob/main/examples/evaluation-loop/README.md): a calibrated evaluation platform judges a candidate agent's tool calls, and the reliability gate turns its verdicts into a release decision
 - [Deployment recipes](https://github.com/contextosai/ContextOS/blob/main/deploy/README.md): Helm, pack publishing from git, audit sinks
